@@ -6,14 +6,16 @@
 //! speckle, and tiles stitch without seams.
 
 use crate::block_definitions::{
-    Block, ANDESITE, BLUE_ICE, COARSE_DIRT, COBBLED_DEEPSLATE, COBBLESTONE, DEEPSLATE, DIRT,
-    GRASS_BLOCK, GRAVEL, ICE, MOSS_BLOCK, PACKED_ICE, PODZOL, SNOWY_GRASS_BLOCK, SNOWY_PODZOL,
-    SNOW_BLOCK, SNOW_LAYERS, STONE, TUFF,
+    Block, ANDESITE, BLUE_ICE, BROWN_TERRACOTTA, COARSE_DIRT, COBBLED_DEEPSLATE, COBBLESTONE,
+    DEEPSLATE, DIRT, GRASS_BLOCK, GRAVEL, ICE, MOSS_BLOCK, ORANGE_TERRACOTTA, PACKED_ICE, PODZOL,
+    RED_SAND, RED_SANDSTONE, RED_TERRACOTTA, SMOOTH_RED_SANDSTONE, SNOWY_GRASS_BLOCK, SNOWY_PODZOL,
+    SNOW_BLOCK, SNOW_LAYERS, STONE, TERRACOTTA, TUFF,
 };
 use crate::climate::Climate;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::ecoregion::Ecoregion;
 use crate::ground::Ground;
-use crate::ground_generation::{patch_noise, value_noise_salted};
+use crate::ground_generation::{ground_noise, patch_noise, value_noise_salted};
 use crate::land_cover::{
     LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE, LC_TREE_COVER,
 };
@@ -32,6 +34,7 @@ const SALT_SNOW_LINE: u32 = 0x5A0E_11A4;
 const SALT_SNOW_DRIFT: u32 = 0xD41F_7B05;
 const SALT_SNOW_FIELD: u32 = 0xF1E1_D5A0;
 const SALT_STREAK: u32 = 0x57EA_C0DE;
+const SALT_FRAY: u32 = 0xF4A7_3D19;
 const SALT_STREAK_RUN: u32 = 0x57EA_0F11;
 const SALT_TALUS: u32 = 0x07A1_05CE;
 const SALT_TALUS_ROCK: u32 = 0x07A1_0B0D;
@@ -47,6 +50,82 @@ const FACE_RAMP: [Block; 6] = [
     COBBLED_DEEPSLATE,
     DEEPSLATE,
 ];
+/// Red sandstone and terracotta in the same steps, for red earth.
+const RED_RAMP: [Block; 6] = [
+    SMOOTH_RED_SANDSTONE,
+    RED_SANDSTONE,
+    ORANGE_TERRACOTTA,
+    TERRACOTTA,
+    RED_TERRACOTTA,
+    BROWN_TERRACOTTA,
+];
+
+/// What the ground's rock is: grey stone, or the red sandstone of red earth.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum Rock {
+    #[default]
+    Grey,
+    Red,
+}
+
+impl Rock {
+    /// Red where a dry climate meets red earth at world block (x, z). The sample is shifted
+    /// by noise, so the border frays instead of tracing the ecoregion map's square cells.
+    pub(crate) fn at(
+        climate: Climate,
+        x: i32,
+        z: i32,
+        eco: impl FnOnce(i32, i32) -> Option<Ecoregion>,
+    ) -> Self {
+        if !climate.is_dry() {
+            return Rock::Grey;
+        }
+        let (sx, sz) = fray(x, z);
+        if crate::biome::red_earth(climate, eco(sx, sz)) {
+            Rock::Red
+        } else {
+            Rock::Grey
+        }
+    }
+
+    fn ramp(self) -> &'static [Block; 6] {
+        match self {
+            Rock::Grey => &FACE_RAMP,
+            Rock::Red => &RED_RAMP,
+        }
+    }
+
+    /// Block under a rock surface, which the strata fill takes as its cue.
+    pub(crate) fn base(self) -> Block {
+        match self {
+            Rock::Grey => STONE,
+            Rock::Red => RED_SANDSTONE,
+        }
+    }
+
+    /// Bare rock ground in irregular patches.
+    pub(crate) fn bare(self, x: i32, z: i32) -> (Block, Block) {
+        match self {
+            Rock::Grey => bare_rock_palette(x, z),
+            Rock::Red => red_rock_palette(x, z),
+        }
+    }
+
+    /// Loose rock: scree ledges and the scree on bare slopes.
+    fn loose(self) -> (Block, Block) {
+        match self {
+            Rock::Grey => (GRAVEL, STONE),
+            Rock::Red => (RED_SAND, RED_SANDSTONE),
+        }
+    }
+}
+
+/// Where red earth is read for world block (x, z): up to 40 blocks off, by smooth noise.
+pub(crate) fn fray(x: i32, z: i32) -> (i32, i32) {
+    let shift = |salt| ((value_noise_salted(x, z, 32, salt) - 0.5) * 80.0) as i32;
+    (x + shift(SALT_FRAY), z + shift(SALT_FRAY.rotate_left(11)))
+}
+
 /// Darkest ramp step a cliff top may take, so ledges don't read black from above.
 const TOP_RAMP_MAX: usize = 3;
 
@@ -198,12 +277,14 @@ pub(crate) fn fill_strata(
     y_min: i32,
     y_max: i32,
     streaks: bool,
+    rock: Rock,
 ) {
     if y_min > y_max {
         return;
     }
     let strata = Strata::at(x, z);
-    let streak = streaks.then(|| streak_block(x, z)).flatten();
+    let streak = streaks.then(|| streak_block(x, z, rock)).flatten();
+    let ramp = rock.ramp();
     // Tone is sampled every few blocks and interpolated, and a bed's lens is looked up
     // once per bed, since fills walk up a column one block at a time.
     let first = strata.tone(y_min);
@@ -233,18 +314,22 @@ pub(crate) fn fill_strata(
             }
         };
         let t = tones.1 + (tones.2 - tones.1) * f64::from(y - tones.0) / f64::from(TONE_STEP);
-        FACE_RAMP[Strata::step(kind, t, y_max + 1 - y)]
+        ramp[Strata::step(kind, t, y_max + 1 - y)]
     };
     editor.fill_column_with_absolute(x, z, y_min, y_max, block_at);
 }
 
-/// Weathering streak down a sheer face in this column: deepslate at the core, tuff around.
-fn streak_block(x: i32, z: i32) -> Option<Block> {
+/// Weathering streak down a sheer face: deepslate core and tuff rim, or desert varnish.
+fn streak_block(x: i32, z: i32, rock: Rock) -> Option<Block> {
     let n = patch_noise(x, z, 3, SALT_STREAK);
+    let (core, rim) = match rock {
+        Rock::Grey => (DEEPSLATE, TUFF),
+        Rock::Red => (BROWN_TERRACOTTA, RED_TERRACOTTA),
+    };
     if n < 0.08 {
-        Some(DEEPSLATE)
+        Some(core)
     } else if n < 0.22 {
-        Some(TUFF)
+        Some(rim)
     } else {
         None
     }
@@ -354,11 +439,26 @@ pub(crate) fn takes_talus(cover: u8) -> bool {
 
 /// Fallen rock below a cliff on open ground: gravel fans with andesite and cobblestone
 /// boulders, thinning out away from the wall.
-pub(crate) fn talus_palette(x: i32, z: i32, near: f64, cover: u8) -> Option<(Block, Block)> {
+pub(crate) fn talus_palette(
+    x: i32,
+    z: i32,
+    near: f64,
+    cover: u8,
+    rock: Rock,
+) -> Option<(Block, Block)> {
     if near <= 0.0 || !takes_talus(cover) || patch_noise(x, z, 7, SALT_TALUS) >= 0.8 * near {
         return None;
     }
     let n = patch_noise(x, z, 4, SALT_TALUS_ROCK);
+    if rock == Rock::Red {
+        return Some(if n < 0.55 {
+            (RED_SAND, RED_SANDSTONE)
+        } else if n < 0.75 {
+            (TERRACOTTA, RED_SANDSTONE)
+        } else {
+            (RED_SANDSTONE, RED_SANDSTONE)
+        });
+    }
     Some(if n < 0.55 {
         (GRAVEL, STONE)
     } else if n < 0.75 {
@@ -389,43 +489,58 @@ pub(crate) fn steep_palette(
     ground_y: i32,
     slope: i32,
     cover: u8,
+    rock: Rock,
 ) -> (Block, Block) {
     if slope > 6 {
         if slope <= 8 && patch_noise(x, z, 10, SALT_LEDGE) < 0.1 {
-            return (GRAVEL, STONE);
+            return rock.loose();
         }
         let strata = Strata::at(x, z);
         let step = Strata::step(strata.block(ground_y), strata.tone(ground_y), 0);
-        return (FACE_RAMP[step.min(TOP_RAMP_MAX)], STONE);
+        return (rock.ramp()[step.min(TOP_RAMP_MAX)], rock.base());
     }
     // A finer second field roughens the outcrop edges. Worn soil is a field of
     // its own, so it doesn't rim every patch of grass.
-    let rock =
+    let outcrop =
         0.7 * patch_noise(x, z, 14, SALT_SCREE) + 0.3 * patch_noise(x, z, 5, SALT_SCREE_EDGE);
-    if is_vegetated(cover) && rock < 0.53 {
+    if is_vegetated(cover) && outcrop < 0.53 {
         if patch_noise(x, z, 6, SALT_WORN) < 0.08 {
             (COARSE_DIRT, DIRT)
         } else {
             (GRASS_BLOCK, DIRT)
         }
-    } else if !is_vegetated(cover) && rock < 0.33 {
-        (GRAVEL, STONE)
+    } else if !is_vegetated(cover) && outcrop < 0.33 {
+        rock.loose()
     } else {
-        bare_rock_palette(x, z)
+        rock.bare(x, z)
     }
+}
+
+/// Red rock between the sand: sandstone with terracotta and smooth sandstone patches.
+fn red_rock_palette(x: i32, z: i32) -> (Block, Block) {
+    let n = ground_noise(x, z, 9, SALT_BARE_ROCK);
+    let surface = if n < 0.2 {
+        TERRACOTTA
+    } else if n < 0.32 {
+        SMOOTH_RED_SANDSTONE
+    } else {
+        RED_SANDSTONE
+    };
+    (surface, RED_SANDSTONE)
 }
 
 /// Exposed rock between the soil patches of bare ground: stone with andesite
 /// and gravel patches.
 pub(crate) fn bare_rock_palette(x: i32, z: i32) -> (Block, Block) {
-    let n = patch_noise(x, z, 9, SALT_BARE_ROCK);
-    if n < 0.15 {
-        (GRAVEL, STONE)
+    let n = ground_noise(x, z, 9, SALT_BARE_ROCK);
+    let surface = if n < 0.15 {
+        GRAVEL
     } else if n < 0.35 {
-        (ANDESITE, STONE)
+        ANDESITE
     } else {
-        (STONE, STONE)
-    }
+        STONE
+    };
+    (crate::climate::speckle(surface, x, z), STONE)
 }
 
 /// How snow settles on one column.
@@ -643,6 +758,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn red_earth_border_is_sampled_near_the_block() {
+        let red = crate::ecoregion::lookup(210);
+        assert_eq!(Rock::at(Climate::HotDesert, 3, 7, |_, _| red), Rock::Red);
+        assert_eq!(Rock::at(Climate::HotDesert, 3, 7, |_, _| None), Rock::Grey);
+        assert_eq!(
+            Rock::at(Climate::Temperate, 3, 7, |_, _| unreachable!()),
+            Rock::Grey
+        );
+        let mut shifted = 0;
+        for i in 0..400 {
+            let (x, z) = (i * 37 - 5000, i * 53 + 900);
+            Rock::at(Climate::ColdSteppe, x, z, |sx, sz| {
+                assert!((sx - x).abs() <= 40 && (sz - z).abs() <= 40);
+                shifted += usize::from((sx, sz) != (x, z));
+                red
+            });
+        }
+        assert!(shifted > 300);
+    }
+
+    #[test]
+    fn red_rock_is_red_from_scree_to_cliff_beds() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let llbbox = LLBBox::new(36.9, -110.1, 36.91, -110.09).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        fill_strata(&mut editor, 3, 3, 0, 60, true, Rock::Red);
+        let red: Vec<Block> = RED_RAMP.iter().copied().chain([BROWN_TERRACOTTA]).collect();
+        for y in 0..=60 {
+            assert!(
+                editor.check_for_block_absolute(3, y, 3, Some(&red), None),
+                "y={y}"
+            );
+        }
+        for x in 0..40 {
+            for z in 0..40 {
+                for slope in [5, 7, 12] {
+                    let (top, under) = steep_palette(x, z, 50, slope, LC_BARE, Rock::Red);
+                    assert!(!matches!(top, STONE | GRAVEL | ANDESITE), "{top:?}");
+                    assert_eq!(under, RED_SANDSTONE);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn fill_strata_lays_every_bed_and_keeps_what_is_there() {
         use crate::coordinate_system::cartesian::XZBBox;
         use crate::coordinate_system::geographic::LLBBox;
@@ -651,7 +814,7 @@ mod tests {
         let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
         let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
         editor.set_block_absolute(GRAVEL, 5, 20, 5, None, None);
-        fill_strata(&mut editor, 5, 5, 0, 40, false);
+        fill_strata(&mut editor, 5, 5, 0, 40, false, Rock::Grey);
         let strata = Strata::at(5, 5);
         for y in 0..=40 {
             // Tone is interpolated between samples, so only those match exactly.
@@ -701,7 +864,7 @@ mod tests {
         for x in 0..200 {
             for z in 0..200 {
                 total += 1;
-                match streak_block(x, z) {
+                match streak_block(x, z, Rock::Grey) {
                     Some(DEEPSLATE) => deep += 1,
                     Some(TUFF) => tuff += 1,
                     _ => {}
@@ -714,7 +877,7 @@ mod tests {
         // Down one streaked column the streak breaks off now and then.
         let (x, z) = (0..200)
             .flat_map(|x| (0..200).map(move |z| (x, z)))
-            .find(|&(x, z)| streak_block(x, z).is_some())
+            .find(|&(x, z)| streak_block(x, z, Rock::Grey).is_some())
             .unwrap();
         let runs = (0..200).filter(|&y| streak_runs(x, z, y)).count();
         assert!((80..200).contains(&runs), "{runs}");
@@ -725,7 +888,7 @@ mod tests {
         let coverage = |near: f64| {
             (0..200)
                 .flat_map(|x| (0..200).map(move |z| (x, z)))
-                .filter(|&(x, z)| talus_palette(x, z, near, LC_GRASSLAND).is_some())
+                .filter(|&(x, z)| talus_palette(x, z, near, LC_GRASSLAND, Rock::Grey).is_some())
                 .count() as f64
                 / 40_000.0
         };
@@ -736,7 +899,7 @@ mod tests {
         );
         assert_eq!(coverage(0.0), 0.0);
         for cover in [crate::land_cover::LC_BUILT_UP, LC_CROPLAND, LC_SNOW_ICE] {
-            assert!((0..50).all(|x| talus_palette(x, 3, 1.0, cover).is_none()));
+            assert!((0..50).all(|x| talus_palette(x, 3, 1.0, cover, Rock::Grey).is_none()));
         }
 
         // A 40-block wall rising from x = 24 on flat ground.
@@ -811,7 +974,7 @@ mod tests {
     fn cliffs_are_rock_not_deepslate() {
         for x in 0..64 {
             for z in 0..64 {
-                let (top, under) = steep_palette(x, z, 120, 12, LC_TREE_COVER);
+                let (top, under) = steep_palette(x, z, 120, 12, LC_TREE_COVER, Rock::Grey);
                 assert!(
                     matches!(top, STONE | ANDESITE | COBBLESTONE | TUFF),
                     "{top:?}"
@@ -826,7 +989,7 @@ mod tests {
         let (mut soil, mut rock) = (0, 0);
         for x in 0..128 {
             for z in 0..128 {
-                match steep_palette(x, z, 90, 5, LC_TREE_COVER).0 {
+                match steep_palette(x, z, 90, 5, LC_TREE_COVER, Rock::Grey).0 {
                     GRASS_BLOCK | COARSE_DIRT => soil += 1,
                     _ => rock += 1,
                 }

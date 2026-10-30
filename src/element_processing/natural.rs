@@ -11,6 +11,7 @@ use crate::floodfill_cache::{
     InnerRings,
 };
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
+use crate::terrain_surface::Rock;
 use crate::trees::mapped::{tree_row_positions, MappedTree};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
@@ -90,14 +91,7 @@ fn natural_area(
                 _ => GRASS_BLOCK,
             };
 
-            // Whether this natural type should have per-block rock variation
-            // via `vary_rock_block`. Note: "bare_rock" is deliberately NOT in
-            // this list — it has its own dedicated 6-class mix in the match
-            // arm below (STONE/ANDESITE/COBBLESTONE/GRAVEL/TUFF/COARSE_DIRT)
-            // which overwrites whatever we put here. Including it in
-            // rock_variation would mean two different mixes race against each
-            // other at the same cell, where the match-arm mix wins but the
-            // first placement is wasted work.
+            // Per-block rock variation; bare rock takes the patchy ground of `Rock::bare`.
             let rock_variation = matches!(
                 natural_type.as_str(),
                 "blockfield" | "cliff" | "saddle" | "ridge"
@@ -229,6 +223,13 @@ fn natural_area(
                             | Climate::ColdSteppe
                     );
 
+                // Scrub and grassland in dry country keep the region's own ground, not a lawn.
+                let dry_ground = matches!(natural_type.as_str(), "scrub" | "grassland" | "heath")
+                    && editor.climate().is_dry();
+
+                let bare_rock = matches!(natural_type.as_str(), "bare_rock" | "rock" | "stone");
+                let needs_rock = dry_ground || bare_rock || block_type == SAND;
+
                 let mut shrubbery_species: Option<Block> = None;
                 for &(x, z) in filled_area.iter() {
                     if in_hole(holes, x, z) {
@@ -240,11 +241,26 @@ fn natural_area(
                     if !editor.in_bounds(x, z) && !editor.owns(x, z) {
                         continue;
                     }
+                    // Per cell, so an area on the red earth border matches the ground beside it.
+                    let rock = if needs_rock {
+                        Rock::at(editor.climate(), x, z, |sx, sz| editor.ecoregion(sx, sz))
+                    } else {
+                        Rock::Grey
+                    };
+                    let block_type = if block_type == SAND && rock == Rock::Red {
+                        RED_SAND
+                    } else {
+                        block_type
+                    };
                     // Roads, paths and paved areas keep their own surface. Checked
                     // by mask because a gravel or dirt road is not in the block list.
                     let sealed = editor.surface_is_sealed(x, z);
                     if !sealed && !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
-                        let b = if rock_variation {
+                        let b = if dry_ground {
+                            dry_ground_block(editor, x, z, rock).unwrap_or(block_type)
+                        } else if bare_rock {
+                            rock.bare(x, z).0
+                        } else if rock_variation {
                             vary_rock_block(block_type, x, z)
                         } else {
                             block_type
@@ -262,19 +278,6 @@ fn natural_area(
                         "glacier" => {
                             editor.set_block(PACKED_ICE, x, 0, z, None, None);
                             editor.set_block(STONE, x, -1, z, None, None);
-                        }
-                        "bare_rock" | "rock" | "stone" => {
-                            // Varied rock surface: stone base with natural variation
-                            let h = crate::land_cover::coord_hash(x, z) % 12;
-                            let rock = match h {
-                                0..=4 => STONE,       // ~42% stone
-                                5..=6 => ANDESITE,    // ~17% andesite
-                                7..=8 => COBBLESTONE, // ~17% cobblestone
-                                9 => GRAVEL,          // ~8% gravel
-                                10 => TUFF,           // ~8% tuff
-                                _ => COARSE_DIRT,     // ~8% coarse dirt
-                            };
-                            editor.set_block(rock, x, 0, z, None, None);
                         }
                         _ => {}
                     }
@@ -298,6 +301,14 @@ fn natural_area(
                         continue;
                     }
                     match natural_type.as_str() {
+                        "scrub" | "grassland" | "heath"
+                            if dry_ground
+                                && !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) =>
+                        {
+                            if rng.random_range(0..60) == 0 {
+                                editor.set_block(DEAD_BUSH, x, 1, z, None, None);
+                            }
+                        }
                         "grassland" => {
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
@@ -386,13 +397,13 @@ fn natural_area(
                         // Dead bushes belong to deserts; coastal dunes elsewhere stay bare.
                         "sand"
                             if arid
-                                && editor.check_for_block(x, 0, z, Some(&[SAND]))
+                                && editor.check_for_block(x, 0, z, Some(&[SAND, RED_SAND]))
                                 && rng.random_range(0..100) == 1 =>
                         {
                             editor.set_block(DEAD_BUSH, x, 1, z, None, None);
                         }
                         "shoal" if rng.random_bool(0.05) => {
-                            editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
+                            editor.set_block(WATER, x, 0, z, Some(&[SAND, RED_SAND, GRAVEL]), None);
                         }
                         "wetland" => {
                             let wetland_type = element
@@ -755,6 +766,16 @@ fn beach_block(surface: Option<&String>) -> Block {
         Some("mud") => MUD,
         _ => SAND,
     }
+}
+
+/// Ground of an arid region under its scrub or grassland, from the land cover there.
+fn dry_ground_block(editor: &WorldEditor, x: i32, z: i32, rock: Rock) -> Option<Block> {
+    let climate = editor.climate();
+    let red = rock == Rock::Red;
+    climate
+        .surface_palette(editor.cover_class(x, z), x, z, red)
+        .or_else(|| climate.surface_palette(crate::land_cover::LC_SHRUBLAND, x, z, red))
+        .map(|(surface, _)| surface)
 }
 
 /// Vary a rock block type per-coordinate for natural rock areas.

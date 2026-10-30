@@ -143,6 +143,47 @@ pub fn mark_beaches(lc: &mut LandCoverData) {
 
 // ─── Data structures ──────────────────────────────────────────────────────
 
+/// One bit per grid cell, allocated on the first mark; empty reads as all false.
+#[derive(Clone, Default)]
+pub struct InlandWater {
+    bits: Vec<u64>,
+    width: usize,
+    height: usize,
+}
+
+impl InlandWater {
+    pub fn new(width: usize, height: usize) -> Self {
+        Self {
+            bits: Vec::new(),
+            width,
+            height,
+        }
+    }
+
+    #[inline]
+    pub fn set(&mut self, x: usize, z: usize) {
+        if x >= self.width || z >= self.height {
+            return;
+        }
+        if self.bits.is_empty() {
+            self.bits = vec![0; (self.width * self.height).div_ceil(64)];
+        }
+        let i = z * self.width + x;
+        self.bits[i / 64] |= 1 << (i % 64);
+    }
+
+    #[inline]
+    pub fn get(&self, x: usize, z: usize) -> bool {
+        if x >= self.width || z >= self.height {
+            return false;
+        }
+        let i = z * self.width + x;
+        self.bits
+            .get(i / 64)
+            .is_some_and(|w| (w >> (i % 64)) & 1 == 1)
+    }
+}
+
 /// Land cover classification grid aligned with the elevation grid.
 #[derive(Clone)]
 pub struct LandCoverData {
@@ -155,6 +196,8 @@ pub struct LandCoverData {
     pub water_blend_cache: OnceCell<WaterBlendMask>,
     /// Lazily computed tiles holding beach, so most beach lookups end in one bit.
     pub beach_tiles: OnceCell<BeachTiles>,
+    /// Cells OSM maps as a lake, river or canal; set on the final grid by the OSM water pass.
+    pub inland_water: InlandWater,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
@@ -488,6 +531,7 @@ pub fn fetch_land_cover_data(
         water_distance,
         water_blend_cache: OnceCell::new(),
         beach_tiles: OnceCell::new(),
+        inland_water: Default::default(),
         width: grid_width,
         height: grid_height,
         cells_per_meter,
@@ -1746,6 +1790,7 @@ mod smoothing_scale_tests {
             grid,
             water_blend_cache: OnceCell::new(),
             beach_tiles: OnceCell::new(),
+            inland_water: Default::default(),
             width,
             height,
             cells_per_meter,
@@ -1784,5 +1829,21 @@ mod smoothing_scale_tests {
         let mut lc = lc_from_rows(&["bbbb", "gggg"], 1.0);
         mark_beaches(&mut lc);
         assert!(lc.grid[0].iter().all(|&c| c == LC_BARE));
+    }
+}
+
+#[cfg(test)]
+mod inland_water_tests {
+    use super::*;
+
+    #[test]
+    fn reads_outside_the_grid_are_unmarked() {
+        let mut m = InlandWater::new(4, 3);
+        assert!(!m.get(1, 1));
+        m.set(1, 1);
+        m.set(9, 9);
+        assert!(m.get(1, 1));
+        assert!(!m.get(1, 3) && !m.get(4, 0));
+        assert!(!m.get(usize::MAX, 0) && !m.get(0, usize::MAX));
     }
 }

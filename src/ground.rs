@@ -750,25 +750,32 @@ impl Ground {
         (measured > 0).then(|| (f64::from(wooded) / f64::from(measured), top))
     }
 
-    /// Force LC_WATER inside OSM water, sinking those cells onto that water's surface.
+    /// Force LC_WATER inside OSM water and sink it onto that water; flat worlds only mark inland.
     pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
+        use crate::land_cover::osm_water_override::{apply_osm_water_override, mark_inland_water};
+        let (world_width, world_height) = self.world_dims();
         let Ground {
             land_cover,
             elevation_data,
             ..
         } = self;
-        let (Some(lc), Some(data)) = (land_cover.as_mut(), elevation_data.as_mut()) else {
+        let Some(lc) = land_cover.as_mut() else {
             return;
         };
-        let (world_width, world_height) = (data.world_width, data.world_height);
-        crate::land_cover::osm_water_override::apply_osm_water_override(
-            lc,
-            &mut data.heights,
-            world_width,
-            world_height,
-            elements,
-            xzbbox,
-        );
+        match elevation_data.as_mut() {
+            Some(data) => {
+                let (world_width, world_height) = (data.world_width, data.world_height);
+                apply_osm_water_override(
+                    lc,
+                    &mut data.heights,
+                    world_width,
+                    world_height,
+                    elements,
+                    xzbbox,
+                );
+            }
+            None => mark_inland_water(lc, world_width, world_height, elements, xzbbox),
+        }
     }
 
     /// Trim ESA water back to land where OSM shows roads, buildings or its own shoreline.
@@ -894,16 +901,19 @@ impl Ground {
     /// Returns 0 if land cover data is not available.
     #[inline(always)]
     pub fn cover_class(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let (world_w, world_h) = self.world_dims();
-            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
-            let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
-            let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
-            lc.grid[z][x]
-        } else {
-            0
-        }
+        self.lc_cell(coord).map_or(0, |(lc, x, z)| lc.grid[z][x])
+    }
+
+    /// Land-cover cell under a coordinate, clamped to the grid.
+    #[inline(always)]
+    fn lc_cell(&self, coord: XZPoint) -> Option<(&land_cover::LandCoverData, usize, usize)> {
+        let lc = self.land_cover.as_ref()?;
+        let (world_w, world_h) = self.world_dims();
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
+        let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
+        Some((lc, x, z))
     }
 
     /// Whether beach land cover lies within `reach` blocks of the given coordinates.
@@ -926,15 +936,25 @@ impl Ground {
     /// 0 = non-water, 1 = shore, 2+ = progressively deeper water.
     #[inline(always)]
     pub fn water_distance(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let (world_w, world_h) = self.world_dims();
-            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
-            let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
-            let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
-            lc.water_distance[z][x]
-        } else {
-            0
+        self.lc_cell(coord)
+            .map_or(0, |(lc, x, z)| lc.water_distance[z][x])
+    }
+
+    /// Whether OSM maps this cell as a lake, river or canal rather than open sea.
+    #[inline]
+    pub fn inland_water_mapped(&self, coord: XZPoint) -> bool {
+        self.lc_cell(coord)
+            .is_some_and(|(lc, x, z)| lc.inland_water.get(x, z))
+    }
+
+    /// Highest Y of the sea surface, `None` without terrain; water above it is inland.
+    pub fn sea_surface_max_y(&self) -> Option<i32> {
+        const SEA_SURFACE_MAX_M: f64 = 5.0;
+        match &self.elevation_data {
+            Some(d) if self.elevation_enabled && d.blocks_per_meter > 0.0 => {
+                Some(d.affine().y_for_metres(SEA_SURFACE_MAX_M).floor() as i32)
+            }
+            _ => None,
         }
     }
 
@@ -1252,12 +1272,14 @@ impl Ground {
         &mut self,
         grid: Vec<Vec<u8>>,
         water_distance: Vec<Vec<u8>>,
+        inland_water: crate::land_cover::InlandWater,
         width: usize,
         height: usize,
     ) {
         if let Some(ref mut lc) = self.land_cover {
             lc.grid = grid;
             lc.water_distance = water_distance;
+            lc.inland_water = inland_water;
             lc.width = width;
             lc.height = height;
             // The water-blend mask was derived from the pre-rotation grid —
@@ -1857,6 +1879,7 @@ mod tests {
             water_distance: vec![vec![1, 0], vec![0, 0]],
             water_blend_cache: once_cell::sync::OnceCell::new(),
             beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
             width: 2,
             height: 2,
             cells_per_meter: 1.0,
@@ -2222,6 +2245,7 @@ pub(crate) mod test_support {
             water_distance: vec![vec![0u8; width]; height],
             water_blend_cache: once_cell::sync::OnceCell::new(),
             beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
             width,
             height,
             cells_per_meter: 1.0,

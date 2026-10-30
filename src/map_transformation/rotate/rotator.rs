@@ -305,6 +305,11 @@ fn rotate_ground_data(
     let has_land_cover = original_ground.has_land_cover();
     let mut new_cover: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
     let mut new_water: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
+    let mut new_inland = if has_land_cover {
+        crate::land_cover::InlandWater::new(new_w, new_h)
+    } else {
+        crate::land_cover::InlandWater::default()
+    };
     // Canopy shares the land-cover grid, so it rides the same samples.
     let has_canopy = original_ground.has_canopy();
     let mut new_canopy: Option<Vec<u8>> =
@@ -353,6 +358,9 @@ fn rotate_ground_data(
             }
             if let Some(ref mut wr) = water_row {
                 wr.push(original_ground.water_distance(coord));
+                if original_ground.inland_water_mapped(coord) {
+                    new_inland.set(x_idx, z_idx);
+                }
             }
             if let Some(ref mut ch) = new_canopy {
                 ch.push(
@@ -426,7 +434,7 @@ fn rotate_ground_data(
 
     // Update land cover with rotated data
     if let (Some(cover_grid), Some(water_dist)) = (new_cover, new_water) {
-        ground.set_land_cover_data(cover_grid, water_dist, new_w, new_h);
+        ground.set_land_cover_data(cover_grid, water_dist, new_inland, new_w, new_h);
     }
     if let Some(canopy_grid) = new_canopy {
         ground.set_canopy_data(canopy_grid, new_w, new_h);
@@ -534,6 +542,7 @@ mod tests {
             water_distance: (0..h).map(|_| row(1, 0)).collect(),
             water_blend_cache: once_cell::sync::OnceCell::new(),
             beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
             width: w,
             height: h,
             cells_per_meter: 1.0,

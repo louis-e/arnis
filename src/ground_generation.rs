@@ -18,8 +18,9 @@ use crate::block_definitions::{
     AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
     CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS, GRASS_BLOCK, GRAVEL,
     GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE, MOSS_BLOCK, MUD,
-    OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE,
-    STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE, YELLOW_CONCRETE,
+    OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, RED_SAND, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK,
+    STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE,
+    YELLOW_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
@@ -40,6 +41,8 @@ use rand::Rng;
 // Salts that keep the undergrowth fields independent of each other.
 const SALT_FOREST_FLOOR: u32 = 0xF0E5_7F10;
 const SALT_SHRUB_FLOOR: u32 = 0x5B7B_F10A;
+const SALT_SHRUB_DIRT: u32 = 0x5B7B_D127;
+const SALT_BARE_EARTH: u32 = 0xBA4E_EA27;
 const SALT_SWARD: u32 = 0x5A7D_0001;
 const SALT_TALL_SWARD: u32 = 0x5A7D_0002;
 const SALT_WETLAND_POOLS: u32 = 0x9001_5E75;
@@ -462,7 +465,6 @@ pub fn generate_ground_region(
                     };
 
                     let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
-
                     // Slope once per column (used for surface selection and depth), from
                     // unrounded heights so a contour doesn't flicker between tiers.
                     let (slope_f, gradient) = if terrain_enabled {
@@ -493,17 +495,24 @@ pub fn generate_ground_region(
                                 x,
                                 ground_y,
                                 z,
-                                Some(&[SAND]),
+                                Some(&[SAND, RED_SAND]),
                                 None,
                             ));
                     let mut did_underfill = false;
 
+                    // Mapped stone under snow or on bare ground snows and screes like the ground.
+                    let has_existing_stone =
+                        editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None)
+                            && snow_line.depth(x, z, ground_y) < terrain_surface::SNOW_MIN_DEPTH
+                            && !(has_land_cover
+                                && matches!(
+                                    ground.cover_class(coord),
+                                    land_cover::LC_BARE | land_cover::LC_SNOW_ICE
+                                ));
+
                     // Determine surface and under-block material for this column.
                     // steep_override means we always compute & place the right blocks,
                     // even if OSM already placed something here.
-                    let has_existing_stone =
-                        editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None);
-
                     if steep_override || !has_existing_stone {
                         // Handle ESA water with variable depth as a special case.
                         // Use bilinear interpolation of the water grid to produce
@@ -618,6 +627,10 @@ pub fn generate_ground_region(
                             } else {
                                 0
                             };
+                            let rock = terrain_surface::Rock::at(climate, x, z, |sx, sz| {
+                                let p = XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z());
+                                ground.ecoregion(p)
+                            });
                             // Snow by altitude and terrain shape. An ESA snow/ice cell near
                             // the snow line or in a cold climate is a glacier, which keeps
                             // patches of old snow even below the line.
@@ -653,7 +666,7 @@ pub fn generate_ground_region(
                                 _ => 0.0,
                             };
                             let talus_block =
-                                terrain_surface::talus_palette(x, z, talus, cover_here);
+                                terrain_surface::talus_palette(x, z, talus, cover_here, rock);
 
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if let Some(body) = planetary_body {
@@ -683,32 +696,27 @@ pub fn generate_ground_region(
                                 if let Some(p) = talus_block {
                                     p
                                 } else if slope > 4 {
-                                    terrain_surface::steep_palette(x, z, ground_y, slope, cover)
+                                    terrain_surface::steep_palette(
+                                        x, z, ground_y, slope, cover, rock,
+                                    )
                                 } else if glacier {
                                     terrain_surface::GLACIER_ICE
-                                } else if let Some(p) = climate.surface_palette(cover, x, z) {
+                                } else if let Some(p) = climate.surface_palette(
+                                    cover,
+                                    x,
+                                    z,
+                                    rock == terrain_surface::Rock::Red,
+                                ) {
                                     p
                                 } else {
                                     // Select surface block based on ESA land cover class
                                     match cover {
                                         land_cover::LC_TREE_COVER => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_SHRUBLAND => {
-                                            // Primarily grass with coarse-dirt patches.
-                                            // Uses value noise (bilinear + smoothstep)
-                                            // at ~5-block resolution so patch contours
-                                            // are organic blobs, not axis-aligned
-                                            // rectangles that an integer-division zone
-                                            // hash would produce. A finer per-block
-                                            // hash adds occasional grass peek-through
-                                            // inside each blob so they don't look
-                                            // stamped.
-                                            let noise = value_noise_01(x, z, 5);
+                                            // Coarse-dirt patches on a fifth of the ground.
+                                            let noise = ground_noise(x, z, 5, SALT_SHRUB_DIRT);
                                             let h = land_cover::coord_hash(x, z);
-                                            // Threshold 0.4 yields roughly 20 % dirt
-                                            // coverage (value noise from uniform
-                                            // samples concentrates around 0.5, so 0.4
-                                            // catches a band below that).
-                                            if noise < 0.4 {
+                                            if noise < 0.2 {
                                                 if h.is_multiple_of(5) {
                                                     (GRASS_BLOCK, DIRT) // grass peek-through
                                                 } else {
@@ -751,7 +759,8 @@ pub fn generate_ground_region(
                                             if neighbors_bare == 0 {
                                                 // Isolated pixel - blend with surroundings
                                                 (GRASS_BLOCK, DIRT)
-                                            } else if value_noise_01(x, z, 6) < 0.45 {
+                                            } else if ground_noise(x, z, 6, SALT_BARE_EARTH) < 0.45
+                                            {
                                                 // Bare/sparse terrain: earth patches at
                                                 // ~6-block resolution between rock, whose
                                                 // own patches come from a separate field.
@@ -786,7 +795,7 @@ pub fn generate_ground_region(
                             } else if terrain_enabled && slope > 4 {
                                 // No land cover data: the same slope cascade, falling
                                 // through to plain grass for the ≤4 slopes.
-                                terrain_surface::steep_palette(x, z, ground_y, slope, 0)
+                                terrain_surface::steep_palette(x, z, ground_y, slope, 0, rock)
                             } else {
                                 (GRASS_BLOCK, DIRT)
                             };
@@ -917,7 +926,9 @@ pub fn generate_ground_region(
                                     let y_min = (ground_y - depth).max(min_y() + 1);
                                     // Rock faces show their bedding down the whole step.
                                     // Off Earth the column stays plain stone.
-                                    if slope > 4 && under_block == STONE && planetary_body.is_none()
+                                    if slope > 4
+                                        && under_block == rock.base()
+                                        && planetary_body.is_none()
                                     {
                                         terrain_surface::fill_strata(
                                             editor,
@@ -926,6 +937,7 @@ pub fn generate_ground_region(
                                             y_min,
                                             y_max,
                                             slope > 6,
+                                            rock,
                                         );
                                     } else {
                                         editor.fill_column_absolute(
@@ -1538,6 +1550,36 @@ pub(crate) fn value_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
     a * (1.0 - sv) + b * sv
 }
 
+/// `patch_noise` bent by a coarser field and mixed with a finer octave: irregular, still uniform.
+pub(crate) fn ground_noise(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
+    // One coarse sample shifts both axes along a diagonal, which bends the lattice away.
+    let bend = value_noise_salted(x, z, scale * 3, salt ^ 0x5A5A_0F0F) - 0.5;
+    let shift = (bend * f64::from(scale) * 2.5) as i32;
+    let coarse = patch_noise(x + shift, z - shift, scale * 2, salt);
+    let fine = patch_noise(
+        x - shift,
+        z + shift,
+        (scale / 2).max(2),
+        salt.rotate_left(7),
+    );
+    mix_uniform(coarse, fine, 0.7)
+}
+
+/// `a * u + (1 - a) * v` of uniform values mapped back to uniform; needs `a >= 0.5`.
+#[inline]
+fn mix_uniform(u: f64, v: f64, a: f64) -> f64 {
+    let b = 1.0 - a;
+    let s = a * u + b * v;
+    let k = 0.5 / (a * b);
+    if s <= b {
+        s * s * k
+    } else if s <= a {
+        (s - b * 0.5) / a
+    } else {
+        1.0 - (1.0 - s) * (1.0 - s) * k
+    }
+}
+
 /// Smooth noise remapped to a roughly uniform `[0, 1]`, so `patch_noise(..) < 0.2`
 /// covers about a fifth of the ground in patches about `scale` blocks across.
 ///
@@ -1559,18 +1601,31 @@ pub(crate) fn patch_noise(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
         (1.0, 1.0),
     ];
     let v = value_noise_salted(x, z, scale, salt);
-    for pair in QUANTILES.windows(2) {
-        let ((v0, q0), (v1, q1)) = (pair[0], pair[1]);
-        if v <= v1 {
-            return q0 + (v - v0) / (v1 - v0) * (q1 - q0);
-        }
-    }
-    1.0
+    let i = QUANTILES
+        .partition_point(|&(v1, _)| v1 < v)
+        .clamp(1, QUANTILES.len() - 1);
+    let ((v0, q0), (v1, q1)) = (QUANTILES[i - 1], QUANTILES[i]);
+    q0 + (v - v0) / (v1 - v0) * (q1 - q0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ground_noise_keeps_shares_and_varies_patch_size() {
+        let samples: Vec<f64> = (0..300)
+            .flat_map(|x| (0..300).map(move |z| ground_noise(x * 3, z * 3, 9, 0xABCD)))
+            .collect();
+        for threshold in [0.1, 0.2, 0.5, 0.8] {
+            let share =
+                samples.iter().filter(|&&v| v < threshold).count() as f64 / samples.len() as f64;
+            assert!(
+                (share - threshold).abs() < 0.05,
+                "{share} below {threshold}"
+            );
+        }
+    }
     use crate::canopy::CanopyData;
 
     /// Share of trunk slots the verdict fills under a closed 20 m canopy.
