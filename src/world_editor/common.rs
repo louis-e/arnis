@@ -5,7 +5,10 @@
 
 use crate::block_definitions::*;
 
-use std::sync::atomic::{AtomicI32, AtomicU16, Ordering as MemOrdering};
+use std::{
+    iter::repeat_n,
+    sync::atomic::{AtomicI32, AtomicU16, Ordering as MemOrdering},
+};
 
 /// Default (vanilla 1.18+) world floor.
 pub const DEFAULT_MIN_Y: i32 = -64;
@@ -147,6 +150,7 @@ pub fn base_chunk_block() -> crate::block_definitions::Block {
 use fastnbt::{LongArray, Value};
 use fnv::{FnvHashMap, FnvHashSet};
 use serde::{Deserialize, Serialize};
+use smallbitvec::SmallBitVec;
 use std::sync::Arc;
 
 const SECTION_BLOCKS: usize = 4096;
@@ -1657,6 +1661,7 @@ impl WorldToModify {
 
     /// [`Self::set_block_with_properties`], except an occupied cell is only overwritten when
     /// `replace(existing)` agrees. Resolves the cell once instead of a read and then a write.
+    /// Return true if the block was placed
     #[inline]
     pub fn set_block_with_properties_if(
         &mut self,
@@ -1665,7 +1670,7 @@ impl WorldToModify {
         z: i32,
         block_with_props: BlockWithProperties,
         replace: impl FnOnce(Block) -> bool,
-    ) {
+    ) -> bool {
         if y <= world_max_y() {
             let (chunk_x, chunk_z) = (x >> 4, z >> 4);
             let clamped_y = y.max(min_y());
@@ -1679,12 +1684,14 @@ impl WorldToModify {
                 let existing = section.storage.get(SectionToModify::index(lx, ly, lz));
                 if existing == AIR || replace(existing) {
                     section.set_block_with_properties(lx, ly, lz, block_with_props);
+                    return true;
                 }
-                return;
+                return false;
             }
         }
         // A cell with no section (or above the ceiling) reads as empty, which is always written.
         self.set_block_with_properties(x, y, z, block_with_props);
+        true
     }
 
     /// Set a block only if the cell is empty (AIR). Thin `#[inline]` wrapper over [`set_with_props_if_absent`].
@@ -2256,6 +2263,109 @@ impl WorldToModify {
         self.regions
             .par_iter_mut()
             .for_each(|(_, region)| region.compact_sections());
+    }
+}
+
+/// Store a boolean value for each block in a column, defaulting to false, optimised for all values being near a single point
+#[derive(Default, Clone)]
+pub(crate) struct ColumnBitVec {
+    min_y: i32,
+    values: SmallBitVec,
+}
+
+impl ColumnBitVec {
+    pub fn insert(&mut self, key_y: i32, value: bool) {
+        if key_y < self.min_y {
+            if !value {
+                return;
+            }
+            // need to shift the vec downward
+            let shift_amount = self.min_y - key_y;
+            debug_assert!(shift_amount > 0);
+            self.values = repeat_n(false, shift_amount as usize)
+                .chain(self.values.iter())
+                .collect();
+            self.min_y = key_y
+        }
+
+        let offset = key_y - self.min_y;
+        debug_assert!(offset >= 0);
+        let offset = offset as usize;
+        if offset >= self.values.len() {
+            // need to extend vec upward
+            if !value {
+                return;
+            }
+            self.values.resize(offset + 1, false);
+        }
+
+        self.values.set(offset, value);
+    }
+
+    pub fn get(&self, key_y: i32) -> bool {
+        if key_y < self.min_y {
+            return false;
+        }
+
+        let offset = key_y - self.min_y;
+        debug_assert!(offset >= 0);
+        let offset = offset as usize;
+        self.values.get(offset).unwrap_or(false)
+    }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (i32, bool)> + use<'a> {
+        (self.min_y..).zip(self.values.iter())
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        for (k, v) in other.iter() {
+            self.insert(k, v);
+        }
+    }
+}
+
+/// Store a boolean for each 3d coordinate in a world, defaulting to false
+/// Optimise for case where true y-value are close together (< 32 difference in the y vector)
+#[derive(Default, Clone)]
+pub(crate) struct WorldColumnBitVec {
+    columns: CoordMap<ColumnBitVec>,
+}
+
+impl WorldColumnBitVec {
+    /// Coordinates are (x, y, z)
+    pub fn set(&mut self, key: (i32, i32, i32), value: bool) {
+        self.columns
+            .entry((key.0, key.2))
+            .and_modify(|c| c.insert(key.1, value))
+            .or_insert_with(|| {
+                let mut c = ColumnBitVec::default();
+                c.insert(key.1, value);
+                c
+            });
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        for (other_coord, other_column) in other.columns.iter() {
+            if let Some(self_column) = self.columns.get_mut(other_coord) {
+                self_column.merge(other_column);
+            } else {
+                self.columns.insert(*other_coord, other_column.clone());
+            }
+        }
+    }
+
+    /// Coordinates are (x, z)
+    pub fn get_column(&self, coord: (i32, i32)) -> Option<&ColumnBitVec> {
+        self.columns.get(&coord)
+    }
+
+    pub fn clear_region(&mut self, rx: i32, rz: i32) {
+        let (x0, z0) = (rx << 9, rz << 9);
+        for z in z0..z0 + 512 {
+            for x in x0..x0 + 512 {
+                self.columns.remove(&(x, z));
+            }
+        }
     }
 }
 
@@ -3214,5 +3324,64 @@ mod terrain_floor_tests {
         with_floor(-2032, -2030, || {
             assert_eq!(terrain_floor_y(), -2032);
         });
+    }
+}
+
+#[cfg(test)]
+mod columnbitvec_tests {
+    use super::*;
+
+    #[allow(clippy::type_complexity)]
+    fn run_test_on_columnbitvec(bit_vec: &mut ColumnBitVec, op: &(&[(i32, bool)], &[(i32, bool)])) {
+        for write in op.0 {
+            bit_vec.insert(write.0, write.1);
+        }
+
+        for check in op.1 {
+            assert_eq!(bit_vec.get(check.0), check.1);
+        }
+    }
+
+    #[test]
+    pub fn test_column() {
+        run_test_on_columnbitvec(
+            &mut ColumnBitVec::default(),
+            &(
+                &[
+                    (-10, true),
+                    (10, true),
+                    (0, false),
+                    (-20, false),
+                    (-10, false),
+                ],
+                &[(-10, false), (10, true), (0, false), (-20, false)],
+            ),
+        );
+
+        run_test_on_columnbitvec(
+            &mut ColumnBitVec::default(),
+            &(
+                &[
+                    (-10, true),
+                    (-10, false),
+                    (-11, false),
+                    (-11, true),
+                    (-12, true),
+                ],
+                &[(-10, false), (-11, true), (-12, true)],
+            ),
+        );
+    }
+
+    #[test]
+    pub fn test_world() {
+        let mut world = WorldColumnBitVec::default();
+
+        world.set((1, 2, 3), true);
+
+        assert!(world.get_column((1, 3)).unwrap().get(2));
+        assert!(!world.get_column((1, 3)).unwrap().get(1));
+
+        assert!(world.get_column((3, 1)).is_none());
     }
 }

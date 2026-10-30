@@ -13751,21 +13751,25 @@ fn generate_parapet(
             continue;
         }
         match cap {
-            ParapetCap::Coping(slab) => editor.set_block_with_properties_absolute(
-                rooftops::bottom_slab(slab),
-                x,
-                course_y + 1,
-                z,
-                Some(&[AIR]),
-                None,
-            ),
-            ParapetCap::Railing => crate::element_processing::connected_blocks::place_connected(
-                editor,
-                IRON_BARS,
-                x,
-                course_y + 1,
-                z,
-            ),
+            ParapetCap::Coping(slab) => {
+                editor.set_block_with_properties_absolute(
+                    rooftops::bottom_slab(slab),
+                    x,
+                    course_y + 1,
+                    z,
+                    Some(&[AIR]),
+                    None,
+                );
+            }
+            ParapetCap::Railing => {
+                crate::element_processing::connected_blocks::place_connected(
+                    editor,
+                    IRON_BARS,
+                    x,
+                    course_y + 1,
+                    z,
+                );
+            }
         }
     }
 

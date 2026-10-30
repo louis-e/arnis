@@ -1605,6 +1605,62 @@ fn place_on_rope(
     }
 }
 
+fn set_block_absolute_transparent_to_snow(
+    editor: &mut WorldEditor,
+    block: Block,
+    x: i32,
+    absolute_y: i32,
+    z: i32,
+    override_whitelist: Option<&[Block]>,
+    override_blacklist: Option<&[Block]>,
+) {
+    let placed = editor.set_block_absolute(
+        block,
+        x,
+        absolute_y,
+        z,
+        override_whitelist,
+        override_blacklist,
+    );
+    if placed {
+        editor.transparent_to_snow.set((x, absolute_y, z), true);
+    }
+}
+
+fn set_block_with_properties_absolute_transparent_to_snow(
+    editor: &mut WorldEditor,
+    block_with_props: BlockWithProperties,
+    x: i32,
+    absolute_y: i32,
+    z: i32,
+    override_whitelist: Option<&[Block]>,
+    override_blacklist: Option<&[Block]>,
+) {
+    let placed = editor.set_block_with_properties_absolute(
+        block_with_props,
+        x,
+        absolute_y,
+        z,
+        override_whitelist,
+        override_blacklist,
+    );
+    if placed {
+        editor.transparent_to_snow.set((x, absolute_y, z), true);
+    }
+}
+
+fn place_connected_transparent_to_snow(
+    editor: &mut WorldEditor,
+    block: Block,
+    x: i32,
+    y: i32,
+    z: i32,
+) {
+    if place_connected(editor, block, x, y, z) {
+        editor.transparent_to_snow.set((x, y, z), true);
+    }
+}
+
 /// One carrier hanging from the rope cell `h`.
 fn draw_carrier(
     editor: &mut WorldEditor,
@@ -1620,98 +1676,127 @@ fn draw_carrier(
     match carrier {
         Carrier::Chair { half, bubble } => {
             for y in hy - 2..=hy {
-                editor.set_block_absolute(CHAIN_Y, hx, y, hz, None, None);
+                set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, y, hz, None, None);
             }
             let back = (-fwd.0, -fwd.1);
             for r in -half..=half {
                 // Tall padded backrest in the lift colour, seat in front of it.
                 let (x, z) = at(0, r);
-                editor.set_block_absolute(colour, x, hy - 3, z, None, None);
-                editor.set_block_absolute(colour, x, hy - 4, z, None, None);
+                set_block_absolute_transparent_to_snow(editor, colour, x, hy - 3, z, None, None);
+                set_block_absolute_transparent_to_snow(editor, colour, x, hy - 4, z, None, None);
                 let (sx, sz) = at(1, r);
-                place(
+                set_block_with_properties_absolute_transparent_to_snow(
                     editor,
                     stair_backed(POLISHED_DEEPSLATE_STAIRS, back),
                     sx,
                     hy - 4,
                     sz,
+                    None,
+                    None,
                 );
             }
             if bubble {
                 let glass = bubble_glass(colour);
                 for r in -half..=half {
                     let (x, z) = at(1, r);
-                    editor.set_block_absolute(glass, x, hy - 2, z, None, None);
+                    set_block_absolute_transparent_to_snow(editor, glass, x, hy - 2, z, None, None);
                     let (x, z) = at(2, r);
-                    editor.set_block_absolute(glass, x, hy - 3, z, None, None);
+                    set_block_absolute_transparent_to_snow(editor, glass, x, hy - 3, z, None, None);
                 }
             } else {
                 // Armrests, safety bar and footrest.
                 for r in [-half, half] {
                     let (x, z) = at(1, r);
-                    place_connected(editor, IRON_BARS, x, hy - 3, z);
+                    place_connected_transparent_to_snow(editor, IRON_BARS, x, hy - 3, z);
                 }
                 for r in -half..=half {
                     let (x, z) = at(2, r);
-                    place_connected(editor, IRON_BARS, x, hy - 3, z);
-                    place(editor, top_slab(POLISHED_BLACKSTONE_SLAB), x, hy - 5, z);
+                    place_connected_transparent_to_snow(editor, IRON_BARS, x, hy - 3, z);
+                    set_block_with_properties_absolute_transparent_to_snow(
+                        editor,
+                        top_slab(POLISHED_BLACKSTONE_SLAB),
+                        x,
+                        hy - 5,
+                        z,
+                        None,
+                        None,
+                    );
                 }
                 let (x, z) = at(2, 0);
-                editor.set_block_absolute(IRON_BARS, x, hy - 4, z, None, None);
+                set_block_absolute_transparent_to_snow(editor, IRON_BARS, x, hy - 4, z, None, None);
             }
         }
         Carrier::Cabin { half_w, half_l } => {
-            editor.set_block_absolute(CHAIN_Y, hx, hy, hz, None, None);
-            editor.set_block_absolute(CHAIN_Y, hx, hy - 1, hz, None, None);
+            set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, hy, hz, None, None);
+            set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, hy - 1, hz, None, None);
             cabin_body(editor, colour, &at, hy - 2, half_w, half_l, 2);
         }
         Carrier::Tram { half_w, half_l } => {
+            //TODO: should this really be transparent to snow?
             for f in -2..=2 {
                 let (x, z) = at(f, 0);
-                editor.set_block_absolute(POLISHED_DEEPSLATE, x, hy, z, None, None);
+                set_block_absolute_transparent_to_snow(
+                    editor,
+                    POLISHED_DEEPSLATE,
+                    x,
+                    hy,
+                    z,
+                    None,
+                    None,
+                );
             }
             for f in [-1, 1] {
                 let (x, z) = at(f, 0);
                 for y in hy - 3..hy {
-                    editor.set_block_absolute(POLISHED_DEEPSLATE_WALL, x, y, z, None, None);
+                    set_block_absolute_transparent_to_snow(
+                        editor,
+                        POLISHED_DEEPSLATE_WALL,
+                        x,
+                        y,
+                        z,
+                        None,
+                        None,
+                    );
                 }
             }
             cabin_body(editor, colour, &at, hy - 4, half_w, half_l, 2);
         }
         Carrier::Bar { half } => {
             for y in hy - 3..=hy {
-                editor.set_block_absolute(CHAIN_Y, hx, y, hz, None, None);
+                set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, y, hz, None, None);
             }
             for r in -half..=half {
                 let (x, z) = at(0, r);
-                place_connected(editor, IRON_BARS, x, hy - 4, z);
+                place_connected_transparent_to_snow(editor, IRON_BARS, x, hy - 4, z);
             }
         }
         Carrier::JBar => {
             for y in hy - 3..=hy {
-                editor.set_block_absolute(CHAIN_Y, hx, y, hz, None, None);
+                set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, y, hz, None, None);
             }
             for r in 0..=1 {
                 let (x, z) = at(0, r);
-                place_connected(editor, IRON_BARS, x, hy - 4, z);
+                place_connected_transparent_to_snow(editor, IRON_BARS, x, hy - 4, z);
             }
         }
         Carrier::Platter => {
             for y in hy - 3..=hy {
-                editor.set_block_absolute(CHAIN_Y, hx, y, hz, None, None);
+                set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, y, hz, None, None);
             }
-            place(
+            set_block_with_properties_absolute_transparent_to_snow(
                 editor,
                 with_props(IRON_TRAPDOOR, &[("half", "top"), ("open", "false")]),
                 hx,
                 hy - 4,
                 hz,
+                None,
+                None,
             );
         }
         Carrier::Bucket => {
-            editor.set_block_absolute(CHAIN_Y, hx, hy, hz, None, None);
-            editor.set_block_absolute(CHAIN_Y, hx, hy - 1, hz, None, None);
-            editor.set_block_absolute(CAULDRON, hx, hy - 2, hz, None, None);
+            set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, hy, hz, None, None);
+            set_block_absolute_transparent_to_snow(editor, CHAIN_Y, hx, hy - 1, hz, None, None);
+            set_block_absolute_transparent_to_snow(editor, CAULDRON, hx, hy - 2, hz, None, None);
         }
     }
 }
@@ -1734,17 +1819,20 @@ fn cabin_body(
             let rim = f.abs() == half_l || r.abs() == half_w;
             // Rounded corners top and bottom.
             if !corner {
-                editor.set_block_absolute(colour, x, roof, z, None, None);
-                editor.set_block_absolute(colour, x, floor, z, None, None);
+                set_block_absolute_transparent_to_snow(editor, colour, x, roof, z, None, None);
+                set_block_absolute_transparent_to_snow(editor, colour, x, floor, z, None, None);
             }
             if !rim {
+                for y in floor + 1..roof {
+                    editor.transparent_to_snow.set((x, y, z), true);
+                }
                 continue;
             }
             // Window posts at the corners and every second cell of a long side.
             let post = corner || (f.abs() == half_l && r % 2 == 0 && half_w > 1 && r != 0);
             for y in floor + 1..roof {
                 let block = if post { colour } else { GRAY_STAINED_GLASS };
-                editor.set_block_absolute(block, x, y, z, None, None);
+                set_block_absolute_transparent_to_snow(editor, block, x, y, z, None, None);
             }
         }
     }

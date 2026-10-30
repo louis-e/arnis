@@ -353,7 +353,9 @@ fn generate_at_grade_rail(
                 let surface = editor.get_block_absolute(x, r, z).unwrap_or(GRAVEL);
                 editor.set_block_absolute(surface, x, bed, z, None, None);
             }
-            _ => editor.set_block_absolute(GRAVEL, x, bed, z, None, None),
+            _ => {
+                editor.set_block_absolute(GRAVEL, x, bed, z, None, None);
+            }
         }
         if lays {
             editor.set_block_absolute(shapes[i], x, bed + 1, z, Some(RAIL_CLEARS), None);

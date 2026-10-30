@@ -1264,28 +1264,28 @@ pub fn generate_ground_region(
                                         );
                                         if on_coarse_dirt {
                                             match rng.random_range(0..100) {
-                                                0..=5 => editor.set_block_absolute(
+                                                0..=5 => { editor.set_block_absolute(
                                                     GRASS,
                                                     x,
                                                     ground_y + 1,
                                                     z,
                                                     None,
                                                     None,
-                                                ),
+                                                ); },
                                                 6..=8 => crate::element_processing::bush::place_bush(
                                                     editor,
                                                     x,
                                                     z,
                                                     crate::element_processing::bush::BushKind::Low,
                                                 ),
-                                                9 => editor.set_block_absolute(
+                                                9 => { editor.set_block_absolute(
                                                     DEAD_BUSH,
                                                     x,
                                                     ground_y + 1,
                                                     z,
                                                     None,
                                                     None,
-                                                ),
+                                                ); },
                                                 _ => {}
                                             }
                                         } else if rng.random_range(0..100) == 0 {
