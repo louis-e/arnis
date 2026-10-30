@@ -272,11 +272,14 @@ pub fn generate_ground_region(
     // `Some` only off Earth, where the body's palette replaces land cover and
     // every Earth-only surface pass is off.
     let planetary_body = (!args.body.is_earth()).then_some(args.body);
-    let center_lat = args
-        .bbox
-        .as_ref()
-        .map(|b| (b.min().lat() + b.max().lat()) * 0.5)
-        .unwrap_or(0.0);
+    let planetary_transformer = planetary_body.and_then(|_| {
+        args.bbox.as_ref().and_then(|bbox| {
+            crate::projection::ProjectionSpec::from_args(args)
+                .transformer(bbox)
+                .ok()
+                .map(|(transformer, _)| transformer)
+        })
+    });
     let has_land_cover = ground.has_land_cover();
     let has_canopy = ground.has_canopy();
     let tree_spacing = editor.tree_slot_spacing();
@@ -671,9 +674,46 @@ pub fn generate_ground_region(
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if let Some(body) = planetary_body {
                                 // No land cover off Earth, so this replaces the
-                                // whole ESA cascade below.
+                                // whole ESA cascade below. Undo the map rotation
+                                // before geographic lookup so the geology layer
+                                // stays aligned with the planetary coordinates.
+                                let (source_x, source_z) = ground.unrotate_point(
+                                    f64::from(x) + 0.5,
+                                    f64::from(z) + 0.5,
+                                );
+                                let features = planetary_transformer
+                                    .as_ref()
+                                    .and_then(|transformer| {
+                                        transformer.inverse_point(source_x, source_z)
+                                    })
+                                    .map(|point| {
+                                        crate::planetary_geology::features_at(
+                                            body,
+                                            point.lat(),
+                                            point.lng(),
+                                        )
+                                    })
+                                    .unwrap_or(0);
+                                // The extra neighborhood samples are useful only
+                                // along mapped channels/rilles; keep the common
+                                // planetary surface path at its existing cost.
+                                let relief_feature = match body {
+                                    crate::celestial::CelestialBody::Moon => {
+                                        crate::planetary_geology::MOON_RILLE
+                                    }
+                                    crate::celestial::CelestialBody::Mars => {
+                                        crate::planetary_geology::MARS_FLUVIAL
+                                            | crate::planetary_geology::MARS_RILLE
+                                    }
+                                    crate::celestial::CelestialBody::Earth => 0,
+                                };
+                                let convexity = if features & relief_feature != 0 {
+                                    ground.convexity(coord)
+                                } else {
+                                    0.0
+                                };
                                 crate::celestial::surface_palette(
-                                    body, slope, center_lat, ground_y, x, z,
+                                    body, slope, ground_y, x, z, features, convexity,
                                 )
                             } else if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
@@ -1666,3 +1706,4 @@ mod tests {
         assert!((0.43..0.53).contains(&share), "{share}");
     }
 }
+

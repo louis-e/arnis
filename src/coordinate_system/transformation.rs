@@ -30,6 +30,27 @@ impl CoordTransformer {
         self.scale_factor_z
     }
 
+    /// Convert a map-space position back to the geographic position that the
+    /// forward transform placed there. Local coordinates are relative to the
+    /// original selection; projected coordinates use the projection's origin.
+    pub fn inverse_point(&self, x: f64, z: f64) -> Option<LLPoint> {
+        let (lat, lon) = match &self.mode {
+            ProjectionMode::Local => {
+                let rel_x = x / self.scale_factor_x;
+                let rel_z = z / self.scale_factor_z;
+                (
+                    self.min_lat + (1.0 - rel_z) * self.len_lat,
+                    self.min_lng + rel_x * self.len_lng,
+                )
+            }
+            ProjectionMode::WebMercator(proj) => {
+                use crate::projection::Projection;
+                proj.inverse(x, z)
+            }
+        };
+        LLPoint::new(lat, lon).ok()
+    }
+
     pub fn llbbox_to_xzbbox(
         llbbox: &LLBBox,
         scale: f64,
@@ -397,4 +418,38 @@ mod test {
         assert_eq!(pt.x, expected_x);
         assert_eq!(pt.z, expected_z);
     }
+
+    #[test]
+    fn inverse_transform_recovers_cell_geography_in_both_modes() {
+        let bbox = LLBBox::new(10.0, 20.0, 11.0, 21.0).unwrap();
+        let point = LLPoint::new(10.25, 20.75).unwrap();
+
+        let (local, _) = CoordTransformer::llbbox_to_xzbbox(&bbox, 0.1).unwrap();
+        let local_cell = local.transform_point(point);
+        let local_center = local
+            .inverse_point(f64::from(local_cell.x) + 0.5, f64::from(local_cell.z) + 0.5)
+            .unwrap();
+        assert!((local_center.lat() - point.lat()).abs() < 0.001);
+        assert!((local_center.lng() - point.lng()).abs() < 0.001);
+
+        let projection = WebMercatorProjection::new(10.5, 20.5, 0.1);
+        let (projected, _) = CoordTransformer::with_projection(&bbox, 0.1, projection).unwrap();
+        let projected_cell = projected.transform_point(point);
+        let projected_center = projected
+            .inverse_point(
+                f64::from(projected_cell.x) + 0.5,
+                f64::from(projected_cell.z) + 0.5,
+            )
+            .unwrap();
+        assert!((projected_center.lat() - point.lat()).abs() < 0.001);
+        assert!((projected_center.lng() - point.lng()).abs() < 0.001);
+    }
+
+    #[test]
+    fn inverse_transform_rejects_positions_outside_geographic_bounds() {
+        let bbox = LLBBox::new(10.0, 20.0, 11.0, 21.0).unwrap();
+        let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&bbox, 1.0).unwrap();
+        assert!(transformer.inverse_point(-1.0e9, 0.0).is_none());
+    }
 }
+

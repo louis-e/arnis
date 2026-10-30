@@ -1315,19 +1315,29 @@ impl Ground {
         self.rotation_mask = Some(mask);
     }
 
+    /// Map a rotated world position back to the coordinates used before the
+    /// map rotation. Callers can then recover the original geographic location.
+    #[inline(always)]
+    pub fn unrotate_point(&self, x: f64, z: f64) -> (f64, f64) {
+        let Some(mask) = self.rotation_mask.as_ref() else {
+            return (x, z);
+        };
+        let dx = x - mask.cx;
+        let dz = z - mask.cz;
+        (
+            dx * mask.cos + dz * mask.neg_sin + mask.cx,
+            -dx * mask.neg_sin + dz * mask.cos + mask.cz,
+        )
+    }
+
     /// Returns `true` if the coordinate is inside the rotated original bbox.
     /// When no rotation was applied, always returns `true`.
     #[inline(always)]
     pub fn is_in_rotated_bounds(&self, x: i32, z: i32) -> bool {
-        let mask = match self.rotation_mask {
-            Some(ref m) => m,
-            None => return true,
+        let Some(mask) = self.rotation_mask.as_ref() else {
+            return true;
         };
-        // Inverse-rotate (x, z) back to original space
-        let dx = x as f64 - mask.cx;
-        let dz = z as f64 - mask.cz;
-        let orig_x = dx * mask.cos + dz * mask.neg_sin + mask.cx;
-        let orig_z = -dx * mask.neg_sin + dz * mask.cos + mask.cz;
+        let (orig_x, orig_z) = self.unrotate_point(f64::from(x), f64::from(z));
         // Allow a tiny tolerance so points that land infinitesimally outside the
         // integer bbox due to floating-point rounding are still considered inside.
         const EPSILON: f64 = 1.0e-9;
@@ -1829,6 +1839,24 @@ mod tests {
             winter: false,
             origin: (0, 0),
         }
+    }
+
+    #[test]
+    fn unrotate_point_restores_the_original_geographic_grid_position() {
+        let mut ground = ground_with(vec![vec![0.0; 2]; 2]);
+        assert_eq!(ground.unrotate_point(3.5, 4.5), (3.5, 4.5));
+
+        ground.set_rotation_mask(RotationMask {
+            cx: 0.0,
+            cz: 0.0,
+            neg_sin: -1.0,
+            cos: 0.0,
+            orig_min_x: 0,
+            orig_max_x: 10,
+            orig_min_z: 0,
+            orig_max_z: 10,
+        });
+        assert_eq!(ground.unrotate_point(3.0, 4.0), (-4.0, 3.0));
     }
 
     // An unmeasured cell hands the decision back to the land cover.
@@ -2394,3 +2422,4 @@ mod frame_tests {
         );
     }
 }
+
