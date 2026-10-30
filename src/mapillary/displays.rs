@@ -1691,14 +1691,10 @@ pub(crate) fn is_arnis_pack(path: &Path) -> bool {
     let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
-    let Ok(mut zip) = zip::ZipArchive::new(file) else {
+    let Ok(zip) = zip::ZipArchive::new(file) else {
         return false;
     };
-    (0..zip.len()).any(|i| {
-        zip.by_index_raw(i)
-            .map(|f| f.name().is_ok_and(|n| n == PACK_MARKER))
-            .unwrap_or(false)
-    })
+    zip.index_for_name(PACK_MARKER).is_some()
 }
 
 /// Installs the staged pack file at `path`, stepping a pack we did not write
