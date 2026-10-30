@@ -62,6 +62,8 @@ pub struct Ground {
     ecoregions: Option<Arc<EcoMap>>,
     /// A winter run: every biome becomes its snowy counterpart.
     winter: bool,
+    /// Biomes from Terralith where one fits better than vanilla's.
+    terralith: bool,
     /// Absolute block of the grids' first cell, so passes that draw patterns line up
     /// across One World seams. (0, 0) in a local run.
     origin: (i32, i32),
@@ -282,6 +284,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            terralith: false,
             origin: (0, 0),
         }
     }
@@ -339,6 +342,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
             winter: false,
+            terralith: false,
             origin: frame.origin(bbox),
         }
     }
@@ -364,6 +368,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            terralith: false,
             origin: (0, 0),
         }
     }
@@ -389,6 +394,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            terralith: false,
             origin: (0, 0),
         }
     }
@@ -441,6 +447,7 @@ impl Ground {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            terralith: false,
             origin: (0, 0),
         }
     }
@@ -580,6 +587,7 @@ impl Ground {
                             .then(|| frame.ecoregions(&requested_bbox, (final_w, final_h)))
                             .flatten(),
                         winter: false,
+                        terralith: false,
                         origin: frame.origin(&requested_bbox),
                     }
                 }
@@ -616,6 +624,7 @@ impl Ground {
                             .then(|| frame.ecoregions(&requested_bbox, plan.final_dims))
                             .flatten(),
                         winter: false,
+                        terralith: false,
                         origin: frame.origin(&requested_bbox),
                     }
                 }
@@ -665,6 +674,16 @@ impl Ground {
 
     pub fn set_winter(&mut self, winter: bool) {
         self.winter = winter;
+    }
+
+    /// Whether biomes come from Terralith where one fits.
+    #[inline(always)]
+    pub fn terralith(&self) -> bool {
+        self.terralith
+    }
+
+    pub fn set_terralith(&mut self, terralith: bool) {
+        self.terralith = terralith;
     }
 
     /// Returns whether land cover data is available
@@ -1464,6 +1483,7 @@ pub fn generate_ground_data(
             extend_world_bounds(args);
         }
         ground.set_winter(args.winter);
+        ground.set_terralith(args.terralith);
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
         let floor = area_floor_for(&ground, args);
@@ -1491,6 +1511,7 @@ pub fn generate_ground_data(
         extend_world_bounds(args);
     }
     ground.set_winter(args.winter);
+    ground.set_terralith(args.terralith);
     crate::world_editor::set_base_chunk_y(ground.base_level());
     crate::world_editor::set_terrain_floor_y(ground.base_level());
     crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
@@ -1790,6 +1811,7 @@ mod tests {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            terralith: false,
             origin: (0, 0),
         }
     }
@@ -2218,6 +2240,7 @@ pub(crate) mod test_support {
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
+            terralith: false,
             origin: (0, 0),
         }
     }

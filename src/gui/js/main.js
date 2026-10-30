@@ -1850,10 +1850,11 @@ function refreshGameplayRows(format) {
   setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
 }
 
-// Java mods load only in Java worlds.
+// Java mods and Terralith biomes load only in Java worlds.
 function refreshModRows(format) {
   const java = (format || selectedWorldFormat) === 'java';
   document.querySelectorAll('.mod-toggle').forEach((el) => setSettingsRowAvailable(el.id, java));
+  setSettingsRowAvailable('terralith-toggle', java);
 }
 
 // The ticked mod ids, for the backend's --mods.
@@ -3558,6 +3559,7 @@ async function startGeneration() {
         disasters: gameplayToggle('disasters-toggle'),
         bodyGravity: gameplayToggle('body-gravity-toggle'),
         mods: selectedMods(),
+        terralith: gameplayToggle('terralith-toggle'),
         oneWorld: oneWorld,
         oneWorldName: oneWorld ? oneWorldFolderName() : ""
     });

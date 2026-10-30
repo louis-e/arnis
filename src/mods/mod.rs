@@ -7,6 +7,7 @@ pub mod create;
 pub mod farmers_delight;
 pub mod macaws;
 pub mod supplementaries;
+pub mod terralith;
 pub mod wildlife;
 
 use crate::block_definitions::{Block, BlockWithProperties};
@@ -42,8 +43,10 @@ pub enum ModPack {
     MacawsFurniture,
     /// Macaw's Roofs: roof tiles and awnings.
     MacawsRoofs,
-    /// Macaw's Windows: framed windows, shutters, curtains and blinds.
-    MacawsWindows,
+    /// Macaw's Doors: entrance doors that suit the building.
+    MacawsDoors,
+    /// Macaw's Paths and Pavings: patterned paving on pedestrian streets and squares.
+    MacawsPaths,
     /// Macaw's Lights and Lamps: street lamps and indoor lights.
     MacawsLights,
     /// Supplementaries: sign posts, flags, wind vanes, flower boxes and shop details.
@@ -59,11 +62,12 @@ pub enum ModPack {
 }
 
 impl ModPack {
-    pub const ALL: [ModPack; 10] = [
+    pub const ALL: [ModPack; 11] = [
         ModPack::Create,
         ModPack::MacawsFurniture,
         ModPack::MacawsRoofs,
-        ModPack::MacawsWindows,
+        ModPack::MacawsDoors,
+        ModPack::MacawsPaths,
         ModPack::MacawsLights,
         ModPack::Supplementaries,
         ModPack::FarmersDelight,
@@ -78,7 +82,8 @@ impl ModPack {
             ModPack::Create => "create",
             ModPack::MacawsFurniture => "macaws-furniture",
             ModPack::MacawsRoofs => "macaws-roofs",
-            ModPack::MacawsWindows => "macaws-windows",
+            ModPack::MacawsDoors => "macaws-doors",
+            ModPack::MacawsPaths => "macaws-paths",
             ModPack::MacawsLights => "macaws-lights",
             ModPack::Supplementaries => "supplementaries",
             ModPack::FarmersDelight => "farmers-delight",
@@ -98,7 +103,8 @@ impl ModPack {
             ModPack::Create => &["Create 6.0.10"],
             ModPack::MacawsFurniture => &["Macaw's Furniture 3.4.1"],
             ModPack::MacawsRoofs => &["Macaw's Roofs 2.3.2"],
-            ModPack::MacawsWindows => &["Macaw's Windows 2.4.2"],
+            ModPack::MacawsDoors => &["Macaw's Doors 1.1.5"],
+            ModPack::MacawsPaths => &["Macaw's Paths and Pavings 1.1.1"],
             ModPack::MacawsLights => &["Macaw's Lights and Lamps 1.1.5"],
             ModPack::Supplementaries => &["Supplementaries 4.0.2", "Moonlight Lib 3.7.2"],
             ModPack::FarmersDelight => &["Farmer's Delight 1.3.4"],
@@ -159,18 +165,32 @@ pub fn stamp_new_world(world: &std::path::Path) {
     }
 }
 
-/// The world format line for the README and the GUI: what to install to open the world.
-pub fn install_note(set: ModSet) -> String {
+/// The Terralith build for the modded version: 2.5.8 needs no library, unlike 2.6 on 1.21.1.
+pub const TERRALITH_FOR_TARGET: &str = "Terralith 2.5.8";
+
+/// What to install to open the world, for MODS.txt and the console, or None for a world
+/// that needs nothing.
+pub fn install_note(set: ModSet, terralith: bool) -> Option<String> {
     let mut names: Vec<&str> = set
         .packs()
         .flat_map(|m| m.requires().iter().copied())
         .collect();
+    if names.is_empty() {
+        return terralith.then(|| {
+            "Install Terralith for the Minecraft version you play: put its datapack zip into \
+             this world's datapacks folder, or install the Terralith mod. No mod loader is needed."
+                .to_string()
+        });
+    }
+    if terralith {
+        names.push(TERRALITH_FOR_TARGET);
+    }
     names.sort_unstable();
     names.dedup();
-    format!(
+    Some(format!(
         "Open this world in Minecraft {TARGET_VERSION} with NeoForge and these mods: {}.",
         names.join(", ")
-    )
+    ))
 }
 
 #[cfg(test)]

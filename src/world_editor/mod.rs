@@ -1033,6 +1033,12 @@ impl<'a> WorldEditor<'a> {
     /// Every item display currently in the world, as its raw NBT compound.
     #[cfg(test)]
     pub fn item_displays(&self) -> Vec<HashMap<String, Value>> {
+        self.entities_with_id("minecraft:item_display")
+    }
+
+    /// Every entity of one type currently in the world, as its raw NBT compound.
+    #[cfg(test)]
+    pub fn entities_with_id(&self, wanted: &str) -> Vec<HashMap<String, Value>> {
         let mut out = Vec::new();
         for region in self.world.regions.values() {
             for chunk in region.chunks.values() {
@@ -1041,8 +1047,7 @@ impl<'a> WorldEditor<'a> {
                 };
                 for entity in entities {
                     let Value::Compound(e) = entity else { continue };
-                    if matches!(e.get("id"), Some(Value::String(id)) if id == "minecraft:item_display")
-                    {
+                    if matches!(e.get("id"), Some(Value::String(id)) if id == wanted) {
                         out.push(e.clone());
                     }
                 }

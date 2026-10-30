@@ -1,14 +1,10 @@
-//! Macaw's Furniture, Roofs, Windows and Lights.
+//! Macaw's Furniture, Roofs, Lights, Doors, and Paths and Pavings.
 //!
 //! Each piece's `facing` follows its own model, which is not the same rule across the
 //! set; the helpers take the way the piece should face and work the state out.
 
 use super::{dir_name, state};
 use crate::block_definitions::*;
-
-pub fn cw(d: (i32, i32)) -> (i32, i32) {
-    (-d.1, d.0)
-}
 
 pub fn ccw(d: (i32, i32)) -> (i32, i32) {
     (d.1, -d.0)
@@ -120,67 +116,74 @@ pub fn couch(color: &str, look: (i32, i32), fallback: Block) -> BlockWithPropert
     )
 }
 
-/// The Macaw's window frame that suits a wall, or None to keep plain glass.
-pub fn window_material(wall: Block) -> Option<&'static str> {
-    let n = wall.name();
-    let wood = [
-        "oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry",
-    ];
-    if let Some(w) = n.strip_suffix("_planks") {
-        return wood.iter().find(|&&x| x == w).map(|&x| match x {
-            "oak" => "oak_plank",
-            "spruce" => "spruce_plank",
-            "birch" => "birch_plank",
-            "jungle" => "jungle_plank",
-            "acacia" => "acacia_plank",
-            "dark_oak" => "dark_oak_plank",
-            "mangrove" => "mangrove_plank",
-            _ => "cherry_plank",
-        });
-    }
-    Some(match n {
-        _ if n.contains("red_sandstone") => "red_sandstone",
-        _ if n.contains("sandstone") => "sandstone",
-        _ if n.contains("deepslate") => "deepslate",
-        _ if n.contains("blackstone") => "blackstone",
-        _ if n.contains("prismarine") => "prismarine",
-        _ if n.contains("quartz") || n == "calcite" => "quartz",
-        _ if n.contains("andesite") => "andesite",
-        _ if n.contains("granite") => "granite",
-        _ if n.contains("diorite") => "diorite",
-        "bricks" | "mud_bricks" => "bricks",
-        _ if n.contains("stone_brick")
-            || n.contains("cobblestone")
-            || n == "stone"
-            || n == "smooth_stone" =>
-        {
-            "stone"
+/// The look of an entrance door.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DoorKind {
+    /// A panelled house door.
+    Panel,
+    /// A rustic planked door.
+    Cottage,
+    /// A wooden frame around a glass pane.
+    Glass,
+    /// A wooden door with small lights, for old and sacred buildings.
+    Classic,
+    /// A shop's glazed door.
+    Store,
+    /// The glass doors of a tower lobby.
+    Sliding,
+    /// A steel door with a window, for works and depots.
+    Metal,
+}
+
+/// A Macaw's entrance door of `kind` in `wood` (oak, spruce, dark_oak or birch). Woods
+/// without that kind get their panel door, or the classic door where they lack that too.
+pub fn door(kind: DoorKind, wood: &str, fallback: Block) -> Block {
+    let has = |k: &str| match (wood, k) {
+        ("dark_oak", "four_panel") | ("spruce", "cottage") | ("oak", "classic") => false,
+        ("oak" | "spruce" | "dark_oak" | "birch", _) => true,
+        _ => false,
+    };
+    let wooden = |k: &str| {
+        let k = [k, "four_panel", "classic"]
+            .into_iter()
+            .find(|&k| has(k))
+            .unwrap_or("glass");
+        format!("mcwdoors:{wood}_{k}_door")
+    };
+    let name = match kind {
+        DoorKind::Panel => wooden("four_panel"),
+        DoorKind::Cottage => wooden("cottage"),
+        DoorKind::Glass => wooden("glass"),
+        DoorKind::Classic => wooden("classic"),
+        DoorKind::Store => "mcwdoors:store_door".to_string(),
+        DoorKind::Sliding => "mcwdoors:sliding_glass_door".to_string(),
+        DoorKind::Metal => "mcwdoors:metal_windowed_door".to_string(),
+    };
+    Block::modded(&name, fallback)
+}
+
+/// Patterned paving for a pedestrian way or square of OSM `surface`, or None to keep the
+/// vanilla surface. `sidewalk` keeps one plain pattern along a road; streets and squares
+/// take one of a few patterns by `seed`. Only the almost full blocks of the mod: its
+/// `*_paving` tiles are thin overlays that need a floor under them.
+pub fn paving(surface: Option<&str>, sidewalk: bool, seed: u64) -> Option<Block> {
+    let (name, fallback) = match surface {
+        Some("paving_stones") | Some("concrete:plates") if sidewalk => {
+            ("stone_running_bond", SMOOTH_STONE)
         }
-        _ if n.ends_with("_concrete") || n.ends_with("terracotta") || n.contains("iron") => "metal",
+        // A pedestrian street is paved even where its surface is not mapped.
+        Some("paving_stones") | Some("concrete:plates") | None => match seed % 3 {
+            0 => ("andesite_windmill_weave", POLISHED_ANDESITE),
+            1 => ("stone_windmill_weave", SMOOTH_STONE),
+            _ => ("andesite_running_bond", POLISHED_ANDESITE),
+        },
+        Some("sett") => ("andesite_running_bond", POLISHED_ANDESITE),
+        Some("bricks" | "brick") if sidewalk => ("brick_running_bond", BRICK),
+        Some("bricks" | "brick") => ("brick_windmill_weave", BRICK),
+        Some("stone" | "flagstone") => ("stone_flagstone", STONE_BRICKS),
         _ => return None,
-    })
-}
-
-/// A window frame of `material` across a wall that runs along x, or along z.
-pub fn framed_window(material: &str, wall_along_x: bool, glass: Block) -> BlockWithProperties {
-    state(
-        &format!("mcwwindows:{material}_window"),
-        glass,
-        &[
-            ("facing", if wall_along_x { "north" } else { "east" }),
-            ("part", "base"),
-        ],
-    )
-}
-
-/// A fabric curtain against the inside of a window whose wall faces out along `out`.
-pub fn curtain(wool: Block, out: (i32, i32)) -> BlockWithProperties {
-    let colour = wool.name().strip_suffix("_wool").unwrap_or("white");
-    state(
-        &format!("mcwwindows:{colour}_curtain"),
-        wool,
-        &[("facing", dir_name(cw(out))), ("tied", "none")],
-    )
+    };
+    Some(Block::modded(&format!("mcwpaths:{name}"), fallback))
 }
 
 /// The Macaw's roof tile for a stair on a roof of `roof`, keeping the stair's slope, or
@@ -343,8 +346,50 @@ mod tests {
 
     #[test]
     fn turns_are_quarter_turns() {
-        assert_eq!(cw((0, -1)), (1, 0));
         assert_eq!(ccw((0, -1)), (-1, 0));
-        assert_eq!(cw(ccw((1, 0))), (1, 0));
+        assert_eq!(back(ccw((1, 0))), (0, 1));
+    }
+
+    #[test]
+    fn doors_fall_back_to_a_kind_their_wood_has() {
+        let name = |kind, wood| {
+            let b = door(kind, wood, OAK_DOOR);
+            format!("{}:{}", b.namespace(), b.name())
+        };
+        assert_eq!(name(DoorKind::Panel, "oak"), "mcwdoors:oak_four_panel_door");
+        assert_eq!(
+            name(DoorKind::Panel, "dark_oak"),
+            "mcwdoors:dark_oak_classic_door"
+        );
+        assert_eq!(
+            name(DoorKind::Cottage, "spruce"),
+            "mcwdoors:spruce_four_panel_door"
+        );
+        assert_eq!(
+            name(DoorKind::Classic, "oak"),
+            "mcwdoors:oak_four_panel_door"
+        );
+        assert_eq!(name(DoorKind::Store, "birch"), "mcwdoors:store_door");
+        assert_eq!(door(DoorKind::Glass, "oak", OAK_DOOR).vanilla(), OAK_DOOR);
+    }
+
+    #[test]
+    fn paving_keeps_to_paved_surfaces() {
+        let name = |s, sidewalk| paving(s, sidewalk, 7).map(|b| b.name().to_string());
+        assert_eq!(
+            name(Some("paving_stones"), true).as_deref(),
+            Some("stone_running_bond")
+        );
+        assert_eq!(
+            name(Some("sett"), false).as_deref(),
+            Some("andesite_running_bond")
+        );
+        assert_eq!(
+            name(Some("bricks"), false).as_deref(),
+            Some("brick_windmill_weave")
+        );
+        assert!(name(None, false).is_some(), "a pedestrian street is paved");
+        assert_eq!(name(Some("asphalt"), false), None);
+        assert_eq!(name(Some("grass"), false), None);
     }
 }

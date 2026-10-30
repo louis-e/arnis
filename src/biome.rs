@@ -224,11 +224,25 @@ pub fn chunk_biome_names(
                             mountain_biome(lc, climate, wd, above_m, g.slope(coord))
                         })
                         .flatten();
+                    let eco = g.ecoregion(coord);
                     let name = mountain
-                        .or_else(|| ecoregion_biome(lc, climate, g.ecoregion(coord)))
+                        .or_else(|| ecoregion_biome(lc, climate, eco))
                         .unwrap_or_else(|| biome_for_class(lc, climate, center_lat_deg, wd));
-                    names[(zi * 4 + xi) as usize] =
-                        if g.winter() { winter_biome(name) } else { name };
+                    names[(zi * 4 + xi) as usize] = if g.winter() {
+                        winter_biome(name)
+                    } else if g.terralith() {
+                        let cell = crate::mods::terralith::Cell {
+                            cover: lc,
+                            climate,
+                            eco,
+                            water_dist: wd,
+                            slope: g.slope(coord),
+                            lat: center_lat_deg,
+                        };
+                        crate::mods::terralith::biome(name, &cell)
+                    } else {
+                        name
+                    };
                 }
             }
         }

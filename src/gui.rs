@@ -373,6 +373,17 @@ fn gui_create_world(save_path: String, world_name: Option<String>) -> Result<Str
     create_new_world(&base, world_name.as_deref()).map_err(|_| 3)
 }
 
+/// The status line a finished run ends on; a world that needs mods says where they are listed.
+fn done_message(args: &Args) -> String {
+    let needs = !args.mods.is_empty() || args.terralith;
+    if needs && !args.bedrock && !args.luanti {
+        "Done! World generation completed. It needs the mods listed in MODS.txt in the world folder."
+            .to_string()
+    } else {
+        "Done! World generation completed.".to_string()
+    }
+}
+
 fn create_new_world(base_path: &Path, custom_name: Option<&str>) -> Result<String, String> {
     crate::world_utils::create_new_world_with_name(base_path, custom_name)
 }
@@ -1435,6 +1446,7 @@ fn gui_start_generation(
     disasters: bool,
     moving_vehicles: bool,
     mods: Vec<String>,
+    terralith: bool,
     body_gravity: bool,
     one_world: bool,
     one_world_name: String,
@@ -1739,6 +1751,7 @@ fn gui_start_generation(
                 } else {
                     Vec::new()
                 },
+                terralith: terralith && world_format == WorldFormat::JavaAnvil,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -2009,7 +2022,7 @@ fn gui_start_generation(
                 // Explicitly release session lock before showing Done message
                 // so Minecraft can open the world immediately
                 drop(_session_lock);
-                emit_gui_progress_update(100.0, "Done! World generation completed.");
+                emit_gui_progress_update(100.0, &done_message(&args));
                 println!("{}", "Done! World generation completed.".green().bold());
 
                 return Ok(());
@@ -2175,7 +2188,7 @@ fn gui_start_generation(
                     // Explicitly release session lock before showing Done message
                     // so Minecraft can open the world immediately
                     drop(_session_lock);
-                    emit_gui_progress_update(100.0, "Done! World generation completed.");
+                    emit_gui_progress_update(100.0, &done_message(&args));
                     println!("{}", "Done! World generation completed.".green().bold());
 
                     Ok(())

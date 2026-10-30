@@ -547,7 +547,16 @@ mod tests {
 
     /// Builds every building among `elements` with interiors on.
     fn build<'a>(xz: &'a XZBBox, elements: &[ProcessedElement]) -> WorldEditor<'a> {
+        build_with(xz, elements, crate::mods::ModSet::default())
+    }
+
+    fn build_with<'a>(
+        xz: &'a XZBBox,
+        elements: &[ProcessedElement],
+        mods: crate::mods::ModSet,
+    ) -> WorldEditor<'a> {
         let mut editor = test_editor(xz);
+        editor.set_mods(mods);
         let cache = FloodFillCache::new();
         let passages = CoordinateBitmap::new_empty();
         let road = CoordinateBitmap::new(xz);
@@ -1146,6 +1155,23 @@ mod tests {
             low.iter().filter(|b| **b == BARREL).count() > 30,
             "stocked aisles"
         );
+    }
+
+    #[test]
+    fn a_modded_supermarket_has_trolleys_by_the_door() {
+        let (xz, elements) = one(
+            sized(
+                2,
+                30,
+                24,
+                &[("building", "retail"), ("shop", "supermarket")],
+            ),
+            vec![],
+        );
+        let mods = crate::mods::ModSet::from_packs(&[crate::mods::ModPack::Automobility]);
+        let editor = build_with(&xz, &elements, mods);
+        let trolleys = editor.entities_with_id("automobility:automobile");
+        assert!(!trolleys.is_empty(), "trolleys inside the entrance");
     }
 
     #[test]

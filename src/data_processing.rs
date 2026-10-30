@@ -2291,8 +2291,9 @@ pub fn generate_world_with_options(
         return Err(e.to_string());
     }
     bench.mark("save");
-    if world_format == WorldFormat::JavaAnvil && !args.mods.is_empty() {
-        let note = crate::mods::install_note(crate::mods::ModSet::from_packs(&args.mods));
+    let note =
+        crate::mods::install_note(crate::mods::ModSet::from_packs(&args.mods), args.terralith);
+    if let Some(note) = note.filter(|_| world_format == WorldFormat::JavaAnvil) {
         println!("{note}");
         if let Err(e) = std::fs::write(output_path.join("MODS.txt"), format!("{note}\n")) {
             eprintln!("Could not write MODS.txt: {e}");

@@ -54,10 +54,12 @@ const SETTINGS = [
   { id: 'disasters-toggle', kind: 'checkbox', store: OWN },
   { id: 'body-gravity-toggle', kind: 'checkbox', store: OWN },
   // Mods
+  { id: 'terralith-toggle', kind: 'checkbox', store: OWN },
   { id: 'mod-create-toggle', kind: 'checkbox', store: OWN },
   { id: 'mod-macaws-furniture-toggle', kind: 'checkbox', store: OWN },
   { id: 'mod-macaws-roofs-toggle', kind: 'checkbox', store: OWN },
-  { id: 'mod-macaws-windows-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-macaws-doors-toggle', kind: 'checkbox', store: OWN },
+  { id: 'mod-macaws-paths-toggle', kind: 'checkbox', store: OWN },
   { id: 'mod-macaws-lights-toggle', kind: 'checkbox', store: OWN },
   { id: 'mod-supplementaries-toggle', kind: 'checkbox', store: OWN },
   { id: 'mod-farmers-delight-toggle', kind: 'checkbox', store: OWN },

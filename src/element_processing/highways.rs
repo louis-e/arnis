@@ -288,6 +288,25 @@ pub(crate) fn surface_palette(
     }
 }
 
+/// Macaw's paving for a pedestrian street or square, or a footway whose paved surface is
+/// mapped; the mod's blocks stand in where Arnis lays smooth stone or the asphalt mix.
+fn modded_paving(
+    editor: &WorldEditor,
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    id: u64,
+) -> Option<Block> {
+    if !editor.mods().has(crate::mods::ModPack::MacawsPaths) || highway_type == "steps" {
+        return None;
+    }
+    let surface = tags.get("surface").map(String::as_str);
+    if highway_type != "pedestrian" && !(is_pedestrian_way_tags(tags) && surface.is_some()) {
+        return None;
+    }
+    let sidewalk = tags.get("footway").is_some_and(|v| v == "sidewalk");
+    crate::mods::macaws::paving(surface, sidewalk, id)
+}
+
 fn is_pedestrian_way_tags(tags: &HashMap<String, String>) -> bool {
     if let Some(h) = tags.get("highway") {
         if matches!(h.as_str(), "footway" | "pedestrian" | "steps") {
@@ -1661,7 +1680,8 @@ fn generate_highways_internal(
 
             // Handle areas like pedestrian plazas. Unified surface handling
             // via the shared surfaces module.
-            let surface_block: Block = get_blocks_for_surface_way(way, &[STONE])[0];
+            let surface_block: Block = modded_paving(editor, highway_type, &way.tags, way.id)
+                .unwrap_or_else(|| get_blocks_for_surface_way(way, &[STONE])[0]);
 
             // Fill the area using flood fill cache
             let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
@@ -1710,7 +1730,11 @@ fn generate_highways_internal(
 
             // Surface palette; width is resolved by highway_block_range below so
             // renderer and prescan stay in sync.
-            let block_types = surface_palette(highway_type, &way.tags);
+            let paving = modded_paving(editor, highway_type, &way.tags, way.id);
+            let block_types: &[Block] = match &paving {
+                Some(block) => std::slice::from_ref(block),
+                None => surface_palette(highway_type, &way.tags),
+            };
             let surface_protect =
                 if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
                     CYCLEWAY_PROTECTED_SURFACES

@@ -403,6 +403,12 @@ pub struct Args {
     /// pack extras off, as they need 1.21.4+.
     #[arg(long, value_delimiter = ',', value_enum)]
     pub mods: Vec<crate::mods::ModPack>,
+
+    /// Biomes from Terralith where one fits the place better than vanilla's: steppes,
+    /// shrublands, boreal shield, oases, warm rivers and more. Java only; the world needs the
+    /// Terralith datapack or mod, which works without a mod loader in any recent version.
+    #[arg(long, default_value_t = false)]
+    pub terralith: bool,
 }
 
 /// Accepts the panel resolutions the atlas budget logic can halve cleanly.
@@ -866,6 +872,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         if let Some((_, flag)) = extras.iter().find(|(on, _)| *on) {
             return Err(format!("{flag} is not available with --one-world yet."));
         }
+    }
+    if args.terralith && (args.bedrock || args.luanti) {
+        return Err(
+            "--terralith writes Terralith biome names, which only Java Edition reads.".to_string(),
+        );
     }
     if !args.mods.is_empty() {
         if args.bedrock || args.luanti {

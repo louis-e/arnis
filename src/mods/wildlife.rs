@@ -1,5 +1,8 @@
-//! Entity mods: Automobility cars on parking spaces and Naturalist animals in zoos and woods.
+//! Entity mods: Automobility cars on parking spaces, and Naturalist animals in zoos and
+//! wherever they would live: woods, wetlands, grass, beaches, parks and ponds.
 
+use crate::climate::Climate;
+use crate::ecoregion::Realm;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use std::collections::HashMap;
@@ -264,39 +267,138 @@ pub fn enclosure_species(tags: &HashMap<String, String>) -> Option<&'static str>
         .map(|(id, _)| *id)
 }
 
-/// Zoo animals for an enclosure, or the odd wild animal for a wood or a wetland.
+/// Where wild animals live, from a way's tags.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Habitat {
+    Wood,
+    Wetland,
+    Grass,
+    Scrub,
+    Beach,
+    Park,
+    /// A pond or lake, with ducks on it.
+    Pond,
+}
+
+impl Habitat {
+    fn of(tags: &HashMap<String, String>) -> Option<Habitat> {
+        let tag = |k: &str| tags.get(k).map(String::as_str);
+        Some(match (tag("natural"), tag("landuse"), tag("leisure")) {
+            (Some("wood"), ..) | (_, Some("forest"), _) => Habitat::Wood,
+            (Some("wetland" | "marsh" | "swamp" | "reedbed"), ..) => Habitat::Wetland,
+            (Some("grassland" | "fell"), ..) | (_, Some("meadow"), _) => Habitat::Grass,
+            (Some("heath" | "scrub"), ..) => Habitat::Scrub,
+            (Some("beach"), ..) => Habitat::Beach,
+            (Some("water"), ..)
+                if matches!(
+                    tag("water"),
+                    None | Some("pond" | "lake" | "basin" | "oxbow")
+                ) =>
+            {
+                Habitat::Pond
+            }
+            (_, _, Some("park" | "garden")) | (_, Some("village_green"), _) => Habitat::Park,
+            _ => return None,
+        })
+    }
+
+    /// Cells of habitat per animal.
+    fn cells_per_animal(self) -> usize {
+        match self {
+            Habitat::Park => 350,
+            Habitat::Beach | Habitat::Pond => 400,
+            Habitat::Wetland => 500,
+            Habitat::Wood => 700,
+            Habitat::Grass | Habitat::Scrub => 900,
+        }
+    }
+}
+
+/// The wild animals of a habitat where it lies: by biogeographic realm and climate, so a
+/// Florida swamp has alligators and a Spessart wood boars.
+fn wild_pool(
+    habitat: Habitat,
+    realm: Option<Realm>,
+    climate: Climate,
+    lat: f64,
+) -> &'static [&'static str] {
+    let tropical = lat.abs() < 23.5;
+    let dry = matches!(
+        climate,
+        Climate::HotDesert | Climate::ColdDesert | Climate::HotSteppe
+    );
+    let cold = matches!(climate, Climate::Boreal | Climate::Tundra | Climate::IceCap);
+    match habitat {
+        // Palm groves and park trees in a desert keep desert animals, not deer and boars.
+        Habitat::Wood | Habitat::Park if dry => &["bird", "bird", "lizard", "snake"],
+        Habitat::Wood => match realm {
+            _ if cold => &["deer", "deer", "bear", "bird", "bird"],
+            Some(Realm::Nearctic) => &["deer", "deer", "black_bear", "turkey", "bird", "snail"],
+            Some(Realm::Neotropic) if tropical => &["bird", "bird", "snake", "capybara", "lizard"],
+            _ if tropical => &["bird", "bird", "snake", "lizard"],
+            _ => &["deer", "deer", "boar", "bird", "bird", "snail", "hedgehog"],
+        },
+        Habitat::Wetland => match realm {
+            Some(Realm::Nearctic) if lat.abs() < 35.0 => {
+                &["alligator", "duck", "duck", "dragonfly", "firefly"]
+            }
+            Some(Realm::Neotropic) => &["capybara", "duck", "duck", "dragonfly"],
+            _ => &["duck", "duck", "dragonfly", "snail", "firefly"],
+        },
+        Habitat::Grass => match realm {
+            Some(Realm::Afrotropic) if dry || climate == Climate::TropicalSavanna => &[
+                "zebra", "zebra", "giraffe", "elephant", "ostrich", "vulture",
+            ],
+            _ if dry => &["bird", "lizard", "butterfly"],
+            Some(Realm::Nearctic) => &["turkey", "butterfly", "butterfly", "bird"],
+            _ => &["butterfly", "butterfly", "bird", "hedgehog"],
+        },
+        Habitat::Scrub if dry => &["lizard", "snake", "desert_scorpion", "vulture", "tortoise"],
+        Habitat::Scrub => &["butterfly", "bird", "lizard", "snake"],
+        // Crabs on warm shores; a beach on a northern lake or river has birds.
+        Habitat::Beach if !cold && lat.abs() < 40.0 => &["crab", "crab", "bird"],
+        Habitat::Beach => &["bird"],
+        Habitat::Park => match realm {
+            Some(Realm::Palearctic) | None if !tropical => {
+                &["bird", "bird", "butterfly", "hedgehog", "snail"]
+            }
+            _ => &["bird", "bird", "butterfly", "lizard"],
+        },
+        Habitat::Pond => &["duck"],
+    }
+}
+
+/// Zoo animals for an enclosure, or wild ones for a wood, a wetland, grass, a beach, a
+/// park or a pond.
 pub fn populate_way(
     editor: &mut WorldEditor,
     way: &crate::osm_parser::ProcessedWay,
     flood_fill_cache: &crate::floodfill_cache::FloodFillCache,
     timeout: Option<&std::time::Duration>,
 ) {
-    let tags = &way.tags;
-    let habitat = tags
-        .get("natural")
-        .or_else(|| {
-            tags.get("landuse")
-                .filter(|v| matches!(v.as_str(), "forest" | "meadow"))
-        })
-        .map(String::as_str);
-    let species = enclosure_species(tags);
-    // Fill only areas that get animals: no coastlines, and no wild ones in small patches.
-    let pool = habitat.and_then(wild_pool);
+    let species = enclosure_species(&way.tags);
+    let habitat = Habitat::of(&way.tags);
+    // Fill only areas that get animals: no coastlines, and no patch too small for one.
     let (x0, x1) = way.nodes.iter().fold((i32::MAX, i32::MIN), |(lo, hi), n| {
         (lo.min(n.x), hi.max(n.x))
     });
     let (z0, z1) = way.nodes.iter().fold((i32::MAX, i32::MIN), |(lo, hi), n| {
         (lo.min(n.z), hi.max(n.z))
     });
-    let roomy = x1 >= x0 && (x1 - x0 + 1) as i64 * (z1 - z0 + 1) as i64 >= WILD_CELLS as i64;
-    if species.is_none() && !(pool.is_some() && roomy) {
+    let area = if x1 >= x0 {
+        (x1 - x0 + 1) as usize * (z1 - z0 + 1) as usize
+    } else {
+        0
+    };
+    let roomy = habitat.is_some_and(|h| area * 2 >= h.cells_per_animal());
+    if species.is_none() && !roomy {
         return;
     }
     let cells = flood_fill_cache.get_or_compute(way, timeout);
     if let Some(species) = species {
         populate_enclosure(editor, species, &cells, way.id);
-    } else if let Some(pool) = pool {
-        populate_wild(editor, pool, &cells, way.id);
+    } else if let Some(habitat) = habitat {
+        populate_wild(editor, habitat, &cells, way.id);
     }
 }
 
@@ -311,26 +413,61 @@ pub fn populate_enclosure(
     spawn_among(editor, &[species], cells, count, seed);
 }
 
-/// Cells of habitat per wild animal.
-const WILD_CELLS: usize = 2500;
-
-/// The wild animals of a wood, a wetland or open grass.
-fn wild_pool(habitat: &str) -> Option<&'static [&'static str]> {
-    Some(match habitat {
-        "forest" | "wood" => &["deer", "deer", "boar", "bird", "snail", "bird"],
-        "wetland" | "marsh" | "swamp" | "reedbed" => &["duck", "duck", "dragonfly", "snail"],
-        "meadow" | "grassland" | "heath" => &["butterfly", "butterfly", "bird"],
-        _ => return None,
-    })
-}
-
-/// Wildlife from `pool`, rarely: the mod also spawns its own.
-pub fn populate_wild(editor: &mut WorldEditor, pool: &[&str], cells: &[(i32, i32)], seed: u64) {
-    let count = cells.len() / WILD_CELLS;
+/// Wildlife for a habitat, often enough to meet on a walk.
+fn populate_wild(editor: &mut WorldEditor, habitat: Habitat, cells: &[(i32, i32)], seed: u64) {
+    let Some(&(x, z)) = cells.first() else {
+        return;
+    };
+    let per = habitat.cells_per_animal();
+    let count = ((cells.len() + per / 2) / per).min(16);
     if count == 0 {
         return;
     }
-    spawn_among(editor, pool, cells, count.min(6), seed);
+    let realm = editor.ecoregion(x, z).map(|e| e.realm);
+    let pool = wild_pool(habitat, realm, editor.climate(), editor.geo_anchor().0);
+    if habitat == Habitat::Pond {
+        float_on_water(editor, pool, cells, count.min(8), seed);
+    } else {
+        spawn_among(editor, pool, cells, count, seed);
+    }
+}
+
+/// Swimmers at the water line of a pond.
+fn float_on_water(
+    editor: &mut WorldEditor,
+    pool: &[&str],
+    cells: &[(i32, i32)],
+    count: usize,
+    seed: u64,
+) {
+    for i in 0..count {
+        let h = stable_hash(seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let (x, z) = cells[(h % cells.len() as u64) as usize];
+        if !editor.owns(x, z) {
+            continue;
+        }
+        let kind = pool[((h >> 16) % pool.len() as u64) as usize];
+        let y = editor.get_water_level(x, z) + 1;
+        editor.add_entity_exact(
+            &format!("naturalist:{kind}"),
+            x as f64 + 0.5,
+            y as f64,
+            z as f64 + 0.5,
+            h as i64,
+            animal_tags(h),
+        );
+    }
+}
+
+fn animal_tags(h: u64) -> HashMap<String, Value> {
+    let yaw = ((h >> 24) % 360) as f32;
+    HashMap::from([
+        ("PersistenceRequired".to_string(), Value::Byte(1)),
+        (
+            "Rotation".to_string(),
+            Value::List(vec![Value::Float(yaw), Value::Float(0.0)]),
+        ),
+    ])
 }
 
 fn spawn_among(
@@ -355,15 +492,7 @@ fn spawn_among(
             continue;
         }
         let kind = pool[((h >> 16) % pool.len() as u64) as usize];
-        let yaw = ((h >> 24) % 360) as f32;
-        let extra = HashMap::from([
-            ("PersistenceRequired".to_string(), Value::Byte(1)),
-            (
-                "Rotation".to_string(),
-                Value::List(vec![Value::Float(yaw), Value::Float(0.0)]),
-            ),
-        ]);
-        editor.add_entity(&format!("naturalist:{kind}"), x, 1, z, Some(extra));
+        editor.add_entity(&format!("naturalist:{kind}"), x, 1, z, Some(animal_tags(h)));
     }
 }
 
@@ -402,8 +531,55 @@ mod tests {
     }
 
     #[test]
-    fn only_habitats_with_animals_have_a_pool() {
-        assert!(wild_pool("wood").is_some() && wild_pool("wetland").is_some());
-        assert!(wild_pool("coastline").is_none() && wild_pool("water").is_none());
+    fn habitats_come_from_the_tags_that_map_them() {
+        assert_eq!(
+            Habitat::of(&tags(&[("natural", "wood")])),
+            Some(Habitat::Wood)
+        );
+        assert_eq!(
+            Habitat::of(&tags(&[("leisure", "park")])),
+            Some(Habitat::Park)
+        );
+        let pond = tags(&[("natural", "water"), ("water", "pond")]);
+        assert_eq!(Habitat::of(&pond), Some(Habitat::Pond));
+        let river = tags(&[("natural", "water"), ("water", "river")]);
+        assert_eq!(Habitat::of(&river), None);
+        assert_eq!(Habitat::of(&tags(&[("natural", "coastline")])), None);
+    }
+
+    #[test]
+    fn wildlife_follows_the_region() {
+        let t = Climate::Temperate;
+        let europe = wild_pool(Habitat::Wood, Some(Realm::Palearctic), t, 50.0);
+        assert!(europe.contains(&"boar") && !europe.contains(&"black_bear"));
+        let florida = wild_pool(Habitat::Wetland, Some(Realm::Nearctic), t, 26.0);
+        assert!(florida.contains(&"alligator"));
+        let maine = wild_pool(Habitat::Wetland, Some(Realm::Nearctic), t, 45.0);
+        assert!(!maine.contains(&"alligator"));
+        let serengeti = wild_pool(
+            Habitat::Grass,
+            Some(Realm::Afrotropic),
+            Climate::TropicalSavanna,
+            -2.5,
+        );
+        assert!(serengeti.contains(&"zebra"));
+        let boreal = wild_pool(
+            Habitat::Wood,
+            Some(Realm::Palearctic),
+            Climate::Boreal,
+            62.0,
+        );
+        assert!(boreal.contains(&"bear"));
+        // Egypt is Palearctic too, but its palm groves and parks hold no deer or hedgehogs.
+        let luxor = Some(Realm::Palearctic);
+        for habitat in [Habitat::Wood, Habitat::Park, Habitat::Grass] {
+            let pool = wild_pool(habitat, luxor, Climate::HotDesert, 25.7);
+            assert!(
+                !pool.contains(&"deer") && !pool.contains(&"hedgehog"),
+                "{habitat:?}"
+            );
+        }
+        let lapland = wild_pool(Habitat::Beach, luxor, Climate::Boreal, 66.5);
+        assert!(!lapland.contains(&"crab"));
     }
 }

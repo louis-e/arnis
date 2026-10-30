@@ -229,7 +229,7 @@
             <svg class="icon" aria-hidden="true"><use href="#i-blocks"></use></svg>
             <span class="settings-nav-text">
               <span class="settings-nav-title" data-localize="settings_section_mods">Mods</span>
-              <span class="settings-nav-sub" data-localize="settings_nav_mods">Create, furniture, vehicles</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_mods">Biomes, furniture, vehicles</span>
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
@@ -922,11 +922,26 @@
                 <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-blocks"></use></svg></span>
                 <div>
                   <h3 data-localize="settings_section_mods">Mods</h3>
-                  <p data-localize="settings_section_mods_desc">Build with blocks, vehicles and animals from Java mods. The world then opens in Minecraft 1.21.1 with NeoForge and the ticked mods installed. Java only; the Gameplay extras and the raised build height are off while any mod is ticked.</p>
+                  <p data-localize="settings_section_mods_desc">Build with biomes, blocks, vehicles and animals from Java mods. Terralith works in any recent version. The other mods need Minecraft 1.21.1 with NeoForge; while one of them is ticked, the Gameplay extras and the raised build height are off. Java only.</p>
                 </div>
               </header>
 
               <div class="setting-grid">
+                <div class="settings-row setting-tile">
+                  <label for="terralith-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-mountain"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Terralith</span>
+                        <span class="tooltip-icon" data-tooltip="Needs the Terralith datapack or mod for your Minecraft version. No mod loader needed.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_terralith_desc">Biomes that fit the land: steppes, shrublands, boreal shield, oases, warm rivers. Works in any recent version.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch terralith-toggle" id="terralith-toggle" name="terralith-toggle">
+                  </div>
+                </div>
                 <div class="settings-row setting-tile">
                   <label for="mod-create-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-pickaxe"></use></svg>
@@ -973,18 +988,33 @@
                   </div>
                 </div>
                 <div class="settings-row setting-tile">
-                  <label for="mod-macaws-windows-toggle" class="setting-label">
+                  <label for="mod-macaws-doors-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-frame"></use></svg>
                     <span class="setting-text">
                       <span class="setting-heading">
-                        <span>Macaw's Windows</span>
-                        <span class="tooltip-icon" data-tooltip="Needs Macaw's Windows 2.4.2.">?</span>
+                        <span>Macaw's Doors</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Macaw's Doors 1.1.5.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="mod_macaws_windows_desc">Framed windows that match the walls, fabric curtains behind them.</span>
+                      <span class="setting-desc" data-localize="mod_macaws_doors_desc">Entrance doors that suit the building: panelled houses, glazed shops and offices, steel works doors.</span>
                     </span>
                   </label>
                   <div class="settings-control">
-                    <input type="checkbox" class="switch mod-toggle" id="mod-macaws-windows-toggle" name="mod-macaws-windows-toggle" data-mod="macaws-windows">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-macaws-doors-toggle" name="mod-macaws-doors-toggle" data-mod="macaws-doors">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="mod-macaws-paths-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-brick-wall"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span>Macaw's Paths and Pavings</span>
+                        <span class="tooltip-icon" data-tooltip="Needs Macaw's Paths and Pavings 1.1.1.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mod_macaws_paths_desc">Patterned paving on pedestrian streets, squares and paved sidewalks, from the mapped surface.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch mod-toggle" id="mod-macaws-paths-toggle" name="mod-macaws-paths-toggle" data-mod="macaws-paths">
                   </div>
                 </div>
                 <div class="settings-row setting-tile">

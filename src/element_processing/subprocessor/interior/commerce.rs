@@ -138,9 +138,9 @@ pub(super) fn shop(c: &mut Canvas, zone: u16, goods: Goods, ctx: &FloorCtx) {
     }
     let stock = stock(goods);
     let tall = c.headroom() >= 3;
-    // Produce sells from crates with the farming mod.
-    let crates = matches!(goods, Goods::Grocery | Goods::General)
-        && c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
+    // Produce sells from crates with the farming mod; a mall is not a greengrocer.
+    let crates =
+        goods == Goods::Grocery && c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
     // Pies at a bakery and hams at a butcher with the farming mod.
     let food = matches!(goods, Goods::Bakery | Goods::Butcher)
         && c.editor.mods().has(crate::mods::ModPack::FarmersDelight);
@@ -291,22 +291,34 @@ pub(super) fn supermarket(c: &mut Canvas, zone: u16, ctx: &FloorCtx) {
     let ue = entry_u(c, zone, &f);
     let tall = c.headroom() >= 3;
 
-    // Trolleys lined up inside the entrance, with the vehicle mod.
-    if c.editor.mods().has(crate::mods::ModPack::Automobility) {
-        let into = f.back();
-        let rot = match into {
+    // Trolleys lined up inside the entrance, with the vehicle mod. The door can sit on any
+    // wall of the frame, so the row runs along the door's own wall.
+    let entry = c.entry(zone);
+    if let Some(e) = entry.filter(|_| c.editor.mods().has(crate::mods::ModPack::Automobility)) {
+        let (inward, along) = (e.inward, (-e.inward.1, e.inward.0));
+        let rot = match inward {
             (0, 1) => 0,
             (-1, 0) => 1,
             (0, -1) => 2,
             _ => 3,
         };
-        for k in 2..=4 {
-            let (x, z) = f.world(ue - k, 1);
-            if c.is_free(x, z) {
-                let y = c.floor_y + 1;
-                crate::mods::wildlife::place_trolley(c.editor, x, y, z, rot);
-                c.keep(x, z);
-            }
+        let row = [(1, 0), (-1, 0), (1, 1), (-1, 1)]
+            .into_iter()
+            .map(|(side, depth)| {
+                (2..=4)
+                    .map(|k| {
+                        (
+                            e.cell.0 + along.0 * side * k + inward.0 * depth,
+                            e.cell.1 + along.1 * side * k + inward.1 * depth,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .find(|cells| cells.iter().all(|&(x, z)| c.is_free(x, z)));
+        for (x, z) in row.into_iter().flatten() {
+            let y = c.floor_y + 1;
+            crate::mods::wildlife::place_trolley(c.editor, x, y, z, rot);
+            c.keep(x, z);
         }
     }
     // Checkout lanes beside the entry: counter, cashier, walkway.
