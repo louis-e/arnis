@@ -163,6 +163,7 @@ async function applyLocalization(localization) {
   // Update error messages
   window.localization = localization;
   renderOneWorldStatus();
+  renderWorldStorageEstimate();
   // The map hint lives in the map iframe, which cannot see this assignment.
   document.querySelectorAll('iframe').forEach((frame) => {
     try {
@@ -1884,6 +1885,7 @@ function updateFormatToggleUI(format) {
   refreshWorldNameEditUI();
   // One World is Java-only too: its status and pins follow the format.
   refreshOneWorldState();
+  scheduleWorldStorageEstimate();
 }
 
 // Expose to window for onclick handlers
@@ -2436,6 +2438,7 @@ function handleBboxInput() {
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
 
   inputBox.addEventListener("input", function () {
+    scheduleWorldStorageEstimate();
     const input = inputBox.value.trim();
 
     if (input === "") {
@@ -2583,6 +2586,136 @@ let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
 let bboxInputError = false;  // The coordinate field holds input that did not validate
+let worldStorageEstimateBytes = null;
+let worldStorageEstimateKnown = false;
+let worldStorageEstimateOverLimit = false;
+let worldStorageEstimateFrame = null;
+
+function storageEstimateText(key, fallback, values = {}) {
+  const template = window.localization && window.localization[key] || fallback;
+  return template.replace(/\{(\w+)\}/g, (match, name) =>
+    Object.prototype.hasOwnProperty.call(values, name) ? values[name] : match
+  );
+}
+
+function renderWorldStorageEstimate() {
+  const container = document.getElementById('world-storage-estimate');
+  const value = document.getElementById('world-storage-estimate-value');
+  const message = document.getElementById('world-storage-estimate-message');
+  if (!container || !value || !message) return;
+
+  const hasSelection = !!selectedBBox && selectedBBox !== '0.000000 0.000000 0.000000 0.000000';
+  container.style.display = hasSelection ? 'flex' : 'none';
+  container.classList.toggle('is-over-limit', worldStorageEstimateOverLimit);
+  container.classList.toggle('is-unavailable', hasSelection && !worldStorageEstimateKnown);
+  if (!hasSelection) {
+    value.textContent = '';
+    message.textContent = '';
+    container.removeAttribute('title');
+  } else if (!worldStorageEstimateKnown) {
+    value.textContent = storageEstimateText('world_storage_estimate_failed',
+      'Could not estimate this world. Check the area and One World status before generating.');
+    message.textContent = '';
+    container.removeAttribute('title');
+  } else {
+    value.textContent = storageEstimateText('world_storage_estimate', 'Estimated world size: {size}', {
+      size: window.WorldStorageEstimate.formatBytes(worldStorageEstimateBytes),
+    });
+    message.textContent = worldStorageEstimateOverLimit
+      ? storageEstimateText('world_storage_estimate_limit',
+        'This estimate exceeds the 120 GB maximum. Select a smaller area to enable generation.')
+      : storageEstimateText('world_storage_estimate_note',
+        'Measured Arnis output with a 2× allowance (decimal GB). Actual size varies by map, format and features; One World overlap may be counted twice.');
+    if (worldStorageEstimateOverLimit) {
+      container.title = storageEstimateText('world_storage_estimate_limit_title',
+        'Estimated world size exceeds the 120 GB maximum.');
+    } else {
+      container.removeAttribute('title');
+    }
+  }
+  syncGenerateButtonAvailability();
+}
+
+function refreshWorldStorageEstimate() {
+  worldStorageEstimateFrame = null;
+  const hasSelection = !!selectedBBox && selectedBBox !== '0.000000 0.000000 0.000000 0.000000';
+  worldStorageEstimateBytes = null;
+  worldStorageEstimateKnown = !hasSelection;
+
+  if (hasSelection) {
+    const coordinates = selectedBBox.trim().split(/[\s,]+/).map(Number);
+    if (coordinates.length === 4 && coordinates.every(Number.isFinite)) {
+      const areaM2 = calculateBBoxSize(...coordinates);
+      const scale = parseFloat(document.getElementById('scale-value-slider')?.value);
+      let existingBytes = 0;
+      let oneWorldStorageKnown = true;
+      if (isOneWorldEnabled()) {
+        if (!oneWorldInfo) {
+          oneWorldStorageKnown = false;
+        } else if (oneWorldInfo.exists) {
+          existingBytes = Number(oneWorldInfo.storage_bytes);
+          oneWorldStorageKnown = Number.isFinite(existingBytes) && existingBytes >= 0;
+        }
+      }
+      if (oneWorldStorageKnown) {
+        worldStorageEstimateBytes = window.WorldStorageEstimate.estimateWorldStorageBytes({
+          areaM2,
+          body: selectedCelestialBody,
+          scale,
+          existingBytes,
+        });
+        worldStorageEstimateKnown = Number.isFinite(worldStorageEstimateBytes);
+      }
+    }
+  }
+
+  worldStorageEstimateOverLimit = hasSelection && worldStorageEstimateKnown
+    ? window.WorldStorageEstimate.generationButtonState(worldStorageEstimateBytes, true).exceedsLimit
+    : false;
+  renderWorldStorageEstimate();
+}
+
+function scheduleWorldStorageEstimate() {
+  if (worldStorageEstimateFrame !== null) return;
+  if (typeof requestAnimationFrame === 'function') {
+    worldStorageEstimateFrame = requestAnimationFrame(refreshWorldStorageEstimate);
+  } else {
+    refreshWorldStorageEstimate();
+  }
+}
+
+function syncGenerateButtonAvailability() {
+  const button = document.getElementById('start-button');
+  const wrapper = document.querySelector('.start-button-wrap');
+  if (!button) return;
+
+  const selected = !!selectedBBox && selectedBBox !== '0.000000 0.000000 0.000000 0.000000';
+  const state = window.WorldStorageEstimate.generationButtonState(
+    worldStorageEstimateBytes,
+    generationButtonEnabled,
+    selected,
+  );
+  const blocked = selected && (!worldStorageEstimateKnown || worldStorageEstimateOverLimit);
+  button.disabled = state.disabled;
+  button.setAttribute('aria-disabled', state.disabled ? 'true' : 'false');
+  if (blocked && worldStorageEstimateOverLimit) {
+    button.title = storageEstimateText('world_storage_estimate_limit_title',
+      'Estimated world size exceeds the 120 GB maximum.');
+  } else if (blocked) {
+    button.title = storageEstimateText('world_storage_estimate_failed',
+      'Could not estimate this world. Check the area and One World status before generating.');
+  } else {
+    button.removeAttribute('title');
+  }
+  if (wrapper) {
+    wrapper.classList.toggle('is-disabled', state.disabled);
+    if (blocked && worldStorageEstimateOverLimit) {
+      wrapper.title = button.title;
+    } else {
+      wrapper.removeAttribute('title');
+    }
+  }
+}
 
 /**
  * Displays the appropriate bbox size status message based on area thresholds
@@ -2612,6 +2745,7 @@ function earthScaleFactor() {
 
 // Re-runs the size status, e.g. after a body switch or scale change moves the tier.
 function refreshBboxSelectionInfo() {
+  scheduleWorldStorageEstimate();
   // An error about the typed coordinates stays until the field is fixed.
   if (!mapSelectedBBox || bboxInputError) return;
   const [lat1, lng1, lat2, lng2] = mapSelectedBBox.split(" ").map(Number);
@@ -2643,6 +2777,7 @@ function displayBboxInfoText(bboxText) {
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
   bboxInputError = false;
+  scheduleWorldStorageEstimate();
 
   // Reset rotation when bbox changes
   if (typeof window.updateRotation === 'function') {
@@ -2687,6 +2822,7 @@ function displayBboxInfoText(bboxText) {
   const selectedSize = calculateBBoxSize(lat1, lng1, lat2, lng2);
 
   displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
+  scheduleWorldStorageEstimate();
 
   // Hide any rendered mini 3D preview if the selection actually changed
   window.arnisPreview3D?.onBboxChanged(selectedBBox);
@@ -3160,14 +3296,18 @@ async function refreshOneWorldState() {
     clearOneWorldOverlays();
     if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
     if (!isWorldNameEditing()) refreshWorldNameEditUI();
+    scheduleWorldStorageEstimate();
     return;
   }
   if (!savePath) {
     oneWorldInfo = { exists: false, foreign: false };
     applyOneWorldPins(oneWorldInfo);
     renderOneWorldStatus();
+    scheduleWorldStorageEstimate();
     return;
   }
+  oneWorldInfo = null;
+  scheduleWorldStorageEstimate();
   let info;
   try {
     info = await fetchOneWorldInfo();
@@ -3177,11 +3317,13 @@ async function refreshOneWorldState() {
     oneWorldInfo = null;
     setOneWorldStatus(String(error), 'error');
     clearOneWorldOverlays();
+    scheduleWorldStorageEstimate();
     return;
   }
   if (seq !== oneWorldRefreshSeq) return;
   oneWorldInfo = info;
   applyOneWorldPins(info);
+  scheduleWorldStorageEstimate();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   renderOneWorldStatus();
 
@@ -3258,6 +3400,7 @@ async function prepareOneWorldRun() {
   }
   oneWorldInfo = info;
   applyOneWorldPins(info);
+  scheduleWorldStorageEstimate();
   renderOneWorldStatus();
   if (info.foreign) return false;
   if (info.locked) {
@@ -3342,6 +3485,7 @@ let generationButtonEnabled = true;
 function setGenerationButtonEnabled(enabled) {
   generationButtonEnabled = enabled;
   refreshWorldNameEditUI();
+  syncGenerateButtonAvailability();
   // The two jobs exclude each other in the backend, so the other one greys out.
   refreshPrecomputeButton();
 }
@@ -3352,7 +3496,11 @@ function setGenerationButtonEnabled(enabled) {
  * @returns {Promise<void>}
  */
 async function startGeneration() {
+  refreshWorldStorageEstimate();
   if (generationButtonEnabled === false) {
+    return;
+  }
+  if (worldStorageEstimateOverLimit || (!!selectedBBox && !worldStorageEstimateKnown)) {
     return;
   }
   // The backend refuses this too, but only after gui_create_world has already
@@ -3389,6 +3537,16 @@ async function startGeneration() {
       const info = document.getElementById('progress-info');
       if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
       return;
+    }
+    // One World is read again asynchronously before the overlap check. Enforce
+    // the cap against that fresh on-disk size before starting the generator.
+    if (oneWorld) {
+      refreshWorldStorageEstimate();
+      if (worldStorageEstimateOverLimit || !worldStorageEstimateKnown) {
+        const info = document.getElementById('progress-info');
+        if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
+        return;
+      }
     }
     lastRunOneWorld = oneWorld;
 
