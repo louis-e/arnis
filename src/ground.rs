@@ -1499,7 +1499,11 @@ pub fn generate_ground_data(
             ground.extended_ceiling = height.extended || !flat_fits_vanilla(args, &bbox, peaks);
         }
         if auto && ground.extended_ceiling {
-            let raised_for = ground.elevation_data.as_ref().and_then(|d| d.raised_for);
+            let raised_for = ground
+                .elevation_data
+                .as_ref()
+                .and_then(|d| d.raised_for)
+                .map(|r| r.with_overture(peaks, args.scale));
             extend_world_bounds(args, ground.base_level(), raised_for);
         }
         ground.set_winter(args.winter);
@@ -2133,6 +2137,7 @@ mod tests {
         let raised = |terrain_top_y, tallest_blocks| RaisedFor {
             terrain_top_y,
             tallest_blocks,
+            overture_pending: false,
         };
         // A flat city with one 400-block tower: the bedrock floor the base already had,
         // and a ceiling over the tower instead of at 2031.

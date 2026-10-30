@@ -126,6 +126,24 @@ impl Halo {
 pub(crate) struct RaisedFor {
     pub terrain_top_y: i32,
     pub tallest_blocks: i32,
+    /// Overture's structures still have to be counted, by `with_overture`.
+    pub overture_pending: bool,
+}
+
+impl RaisedFor {
+    /// Counts Overture's structures too, waiting for them if the fit did not. Waited for
+    /// here rather than in the fit, so the terrain work after it runs while they download.
+    pub(crate) fn with_overture(self, peaks: &PeakSource, scale: f64) -> Self {
+        if !self.overture_pending {
+            return self;
+        }
+        let tallest = (tallest_m(&peaks.take_overture()) * scale).ceil() as i32;
+        Self {
+            tallest_blocks: self.tallest_blocks.max(tallest),
+            overture_pending: false,
+            ..self
+        }
+    }
 }
 
 /// Height of the tallest of `models`, in metres.
@@ -586,17 +604,14 @@ pub fn fetch_elevation_data(
         band,
         taller,
     );
-    // A band raised for this area is sized by the tallest thing standing on it, Overture's
-    // included even where OSM's alone already made the case.
+    // A band raised for this area is sized by the tallest thing standing on it. Overture's
+    // count too, even where OSM's alone made the case; those the fit did not wait for are
+    // left to `RaisedFor::with_overture`.
+    let overture_pending = hints.overture_follows && overture_tallest.get().is_none();
     let tallest_structure_m = (taller == Some(band)).then(|| {
-        let overture = match overture_tallest.get() {
-            Some(m) => m,
-            None if hints.overture_follows => tallest_m(&peaks.take_overture()),
-            None => 0.0,
-        };
         tallest_m(&hints.tall_models)
             .max(tallest_m(&hints.tall_structures))
-            .max(overture)
+            .max(overture_tallest.get().unwrap_or(0.0))
     });
     // Only the band needed them, and a city's worth would sit through the fit.
     hints.tall_structures = Vec::new();
@@ -695,6 +710,7 @@ pub fn fetch_elevation_data(
                 effective_ground_level
             },
             tallest_blocks: (m * scale).ceil() as i32,
+            overture_pending,
         }),
         halo: None,
     })
