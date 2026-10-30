@@ -490,6 +490,9 @@ const TUNNEL_RAMP_STEP: i32 = 1; // max descent per cell
 const TUNNEL_RAMP_RUN: i32 = 3; // portal ramp run per 1 block drop
 const TUNNEL_LAYER_DROP: i32 = 7; // extra depth per layer below -1
 const TUNNEL_LIGHT_INTERVAL: usize = 8;
+// The terrain fit leaves `BORE_ROOM` between the deepest bed and the lowest a bed can lie,
+// a block under the lowest a road can lie, `TUNNEL_COVER_DROP` under it.
+const _: () = assert!(TUNNEL_COVER_DROP < crate::water_depth::BORE_ROOM);
 /// `layer` is untrusted; deeper than this is noise and overflows `i32`.
 const TUNNEL_MAX_LAYERS_BELOW: i32 = 8;
 
@@ -882,6 +885,18 @@ pub fn generate_highway_tunnel_shell(
     // Raw DEM keeps road_y identical when a way is reprocessed across tiles.
     // `cover_ys` is the lowest ground the footprint touches; it decides the roof.
     let (terrain_ys, cover_ys) = tunnel_cover_profile(editor, &pts, wall_off);
+    // Under water the terrain is the water's surface, and the carve digs the bed out below
+    // it. The bore aims under the deepest bed across its footprint, or the bed is laid on
+    // its roof and the shell stands up in the water. The water still counts as cover.
+    let aim_ys: Vec<i32> = pts
+        .iter()
+        .zip(&cover_ys)
+        .map(|(&(x, z), &c)| {
+            editor
+                .lowest_carved_bed(x, z, wall_off)
+                .map_or(c, |b| b.min(c))
+        })
+        .collect();
 
     let floor = tunnel_min_road_y();
     // No room anywhere: a road at grade beats a brick pit.
@@ -916,7 +931,7 @@ pub fn generate_highway_tunnel_shell(
         let t = i as f32 / denom;
         let grade = (start_ground as f32 + (end_ground - start_ground) as f32 * t).round() as i32;
         // Deepen the target, not the portal, so the ramp still reaches ground.
-        let desired = grade.min(cover_ys[i] - cover_drop);
+        let desired = grade.min(aim_ys[i] - cover_drop);
         // The road has to be back at the surface by an open portal.
         let ramp_s = if start_internal {
             i32::MIN
@@ -3593,6 +3608,22 @@ mod tests {
         assert_eq!(highway_block_range("residential", &tags(&[]), 0.4), 1);
     }
 
+    /// The water carve finds a bore's roof by what it is built of, so it has to know
+    /// every block of the shell.
+    #[test]
+    fn the_water_carve_knows_every_road_shell_block() {
+        use crate::water_depth::BORE_SHELL;
+        for x in -30..30 {
+            for y in -10..10 {
+                for z in -30..30 {
+                    assert!(BORE_SHELL.contains(&tunnel_shell_block(x, y, z)));
+                }
+            }
+        }
+        // The foundation, road row and interior placeholder.
+        assert!(BORE_SHELL.contains(&STONE_BRICKS));
+    }
+
     #[test]
     fn runway_dash_alternates_on_and_off() {
         // At scale 1: 10 blocks on, 6 off, repeating every 16.
@@ -5070,6 +5101,135 @@ mod tests {
             cells.iter().all(|c| c.covered),
             "a 1-block dip in the overburden does not open a shaft"
         );
+    }
+
+    /// The reported pale stripes, for a road tunnel: its roof sat two under the water's
+    /// surface, and the bed over it stayed there while the river around it was carved.
+    #[test]
+    fn a_road_tunnel_under_a_river_runs_below_the_carved_bed() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let cells = road_tunnel_under_river(0);
+        let mid = cells.iter().find(|c| c.x == 100).unwrap();
+        assert!(
+            mid.road_y <= -14,
+            "road at {} under a bed at -7",
+            mid.road_y
+        );
+    }
+
+    /// The base the terrain fit lifts an area to when a bore runs under its water is
+    /// exactly enough to keep the bore under the deepest bed.
+    #[test]
+    fn a_road_tunnel_fits_under_a_river_on_the_lifted_base() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        // The carve floor for the deepest tier, and the room for a bore on top.
+        road_tunnel_under_river(
+            crate::world_editor::min_y() + 6 + 2 + crate::water_depth::BORE_ROOM,
+        );
+    }
+
+    /// A road tunnel under a river 100 blocks wide at `level`, opening on dry land either
+    /// side, built in the generator's order and checked for a river bed over it.
+    fn road_tunnel_under_river(level: i32) -> Vec<HighwayTunnelCell> {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let ground =
+            crate::ground::test_support::ground_with_water(200, 120, level as f32, |x, _| {
+                (50..150).contains(&x)
+            });
+        let field = std::sync::Arc::new(crate::water_depth::compute_big_water_field(
+            &ground, &xzbbox,
+        ));
+        let mut editor = tunnel_editor(&xzbbox, ground.clone());
+        editor.set_water_field(std::sync::Arc::clone(&field));
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let way = tunnel_span(1, 10, 190, &[("highway", "residential"), ("tunnel", "yes")]);
+        let elems = vec![ProcessedElement::Way(way.clone())];
+        let endpoints = collect_tunnel_internal_endpoints(&elems, &xzbbox);
+        let portals = test_portals(&editor, &elems, &endpoints);
+        let footprint = collect_tunnel_footprint(&elems, &editor, &endpoints, &xzbbox, 1.0);
+
+        // In the generator's order: the shell, the river carved over it, then the bore.
+        let mut cells = Vec::new();
+        assert!(generate_highway_tunnel_shell(
+            &mut editor,
+            &way,
+            &args,
+            &endpoints,
+            &portals,
+            &mut cells
+        ));
+        crate::water_depth::carve_lc_water_region(
+            &mut editor,
+            &ground,
+            &xzbbox,
+            &field,
+            &CoordinateBitmap::new_empty(),
+            &footprint,
+            &BridgeSurfaceMap::empty(),
+            xzbbox.min_x(),
+            xzbbox.max_x(),
+            xzbbox.min_z(),
+            xzbbox.max_z(),
+        );
+        carve_highway_tunnel_interior(&mut editor, &cells);
+
+        let wall = cells[0].half_width + 1;
+        for x in 50..150 {
+            for z in 50 - wall..=50 + wall {
+                let bed = editor.carved_bed(x, z).expect("river");
+                // The bed the rest of the river has, not one left on the roof.
+                assert!(
+                    editor.block_exists_absolute(x, bed, z)
+                        && !editor.check_for_block_absolute(x, bed, z, Some(&[WATER]), None),
+                    "no bed at ({x}, {bed}, {z})"
+                );
+                for y in bed - 1..=level {
+                    assert!(
+                        !editor.check_for_block_absolute(x, y, z, Some(TUNNEL_BRICK), None),
+                        "shell in the river at ({x}, {y}, {z}), bed {bed}"
+                    );
+                }
+            }
+        }
+        // Roofed, paved and dry the whole way under the river. On a ramp a neighbour's
+        // stamp sits in the bore and carves the roof a row up, so it is hollow on the flat.
+        let asphalt = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
+        for cell in cells.iter().filter(|c| (50..150).contains(&c.x)) {
+            assert!(cell.covered, "open cut at x={}", cell.x);
+            let (x, z, road) = (cell.x, cell.z, cell.road_y);
+            assert!(editor.check_for_block_absolute(x, road, z, Some(asphalt), None));
+            let bed = editor.carved_bed(x, z).unwrap();
+            for y in road..bed {
+                assert!(
+                    !editor.check_for_block_absolute(x, y, z, Some(&[WATER]), None),
+                    "water in the bore at ({x}, {y}, {z})"
+                );
+            }
+            let roof = road + TUNNEL_CEIL_OFFSET;
+            assert!(
+                (roof..=roof + 2).any(|y| editor.check_for_block_absolute(
+                    x,
+                    y,
+                    z,
+                    Some(TUNNEL_BRICK),
+                    None
+                )),
+                "no roof at x={x}"
+            );
+            if (90..110).contains(&x) {
+                for y in road + 1..roof {
+                    assert!(
+                        !editor.block_exists_absolute(x, y, z),
+                        "bore filled at ({x}, {y}, {z})"
+                    );
+                }
+            }
+        }
+        cells
     }
 
     /// With no vertical room the bore used to emit a few stone-brick pads.

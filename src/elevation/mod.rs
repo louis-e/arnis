@@ -124,11 +124,57 @@ pub struct HeightBand {
     pub min_ground_level: i32,
     pub disable_height_limit: bool,
     pub extended_max_y: i32,
+    /// The world's floor, which a tunnel under carved water has to keep off.
+    pub floor_y: i32,
 }
 
 impl HeightBand {
     fn extended_ceiling(&self) -> bool {
         self.disable_height_limit && self.extended_max_y > crate::world_editor::DEFAULT_MAX_Y
+    }
+
+    /// This band, its base high enough that a tunnel under each of `crossings` keeps its
+    /// cover under the carved bed, `BORE_ROOM` over the floor. A body's surface stands as
+    /// far over the base as its lowest terrain over the area's lowest, `lo_m`, at `bpm`
+    /// blocks per metre, so water up the relief needs less of a lift, and a shallow body
+    /// less than the deepest. Only as much as the deepest of them needs, then.
+    fn with_bore_room(
+        self,
+        crossings: &[crate::water_depth::BoreCrossing],
+        lo_m: f64,
+        range_m: f64,
+        bpm: f64,
+    ) -> Self {
+        let room = |c: &crate::water_depth::BoreCrossing, over_base: i32| {
+            self.floor_y + c.depth + 2 + crate::water_depth::BORE_ROOM - over_base
+        };
+        let Some(worst) = crossings.iter().map(|c| room(c, 0)).max() else {
+            return self;
+        };
+        // The fit keeps the full scale while the relief takes at most half the column over
+        // the base, all a top reserve leaves it. Past that it may compress the relief, and
+        // a body up it then stands lower than its terrain says: count none of its height.
+        let ceiling = postprocess::terrain_ceiling(self.disable_height_limit, self.extended_max_y);
+        let exact = range_m * bpm <= f64::from(ceiling - worst.max(self.ground_level)) / 2.0;
+        let needed = crossings
+            .iter()
+            .map(|c| {
+                // Two blocks short, for the levelling and the snap of a water surface.
+                let over_base = if exact && c.lowest_m.is_finite() {
+                    (((c.lowest_m - lo_m) * bpm).floor() as i32 - 2).max(0)
+                } else {
+                    0
+                };
+                room(c, over_base)
+            })
+            .max()
+            .unwrap_or(worst);
+        let ground_level = self.ground_level.max(needed);
+        Self {
+            ground_level,
+            min_ground_level: self.min_ground_level.max(needed).min(ground_level),
+            ..self
+        }
     }
 }
 
@@ -344,7 +390,7 @@ pub fn fetch_elevation_data(
     height_multiplier: f64,
     band: HeightBand,
     taller: Option<HeightBand>,
-    land_cover: Option<&mut LandCoverData>,
+    mut land_cover: Option<&mut LandCoverData>,
     source_mode: SourceMode,
     benchmark: bool,
     dims: (usize, usize, usize, usize),
@@ -419,7 +465,7 @@ pub fn fetch_elevation_data(
         (0.0, 0)
     };
 
-    if let Some(lc) = land_cover {
+    if let Some(lc) = land_cover.as_deref_mut() {
         // The land-cover Gaussian is the slowest elevation step on big areas;
         // animate the bar across 14->16% as it runs instead of freezing.
         apply_land_cover_repair(
@@ -436,6 +482,37 @@ pub fn fetch_elevation_data(
     // before the fit, so the summit counts towards the height range.
     let mut hints = peaks.take();
     peaks::raise_peaks(&mut height_grid, bbox, &hints.peaks, m_per_cell, seam_pad);
+    // A tunnel under the water has to get under its carved bed, and the floor the carve
+    // was given may leave no room for one.
+    let crossings = land_cover.as_deref().map_or_else(Vec::new, |lc| {
+        let cells = peaks::bore_water_cells(lc, bbox, &hints.bores);
+        // The repair skips a land cover of another size than the heights; so do these.
+        crate::water_depth::bore_crossings(&lc.grid, world_width, world_height, &cells, |x, y| {
+            height_grid
+                .get(y)
+                .and_then(|row| row.get(x))
+                .copied()
+                .unwrap_or(f64::NAN)
+        })
+    });
+    let (band, taller) = if crossings.is_empty() {
+        (band, taller)
+    } else {
+        let (lo, hi) = height_grid
+            .iter()
+            .flatten()
+            .filter(|h| h.is_finite())
+            .fold((f64::MAX, f64::MIN), |(a, b), &h| (a.min(h), b.max(h)));
+        let lift = |b: HeightBand| {
+            b.with_bore_room(
+                &crossings,
+                lo,
+                (hi - lo).max(0.0),
+                scale * height_multiplier,
+            )
+        };
+        (lift(band), taller.map(lift))
+    };
     let band = pick_band(
         &height_grid,
         bbox,
@@ -453,6 +530,7 @@ pub fn fetch_elevation_data(
         min_ground_level,
         disable_height_limit,
         extended_max_y,
+        ..
     } = band;
     // The models stand at world scale, not at the terrain's compressed one.
     let top_reserve = match affine {
@@ -632,6 +710,7 @@ mod band_tests {
             min_ground_level: if extended { -2030 } else { -62 },
             disable_height_limit: extended,
             extended_max_y: 2031,
+            floor_y: if extended { -2032 } else { -64 },
         }
     }
 
@@ -723,6 +802,51 @@ mod band_tests {
             ..Default::default()
         };
         assert_eq!(pick(&hills, &elsewhere, true), band(false));
+    }
+
+    /// A tunnel needs room under its water's carved bed: on the vanilla floor the deepest
+    /// lies on bedrock, so the base lifts by what the crossed water needs, and no more.
+    #[test]
+    fn a_bore_under_the_water_lifts_the_base_by_what_its_water_needs() {
+        use crate::water_depth::BoreCrossing;
+        let lift = |b: HeightBand, crossings: &[BoreCrossing], range_m: f64| {
+            let b = b.with_bore_room(crossings, 0.0, range_m, 1.0);
+            (b.ground_level, b.min_ground_level)
+        };
+        let deep = BoreCrossing {
+            depth: 6,
+            lowest_m: 0.0,
+        };
+        let shallow = BoreCrossing {
+            depth: 2,
+            lowest_m: 0.0,
+        };
+        // A carve six deep at the area's lowest point: the floor, the bed and its block
+        // under it, the depth and the room.
+        assert_eq!(lift(band(false), &[deep], 50.0), (-48, -48));
+        assert_eq!(lift(band(false), &[shallow, deep], 50.0), (-48, -48));
+        assert_eq!(lift(band(false), &[shallow], 50.0), (-52, -52));
+        // Water 10 m up the relief stands 10 blocks over the base, less two to be safe.
+        let up = BoreCrossing {
+            depth: 6,
+            lowest_m: 10.0,
+        };
+        assert_eq!(lift(band(false), &[up], 50.0), (-56, -56));
+        // ...unless the relief is tall enough that the fit may compress it.
+        assert_eq!(lift(band(false), &[up], 300.0), (-48, -48));
+        // The extended floor has room, and a base already over the need stays.
+        let extended = band(true).with_bore_room(&[deep], 0.0, 50.0, 1.0);
+        assert_eq!(
+            (extended.ground_level, extended.min_ground_level),
+            (-62, -2016)
+        );
+        let high = HeightBand {
+            ground_level: 10,
+            min_ground_level: 10,
+            ..band(false)
+        };
+        assert_eq!(high.with_bore_room(&[deep], 0.0, 50.0, 1.0), high);
+        assert_eq!(band(false).with_bore_room(&[], 0.0, 50.0, 1.0), band(false));
     }
 
     #[test]

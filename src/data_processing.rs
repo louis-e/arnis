@@ -1060,7 +1060,10 @@ pub fn generate_world_with_options(
     bench.reset();
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
-    let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+    // Shared with the editors, so a bore under water keeps its cover under the carved bed.
+    let big_water_field = Arc::new(crate::water_depth::compute_big_water_field(
+        &ground, &xzbbox,
+    ));
     // Resolved once here: a body spanning many tiles must not be measured per tile.
     let still_surfaces = water_areas::prescan_still_surfaces(&elements, &ground, &xzbbox);
 
@@ -1087,6 +1090,7 @@ pub fn generate_world_with_options(
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(Arc::clone(&ground));
+    editor.set_water_field(Arc::clone(&big_water_field));
     if let Some(ref tp) = tree_pack {
         editor.set_tree_pack(Arc::clone(tp));
     }
@@ -1524,6 +1528,7 @@ pub fn generate_world_with_options(
 
             let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
             tile_editor.set_ground(Arc::clone(&ground));
+            tile_editor.set_water_field(Arc::clone(&big_water_field));
             tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
             // Ground generation runs on tile editors, so they need the real scale.
             tile_editor.set_projection_info(&args.projection.to_string(), args.scale);
@@ -2108,6 +2113,7 @@ pub fn generate_world_with_options(
     drop(tunnel_footprint);
     drop(rail_mask);
     drop(rail_joins);
+    editor.release_water_field();
     drop(big_water_field);
     // The ruins break buildings open where these say they stand.
     let building_footprints = args.post_apocalyptic.then_some(building_footprints);

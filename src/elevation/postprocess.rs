@@ -2724,7 +2724,7 @@ pub enum AffinePolicy {
 /// Most headroom `FitWithHeadroom` keeps below the lowest cell.
 const HEADROOM_MAX_BLOCKS: f64 = 96.0;
 
-fn terrain_ceiling(disable_height_limit: bool, extended_max_y: i32) -> i32 {
+pub(crate) fn terrain_ceiling(disable_height_limit: bool, extended_max_y: i32) -> i32 {
     let effective_max_y = if disable_height_limit {
         extended_max_y
     } else {

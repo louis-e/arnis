@@ -81,6 +81,9 @@ pub enum DecalKey {
     Poster(u8),
     /// Advertising column poster variant, 1x2 tiles.
     ColumnPoster(u8),
+    /// Front of an ATM, ticket or vending machine by asset name, 1x2 tiles, or 1x1 for a
+    /// small dispenser.
+    Machine(&'static str),
     /// "You are here" board centred on a world position, 2x2 tiles.
     LocalMap {
         x: i32,
@@ -106,6 +109,7 @@ impl DecalKey {
             DecalKey::Text { cols, .. } => (*cols as u32, 1),
             DecalKey::Poster(_) => super::posters::BILLBOARD_TILES,
             DecalKey::ColumnPoster(_) => super::posters::COLUMN_TILES,
+            DecalKey::Machine(name) => super::machines::tiles(name),
             DecalKey::LocalMap { .. } => (2, 2),
             _ => (1, 1),
         }

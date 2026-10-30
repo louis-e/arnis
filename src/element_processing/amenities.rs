@@ -2,8 +2,10 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::decals::DecalKey;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::get_nearest_road_block;
+use crate::element_processing::signage;
 use crate::element_processing::street_furniture;
 use crate::element_processing::surfaces::{get_blocks_for_surface, semirandom_surface};
 use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
@@ -100,11 +102,28 @@ pub fn generate_amenities(
             }
             "vending_machine" | "atm" => {
                 if let Some(pt) = first_node {
-                    editor.set_block(IRON_BLOCK, pt.x, 1, pt.z, None, None);
-                    editor.set_block(IRON_BLOCK, pt.x, 2, pt.z, None, None);
-                    // Front graphic on the upper block, all four sides.
+                    let name = signage::machine_front(element.tags()).unwrap_or("");
+                    // The cabinet in the colour its front is drawn in; a small dispenser
+                    // is a box at eye height on a post.
+                    let cabinet = match name {
+                        "vending_drinks" => BLUE_CONCRETE,
+                        "vending_snacks" => GRAY_CONCRETE,
+                        "coin_press" => RED_CONCRETE,
+                        "dog_bags" => GREEN_CONCRETE,
+                        "dispenser" => LIGHT_GRAY_CONCRETE,
+                        _ => IRON_BLOCK,
+                    };
+                    let low = if crate::decals::machines::SMALL.contains(&name) {
+                        IRON_BARS
+                    } else {
+                        cabinet
+                    };
+                    editor.set_block(low, pt.x, 1, pt.z, None, None);
+                    editor.set_block(cabinet, pt.x, 2, pt.z, None, None);
                     let abs_y = editor.get_absolute_y(pt.x, 2, pt.z);
-                    place_furniture_decals(editor, element.tags(), pt.x, abs_y, pt.z);
+                    if !name.is_empty() {
+                        place_machine_front(editor, &DecalKey::Machine(name), pt.x, abs_y, pt.z);
+                    }
                 }
             }
             "bicycle_parking" => {
@@ -628,7 +647,7 @@ fn build_display_item_for_category(
     }
 }
 
-/// Places the furniture pictogram (recycling, vending, ATM) on all four sides of a block.
+/// Places the furniture pictogram (recycling) on all four sides of a block.
 /// Returns false when decals are off or the icon is not registered.
 fn place_furniture_decals(
     editor: &mut WorldEditor,
@@ -637,7 +656,7 @@ fn place_furniture_decals(
     abs_y: i32,
     z: i32,
 ) -> bool {
-    let Some(key) = crate::element_processing::signage::furniture_pictogram(tags) else {
+    let Some(key) = signage::furniture_pictogram(tags) else {
         return false;
     };
     if !editor.signage().is_some_and(|s| s.registry.contains(&key)) {
@@ -647,6 +666,26 @@ fn place_furniture_decals(
         editor.place_decal(x, abs_y, z, facing, &key);
     }
     true
+}
+
+/// Hangs a machine's front, down from the upper cabinet block at `top_y`, on every open
+/// face of the cabinet, so it reads as one from any side. False when decals are off or no
+/// face could take it.
+fn place_machine_front(
+    editor: &mut WorldEditor,
+    key: &DecalKey,
+    x: i32,
+    top_y: i32,
+    z: i32,
+) -> bool {
+    if !editor.signage().is_some_and(|s| s.registry.contains(key)) {
+        return false;
+    }
+    let mut any = false;
+    for facing in [2i8, 3, 4, 5] {
+        any |= editor.place_decal_panel(x, top_y, z, facing, key, true, true);
+    }
+    any
 }
 
 fn place_item_frame_on_random_side(
@@ -917,4 +956,101 @@ fn make_basic_item(id: &str, slot: i8, count: i8) -> HashMap<String, Value> {
 
 fn tag_enabled(tags: &HashMap<String, String>, key: &str) -> bool {
     tags.get(key).is_some_and(|value| value == "yes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::element_processing::building_test_support::{tag_map, test_editor};
+    use crate::element_processing::signage::SignageContext;
+    use crate::osm_parser::ProcessedNode;
+    use clap::Parser as _;
+    use std::sync::Arc;
+
+    /// Item frames showing `key` around a machine at (20, 20), with a wall along its east
+    /// side if `walled`, and the upper block of its cabinet.
+    fn machine_frames(
+        tags: &[(&str, &str)],
+        road: &RoadMaskBitmap,
+        key: DecalKey,
+        walled: bool,
+    ) -> (Vec<(i32, i32, i32)>, Option<Block>) {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        if walled {
+            for z in 15..=25 {
+                for y in 1..=4 {
+                    editor.set_block_absolute(STONE_BRICKS, 21, y, z, None, None);
+                }
+            }
+        }
+        let ctx = Arc::new(SignageContext::with_keys(vec![key.clone()]));
+        editor.set_map_decals(true);
+        editor.set_signage(Arc::clone(&ctx));
+        let node = ProcessedElement::Node(ProcessedNode {
+            id: 7,
+            tags: tag_map(tags),
+            x: 20,
+            z: 20,
+        });
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"]);
+        generate_amenities(&mut editor, &node, &args, &FloodFillCache::new(), road);
+        let entry = ctx.registry.get(&key).unwrap();
+        let ids: Vec<i32> = (0..entry.rows).map(|r| entry.tile_id(0, r)).collect();
+        let mut frames: Vec<(i32, i32, i32)> = editor
+            .item_frames()
+            .into_iter()
+            .filter(|f| ids.contains(&f.map_id))
+            .map(|f| (f.x, f.y, f.z))
+            .collect();
+        frames.sort_unstable();
+        (frames, editor.get_block_absolute(20, 2, 20))
+    }
+
+    #[test]
+    fn a_machine_shows_its_front_on_every_open_face() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let road = RoadMaskBitmap::new(&xzbbox);
+        let (frames, cabinet) = machine_frames(
+            &[("amenity", "atm")],
+            &road,
+            DecalKey::Machine("atm"),
+            false,
+        );
+        assert_eq!(cabinet, Some(IRON_BLOCK));
+        // Top and bottom tile on each of the four faces.
+        assert_eq!(frames.len(), 8, "{frames:?}");
+        for (x, z) in [(19, 20), (21, 20), (20, 19), (20, 21)] {
+            assert!(frames.contains(&(x, 1, z)) && frames.contains(&(x, 2, z)));
+        }
+        let tags = [("amenity", "vending_machine"), ("vending", "drinks")];
+        let (_, cabinet) = machine_frames(&tags, &road, DecalKey::Machine("vending_drinks"), false);
+        assert_eq!(cabinet, Some(BLUE_CONCRETE));
+    }
+
+    #[test]
+    fn a_dog_bag_dispenser_is_a_box_on_a_post() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let road = RoadMaskBitmap::new(&xzbbox);
+        let tags = [
+            ("amenity", "vending_machine"),
+            ("vending", "excrement_bags"),
+        ];
+        let (frames, cabinet) = machine_frames(&tags, &road, DecalKey::Machine("dog_bags"), false);
+        assert_eq!(cabinet, Some(GREEN_CONCRETE));
+        // One tile on each face of the box, none down the post.
+        assert_eq!(frames.len(), 4, "{frames:?}");
+        assert!(frames.iter().all(|&(_, y, _)| y == 2), "{frames:?}");
+    }
+
+    #[test]
+    fn a_machine_against_a_wall_keeps_its_front_off_the_wall() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let road = RoadMaskBitmap::new(&xzbbox);
+        let (frames, _) =
+            machine_frames(&[("amenity", "atm")], &road, DecalKey::Machine("atm"), true);
+        assert_eq!(frames.len(), 6, "{frames:?}");
+        assert!(frames.iter().all(|&(x, _, _)| x != 21), "{frames:?}");
+    }
 }
