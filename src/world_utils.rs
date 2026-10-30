@@ -878,11 +878,18 @@ pub fn tall_datapack_range(world_path: &Path) -> Option<(i32, i32)> {
     )
     .ok()?;
     let dimension: serde_json::Value = serde_json::from_slice(&json).ok()?;
-    let min_y = i32::try_from(dimension["min_y"].as_i64()?).ok()?;
-    let height = i32::try_from(dimension["height"].as_i64()?).ok()?;
-    let max_y = min_y + height - 1;
-    (min_y.rem_euclid(16) == 0 && max_y.rem_euclid(16) == 15 && min_y < max_y)
-        .then_some((min_y, max_y))
+    let min_y = dimension["min_y"].as_i64()?;
+    let max_y = min_y.checked_add(dimension["height"].as_i64()?)? - 1;
+    // Only a range Arnis could have written: on section bounds, within the pack's and
+    // holding vanilla's, which the terrain base and its bedrock assume.
+    let (full_min, full_max) = TALL_DATAPACK_FULL_RANGE;
+    let vanilla = i64::from(crate::world_editor::DEFAULT_MIN_Y)
+        ..=i64::from(crate::world_editor::DEFAULT_MAX_Y);
+    let fits = min_y.rem_euclid(16) == 0
+        && max_y.rem_euclid(16) == 15
+        && (i64::from(full_min)..=*vanilla.start()).contains(&min_y)
+        && (*vanilla.end()..=i64::from(full_max)).contains(&max_y);
+    fits.then_some((min_y as i32, max_y as i32))
 }
 
 /// The whole range the tall-world datapack can declare, which a One World always takes.
@@ -2059,6 +2066,17 @@ mod tests {
         let (min_y, max_y) = TALL_DATAPACK_FULL_RANGE;
         install_tall_datapack(&world, min_y, max_y).unwrap();
         assert_eq!(tall_datapack_range(&world), Some(TALL_DATAPACK_FULL_RANGE));
+        // A pack edited by hand past what the world can hold is not taken as its range.
+        for (min_y, max_y) in [(0, 255), (-4096, 2031), (-128, 4095)] {
+            install_tall_datapack(&world, min_y, max_y).unwrap();
+            assert_eq!(tall_datapack_range(&world), None, "{min_y}..{max_y}");
+        }
+        let dim = world
+            .join("datapacks")
+            .join(TALL_DATAPACK_NAME)
+            .join("data/minecraft/dimension_type/overworld.json");
+        fs::write(&dim, r#"{"min_y": 9223372036854775807, "height": 16}"#).unwrap();
+        assert_eq!(tall_datapack_range(&world), None);
     }
 
     fn read_json(path: &Path) -> serde_json::Value {
