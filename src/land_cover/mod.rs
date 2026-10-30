@@ -143,6 +143,40 @@ pub fn mark_beaches(lc: &mut LandCoverData) {
 
 // ─── Data structures ──────────────────────────────────────────────────────
 
+/// One bit per grid cell; empty reads as all false.
+#[derive(Clone, Default)]
+pub struct InlandWater {
+    bits: Vec<u64>,
+    width: usize,
+}
+
+impl InlandWater {
+    pub fn new(width: usize, height: usize) -> Self {
+        Self {
+            bits: vec![0; (width * height).div_ceil(64)],
+            width,
+        }
+    }
+
+    #[inline]
+    pub fn set(&mut self, x: usize, z: usize) {
+        let i = z * self.width + x;
+        if let Some(w) = self.bits.get_mut(i / 64) {
+            *w |= 1 << (i % 64);
+        }
+    }
+
+    #[inline]
+    pub fn get(&self, x: usize, z: usize) -> bool {
+        let i = z * self.width + x;
+        x < self.width
+            && self
+                .bits
+                .get(i / 64)
+                .is_some_and(|w| (w >> (i % 64)) & 1 == 1)
+    }
+}
+
 /// Land cover classification grid aligned with the elevation grid.
 #[derive(Clone)]
 pub struct LandCoverData {
@@ -155,6 +189,8 @@ pub struct LandCoverData {
     pub water_blend_cache: OnceCell<WaterBlendMask>,
     /// Lazily computed tiles holding beach, so most beach lookups end in one bit.
     pub beach_tiles: OnceCell<BeachTiles>,
+    /// Cells OSM maps as a lake, river or canal; set on the final grid by the OSM water pass.
+    pub inland_water: InlandWater,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
@@ -488,6 +524,7 @@ pub fn fetch_land_cover_data(
         water_distance,
         water_blend_cache: OnceCell::new(),
         beach_tiles: OnceCell::new(),
+        inland_water: Default::default(),
         width: grid_width,
         height: grid_height,
         cells_per_meter,
@@ -1746,6 +1783,7 @@ mod smoothing_scale_tests {
             grid,
             water_blend_cache: OnceCell::new(),
             beach_tiles: OnceCell::new(),
+            inland_water: Default::default(),
             width,
             height,
             cells_per_meter,

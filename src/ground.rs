@@ -750,25 +750,33 @@ impl Ground {
         (measured > 0).then(|| (f64::from(wooded) / f64::from(measured), top))
     }
 
-    /// Force LC_WATER inside OSM water, sinking those cells onto that water's surface.
+    /// Force LC_WATER inside OSM water, sinking those cells onto that water's surface. Flat
+    /// worlds only learn which water is inland.
     pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
+        use crate::land_cover::osm_water_override::{apply_osm_water_override, mark_inland_water};
+        let (world_width, world_height) = self.world_dims();
         let Ground {
             land_cover,
             elevation_data,
             ..
         } = self;
-        let (Some(lc), Some(data)) = (land_cover.as_mut(), elevation_data.as_mut()) else {
+        let Some(lc) = land_cover.as_mut() else {
             return;
         };
-        let (world_width, world_height) = (data.world_width, data.world_height);
-        crate::land_cover::osm_water_override::apply_osm_water_override(
-            lc,
-            &mut data.heights,
-            world_width,
-            world_height,
-            elements,
-            xzbbox,
-        );
+        match elevation_data.as_mut() {
+            Some(data) => {
+                let (world_width, world_height) = (data.world_width, data.world_height);
+                apply_osm_water_override(
+                    lc,
+                    &mut data.heights,
+                    world_width,
+                    world_height,
+                    elements,
+                    xzbbox,
+                );
+            }
+            None => mark_inland_water(lc, world_width, world_height, elements, xzbbox),
+        }
     }
 
     /// Trim ESA water back to land where OSM shows roads, buildings or its own shoreline.
@@ -935,6 +943,32 @@ impl Ground {
             lc.water_distance[z][x]
         } else {
             0
+        }
+    }
+
+    /// Whether OSM maps this cell as a lake, river or canal rather than open sea.
+    #[inline]
+    pub fn inland_water_mapped(&self, coord: XZPoint) -> bool {
+        let Some(ref lc) = self.land_cover else {
+            return false;
+        };
+        let (world_w, world_h) = self.world_dims();
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
+        let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
+        lc.inland_water.get(x, z)
+    }
+
+    /// Highest Y the sea surface reaches, or `None` without terrain. Water above it is
+    /// a lake or river even where OSM does not map it.
+    pub fn sea_surface_max_y(&self) -> Option<i32> {
+        const SEA_SURFACE_MAX_M: f64 = 5.0;
+        match &self.elevation_data {
+            Some(d) if self.elevation_enabled && d.blocks_per_meter > 0.0 => {
+                Some(d.affine().y_for_metres(SEA_SURFACE_MAX_M).floor() as i32)
+            }
+            _ => None,
         }
     }
 
@@ -1252,12 +1286,14 @@ impl Ground {
         &mut self,
         grid: Vec<Vec<u8>>,
         water_distance: Vec<Vec<u8>>,
+        inland_water: crate::land_cover::InlandWater,
         width: usize,
         height: usize,
     ) {
         if let Some(ref mut lc) = self.land_cover {
             lc.grid = grid;
             lc.water_distance = water_distance;
+            lc.inland_water = inland_water;
             lc.width = width;
             lc.height = height;
             // The water-blend mask was derived from the pre-rotation grid —
@@ -1857,6 +1893,7 @@ mod tests {
             water_distance: vec![vec![1, 0], vec![0, 0]],
             water_blend_cache: once_cell::sync::OnceCell::new(),
             beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
             width: 2,
             height: 2,
             cells_per_meter: 1.0,

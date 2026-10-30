@@ -57,11 +57,11 @@ impl Climate {
             5 => Climate::ColdDesert,                       // BWk
             6 => Climate::HotSteppe,                        // BSh
             7 => Climate::ColdSteppe,                       // BSk
-            17 | 18 | 21 | 22 => Climate::DryContinental,   // Dsa/Dsb, Dwa/Dwb
+            17 | 18 => Climate::DryContinental,             // Dsa/Dsb
             19 | 20 | 23 | 24 | 27 | 28 => Climate::Boreal, // Dsc/Dsd, Dwc/Dwd, Dfc/Dfd
             29 => Climate::Tundra,                          // ET
             30 => Climate::IceCap,                          // EF
-            _ => Climate::Temperate,                        // Af/Am, C*, Dfa/Dfb, 0
+            _ => Climate::Temperate,                        // Af/Am, C*, Dfa/Dfb, Dwa/Dwb, 0
         }
     }
 
@@ -171,6 +171,9 @@ mod tests {
         assert_eq!(Climate::from_class(30), Climate::IceCap);
         assert_eq!(Climate::from_class(15), Climate::Temperate); // Cfb
         assert_eq!(Climate::from_class(0), Climate::Temperate); // ocean
+                                                                // Monsoon summers are wet (Seoul, Dwa); only summer-dry Ds* counts as dry.
+        assert_eq!(Climate::from_class(21), Climate::Temperate);
+        assert_eq!(Climate::from_class(18), Climate::DryContinental);
     }
 
     #[test]

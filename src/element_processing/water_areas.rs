@@ -952,6 +952,7 @@ mod tests {
             water_distance: vec![vec![0u8; n]; n],
             water_blend_cache: once_cell::sync::OnceCell::new(),
             beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
             width: n,
             height: n,
             cells_per_meter: 1.0,
