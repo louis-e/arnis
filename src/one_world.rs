@@ -530,7 +530,7 @@ fn resolve(
     // level.dat and the map item are written by the first area only.
     if extending {
         println!(
-            "Note: One World keeps the game mode, time of day, world type and map item of its first area."
+            "Note: One World keeps the game mode, time of day, world type, mob spawning and map item of its first area."
         );
     }
     args.map_preview = true;

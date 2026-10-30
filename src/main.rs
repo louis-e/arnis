@@ -218,6 +218,7 @@ fn run_cli() {
 
     // Parse input arguments
     let mut args: Args = Args::parse();
+    let asked_mob_spawning = args.mob_spawning;
     args::apply_body_defaults(&mut args);
     args::apply_feature_needs(&mut args);
 
@@ -249,6 +250,13 @@ fn run_cli() {
         eprintln!(
             "{} --terrain is deprecated: terrain is now on by default. \
              Use --mode geo-only for flat ground.",
+            "Note:".yellow().bold()
+        );
+    }
+    if asked_mob_spawning.spawns() && !args.mob_spawning.spawns() {
+        eprintln!(
+            "{} --mob-spawning is off: Zombie Outbreak and Disasters bring their own mobs, and \
+             nothing lives off Earth.",
             "Note:".yellow().bold()
         );
     }

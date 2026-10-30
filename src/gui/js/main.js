@@ -54,6 +54,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initLodLightingCoupling();
   initCavesFillCoupling();
   initDisastersCoupling();
+  initMobSpawningLockout();
   refreshHeightLimitRow();
   refreshGameplayRows();
   // After initSettings(), so the slider label and rotation handlers exist
@@ -1273,30 +1274,14 @@ function initSettings() {
   });
   refreshHeightDisplay();
 
-  // Game mode segmented control
-  const gamemodeGroup = document.getElementById("gamemode-group");
-  gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      gamemodeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-    });
-  });
-
-  // World type segmented control
-  const worldTypeGroup = document.getElementById("world-type-group");
-  worldTypeGroup.querySelectorAll(".segment").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      worldTypeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-    });
-  });
-
-  // Signage segmented control
-  const signageGroup = document.getElementById("signage-group");
-  signageGroup.querySelectorAll(".segment").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      signageGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
+  // Segmented controls whose click only moves the active segment
+  ["gamemode-group", "world-type-group", "mob-spawning-group", "signage-group"].forEach((id) => {
+    const group = document.getElementById(id);
+    group.querySelectorAll(".segment").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        group.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+      });
     });
   });
 
@@ -1813,13 +1798,24 @@ function refreshHeightLimitRow(format) {
 // A One World's areas sit at their real heights and a superflat off Earth is
 // grass, so the backend makes both void.
 function refreshWorldTypeRow(format) {
-  const group = document.getElementById('world-type-group');
-  if (!group) return;
   const available = (format || selectedWorldFormat) === 'java'
     && selectedCelestialBody === 'earth' && !isOneWorldEnabled();
+  setSegmentedRowAvailable('world-type-group', available);
+}
+
+// Greyed the way the settings store reads it: every segment disabled, so the row is out of
+// the tab order and never shows as modified, and inert like a greyed toggle's row. The
+// active segment stays, so the choice comes back with the row.
+function setSegmentedRowAvailable(groupId, available) {
+  const group = document.getElementById(groupId);
+  if (!group) return;
   group.classList.toggle('segmented-disabled', !available);
+  group.querySelectorAll('.segment').forEach((btn) => { btn.disabled = !available; });
   const row = group.closest('.settings-row');
-  if (row) row.classList.toggle('settings-row-unavailable', !available);
+  if (row) {
+    row.classList.toggle('settings-row-unavailable', !available);
+    row.toggleAttribute('inert', !available);
+  }
 }
 
 // The extras are a Java data pack, and each One World area would write its own over
@@ -1841,6 +1837,37 @@ function refreshGameplayRows(format) {
   setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
   setSettingsRowAvailable('moving-cars-toggle', vehicles && earth);
   setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
+  // Last, as it reads whether the outbreak and the disasters are still available.
+  refreshMobSpawningRow(current);
+}
+
+// Mineclonia spawns by settings outside the world, nothing lives off Earth, and the Zombie
+// Outbreak and Disasters bring their own mobs on their own difficulty. The backend turns it
+// off in all of these too.
+function mobSpawningAvailable(format) {
+  const current = format || selectedWorldFormat;
+  return (current === 'java' || current === 'bedrock')
+    && selectedCelestialBody === 'earth'
+    && !gameplayToggle('zombie-outbreak-toggle')
+    && !gameplayToggle('disasters-toggle');
+}
+
+function refreshMobSpawningRow(format) {
+  setSegmentedRowAvailable('mob-spawning-group', mobSpawningAvailable(format));
+}
+
+// Off wherever the row is greyed, so a stale choice is never sent.
+function getMobSpawning() {
+  if (!mobSpawningAvailable()) return 'off';
+  const btn = document.querySelector('#mob-spawning-group .segment.active');
+  return btn ? btn.dataset.mobSpawning : 'off';
+}
+
+function initMobSpawningLockout() {
+  ['zombie-outbreak-toggle', 'disasters-toggle'].forEach((id) => {
+    const toggle = document.getElementById(id);
+    if (toggle) toggle.addEventListener('change', () => refreshMobSpawningRow());
+  });
 }
 
 // Disabled means unavailable for this format or body, so a stale tick is never sent.
@@ -3522,6 +3549,7 @@ async function startGeneration() {
         gamemode: gamemode,
         worldTime: worldTime,
         worldType: worldType,
+        mobSpawning: getMobSpawning(),
         mapItem: mapItem,
         signage: signage,
         mapillaryToken: getMapillaryToken(),

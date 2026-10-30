@@ -277,6 +277,8 @@ pub struct WorldEditor<'a> {
     preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
     game_mode: crate::args::GameMode,
     world_time: i64,
+    /// Bedrock only: Java writes it with the rest of its level.dat settings.
+    mob_spawning: crate::args::MobSpawning,
     /// Bedrock only: give the player a starting map that reveals the world as they explore.
     start_with_map: bool,
     /// Bedrock only: the packs that run the moving vehicles.
@@ -348,6 +350,7 @@ impl<'a> WorldEditor<'a> {
             dh: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
+            mob_spawning: crate::args::MobSpawning::Off,
             start_with_map: false,
             bedrock_addon: None,
             size_options: Default::default(),
@@ -413,6 +416,7 @@ impl<'a> WorldEditor<'a> {
             dh: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
+            mob_spawning: crate::args::MobSpawning::Off,
             start_with_map: false,
             bedrock_addon: None,
             size_options: Default::default(),
@@ -478,6 +482,7 @@ impl<'a> WorldEditor<'a> {
             dh: None,
             game_mode: crate::args::GameMode::Creative,
             world_time: 6000,
+            mob_spawning: crate::args::MobSpawning::Off,
             start_with_map: false,
             bedrock_addon: None,
             size_options: Default::default(),
@@ -788,9 +793,15 @@ impl<'a> WorldEditor<'a> {
         self.void_world = enabled;
     }
 
-    pub fn set_game_settings(&mut self, mode: crate::args::GameMode, world_time: i64) {
+    pub fn set_game_settings(
+        &mut self,
+        mode: crate::args::GameMode,
+        world_time: i64,
+        mob_spawning: crate::args::MobSpawning,
+    ) {
         self.game_mode = mode;
         self.world_time = world_time;
+        self.mob_spawning = mob_spawning;
     }
 
     /// Bedrock only: enable the starting map that reveals the world as the player explores.
@@ -2760,6 +2771,7 @@ impl<'a> WorldEditor<'a> {
         )
         .with_ground_origin((self.ground_origin_x, self.ground_origin_z))
         .with_size_options(self.size_options)
+        .with_mob_spawning(self.mob_spawning)
         .with_addon(self.bedrock_addon.take())
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }

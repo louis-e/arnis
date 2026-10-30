@@ -1202,13 +1202,37 @@ fn singleplayer_file(
     Some(world.join("players").join("data").join(name))
 }
 
-// Writes GameType, DayTime, the player's game mode and what the game generates around the
-// area into an existing level.dat.
+/// Natural spawning, in the template's 1.21.4 game rule names: 1.21.11 renames them to
+/// `spawn_mobs` and `mob_griefing` when it upgrades the world. Monsters need a difficulty
+/// above the template's Peaceful, and mob griefing off keeps creepers and endermen from
+/// taking the city apart. All three are written whatever the choice, so a level.dat written
+/// before with another one does not keep its difficulty or griefing.
+fn apply_mob_spawning(
+    data: &mut std::collections::HashMap<String, Value>,
+    mobs: crate::args::MobSpawning,
+) {
+    let flag = |on: bool| Value::String(on.to_string());
+    if let Value::Compound(rules) = data
+        .entry("GameRules".to_string())
+        .or_insert_with(|| Value::Compound(Default::default()))
+    {
+        rules.insert("doMobSpawning".to_string(), flag(mobs.spawns()));
+        rules.insert("mobGriefing".to_string(), flag(!mobs.monsters()));
+    }
+    data.insert(
+        "Difficulty".to_string(),
+        Value::Byte(mobs.java_difficulty()),
+    );
+}
+
+// Writes GameType, DayTime, the player's game mode, what spawns and what the game generates
+// around the area into an existing level.dat.
 pub fn apply_java_world_settings(
     world_path: &Path,
     game_mode: crate::args::GameMode,
     world_time: i64,
     world_type: crate::args::WorldType,
+    mob_spawning: crate::args::MobSpawning,
 ) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
@@ -1240,6 +1264,7 @@ pub fn apply_java_world_settings(
         if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
             player.insert("playerGameType".to_string(), Value::Int(game_type));
         }
+        apply_mob_spawning(data, mob_spawning);
     }
 
     // Folded into this rewrite rather than a second read/write: both need the post-generation
@@ -1783,6 +1808,7 @@ mod tests {
             crate::args::GameMode::Survival,
             13000,
             crate::args::WorldType::Void,
+            crate::args::MobSpawning::Off,
         )
         .unwrap();
 
@@ -1803,6 +1829,64 @@ mod tests {
         if let Some(Value::Compound(player)) = data.get("Player") {
             assert_eq!(player.get("playerGameType"), Some(&Value::Int(0)));
         }
+    }
+
+    #[test]
+    fn mob_spawning_sets_the_game_rules_and_the_difficulty_monsters_need() {
+        use crate::args::MobSpawning;
+        let tmp = tempfile::tempdir().unwrap();
+        // Each choice applied in turn to one new world.
+        let written = |choices: &[MobSpawning]| {
+            let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+            for &mobs in choices {
+                apply_java_world_settings(
+                    &world,
+                    crate::args::GameMode::Survival,
+                    6000,
+                    crate::args::WorldType::Void,
+                    mobs,
+                )
+                .unwrap();
+            }
+            let Value::Compound(mut root) = level_dat_root(&world) else {
+                panic!("root not a compound");
+            };
+            let Some(Value::Compound(mut data)) = root.remove("Data") else {
+                panic!("missing Data");
+            };
+            let Some(Value::Compound(rules)) = data.remove("GameRules") else {
+                panic!("missing GameRules");
+            };
+            let rule = |name: &str| match rules.get(name) {
+                Some(Value::String(v)) => v.clone(),
+                other => panic!("{name}: {other:?}"),
+            };
+            (
+                rule("doMobSpawning"),
+                rule("mobGriefing"),
+                data.get("Difficulty").cloned(),
+            )
+        };
+        let peaceful = Some(Value::Byte(0));
+        let off = ("false".into(), "true".into(), peaceful.clone());
+        assert_eq!(
+            written(&[MobSpawning::Off]),
+            off,
+            "the template as it always was"
+        );
+        assert_eq!(
+            written(&[MobSpawning::Animals]),
+            ("true".into(), "true".into(), peaceful)
+        );
+        assert_eq!(
+            written(&[MobSpawning::All]),
+            ("true".into(), "false".into(), Some(Value::Byte(2)))
+        );
+        assert_eq!(
+            written(&[MobSpawning::All, MobSpawning::Off]),
+            off,
+            "nothing of an earlier choice is left behind"
+        );
     }
 
     fn flat_layers(root: &Value) -> Vec<(String, i32)> {
@@ -1891,6 +1975,7 @@ mod tests {
             crate::args::GameMode::Creative,
             6000,
             crate::args::WorldType::Flat,
+            crate::args::MobSpawning::Off,
         )
         .unwrap();
         let vanilla_layers = flat_layers(&level_dat_root(&vanilla));
@@ -1903,6 +1988,7 @@ mod tests {
             crate::args::GameMode::Creative,
             6000,
             crate::args::WorldType::Flat,
+            crate::args::MobSpawning::Off,
         )
         .unwrap();
         let tall_layers = flat_layers(&level_dat_root(&tall));
@@ -1927,6 +2013,7 @@ mod tests {
             crate::args::GameMode::Creative,
             6000,
             crate::args::WorldType::Void,
+            crate::args::MobSpawning::Off,
         )
         .unwrap();
         let root = level_dat_root(&world);

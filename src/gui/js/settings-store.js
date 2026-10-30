@@ -39,6 +39,7 @@ const SETTINGS = [
   { id: 'gamemode-group', kind: 'segmented', store: OWN, valueAttr: 'data-gamemode' },
   { id: 'world-time-slider', kind: 'number', store: OWN },
   { id: 'world-type-group', kind: 'segmented', store: OWN, valueAttr: 'data-world-type' },
+  { id: 'mob-spawning-group', kind: 'segmented', store: OWN, valueAttr: 'data-mob-spawning' },
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   // Turning One World off writes its pinned values back, so a reset does it first.
