@@ -727,13 +727,19 @@ impl BridgeStructureMap {
                 .map(|cs| cs.iter().map(|&(x, z)| along(x, z)).collect())
                 .collect();
             // How far the deck reaches along its axis. Not the members' lengths summed, which
-            // counts a footbridge beside the road as more length.
+            // counts a footbridge beside the road as more length; but no shorter than its
+            // longest member walks, or a curved ramp would measure only its chord.
             let (u_min, u_max) = us
                 .iter()
                 .flatten()
                 .fold((f32::MAX, f32::MIN), |(lo, hi), &u| (lo.min(u), hi.max(u)));
             let span = (u_max - u_min).max(0.0);
-            let short = span < SHORT_BRIDGE_LENGTH_BLOCKS;
+            let longest_member = group_indices
+                .iter()
+                .map(|&i| way_length_blocks(bridge_ways[i]))
+                .max()
+                .unwrap_or(0);
+            let short = span.max(longest_member as f32) < SHORT_BRIDGE_LENGTH_BLOCKS;
             // A loop or hairpin maps two places onto one axis position; keep it level.
             let follows_axis = axis_len >= 1.0
                 && group_indices.iter().enumerate().all(|(m, &idx)| {
@@ -2872,6 +2878,31 @@ mod tests {
             let profile = ys(&structures, id);
             assert!(profile.iter().all(|&y| y == 0), "way {id}: {profile:?}");
         }
+    }
+
+    #[test]
+    fn a_curved_deck_is_as_long_as_it_walks_not_as_its_chord() {
+        // A half turn about 44 blocks long whose ends are only 28 apart.
+        let curve: Vec<(i32, i32)> = (0..=10)
+            .map(|i| {
+                let a = f64::from(i) * std::f64::consts::PI / 10.0;
+                (
+                    20 + (14.0 * (1.0 - a.cos())).round() as i32,
+                    40 + (14.0 * a.sin()).round() as i32,
+                )
+            })
+            .collect();
+        let bridge = way_with(
+            1,
+            &[
+                ("highway", "residential"),
+                ("bridge", "yes"),
+                ("layer", "1"),
+            ],
+            &curve,
+        );
+        let (structures, _) = structures_over(&[bridge], |_| 0.0);
+        assert!(*ys(&structures, 1).iter().max().unwrap() > 0);
     }
 
     #[test]
