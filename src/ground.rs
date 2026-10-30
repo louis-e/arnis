@@ -1747,12 +1747,10 @@ fn flat_overflow(
     peaks: &crate::elevation::PeakSource,
 ) -> Option<RaisedFor> {
     let hints = peaks.take();
+    // Counted whole, as the fit counts them: a tall building the area's edge cuts is still
+    // partly built, and too high a ceiling costs a section where too low a one cuts it off.
     let tallest = |structures: &[crate::elevation::TallModel]| {
-        structures
-            .iter()
-            .filter(|m| crate::elevation::peaks::inside(bbox, m.lat, m.lon))
-            .map(|m| m.height_m)
-            .fold(0.0, f64::max)
+        structures.iter().map(|m| m.height_m).fold(0.0, f64::max)
     };
     // Overture's list can be read only once, so its tallest is kept on the way past.
     let overture = std::cell::Cell::new(None);
