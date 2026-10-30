@@ -1420,6 +1420,7 @@ fn gui_start_generation(
     gamemode: String,
     world_time: i64,
     world_type: String,
+    mob_spawning: String,
     map_item: bool,
     signage: String,
     mapillary_token: String,
@@ -1685,6 +1686,10 @@ fn gui_start_generation(
                 gamemode: crate::args::GameMode::from_str_lossy(&gamemode),
                 world_time: world_time.clamp(0, 23999),
                 world_type: crate::args::WorldType::from_str_lossy(&world_type),
+                // The frontend sends off wherever the row is greyed, and `apply_body_defaults`
+                // and `apply_feature_needs` turn it off again off Earth and beside the
+                // Zombie Outbreak and Disasters. Luanti never reads it.
+                mob_spawning: crate::args::MobSpawning::from_str_lossy(&mob_spawning),
                 map_item,
                 // Frontend refuses previews for rotated worlds, skip the work there.
                 map_preview: world_format != WorldFormat::LuantiWorld

@@ -394,6 +394,7 @@ pub struct BedrockWriter {
     game_mode: crate::args::GameMode,
     world_time: i64,
     start_with_map: bool,
+    mob_spawning: crate::args::MobSpawning,
     size_options: WorldSizeOptions,
     addon: Option<crate::bedrock_addon::Addon>,
 }
@@ -432,6 +433,7 @@ impl BedrockWriter {
             game_mode,
             world_time,
             start_with_map,
+            mob_spawning: crate::args::MobSpawning::Off,
             size_options: WorldSizeOptions::default(),
             addon: None,
         }
@@ -446,6 +448,12 @@ impl BedrockWriter {
     /// Where the ground grid starts, which the biomes and the spawn height read it from.
     pub fn with_ground_origin(mut self, origin: (i32, i32)) -> Self {
         self.ground_origin = Some(origin);
+        self
+    }
+
+    /// What spawns on its own, which also picks the difficulty.
+    pub fn with_mob_spawning(mut self, mobs: crate::args::MobSpawning) -> Self {
+        self.mob_spawning = mobs;
         self
     }
 
@@ -635,6 +643,8 @@ impl BedrockWriter {
             .unwrap_or_default()
             .as_secs() as i64;
 
+        let mobs = self.mob_spawning;
+
         // Build complete level.dat NBT structure
         let level_dat = BedrockLevelDat {
             // Version information - critical for Bedrock to recognize the world
@@ -657,11 +667,11 @@ impl BedrockWriter {
             // World generation - Flat/Void world
             generator: 2, // Flat
             flat_world_layers: r#"{"biome_id":1,"encoding_version":6,"preset_id":"TheVoid","world_version":"version.post_1_18"}"#.to_string(),
-            spawn_mobs: false,
+            spawn_mobs: mobs.spawns(),
 
             // Game settings
             game_type: self.game_mode.bedrock_game_type(),
-            difficulty: 2, // Normal
+            difficulty: mobs.bedrock_difficulty(),
             force_game_type: false,
 
             // Time
@@ -687,12 +697,13 @@ impl BedrockWriter {
             // Game rules
             do_daylight_cycle: true,
             do_weather_cycle: true,
-            do_mob_spawning: false,
+            do_mob_spawning: mobs.spawns(),
             do_mob_loot: true,
             do_tile_drops: true,
             do_entity_drops: true,
             do_fire_tick: true,
-            mob_griefing: true,
+            // Off with monsters, so creepers and endermen leave the city standing.
+            mob_griefing: !mobs.monsters(),
             natural_regeneration: true,
             pvp: true,
             keep_inventory: false,
@@ -2275,6 +2286,52 @@ mod tests {
         // Verify the mcworld was created
         let mcworld_path = output_dir.with_extension("mcworld");
         assert!(mcworld_path.exists(), "mcworld file should exist");
+    }
+
+    #[test]
+    fn mob_spawning_sets_the_game_rules_and_the_difficulty_monsters_need() {
+        use crate::args::MobSpawning;
+        use std::io::Read;
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let world = WorldToModify::default();
+        let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+
+        let written = |mobs: MobSpawning| {
+            let output_dir = temp_dir.path().join(format!("{mobs:?}"));
+            test_writer(output_dir.clone())
+                .with_mob_spawning(mobs)
+                .write_world(&world, &xzbbox, &llbbox)
+                .expect("write_world");
+            let file = fs::File::open(output_dir.with_extension("mcworld")).unwrap();
+            let mut archive = ZipArchive::new(file).unwrap();
+            let mut raw = Vec::new();
+            archive
+                .by_name("level.dat")
+                .unwrap()
+                .read_to_end(&mut raw)
+                .unwrap();
+            let mut nbt = &raw[8..];
+            let level: StdHashMap<String, nbtx::Value> = nbtx::from_le_bytes(&mut nbt).unwrap();
+            let flag = |key: &str| match level.get(key) {
+                Some(nbtx::Value::Byte(b)) => *b != 0,
+                other => panic!("{key}: {other:?}"),
+            };
+            let difficulty = match level.get("Difficulty") {
+                Some(nbtx::Value::Int(d)) => *d,
+                other => panic!("Difficulty: {other:?}"),
+            };
+            (
+                flag("domobspawning"),
+                flag("spawnMobs"),
+                flag("mobgriefing"),
+                difficulty,
+            )
+        };
+
+        assert_eq!(written(MobSpawning::Off), (false, false, true, 2));
+        assert_eq!(written(MobSpawning::Animals), (true, true, true, 0));
+        assert_eq!(written(MobSpawning::All), (true, true, false, 2));
     }
 
     #[test]

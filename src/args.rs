@@ -271,6 +271,13 @@ pub struct Args {
     #[arg(long = "world-type", value_enum, default_value_t = WorldType::Void)]
     pub world_type: WorldType,
 
+    /// Natural mob spawning, Java and Bedrock. `animals` puts the world on Peaceful, so only
+    /// animals, fish and bats turn up; `all` puts it on Normal for monsters too, with mob
+    /// griefing off so creepers and endermen leave the city standing. Earth only; Zombie
+    /// Outbreak and Disasters keep it off, as they bring their own mobs.
+    #[arg(long = "mob-spawning", value_enum, default_value_t = MobSpawning::Off)]
+    pub mob_spawning: MobSpawning,
+
     /// Readable image signs, Java only. `basic` covers public signage: street names,
     /// traffic signs, transit stops, information boards and billboards. `full` adds
     /// building signage: shop name plates, house numbers and crossing signs.
@@ -700,6 +707,57 @@ impl WorldType {
     }
 }
 
+/// What spawns in the world on its own. Monsters only spawn above Peaceful on every version
+/// Arnis supports, so the difficulty is what separates the two kinds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum MobSpawning {
+    /// Nothing, as the game rules Arnis has always written.
+    #[default]
+    Off,
+    /// Animals, fish and bats, on Peaceful.
+    Animals,
+    /// Animals and monsters, on Normal, with mob griefing off.
+    All,
+}
+
+impl MobSpawning {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "animals" => MobSpawning::Animals,
+            "all" => MobSpawning::All,
+            _ => MobSpawning::Off,
+        }
+    }
+
+    /// The `doMobSpawning` game rule.
+    pub fn spawns(self) -> bool {
+        self != MobSpawning::Off
+    }
+
+    /// Whether monsters come too, which takes a difficulty above Peaceful and mob griefing
+    /// off, so creepers and endermen cannot take the generated city apart.
+    pub fn monsters(self) -> bool {
+        self == MobSpawning::All
+    }
+
+    /// Normal for monsters, else Peaceful, as the template has always been.
+    pub fn java_difficulty(self) -> i8 {
+        if self.monsters() {
+            2
+        } else {
+            0
+        }
+    }
+
+    /// Normal, as Arnis has always written, except Peaceful where only animals are to spawn.
+    pub fn bedrock_difficulty(self) -> i32 {
+        match self {
+            MobSpawning::Animals => 0,
+            MobSpawning::Off | MobSpawning::All => 2,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
 pub enum GameMode {
     Survival,
@@ -738,13 +796,19 @@ impl GameMode {
 pub const DISASTER_GROUND_LEVEL: i32 = -40;
 
 /// What some features need from the rest of the world: caves carve into the filled ground,
-/// and disasters dig holes in it, with rock under even the lowest ground.
+/// and disasters dig holes in it, with rock under even the lowest ground. The Zombie
+/// Outbreak sends its own waves, and Disasters play on Normal, which would let monsters in
+/// beside Animals, and need mob griefing for their meteors to crater, so both keep natural
+/// spawning off.
 pub fn apply_feature_needs(args: &mut Args) {
     if args.caves || args.disasters {
         args.fillground = true;
     }
     if args.disasters {
         args.ground_level = args.ground_level.max(DISASTER_GROUND_LEVEL);
+    }
+    if args.zombie_outbreak || args.disasters {
+        args.mob_spawning = MobSpawning::Off;
     }
 }
 
@@ -786,6 +850,8 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.traffic_lights = false;
     args.discoveries = false;
     args.moving_vehicles = false;
+    // Nothing lives there, and the one barren biome would still spawn zombies.
+    args.mob_spawning = MobSpawning::Off;
     // Airless bodies look right at night. Only a default: comparing against the
     // flag's own default lets an explicit --world-time win.
     if args.world_time == DEFAULT_WORLD_TIME {
@@ -863,6 +929,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
 
     if args.map_preview && args.luanti {
         return Err("--map-preview is not supported for Luanti worlds.".to_string());
+    }
+
+    // Mineclonia spawns by its own settings, which live outside the world.
+    if args.mob_spawning.spawns() && args.luanti {
+        return Err("--mob-spawning is not available for Luanti worlds.".to_string());
     }
 
     if args.one_world {
@@ -1182,6 +1253,51 @@ mod tests {
         let higher = parse(&["--disasters", "--ground-level", "10"]);
         assert_eq!(higher.ground_level, 10);
         assert!(parse(&["--caves"]).fillground);
+    }
+
+    #[test]
+    fn mob_spawning_stays_off_where_the_world_brings_its_own_mobs() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::parse_from(cmd.iter());
+            apply_body_defaults(&mut args);
+            apply_feature_needs(&mut args);
+            args
+        };
+        assert_eq!(parse(&[]).mob_spawning, MobSpawning::Off);
+        let animals = parse(&["--mob-spawning", "animals"]);
+        assert_eq!(animals.mob_spawning, MobSpawning::Animals);
+        assert!(validate_args(&animals).is_ok());
+        let bedrock = parse(&["--bedrock", "--mob-spawning", "all"]);
+        assert_eq!(bedrock.mob_spawning, MobSpawning::All);
+        assert!(validate_args(&bedrock).is_ok());
+
+        for extra in [
+            &["--zombie-outbreak"][..],
+            &["--disasters"],
+            &["--body", "moon"],
+        ] {
+            let mut cmd = extra.to_vec();
+            cmd.extend(["--mob-spawning", "all"]);
+            assert_eq!(parse(&cmd).mob_spawning, MobSpawning::Off, "{extra:?}");
+        }
+
+        let luanti = validate_args(&parse(&["--luanti", "--mob-spawning", "animals"])).unwrap_err();
+        assert!(luanti.contains("--mob-spawning"), "{luanti}");
+        assert!(validate_args(&parse(&["--luanti"])).is_ok());
+
+        assert_eq!(MobSpawning::from_str_lossy("animals"), MobSpawning::Animals);
+        assert_eq!(MobSpawning::from_str_lossy("all"), MobSpawning::All);
+        assert_eq!(MobSpawning::from_str_lossy("bogus"), MobSpawning::Off);
+        assert!(!MobSpawning::Off.spawns() && !MobSpawning::Off.monsters());
+        assert!(MobSpawning::Animals.spawns() && !MobSpawning::Animals.monsters());
+        assert!(MobSpawning::All.spawns() && MobSpawning::All.monsters());
+        let difficulties = [MobSpawning::Off, MobSpawning::Animals, MobSpawning::All]
+            .map(|m| (m.java_difficulty(), m.bedrock_difficulty()));
+        assert_eq!(difficulties, [(0, 2), (0, 0), (2, 2)]);
     }
 
     #[test]

@@ -845,7 +845,7 @@ pub fn generate_world_with_options(
         crate::world_utils::remove_untouched_template_region(&output_path);
     }
     editor.set_place_schematics(args.use_3d);
-    editor.set_game_settings(args.gamemode, args.world_time);
+    editor.set_game_settings(args.gamemode, args.world_time, args.mob_spawning);
     editor.set_start_with_map(args.map_item);
     editor.set_size_options(crate::world_utils::WorldSizeOptions::of(args));
     editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
@@ -2408,6 +2408,7 @@ pub fn generate_world_with_options(
             args.gamemode,
             args.world_time,
             args.world_type,
+            args.mob_spawning,
         ) {
             eprintln!("Warning: Failed to apply world settings: {e}");
         }
