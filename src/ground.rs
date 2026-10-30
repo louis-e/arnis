@@ -1495,15 +1495,15 @@ pub fn generate_ground_data(
             &frame,
             peaks,
         );
+        let mut raised_for = ground.elevation_data.as_ref().and_then(|d| d.raised_for);
         if auto && !ground.elevation_enabled {
-            ground.extended_ceiling = height.extended || !flat_fits_vanilla(args, &bbox, peaks);
+            raised_for = (!height.extended)
+                .then(|| flat_overflow(args, &bbox, ground.base_level(), peaks))
+                .flatten();
+            ground.extended_ceiling = height.extended || raised_for.is_some();
         }
         if auto && ground.extended_ceiling {
-            let raised_for = ground
-                .elevation_data
-                .as_ref()
-                .and_then(|d| d.raised_for)
-                .map(|r| r.with_overture(peaks, args.scale));
+            let raised_for = raised_for.map(|r| r.with_overture(peaks, args.scale));
             extend_world_bounds(args, ground.base_level(), raised_for);
         }
         ground.set_winter(args.winter);
@@ -1529,9 +1529,13 @@ pub fn generate_ground_data(
         args.canopy_height,
         &frame,
     );
-    if auto && (height.extended || !flat_fits_vanilla(args, &bbox, peaks)) {
+    let raised_for = (auto && !height.extended)
+        .then(|| flat_overflow(args, &bbox, ground.base_level(), peaks))
+        .flatten();
+    if auto && (height.extended || raised_for.is_some()) {
         ground.extended_ceiling = true;
-        extend_world_bounds(args, ground.base_level(), None);
+        let raised_for = raised_for.map(|r| r.with_overture(peaks, args.scale));
+        extend_world_bounds(args, ground.base_level(), raised_for);
     }
     ground.set_winter(args.winter);
     crate::world_editor::set_base_chunk_y(ground.base_level());
@@ -1733,12 +1737,32 @@ fn sized_world_bounds(base: i32, raised_for: RaisedFor) -> (i32, i32) {
     (min, max)
 }
 
-/// Without a relief to fit: whether every tall structure stays under vanilla's ceiling.
-/// Takes the hints, so it is only for a run whose elevation fetch did not take them.
-fn flat_fits_vanilla(args: &Args, bbox: &LLBBox, peaks: &crate::elevation::PeakSource) -> bool {
+/// Without a relief to fit: None when every tall structure stays under vanilla's ceiling,
+/// else what the raised range has to hold on flat ground at `base`. Takes the hints, so it
+/// is only for a run whose elevation fetch did not take them.
+fn flat_overflow(
+    args: &Args,
+    bbox: &LLBBox,
+    base: i32,
+    peaks: &crate::elevation::PeakSource,
+) -> Option<RaisedFor> {
+    let hints = peaks.take();
+    let tallest = |structures: &[crate::elevation::TallModel]| {
+        structures
+            .iter()
+            .filter(|m| crate::elevation::peaks::inside(bbox, m.lat, m.lon))
+            .map(|m| m.height_m)
+            .fold(0.0, f64::max)
+    };
+    // Overture's list can be read only once, so its tallest is kept on the way past.
+    let overture = std::cell::Cell::new(None);
     let why = crate::elevation::vanilla_misses(
-        &peaks.take(),
-        || peaks.take_overture(),
+        &hints,
+        || {
+            let structures = peaks.take_overture();
+            overture.set(Some(tallest(&structures)));
+            structures
+        },
         |structures| {
             structures
                 .iter()
@@ -1755,14 +1779,16 @@ fn flat_fits_vanilla(args: &Args, bbox: &LLBBox, peaks: &crate::elevation::PeakS
                 args.ground_level,
             )
         },
-    );
-    match why {
-        Some(why) => {
-            eprintln!("Extended build height: {why}");
-            false
-        }
-        None => true,
-    }
+    )?;
+    eprintln!("Extended build height: {why}");
+    let tallest_m = tallest(&hints.tall_models)
+        .max(tallest(&hints.tall_structures))
+        .max(overture.get().unwrap_or(0.0));
+    Some(RaisedFor {
+        terrain_top_y: base,
+        tallest_blocks: (tallest_m * args.scale).ceil() as i32,
+        overture_pending: hints.overture_follows && overture.get().is_none(),
+    })
 }
 
 /// After the terrain fit: a run that picked its build height from the area takes the one
