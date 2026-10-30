@@ -136,34 +136,45 @@ fn inland_reach(land_cover: &LandCoverData) -> usize {
 fn spread_inland(grid: &[Vec<u8>], inland: &mut InlandWater, reach: usize) {
     let height = grid.len();
     let width = grid.first().map_or(0, |r| r.len());
-    let mut frontier: Vec<(usize, usize)> = Vec::new();
+    let open = |inland: &InlandWater, x: usize, z: usize| {
+        x < width && z < height && grid[z][x] == LC_WATER && !inland.get(x, z)
+    };
+    let around = |x: usize, z: usize| {
+        [
+            (x.wrapping_sub(1), z),
+            (x + 1, z),
+            (x, z.wrapping_sub(1)),
+            (x, z + 1),
+        ]
+    };
+    // Only marked water on the edge of unmarked water seeds, kept as flat u32 indices.
+    let mut frontier: Vec<u32> = Vec::new();
     for (z, row) in grid.iter().enumerate() {
         for (x, &c) in row.iter().enumerate() {
-            if c == LC_WATER && inland.get(x, z) {
-                frontier.push((x, z));
+            if c == LC_WATER
+                && inland.get(x, z)
+                && around(x, z).iter().any(|&(nx, nz)| open(inland, nx, nz))
+            {
+                frontier.push((z * width + x) as u32);
             }
         }
     }
+    let mut next = Vec::new();
     for _ in 0..reach {
-        let mut next = Vec::new();
-        for &(x, z) in &frontier {
-            let around = [
-                (x.wrapping_sub(1), z),
-                (x + 1, z),
-                (x, z.wrapping_sub(1)),
-                (x, z + 1),
-            ];
-            for (nx, nz) in around {
-                if nx < width && nz < height && grid[nz][nx] == LC_WATER && !inland.get(nx, nz) {
+        if frontier.is_empty() {
+            break;
+        }
+        for &i in &frontier {
+            let (x, z) = (i as usize % width, i as usize / width);
+            for (nx, nz) in around(x, z) {
+                if open(inland, nx, nz) {
                     inland.set(nx, nz);
-                    next.push((nx, nz));
+                    next.push((nz * width + nx) as u32);
                 }
             }
         }
-        if next.is_empty() {
-            break;
-        }
-        frontier = next;
+        std::mem::swap(&mut frontier, &mut next);
+        next.clear();
     }
 }
 

@@ -305,7 +305,11 @@ fn rotate_ground_data(
     let has_land_cover = original_ground.has_land_cover();
     let mut new_cover: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
     let mut new_water: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
-    let mut new_inland = crate::land_cover::InlandWater::new(new_w, new_h);
+    let mut new_inland = if has_land_cover {
+        crate::land_cover::InlandWater::new(new_w, new_h)
+    } else {
+        crate::land_cover::InlandWater::default()
+    };
     // Canopy shares the land-cover grid, so it rides the same samples.
     let has_canopy = original_ground.has_canopy();
     let mut new_canopy: Option<Vec<u8>> =

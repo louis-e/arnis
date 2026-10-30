@@ -143,27 +143,33 @@ pub fn mark_beaches(lc: &mut LandCoverData) {
 
 // ─── Data structures ──────────────────────────────────────────────────────
 
-/// One bit per grid cell; empty reads as all false.
+/// One bit per grid cell, allocated on the first mark; empty reads as all false.
 #[derive(Clone, Default)]
 pub struct InlandWater {
     bits: Vec<u64>,
     width: usize,
+    height: usize,
 }
 
 impl InlandWater {
     pub fn new(width: usize, height: usize) -> Self {
         Self {
-            bits: vec![0; (width * height).div_ceil(64)],
+            bits: Vec::new(),
             width,
+            height,
         }
     }
 
     #[inline]
     pub fn set(&mut self, x: usize, z: usize) {
-        let i = z * self.width + x;
-        if let Some(w) = self.bits.get_mut(i / 64) {
-            *w |= 1 << (i % 64);
+        if x >= self.width || z >= self.height {
+            return;
         }
+        if self.bits.is_empty() {
+            self.bits = vec![0; (self.width * self.height).div_ceil(64)];
+        }
+        let i = z * self.width + x;
+        self.bits[i / 64] |= 1 << (i % 64);
     }
 
     #[inline]

@@ -493,7 +493,8 @@ fn military_ground(
         }
         _ => {
             // Arid and polar bases sit on the region's own ground.
-            if let Some((surface, _)) = climate.surface_palette(cover, x, z) {
+            let red = crate::biome::red_earth(climate, editor.ecoregion(x, z));
+            if let Some((surface, _)) = climate.surface_palette(cover, x, z, red) {
                 return Some(surface);
             }
             // Vehicle tracks and training ground as organic patches in the grass: about a

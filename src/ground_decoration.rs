@@ -19,9 +19,10 @@ use crate::block_definitions::{
     LARGE_FERN_LOWER, LARGE_FERN_UPPER, LILAC_LOWER, LILAC_UPPER, LILY_OF_THE_VALLEY, LILY_PAD,
     MANGROVE_LOG, MOSS_BLOCK, MOSS_CARPET, MUD, MYCELIUM, OAK_LEAVES, OAK_LOG, ORANGE_TERRACOTTA,
     ORANGE_TULIP, OXEYE_DAISY, PEONY_LOWER, PEONY_UPPER, PINK_TULIP, PODZOL, PUMPKIN, RED_FLOWER,
-    RED_MUSHROOM, RED_TERRACOTTA, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND, SPRUCE_LEAVES,
-    SPRUCE_LOG, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH, TALL_GRASS_BOTTOM,
-    TALL_GRASS_TOP, TERRACOTTA, WATER, WHITE_FLOWER, WHITE_TULIP, YELLOW_FLOWER, YELLOW_TERRACOTTA,
+    RED_MUSHROOM, RED_SAND, RED_TERRACOTTA, RED_TULIP, ROSE_BUSH_LOWER, ROSE_BUSH_UPPER, SAND,
+    SPRUCE_LEAVES, SPRUCE_LOG, SUGAR_CANE, SUNFLOWER_LOWER, SUNFLOWER_UPPER, SWEET_BERRY_BUSH,
+    TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TERRACOTTA, WATER, WHITE_FLOWER, WHITE_TULIP, YELLOW_FLOWER,
+    YELLOW_TERRACOTTA,
 };
 use crate::climate::Climate;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
@@ -488,9 +489,10 @@ fn features(habitat: Habitat) -> &'static [(Feature, u32)] {
 
 const SOIL: &[Block] = &[GRASS_BLOCK, PODZOL, DIRT, COARSE_DIRT, MOSS_BLOCK];
 const SHADE_SOIL: &[Block] = &[GRASS_BLOCK, PODZOL, DIRT, COARSE_DIRT, MOSS_BLOCK, MYCELIUM];
-const CANE_SOIL: &[Block] = &[GRASS_BLOCK, DIRT, COARSE_DIRT, PODZOL, SAND, MUD];
+const CANE_SOIL: &[Block] = &[GRASS_BLOCK, DIRT, COARSE_DIRT, PODZOL, SAND, RED_SAND, MUD];
 const DRY_SOIL: &[Block] = &[
     SAND,
+    RED_SAND,
     COARSE_DIRT,
     DIRT,
     TERRACOTTA,
@@ -759,7 +761,7 @@ fn grow_patch(
                     3 => 3,
                     _ => 2,
                 };
-                place_stack(editor, x, y, z, &[SAND], CACTUS, height, true);
+                place_stack(editor, x, y, z, &[SAND, RED_SAND], CACTUS, height, true);
             }
             Feature::LilyPads => {
                 if editor.check_for_block_absolute(x, y, z, Some(&[WATER]), None)

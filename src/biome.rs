@@ -44,6 +44,18 @@ impl Cell {
 /// Red sand and rock country: Australia's interior deserts and the Colorado Plateau.
 const RED_EARTH: [u16; 9] = [207, 208, 209, 210, 211, 213, 214, 215, 429];
 
+/// Whether the ground is red earth: a dry climate in one of the `RED_EARTH` ecoregions.
+pub(crate) fn red_earth(climate: Climate, eco: Option<Ecoregion>) -> bool {
+    matches!(
+        climate,
+        Climate::HotDesert
+            | Climate::ColdDesert
+            | Climate::HotSteppe
+            | Climate::ColdSteppe
+            | Climate::DryContinental
+    ) && eco.is_some_and(|e| RED_EARTH.contains(&e.id))
+}
+
 /// Slope from which bare ground reads as a rock face, in `Ground::slope` units.
 const ROCK_FACE_SLOPE: i32 = 4;
 
@@ -122,23 +134,15 @@ fn mountain_biome(c: &Cell, climate: Climate) -> Option<&'static str> {
 /// Land biome from the ecoregion where it beats the climate alone.
 fn ecoregion_biome(lc: u8, climate: Climate, eco: Option<Ecoregion>) -> Option<&'static str> {
     use EcoBiome::*;
-    let eco = eco?;
-    let dry = matches!(
-        climate,
-        Climate::HotDesert
-            | Climate::ColdDesert
-            | Climate::HotSteppe
-            | Climate::ColdSteppe
-            | Climate::DryContinental
-    );
     let open = matches!(lc, LC_TREE_COVER | LC_SHRUBLAND | LC_GRASSLAND | LC_BARE);
-    if dry && open && RED_EARTH.contains(&eco.id) {
+    if open && red_earth(climate, eco) {
         return Some(if lc == LC_TREE_COVER {
             "minecraft:wooded_badlands"
         } else {
             "minecraft:badlands"
         });
     }
+    let eco = eco?;
     if matches!(
         climate,
         Climate::HotDesert
@@ -736,6 +740,17 @@ mod tests {
             ecoregion_biome(LC_BARE, Climate::Temperate, lookup(429)),
             None
         );
+    }
+
+    #[test]
+    fn red_earth_needs_a_dry_climate_and_a_red_ecoregion() {
+        use crate::ecoregion::lookup;
+        assert!(red_earth(Climate::HotDesert, lookup(210)));
+        assert!(red_earth(Climate::DryContinental, lookup(429)));
+        // Not in a wet climate, in the pale Arabian sands, or without an ecoregion.
+        assert!(!red_earth(Climate::Temperate, lookup(429)));
+        assert!(!red_earth(Climate::HotDesert, lookup(809)));
+        assert!(!red_earth(Climate::HotDesert, None));
     }
 
     #[test]
