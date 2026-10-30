@@ -15,7 +15,9 @@ use std::sync::Arc;
 
 const LAYER_HEIGHT_STEP: i32 = 6;
 const FLAT_TERRAIN_DIP_THRESHOLD: i32 = 4;
-const SHORT_BRIDGE_LENGTH_BLOCKS: usize = 30;
+/// A deck shorter than this, along its axis, stays at its ends' level over flat ground:
+/// two of the shortest 15-block ramps would leave it less than 10 level blocks between them.
+const SHORT_BRIDGE_LENGTH_BLOCKS: f32 = 40.0;
 const BRIDGE_NAME_FUSE_DISTANCE_BLOCKS: i32 = 200;
 const DUAL_CARRIAGEWAY_MAX_DISTANCE_BLOCKS: f32 = 12.0;
 const DUAL_CARRIAGEWAY_HEADING_TOLERANCE_DEG: f32 = 20.0;
@@ -722,6 +724,14 @@ impl BridgeStructureMap {
                 .iter()
                 .map(|cs| cs.iter().map(|&(x, z)| along(x, z)).collect())
                 .collect();
+            // How far the deck reaches along its axis. Not the members' lengths summed, which
+            // counts a footbridge beside the road as more length.
+            let (u_min, u_max) = us
+                .iter()
+                .flatten()
+                .fold((f32::MAX, f32::MIN), |(lo, hi), &u| (lo.min(u), hi.max(u)));
+            let span = (u_max - u_min).max(0.0);
+            let short = span < SHORT_BRIDGE_LENGTH_BLOCKS;
             // A loop or hairpin maps two places onto one axis position; keep it level.
             let follows_axis = axis_len >= 1.0
                 && group_indices.iter().enumerate().all(|(m, &idx)| {
@@ -783,7 +793,9 @@ impl BridgeStructureMap {
                     let (nx, nz) = path[(i + 1).min(path.len() - 1)];
                     let heading = ((nx - px) as f32, (nz - pz) as f32);
                     for seg in obstacles.at(x, z) {
-                        if dist_to_segment(x as f32, z as f32, seg) > seg.reach
+                        // A short deck clears only what cannot pass under it at its level.
+                        if (short && !seg.must_clear)
+                            || dist_to_segment(x as f32, z as f32, seg) > seg.reach
                             || !crosses(heading, seg)
                         {
                             continue;
@@ -819,9 +831,7 @@ impl BridgeStructureMap {
                 let (s, e) = ends(idx);
                 is_edge(s) || is_edge(e)
             });
-            let flat_span = has_boundary_endpoint
-                && dip < FLAT_TERRAIN_DIP_THRESHOLD
-                && total_length >= SHORT_BRIDGE_LENGTH_BLOCKS;
+            let flat_span = has_boundary_endpoint && dip < FLAT_TERRAIN_DIP_THRESHOLD && !short;
             let mut clearance = if flat_span {
                 max_layer * LAYER_HEIGHT_STEP
             } else {
@@ -833,11 +843,6 @@ impl BridgeStructureMap {
             if clearance > 0 {
                 let plateau = terrain_max + clearance;
                 level_deck = level_deck.max(plateau);
-                let (u_min, u_max) = us
-                    .iter()
-                    .flatten()
-                    .fold((f32::MAX, f32::MIN), |(lo, hi), &u| (lo.min(u), hi.max(u)));
-                let span = (u_max - u_min).max(0.0);
                 let ramp = (span * 0.35).clamp(15.0, 50.0).min(span / 2.0);
                 let mut placed = false;
                 for (m, &idx) in group_indices.iter().enumerate() {
@@ -1944,6 +1949,8 @@ struct GradeSegment {
     // Distance from the centerline still inside the way's footprint.
     reach: f32,
     headroom: i32,
+    // Roads and rails, which a short deck still has to clear; water and paths it need not.
+    must_clear: bool,
     // Index into `GradeObstacles::ways`.
     way: usize,
 }
@@ -1967,8 +1974,9 @@ impl<'a> GradeObstacles<'a> {
             let ProcessedElement::Way(way) = elem else {
                 continue;
             };
-            let Some((half, headroom)) = grade_obstacle(way, scale)
-                .or_else(|| waterway_clearance(way).map(|headroom| (0, headroom)))
+            let Some((half, headroom, must_clear)) = grade_obstacle(way, scale)
+                .map(|(half, headroom)| (half, headroom, headroom >= ROAD_HEADROOM))
+                .or_else(|| waterway_clearance(way).map(|headroom| (0, headroom, false)))
             else {
                 continue;
             };
@@ -1993,6 +2001,7 @@ impl<'a> GradeObstacles<'a> {
                     bz: pair[1].z as f32,
                     reach,
                     headroom,
+                    must_clear,
                     way: w,
                 });
                 for bx in x0.div_euclid(OBSTACLE_GRID_CELL)..=x1.div_euclid(OBSTACLE_GRID_CELL) {
@@ -2823,6 +2832,42 @@ mod tests {
             *profile.last().unwrap() >= ROAD_HEADROOM,
             "stays up at the cut: {profile:?}"
         );
+    }
+
+    /// Münchener Straße over the Fehlbach in Erding, with the footbridges either side of
+    /// it, at 48.3057, 11.9053: one structure about 30 blocks long, too short for ramps.
+    #[test]
+    fn a_short_road_bridge_with_footbridges_over_a_river_stays_level() {
+        let layer_one = |highway| [("highway", highway), ("bridge", "yes"), ("layer", "1")];
+        let ways = [
+            way_with(1, &layer_one("tertiary"), &[(60, 46), (39, 58), (38, 59)]),
+            way_with(2, &layer_one("footway"), &[(38, 53), (60, 42)]),
+            way_with(
+                3,
+                &layer_one("footway"),
+                &[(37, 65), (43, 60), (52, 54), (61, 49)],
+            ),
+            way_with(4, &[("waterway", "river")], &[(55, 82), (49, 4)]),
+            way_with(5, &[("highway", "tertiary")], &[(69, 42), (60, 46)]),
+            way_with(
+                6,
+                &[("highway", "tertiary")],
+                &[(38, 59), (37, 60), (30, 65)],
+            ),
+            way_with(7, &[("highway", "footway")], &[(60, 42), (68, 37)]),
+            way_with(
+                8,
+                &[("highway", "footway")],
+                &[(38, 53), (36, 50), (30, 45)],
+            ),
+            way_with(9, &[("highway", "footway")], &[(61, 49), (69, 46)]),
+            way_with(10, &[("highway", "footway")], &[(28, 76), (37, 65)]),
+        ];
+        let (structures, _) = structures_over(&ways, |_| 0.0);
+        for id in 1..=3 {
+            let profile = ys(&structures, id);
+            assert!(profile.iter().all(|&y| y == 0), "way {id}: {profile:?}");
+        }
     }
 
     #[test]
