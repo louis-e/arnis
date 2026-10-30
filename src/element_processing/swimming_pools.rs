@@ -178,7 +178,9 @@ fn place(editor: &mut WorldEditor, block: Block, x: i32, y: i32, z: i32, ground_
         return;
     }
     match editor.get_block_absolute(x, y, z) {
-        None => editor.set_block_absolute(block, x, y, z, None, None),
+        None => {
+            editor.set_block_absolute(block, x, y, z, None, None);
+        }
         Some(existing) if is_tree_part(existing) => {
             clear_tree_from(editor, x, y, z);
             editor.set_block_absolute(block, x, y, z, None, None);
