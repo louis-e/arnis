@@ -157,6 +157,8 @@ impl ElevationProvider for PlanetaryDem {
 
         Ok(RawElevationGrid {
             heights_meters: heights,
+            // One archive per body, at one resolution.
+            source_pixels: None,
         })
     }
 }

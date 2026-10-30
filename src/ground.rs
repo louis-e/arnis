@@ -164,6 +164,7 @@ impl GroundFrame {
                 dims: (ww, wh, gw, gh),
                 pad: 0,
                 final_dims: (ww, wh),
+                origin: None,
             };
         };
         let pad = self.pad_blocks;
@@ -173,12 +174,18 @@ impl GroundFrame {
             // Providers sample a bbox edge to edge, so with one cell per block a
             // bbox running from first to last block centre samples every block
             // at its centre.
-            let x0 = crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false) as f64
-                - pad as f64
-                + 0.5;
-            let z0 = crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false) as f64
-                - pad as f64
-                + 0.5;
+            let origin = (
+                i64::from(crate::projection::snap_edge(
+                    proj.x_for_lon(bbox.min().lng()),
+                    false,
+                )) - pad as i64,
+                i64::from(crate::projection::snap_edge(
+                    proj.z_for_lat(bbox.max().lat()),
+                    false,
+                )) - pad as i64,
+            );
+            let x0 = origin.0 as f64 + 0.5;
+            let z0 = origin.1 as f64 + 0.5;
             let (x1, z1) = (x0 + (pw - 1) as f64, z0 + (ph - 1) as f64);
             if let Ok(centres) = LLBBox::new(
                 proj.lat_for_z(z1),
@@ -191,6 +198,7 @@ impl GroundFrame {
                     dims: (pw, ph, gw, gh),
                     pad,
                     final_dims: (world_w, world_h),
+                    origin: Some(origin),
                 };
             }
         }
@@ -206,6 +214,7 @@ impl GroundFrame {
             dims: (world_w, world_h, gw, gh),
             pad: 0,
             final_dims: (world_w, world_h),
+            origin: None,
         }
     }
 }
@@ -216,6 +225,8 @@ struct FetchPlan {
     dims: (usize, usize, usize, usize),
     pad: usize,
     final_dims: (usize, usize),
+    /// The world block of the grid's cell (0, 0), where the grid has one cell per block.
+    origin: Option<(i64, i64)>,
 }
 
 impl FetchPlan {
@@ -529,7 +540,10 @@ impl Ground {
                 (world_w, world_h, grid_w, grid_h),
                 frame.affine,
                 peaks,
-                (frame.pad_blocks > 0).then_some(plan.pad),
+                (frame.pad_blocks > 0).then_some(crate::elevation::Seam {
+                    pad: plan.pad,
+                    origin: plan.origin,
+                }),
             ) {
                 Ok(mut elevation_data) => {
                     let lat = (requested_bbox.min().lat() + requested_bbox.max().lat()) / 2.0;

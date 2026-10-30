@@ -1,4 +1,5 @@
 pub mod cache;
+mod detail;
 pub mod peaks;
 pub mod postprocess;
 pub mod provider;
@@ -368,6 +369,15 @@ pub fn compute_grid_dims_for_world(
     (world_width, world_height, grid_width, grid_height)
 }
 
+/// A One World area's margin: the grid runs `pad` cells past the area on every side. With
+/// one cell per block its cell (0, 0) is world block `origin`, so neighbouring areas can
+/// line up what they work out over the margin they share.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Seam {
+    pub pad: usize,
+    pub origin: Option<(i64, i64)>,
+}
+
 /// Fetch elevation data for the given bounding box.
 ///
 /// Fetches from Mapterhorn, falling back to AWS Terrain Tiles if it fails.
@@ -382,7 +392,7 @@ pub fn compute_grid_dims_for_world(
 /// `dims` comes from `compute_grid_dims`, so it matches the land cover grid.
 /// `height_multiplier` scales blocks per metre on the vertical axis only.
 /// The fit uses `band`, or `taller` when the area needs more room than `band` has.
-/// `seam_pad` is a One World's margin around its area, in cells.
+/// `seam` is set for a One World's area, fetched with a margin past its edges.
 #[allow(clippy::too_many_arguments)]
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
@@ -396,7 +406,7 @@ pub fn fetch_elevation_data(
     dims: (usize, usize, usize, usize),
     affine: AffinePolicy,
     peaks: &PeakSource,
-    seam_pad: Option<usize>,
+    seam: Option<Seam>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = dims;
@@ -416,7 +426,10 @@ pub fn fetch_elevation_data(
     emit_gui_progress_update(12.0, "Processing elevation...");
 
     // Shared post-processing pipeline
-    let mut height_grid = raw.heights_meters;
+    let RawElevationGrid {
+        heights_meters: mut height_grid,
+        source_pixels,
+    } = raw;
     let (bbox_height_m, bbox_width_m) = geo_distance(bbox.min(), bbox.max());
     let m_per_cell = (bbox_width_m / grid_width as f64 + bbox_height_m / grid_height as f64) * 0.5;
     // Both passes target Earth DSM defects and actively damage altimetry: the outlier
@@ -478,10 +491,38 @@ pub fn fetch_elevation_data(
         );
     }
     bench.mark("elev_landcover_repair");
+    let mut hints = peaks.take();
+    let graded = std::mem::take(&mut hints.graded);
+    // After the repairs, which would smooth it away, and before the peaks, which set their
+    // summits over it. Only where the source was coarse.
+    if let Some(source) = source_pixels {
+        let changed = detail::add_steep_detail(
+            &mut height_grid,
+            bbox,
+            &source,
+            scale,
+            seam.and_then(|s| s.origin),
+            land_cover.as_deref(),
+            &graded,
+        );
+        if changed > 0 {
+            println!(
+                "Steep detail: roughened {:.1}% of the terrain, steep ground with only coarse elevation data",
+                changed as f64 * 100.0 / (grid_width * grid_height) as f64
+            );
+        }
+    }
+    drop(graded);
+    bench.mark("elev_steep_detail");
     // After the repairs, which would smooth a restored needle back down, and
     // before the fit, so the summit counts towards the height range.
-    let mut hints = peaks.take();
-    peaks::raise_peaks(&mut height_grid, bbox, &hints.peaks, m_per_cell, seam_pad);
+    peaks::raise_peaks(
+        &mut height_grid,
+        bbox,
+        &hints.peaks,
+        m_per_cell,
+        seam.map(|s| s.pad),
+    );
     // A tunnel under the water has to get under its carved bed, and the floor the carve
     // was given may leave no room for one.
     let crossings = land_cover.as_deref().map_or_else(Vec::new, |lc| {
