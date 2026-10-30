@@ -18,6 +18,7 @@ use super::provider::SourcePixels;
 use crate::building_facades::choose::hash64;
 use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
 use crate::land_cover::{LandCoverData, LC_BUILT_UP, LC_WATER};
+use crate::projection::web_mercator::mercator_y_m;
 
 /// Source pixels up to this many blocks across resample smoothly enough: a 10 m DEM stays
 /// as it is at scale 1. The detail fades in from here to `RES_FULL_BLOCKS`.
@@ -82,6 +83,7 @@ pub(crate) fn add_steep_detail(
     if octaves.iter().all(|&(_, w)| w <= 0.0) {
         return 0;
     }
+    let placement = RowPlacement::new(bbox, rows, one_world_origin.is_some());
     let lattice = match one_world_origin {
         // A One World's cells are its blocks, so the step is the same in every area.
         Some(origin) => Lattice::new(origin, ((BLOCK_M * scale).round() as usize).max(1)),
@@ -91,10 +93,14 @@ pub(crate) fn add_steep_detail(
         ),
     }
     .over(cols, rows);
+    let row_taps: Vec<Taps> = (0..rows)
+        .map(|gz| lattice.taps_z(placement.at_row(gz as f64)))
+        .collect();
     let land_cover = land_cover.filter(|lc| lc.width == cols && lc.height == rows);
     let Some(gate) = Gate::new(
         source,
         lattice,
+        &placement,
         (cols, rows),
         scale,
         bbox,
@@ -143,6 +149,7 @@ pub(crate) fn add_steep_detail(
     let field = Field {
         gate: &gate,
         col_taps: &col_taps,
+        row_taps: &row_taps,
         lats: &lats,
         lngs: &lngs,
         octaves,
@@ -193,6 +200,7 @@ type EdgeRows = (Option<Vec<f64>>, Option<Vec<f64>>);
 struct Field<'a> {
     gate: &'a Gate,
     col_taps: &'a [Taps],
+    row_taps: &'a [Taps],
     /// Sine and cosine of each row's latitude and each column's longitude.
     lats: &'a [(f64, f64)],
     lngs: &'a [(f64, f64)],
@@ -214,7 +222,7 @@ impl Field<'_> {
         above: Option<&[f64]>,
         below: Option<&[f64]>,
     ) -> usize {
-        let taps_z = self.gate.lattice.taps_z(gz);
+        let taps_z = self.row_taps[gz];
         if !self.gate.any_in(taps_z) {
             return 0;
         }
@@ -312,20 +320,14 @@ impl Lattice {
             .clamp(0, self.width as i64 - 1) as usize
     }
 
-    fn block_z(&self, gz: i64) -> usize {
-        ((gz + self.origin.1).div_euclid(self.step as i64) - self.first.1)
+    /// The block row holding the row at `pos` (see `RowPlacement`), clamped to the lattice.
+    fn block_z(&self, pos: f64) -> usize {
+        ((pos.round() as i64 + self.origin.1).div_euclid(self.step as i64) - self.first.1)
             .clamp(0, self.height as i64 - 1) as usize
     }
 
-    /// The grid rows inside block row `bz`.
-    fn rows_of(&self, bz: usize, rows: usize) -> std::ops::Range<usize> {
-        let top = (self.first.1 + bz as i64) * self.step as i64 - self.origin.1;
-        let clamp = |v: i64| v.clamp(0, rows as i64) as usize;
-        clamp(top)..clamp(top + self.step as i64)
-    }
-
-    fn taps(cell: usize, origin: i64, step: usize, first: i64, blocks: usize) -> Taps {
-        let centred = (cell as i64 + origin) as f64 - (step as f64 - 1.0) / 2.0;
+    fn taps(cell: f64, origin: i64, step: usize, first: i64, blocks: usize) -> Taps {
+        let centred = cell + origin as f64 - (step as f64 - 1.0) / 2.0;
         let f = (centred / step as f64 - first as f64).clamp(0.0, (blocks - 1) as f64);
         let lo = f.floor() as usize;
         Taps {
@@ -336,11 +338,63 @@ impl Lattice {
     }
 
     fn taps_x(&self, gx: usize) -> Taps {
-        Self::taps(gx, self.origin.0, self.step, self.first.0, self.width)
+        Self::taps(
+            gx as f64,
+            self.origin.0,
+            self.step,
+            self.first.0,
+            self.width,
+        )
     }
 
-    fn taps_z(&self, gz: usize) -> Taps {
-        Self::taps(gz, self.origin.1, self.step, self.first.1, self.height)
+    /// Taps for the row at `pos` (see `RowPlacement`).
+    fn taps_z(&self, pos: f64) -> Taps {
+        Self::taps(pos, self.origin.1, self.step, self.first.1, self.height)
+    }
+}
+
+/// Where the grid's rows lie on the lattice's rows. The providers sample equal steps of
+/// latitude; a One World lays them onto its Mercator blocks only after the detail, so
+/// there each row counts at the block row its latitude will land on, as the neighbouring
+/// areas count it.
+struct RowPlacement {
+    lat_top: f64,
+    lat_bottom: f64,
+    /// Mercator northing of the top and bottom row, in a One World.
+    mercator: Option<(f64, f64)>,
+    last: f64,
+}
+
+impl RowPlacement {
+    fn new(bbox: &LLBBox, rows: usize, mercator: bool) -> Self {
+        let (lat_top, lat_bottom) = (bbox.max().lat(), bbox.min().lat());
+        Self {
+            lat_top,
+            lat_bottom,
+            mercator: mercator.then(|| (mercator_y_m(lat_top), mercator_y_m(lat_bottom))),
+            last: rows.saturating_sub(1) as f64,
+        }
+    }
+
+    /// Lattice row (fractional) of latitude `lat`.
+    fn at_lat(&self, lat: f64) -> f64 {
+        match self.mercator {
+            Some((top, bottom)) if top != bottom => {
+                (mercator_y_m(lat) - top) / (bottom - top) * self.last
+            }
+            _ if self.lat_top != self.lat_bottom => {
+                (self.lat_top - lat) / (self.lat_top - self.lat_bottom) * self.last
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// Lattice row of grid row `gz` (fractional, as a way's points fall between rows).
+    fn at_row(&self, gz: f64) -> f64 {
+        if self.last <= 0.0 {
+            return gz;
+        }
+        self.at_lat(self.lat_top - gz / self.last * (self.lat_top - self.lat_bottom))
     }
 }
 
@@ -367,6 +421,7 @@ impl Gate {
     fn new(
         source: &SourcePixels,
         lattice: Lattice,
+        placement: &RowPlacement,
         grid: (usize, usize),
         scale: f64,
         bbox: &LLBBox,
@@ -376,13 +431,23 @@ impl Gate {
     ) -> Option<Self> {
         let (width, height) = (lattice.width, lattice.height);
         let (cols, rows) = grid;
+        // The grid rows of each block row; the rows run down the lattice in order.
+        let mut block_rows = vec![0..0; height];
+        for gz in 0..rows {
+            let span = &mut block_rows[lattice.block_z(placement.at_row(gz as f64))];
+            *span = if span.start == span.end {
+                gz..gz + 1
+            } else {
+                span.start..gz + 1
+            };
+        }
         // The finest source pixel in each block decides it, so a block a fine source
         // reaches into takes nothing.
         let coarse: Vec<f32> = (0..height)
             .into_par_iter()
             .flat_map_iter(|bz| {
                 let mut finest = vec![f32::INFINITY; width];
-                for gz in lattice.rows_of(bz, rows) {
+                for gz in block_rows[bz].clone() {
                     let runs = source.row(gz).runs();
                     for (i, &(start, metres)) in runs.iter().enumerate() {
                         let end = runs
@@ -414,7 +479,7 @@ impl Gate {
                 .into_par_iter()
                 .map(|bz| {
                     let mut blocks = vec![false; width];
-                    for row in &lc.grid[lattice.rows_of(bz, rows)] {
+                    for row in &lc.grid[block_rows[bz].clone()] {
                         for (gx, &class) in row.iter().enumerate() {
                             if class == LC_WATER || class == LC_BUILT_UP {
                                 blocks[lattice.block_x(gx as i64)] = true;
@@ -440,9 +505,8 @@ impl Gate {
                 for (x, z) in points_on_segment(a, b, grid, reach, spacing) {
                     let xs = lattice.block_x((x - reach).floor() as i64)
                         ..=lattice.block_x((x + reach).ceil() as i64);
-                    for bz in lattice.block_z((z - reach).floor() as i64)
-                        ..=lattice.block_z((z + reach).ceil() as i64)
-                    {
+                    let z = placement.at_row(z);
+                    for bz in lattice.block_z(z - reach)..=lattice.block_z(z + reach) {
                         keep[bz * width + xs.start()..=bz * width + xs.end()].fill(0.0);
                     }
                 }
@@ -891,14 +955,39 @@ mod tests {
     }
 
     #[test]
+    fn one_world_rows_count_on_the_world_block_they_land_on() {
+        use crate::projection::web_mercator::mercator_lat_deg;
+        // A world whose blocks are 1.4 Mercator metres tall, counted south from 46° N. An
+        // area's rows run at equal latitude steps between its first and last block centre.
+        let (y0, block) = (mercator_y_m(46.0), 1.4);
+        let lat_of = |centre: f64| mercator_lat_deg(y0 - centre * block);
+        let area = |oz: f64, rows: usize| {
+            let top = lat_of(oz + 0.5);
+            let bottom = lat_of(oz + rows as f64 - 0.5);
+            RowPlacement::new(&LLBBox::new(bottom, 8.0, top, 8.1).unwrap(), rows, true)
+        };
+        // Two areas about 6 km tall, the second starting 5000 blocks below the first.
+        let (a, b) = (area(0.0, 6001), area(5000.0, 6001));
+        for centre in [5000.5, 5600.25, 6000.5] {
+            let lat = lat_of(centre);
+            assert!((a.at_lat(lat) - (b.at_lat(lat) + 5000.0)).abs() < 1e-6);
+            assert!((a.at_lat(lat) - (centre - 0.5)).abs() < 1e-6);
+        }
+        // Halfway down an area a row lands most of a block off its index.
+        let off = (a.at_row(3000.0) - 3000.0).abs();
+        assert!(off > 0.5, "{off}");
+        // Outside a One World the rows are their index.
+        let flat = RowPlacement::new(&bbox(), 401, false);
+        assert!((flat.at_row(123.0) - 123.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn a_lattice_counts_its_blocks_from_the_world_grid() {
         let l = Lattice::new((37, -5), 8).over(100, 50);
         // World cells 37..=136 and -5..=44: blocks 4..=17 and -1..=5.
         assert_eq!((l.first, l.width, l.height), ((4, -1), 14, 7));
         assert_eq!((l.block_x(0), l.block_x(2), l.block_x(3)), (0, 0, 1));
-        assert_eq!((l.block_z(4), l.block_z(5)), (0, 1));
-        assert_eq!(l.rows_of(0, 50), 0..5);
-        assert_eq!(l.rows_of(1, 50), 5..13);
+        assert_eq!((l.block_z(4.0), l.block_z(4.6)), (0, 1));
         // World cell 46 lies 2.5 cells past the centre of block 5 (cells 40-47), on the way
         // to block 6's.
         let t = l.taps_x(46 - 37);
