@@ -949,22 +949,24 @@ pub fn generate_world_with_options(
     // Signage pre-pass: every decal the world needs gets its map id now, so the tile
     // threads only read the registry. Java only; other formats keep banner fallbacks.
     let signage_start = args.benchmark.then(std::time::Instant::now);
-    // A One World continues after its last map id.
+    // Maps continue after the world's own: a new world's start at FIRST_MAP_ID, a world
+    // generated into again after its last. The preview and branding maps come first.
     let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil && !extending;
     let place_branding = world_format == WorldFormat::JavaAnvil && !extending;
-    let first_decal_id = if one_world.is_some() {
+    let first_map_id = if world_format == WorldFormat::JavaAnvil {
         let layout = crate::world_utils::WorldLayout::of(&output_path);
-        let next = crate::map_item::next_map_id(&layout.maps_dir(&output_path));
-        next + if wants_map_item {
+        crate::map_item::next_map_id(&layout.maps_dir(&output_path))
+    } else {
+        crate::map_item::FIRST_MAP_ID
+    };
+    let first_decal_id = first_map_id
+        + if wants_map_item {
             2
         } else if place_branding {
             1
         } else {
             0
-        }
-    } else {
-        crate::decals::registry::DecalRegistry::FIRST_ID
-    };
+        };
     let mut signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
         == WorldFormat::JavaAnvil)
         .then(|| signage::build_context(&elements, args, llbbox, &xzbbox, first_decal_id))
@@ -2235,16 +2237,17 @@ pub fn generate_world_with_options(
         eprintln!("[BENCHMARK] block_hash={:016x}", h);
     }
 
-    // Map id 0 is the first map; branding is id 1 with the preview on, else id 0.
+    // The preview is this run's first map and branding the next, or branding the first with
+    // the preview off: the ids the map writers below are given.
     if place_branding {
         let (sx, sz) = options
             .spawn_point
             .or_else(|| crate::map_item::read_spawn_xz(&output_path))
             .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
         if wants_map_item {
-            editor.place_map_item_frame(sx, sz, 0, 1);
+            editor.place_map_item_frame(sx, sz, first_map_id, first_map_id + 1);
         } else {
-            editor.place_branding_map_only(sx, sz, 0);
+            editor.place_branding_map_only(sx, sz, first_map_id);
         }
     }
 
@@ -2297,13 +2300,13 @@ pub fn generate_world_with_options(
 
     if wants_map_item {
         if let Some(p) = preview.as_ref() {
-            match crate::map_item::write_map_item(&output_path, p, &xzbbox) {
+            match crate::map_item::write_map_item(&output_path, p, &xzbbox, first_map_id) {
                 Ok(()) => println!("World map item added to the player inventory."),
                 Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
             }
         }
     } else if place_branding {
-        if let Err(e) = crate::map_item::write_branding_map_only(&output_path) {
+        if let Err(e) = crate::map_item::write_branding_map_only(&output_path, first_map_id) {
             eprintln!("Warning: Failed to create arnismc.com map: {e}");
         }
     }

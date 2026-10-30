@@ -79,6 +79,10 @@ pub struct Args {
     #[arg(skip)]
     pub one_world_run: Option<crate::one_world::RunContext>,
 
+    /// The range an existing world's tall datapack declares, which a run into it keeps.
+    #[arg(skip)]
+    pub tall_range: Option<(i32, i32)>,
+
     /// Ground level to use in the Minecraft world
     #[arg(long, default_value_t = -62, allow_hyphen_values = true)]
     pub ground_level: i32,

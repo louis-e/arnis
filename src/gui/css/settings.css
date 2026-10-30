@@ -425,14 +425,22 @@ label[for].setting-label {
   min-width: 0;
 }
 
+/* One row: a long name wraps inside its own box and keeps the tooltip and revert
+   buttons beside it, rather than pushing them onto a line of their own. */
 .setting-heading {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
+}
+
+/* The name gives way, down to breaking a long compound word, before the buttons do. */
+.setting-heading > [data-localize] {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .setting-desc {

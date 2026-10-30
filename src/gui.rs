@@ -86,11 +86,13 @@ pub fn run_gui() -> Result<(), String> {
 
         // Force software rendering for better compatibility.
         // Only set if not already configured by the user, allowing manual override
-        // for systems where software rendering causes EGL_BAD_PARAMETER (see #1247).
-        if env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
+        // for systems where software rendering causes EGL_BAD_PARAMETER (see #1247),
+        // and left out where the launcher found that only the GPU driver starts.
+        let gpu = crate::linux_gui::current() == Some(crate::linux_gui::Renderer::Gpu);
+        if !gpu && env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
             env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
         }
-        if env::var("GALLIUM_DRIVER").is_err() {
+        if !gpu && env::var("GALLIUM_DRIVER").is_err() {
             env::set_var("GALLIUM_DRIVER", "softpipe");
         }
 
@@ -1644,6 +1646,9 @@ fn gui_start_generation(
                 one_world: false,
                 world_name: None,
                 one_world_run: None,
+                tall_range: existing_tall
+                    .then(|| crate::world_utils::tall_datapack_range(&world_path))
+                    .flatten(),
                 ground_level,
                 mode: crate::args::GenerationMode::from_name(&generation_mode),
                 post_apocalyptic: post_apocalyptic_enabled,
@@ -1759,7 +1764,10 @@ fn gui_start_generation(
                 }
                 _session_lock = Some(session.lock);
                 if args.disable_height_limit && session.created {
-                    if let Err(e) = crate::world_utils::install_tall_datapack(&world_path) {
+                    let (min_y, max_y) = crate::world_utils::TALL_DATAPACK_FULL_RANGE;
+                    if let Err(e) =
+                        crate::world_utils::install_tall_datapack(&world_path, min_y, max_y)
+                    {
                         let error_msg = format!("Failed to install tall-world datapack: {e}");
                         eprintln!("{error_msg}");
                         emit_gui_error(&error_msg);

@@ -55,6 +55,9 @@ pub struct ElevationData {
     pub(crate) soft_top: Option<SoftTop>,
     /// The fit used a ceiling a pack raised above vanilla's.
     pub(crate) extended_ceiling: bool,
+    /// When the fit raised the build height for this area itself: the highest terrain Y and
+    /// the tallest building or model on it, in blocks. They size the raised dimension.
+    pub(crate) raised_for: Option<RaisedFor>,
     /// The margin `crop` cut away, read only past the area.
     pub(crate) halo: Option<Halo>,
 }
@@ -115,6 +118,37 @@ impl Halo {
             None
         }
     }
+}
+
+/// What an area that needed more than vanilla's height reaches, so its dimension is
+/// raised only that far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RaisedFor {
+    pub terrain_top_y: i32,
+    pub tallest_blocks: i32,
+    /// Overture's structures still have to be counted, by `with_overture`.
+    pub overture_pending: bool,
+}
+
+impl RaisedFor {
+    /// Counts Overture's structures too, waiting for them if the fit did not. Waited for
+    /// here rather than in the fit, so the terrain work after it runs while they download.
+    pub(crate) fn with_overture(self, peaks: &PeakSource, scale: f64) -> Self {
+        if !self.overture_pending {
+            return self;
+        }
+        let tallest = (tallest_m(&peaks.take_overture()) * scale).ceil() as i32;
+        Self {
+            tallest_blocks: self.tallest_blocks.max(tallest),
+            overture_pending: false,
+            ..self
+        }
+    }
+}
+
+/// Height of the tallest of `models`, in metres.
+fn tallest_m(models: &[TallModel]) -> f64 {
+    models.iter().map(|m| m.height_m).fold(0.0, f64::max)
 }
 
 /// Room the height fit has: the base it starts from, the lowest base it may sink to and the
@@ -554,16 +588,31 @@ pub fn fetch_elevation_data(
         };
         (lift(band), taller.map(lift))
     };
+    // Overture's list can be read only once, so its tallest is kept on the way past.
+    let overture_tallest = std::cell::Cell::new(None);
     let band = pick_band(
         &height_grid,
         bbox,
         &hints,
-        || peaks.take_overture(),
+        || {
+            let structures = peaks.take_overture();
+            overture_tallest.set(Some(tallest_m(&structures)));
+            structures
+        },
         scale,
         height_multiplier,
         band,
         taller,
     );
+    // A band raised for this area is sized by the tallest thing standing on it. Overture's
+    // count too, even where OSM's alone made the case; those the fit did not wait for are
+    // left to `RaisedFor::with_overture`.
+    let overture_pending = hints.overture_follows && overture_tallest.get().is_none();
+    let tallest_structure_m = (taller == Some(band)).then(|| {
+        tallest_m(&hints.tall_models)
+            .max(tallest_m(&hints.tall_structures))
+            .max(overture_tallest.get().unwrap_or(0.0))
+    });
     // Only the band needed them, and a city's worth would sit through the fit.
     hints.tall_structures = Vec::new();
     let HeightBand {
@@ -653,6 +702,16 @@ pub fn fetch_elevation_data(
         ground_level: effective_ground_level,
         soft_top,
         extended_ceiling: band.extended_ceiling(),
+        // The models stand at world scale, as in the reserve above.
+        raised_for: tallest_structure_m.map(|m| RaisedFor {
+            terrain_top_y: if max_block_height >= min_block_height {
+                max_block_height.ceil() as i32
+            } else {
+                effective_ground_level
+            },
+            tallest_blocks: (m * scale).ceil() as i32,
+            overture_pending,
+        }),
         halo: None,
     })
 }
