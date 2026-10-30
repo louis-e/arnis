@@ -445,7 +445,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("podzol", Rgb([91, 63, 24])),
         ("rooted_dirt", Rgb([144, 103, 76])),
         ("mud", Rgb([60, 57, 61])),
-        ("packed_mud", Rgb([142, 106, 79])),
         ("stone", Rgb([128, 128, 128])),
         ("granite", Rgb([149, 108, 91])),
         ("polished_granite", Rgb([154, 112, 98])),

@@ -162,7 +162,6 @@ const MUSHROOM_STEM_BITS: [u8; 64] = [
 fn renamed(java_name: &str) -> &str {
     match java_name {
         "beetroots" => "beetroot",
-        "rooted_dirt" => "dirt_with_roots",
         "bricks" => "brick_block",
         "cobweb" => "web",
         "dead_bush" => "deadbush",

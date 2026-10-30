@@ -505,11 +505,11 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         202 => "mcl_flowerpots:flower_pot",
         203 => "mcl_ocean:sea_lantern",
         204 => "mcl_stairs:slab_diorite_smooth",
-        205 => "mcl_stairs:slab_warped",
-        206 => return conv_stair(props, "mcl_stairs:stair_warped"), // WARPED_STAIRS
+        205 => "mcl_farming:beetroot", // BEETROOTS
+        206 => "mcl_farming:wheat_7",  // WHEAT_YOUNG, exported ripe
         207 => "mcl_colorblocks:concrete_green",
         208 => "mcl_walls:brick",
-        209 => "mcl_redstone_torch:redstoneblock",
+        209 => "mcl_farming:carrot_7", // CARROTS_YOUNG, exported ripe
         210 | 362 => return conv_chain(block, props),
         211 => {
             return conv_trapdoor(
@@ -518,8 +518,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
                 "mcl_doors:trapdoor_warped_open",
             )
         } // WARPED_TRAPDOOR
-        212 => "mcl_trees:stripped_warped",
-        213 => "mcl_trees:bark_stripped_warped",
+        212 => "mcl_farming:potato_4", // POTATOES_YOUNG, exported ripe
+        213 => "mcl_farming:beetroot", // BEETROOTS_YOUNG, exported ripe
         214 => "mcl_stairs:slab_stone",
         215 => "mcl_stairs:slab_deepslate_cobbled",
         216 => "mcl_colorblocks:hardened_clay_silver",
@@ -890,18 +890,11 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         519 => "mcl_core:lapisblock",
         520 => "mcl_core:redsand",
         521 => "mcl_core:redsandstone",
-        522 => "mcl_mud:packed_mud",
-        523 => "mcl_lush_caves:rooted_dirt",
-        524 => "mcl_farming:beetroot",
-        // Younger crop stages export ripe, like the ripe ids above.
-        525 => "mcl_farming:wheat_7",
-        526 => "mcl_farming:wheat_7",
-        527 => "mcl_farming:potato_4",
-        528 => "mcl_farming:potato_4",
-        529 => "mcl_farming:carrot_7",
-        530 => "mcl_farming:carrot_7",
-        531 => "mcl_farming:beetroot",
-        532 => "mcl_farming:beetroot",
+        522 => "mcl_stairs:slab_warped",
+        523 => return conv_stair(props, "mcl_stairs:stair_warped"), // WARPED_STAIRS
+        524 => "mcl_redstone_torch:redstoneblock",
+        525 => "mcl_trees:stripped_warped",
+        526 => "mcl_trees:bark_stripped_warped",
         _ => "mcl_core:stone",
     };
     LuantiNode {

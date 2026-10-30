@@ -474,11 +474,6 @@ fn plant_plot(editor: &mut WorldEditor, plot: &Plot, surface: Block, x: i32, z: 
     if !editor.check_for_block(x, 0, z, Some(&[surface])) {
         return;
     }
-    // Irrigation dots, but only where boxed in so they can't flow downhill and wash out crops.
-    if surface == FARMLAND && x % 9 == 0 && z % 9 == 0 && editor.water_source_is_enclosed(x, z) {
-        editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
-        return;
-    }
     match plot.cover(surface, x, z) {
         Some(Cover::Single(block)) => editor.set_block(block, x, 1, z, None, None),
         Some(Cover::Tall(lower, upper)) => {

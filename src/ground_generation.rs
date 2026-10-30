@@ -732,13 +732,18 @@ pub fn generate_ground_region(
                                         }
                                         land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_CROPLAND => match &cropland {
-                                            Some(grid) => {
+                                            // A mapped feature that already holds the column
+                                            // keeps it, so no plot is worked out there.
+                                            Some(grid)
+                                                if !editor
+                                                    .block_exists_absolute(x, ground_y, z) =>
+                                            {
                                                 let plot = grid.plot_at(x, z);
                                                 let top = plot.surface(x, z);
                                                 cropland_plot = Some((plot, top));
                                                 (top, DIRT)
                                             }
-                                            None => (FARMLAND, DIRT),
+                                            _ => (FARMLAND, DIRT),
                                         },
                                         land_cover::LC_BUILT_UP => {
                                             let h = land_cover::coord_hash(x, z) % 100;
@@ -873,10 +878,8 @@ pub fn generate_ground_region(
                                     None,
                                 );
                             } else {
-                                // Plants only follow a plot surface this pass actually laid.
-                                if cropland_plot.is_some_and(|(_, top)| top != surface_block)
-                                    || editor.block_exists_absolute(x, ground_y, z)
-                                {
+                                // Snow can still take the plot's place.
+                                if cropland_plot.is_some_and(|(_, top)| top != surface_block) {
                                     cropland_plot = None;
                                 }
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);

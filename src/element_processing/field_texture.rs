@@ -8,6 +8,7 @@ use crate::block_definitions::*;
 use crate::ground_generation::value_noise_01;
 use crate::land_cover::coord_hash;
 use crate::osm_parser::ProcessedNode;
+use std::cell::Cell;
 
 /// Farmland style, matching the GUI's segmented control.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
@@ -102,15 +103,10 @@ impl Params {
             }
             roll -= w;
         }
-        // Mostly ripe, with some fields sown later.
-        let stage = match mix(key ^ 0xA9E3) % 20 {
-            0..=11 => 0,
-            12..=16 => 1,
-            _ => 2,
-        };
         Plot {
             crop,
-            stage,
+            // Mostly ripe, with some fields sown later.
+            young: mix(key ^ 0xA9E3).is_multiple_of(4),
             seed: mix(key ^ 0xF10E),
             rows_along_x,
         }
@@ -141,8 +137,7 @@ fn sane_scale(scale: f64) -> f64 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Plot {
     pub crop: Crop,
-    // 0 ripe, 1 half grown, 2 young.
-    stage: u8,
+    young: bool,
     seed: u64,
     // Rows follow the world axis nearest the strip, so they rasterise as straight lines.
     rows_along_x: bool,
@@ -160,8 +155,8 @@ impl Plot {
         (if self.rows_along_x { z } else { x }).rem_euclid(2) == 0
     }
 
-    /// Ground block of this plot at a cell. Fallow and sunflower rows avoid plain dirt and
-    /// bare farmland, which would turn back to grass or dirt once the world is played.
+    /// Ground block of this plot at a cell. Untilled plots avoid plain dirt and bare
+    /// farmland, which would turn back to grass or dirt once the world is played.
     pub fn surface(&self, x: i32, z: i32) -> Block {
         let n = value_noise_01(x, z, TEXTURE_NOISE);
         match self.crop {
@@ -175,10 +170,8 @@ impl Plot {
             Crop::Sunflowers => {
                 if n < 0.16 {
                     GRASS_BLOCK
-                } else if self.on_row(x, z) {
-                    COARSE_DIRT
                 } else {
-                    PACKED_MUD
+                    COARSE_DIRT
                 }
             }
             Crop::Pumpkins => {
@@ -192,9 +185,7 @@ impl Plot {
                 if n < 0.33 {
                     COARSE_DIRT
                 } else if n < 0.45 {
-                    ROOTED_DIRT
-                } else if n < 0.54 {
-                    PACKED_MUD
+                    MUD
                 } else if n < 0.70 {
                     GRASS_BLOCK
                 } else {
@@ -222,7 +213,9 @@ impl Plot {
                 }
             }
             Crop::Sunflowers => match surface {
-                COARSE_DIRT if roll < 85 => Some(Cover::Tall(SUNFLOWER_LOWER, SUNFLOWER_UPPER)),
+                COARSE_DIRT if roll < 85 && self.on_row(x, z) => {
+                    Some(Cover::Tall(SUNFLOWER_LOWER, SUNFLOWER_UPPER))
+                }
                 GRASS_BLOCK if roll < 25 => single(GRASS),
                 _ => None,
             },
@@ -235,7 +228,7 @@ impl Plot {
             },
             Crop::Fallow => match (surface, roll) {
                 (GRASS_BLOCK, 0..=19) => single(GRASS),
-                (GRASS_BLOCK, _) | (PACKED_MUD, _) => None,
+                (GRASS_BLOCK, _) | (MUD, _) => None,
                 (_, 0..=5) => single(DEAD_BUSH),
                 (_, 6..=14) => single(GRASS),
                 (_, 15..=16) => single(FERN),
@@ -251,30 +244,18 @@ impl Plot {
         } else {
             self.crop
         };
-        // A fifth of the cells lag one stage behind the field.
-        let stage = if roll.is_multiple_of(5) {
-            (self.stage + 1).min(2)
-        } else {
-            self.stage
-        };
-        crop_stage_block(crop, stage)
-    }
-}
-
-fn crop_stage_block(crop: Crop, stage: u8) -> Block {
-    match (crop, stage) {
-        (Crop::Wheat, 0) => WHEAT,
-        (Crop::Wheat, 1) => WHEAT_HALF,
-        (Crop::Wheat, _) => WHEAT_YOUNG,
-        (Crop::Potatoes, 0) => POTATOES,
-        (Crop::Potatoes, 1) => POTATOES_HALF,
-        (Crop::Potatoes, _) => POTATOES_YOUNG,
-        (Crop::Carrots, 0) => CARROTS,
-        (Crop::Carrots, 1) => CARROTS_HALF,
-        (Crop::Carrots, _) => CARROTS_YOUNG,
-        (_, 0) => BEETROOTS,
-        (_, 1) => BEETROOTS_HALF,
-        (_, _) => BEETROOTS_YOUNG,
+        // Some cells of a ripe field lag behind.
+        let young = self.young || roll < 15;
+        match (crop, young) {
+            (Crop::Wheat, false) => WHEAT,
+            (Crop::Wheat, true) => WHEAT_YOUNG,
+            (Crop::Potatoes, false) => POTATOES,
+            (Crop::Potatoes, true) => POTATOES_YOUNG,
+            (Crop::Carrots, false) => CARROTS,
+            (Crop::Carrots, true) => CARROTS_YOUNG,
+            (_, false) => BEETROOTS,
+            (_, true) => BEETROOTS_YOUNG,
+        }
     }
 }
 
@@ -292,6 +273,9 @@ pub struct FieldLayout {
     n_across: i64,
     n_along: i64,
     rows_along_x: bool,
+    // Neighbouring cells nearly always share a strip and a plot.
+    last_strip: Cell<Option<(i64, f64)>>,
+    last_plot: Cell<Option<((i64, i64), Plot)>>,
 }
 
 impl FieldLayout {
@@ -343,6 +327,8 @@ impl FieldLayout {
             n_across,
             n_along,
             rows_along_x: along.0.abs() >= along.1.abs(),
+            last_strip: Cell::new(None),
+            last_plot: Cell::new(None),
         })
     }
 
@@ -351,15 +337,29 @@ impl FieldLayout {
         let a = self.across.0 * fx + self.across.1 * fz - self.across_min;
         let l = self.along.0 * fx + self.along.1 * fz - self.along_min;
         let i = ((a / self.strip).floor() as i64).clamp(0, self.n_across - 1);
-        // Each strip is cut at its own offset, so long fields brick rather than checker.
-        let (shift, last) = if self.n_along > 1 {
-            let t = (mix(self.id ^ (i as u64).wrapping_mul(0x9E37)) % 1000) as f64 / 1000.0;
-            ((0.3 + 0.4 * t) * self.length, self.n_along)
+        let j = if self.n_along > 1 {
+            let shift = match self.last_strip.get() {
+                Some((strip, shift)) if strip == i => shift,
+                _ => {
+                    // Each strip is cut at its own offset, so long fields brick, not checker.
+                    let t = (mix(self.id ^ (i as u64).wrapping_mul(0x9E37)) % 1000) as f64;
+                    let shift = (0.3 + 0.4 * t / 1000.0) * self.length;
+                    self.last_strip.set(Some((i, shift)));
+                    shift
+                }
+            };
+            (((l + shift) / self.length).floor() as i64).clamp(0, self.n_along)
         } else {
-            (0.0, 0)
+            0
         };
-        let j = (((l + shift) / self.length).floor() as i64).clamp(0, last);
-        self.params.plot(plot_key(self.id, i, j), self.rows_along_x)
+        if let Some((key, plot)) = self.last_plot.get() {
+            if key == (i, j) {
+                return plot;
+            }
+        }
+        let plot = self.params.plot(plot_key(self.id, i, j), self.rows_along_x);
+        self.last_plot.set(Some(((i, j), plot)));
+        plot
     }
 }
 
@@ -369,6 +369,17 @@ pub struct CroplandGrid {
     params: Params,
     scale: f64,
     block: i32,
+    last_block: Cell<Option<StripBlock>>,
+    last_plot: Cell<Option<((u64, i32), Plot)>>,
+}
+
+#[derive(Clone, Copy)]
+struct StripBlock {
+    key: (i32, i32),
+    hash: u64,
+    rows_along_x: bool,
+    width: i32,
+    phase: i32,
 }
 
 impl CroplandGrid {
@@ -381,19 +392,41 @@ impl CroplandGrid {
             params,
             scale,
             block,
+            last_block: Cell::new(None),
+            last_plot: Cell::new(None),
         })
     }
 
     pub fn plot_at(&self, x: i32, z: i32) -> Plot {
-        let (bx, bz) = (x.div_euclid(self.block), z.div_euclid(self.block));
-        let h = plot_key(0xC0FF_EE11, i64::from(bx), i64::from(bz));
-        let rows_along_x = h & 1 == 0;
-        let across = if rows_along_x { z } else { x };
-        let width = self.params.strip_blocks(self.scale, h >> 8).round() as i32;
-        let phase = ((h >> 32) % width as u64) as i32;
-        let strip = (across + phase).div_euclid(width);
-        self.params
-            .plot(plot_key(h, i64::from(strip), 0), rows_along_x)
+        let key = (x.div_euclid(self.block), z.div_euclid(self.block));
+        let b = match self.last_block.get() {
+            Some(b) if b.key == key => b,
+            _ => {
+                let hash = plot_key(0xC0FF_EE11, i64::from(key.0), i64::from(key.1));
+                let width = self.params.strip_blocks(self.scale, hash >> 8).round() as i32;
+                let b = StripBlock {
+                    key,
+                    hash,
+                    rows_along_x: hash & 1 == 0,
+                    width,
+                    phase: ((hash >> 32) % width as u64) as i32,
+                };
+                self.last_block.set(Some(b));
+                b
+            }
+        };
+        let across = if b.rows_along_x { z } else { x };
+        let strip = (across + b.phase).div_euclid(b.width);
+        if let Some((k, plot)) = self.last_plot.get() {
+            if k == (b.hash, strip) {
+                return plot;
+            }
+        }
+        let plot = self
+            .params
+            .plot(plot_key(b.hash, i64::from(strip), 0), b.rows_along_x);
+        self.last_plot.set(Some(((b.hash, strip), plot)));
+        plot
     }
 }
 
@@ -544,20 +577,45 @@ mod tests {
     }
 
     #[test]
-    fn sunflower_rows_are_straight_world_lines() {
+    fn tilled_and_fallow_blocks_keep_one_byte_sections() {
+        let blocks = [
+            FARMLAND,
+            COARSE_DIRT,
+            GRASS_BLOCK,
+            MUD,
+            WHEAT,
+            WHEAT_YOUNG,
+            CARROTS,
+            CARROTS_YOUNG,
+            POTATOES,
+            POTATOES_YOUNG,
+            BEETROOTS,
+            BEETROOTS_YOUNG,
+            HAY_BALE,
+            DEAD_BUSH,
+            GRASS,
+            FERN,
+        ];
+        for b in blocks {
+            assert!(b.id() < 256, "{} has id {}", b.name(), b.id());
+        }
+    }
+
+    #[test]
+    fn sunflowers_stand_in_straight_world_rows() {
         let p = Plot {
             crop: Crop::Sunflowers,
-            stage: 0,
+            young: false,
             seed: 1,
             rows_along_x: true,
         };
-        for z in 0..40 {
-            let row: HashSet<_> = (0..200)
-                .map(|x| p.surface(x, z))
-                .filter(|&b| b != GRASS_BLOCK)
-                .collect();
-            assert!(row.len() <= 1, "row {z} mixes {row:?}");
-        }
+        let tall = |x, z| matches!(p.cover(COARSE_DIRT, x, z), Some(Cover::Tall(..)));
+        let planted: usize = (0..200).filter(|&x| tall(x, 10)).count();
+        assert!(planted > 150, "row 10 holds only {planted} sunflowers");
+        assert!(
+            (0..200).all(|x| !tall(x, 11)),
+            "a sunflower stands between rows"
+        );
     }
 
     #[test]
@@ -571,7 +629,7 @@ mod tests {
                 other => panic!("farmland grew {other:?}"),
             }
         }
-        p.crop = Crop::Sunflowers;
-        assert_eq!(p.cover(PACKED_MUD, 3, 4), None);
+        p.crop = Crop::Fallow;
+        assert_eq!(p.cover(MUD, 3, 4), None);
     }
 }
