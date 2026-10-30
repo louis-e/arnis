@@ -1645,6 +1645,9 @@ fn gui_start_generation(
                 one_world: false,
                 world_name: None,
                 one_world_run: None,
+                tall_range: existing_tall
+                    .then(|| crate::world_utils::tall_datapack_range(&world_path))
+                    .flatten(),
                 ground_level,
                 mode: crate::args::GenerationMode::from_name(&generation_mode),
                 post_apocalyptic: post_apocalyptic_enabled,

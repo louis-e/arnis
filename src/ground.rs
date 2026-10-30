@@ -1567,8 +1567,14 @@ pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
     } else if args.luanti {
         crate::world_editor::DEFAULT_MAX_Y
     } else {
-        2031
+        java_tall_range(args).1
     }
+}
+
+/// The Java tall range: the full pack's, or the one the world being written into declares.
+fn java_tall_range(args: &Args) -> (i32, i32) {
+    args.tall_range
+        .unwrap_or(crate::world_utils::TALL_DATAPACK_FULL_RANGE)
 }
 
 /// World floor. The bundled Java datapack already declares the full range the engine allows
@@ -1591,7 +1597,7 @@ pub(crate) fn world_top_y(args: &Args, extended: bool) -> i32 {
     } else if args.bedrock {
         511
     } else {
-        2031
+        java_tall_range(args).1
     }
 }
 
@@ -1602,7 +1608,7 @@ pub(crate) fn extended_min_y_for(args: &Args) -> i32 {
 /// `extended_min_y_for` with the extended height on or off.
 pub(crate) fn world_min_y(args: &Args, extended: bool) -> i32 {
     if extended && !args.bedrock && !args.luanti {
-        -2032
+        java_tall_range(args).0
     } else {
         crate::world_editor::DEFAULT_MIN_Y
     }
@@ -1708,15 +1714,18 @@ const STRUCTURE_HEADROOM: i32 = 32;
 /// The floor is the terrain floor the base already puts bedrock on, and never above
 /// vanilla's; the ceiling clears the terrain and what stands on it, never below vanilla's.
 fn sized_world_bounds(base: i32, raised_for: RaisedFor) -> (i32, i32) {
+    let (full_min, full_max) = crate::world_utils::TALL_DATAPACK_FULL_RANGE;
     let floor = (base - crate::world_editor::common::TERRAIN_FLOOR_DEPTH).div_euclid(16) * 16;
-    let min = floor.clamp(-2032, crate::world_editor::DEFAULT_MIN_Y);
+    let min = floor.clamp(full_min, crate::world_editor::DEFAULT_MIN_Y);
     let RaisedFor {
         terrain_top_y,
         tallest_blocks,
+        ..
     } = raised_for;
     let top =
         (terrain_top_y + PROP_HEADROOM).max(terrain_top_y + tallest_blocks + STRUCTURE_HEADROOM);
-    let max = ((top + 16).div_euclid(16) * 16 - 1).clamp(crate::world_editor::DEFAULT_MAX_Y, 2031);
+    let max =
+        ((top + 16).div_euclid(16) * 16 - 1).clamp(crate::world_editor::DEFAULT_MAX_Y, full_max);
     (min, max)
 }
 
@@ -2197,6 +2206,13 @@ mod tests {
             crate::world_editor::DEFAULT_MAX_Y
         );
         assert_eq!(world_top_y_for(&luanti), crate::world_editor::DEFAULT_MAX_Y);
+
+        // A world whose pack was sized keeps that size when generated into again.
+        let mut existing = args(&[]);
+        existing.tall_range = Some((-128, 399));
+        assert_eq!(extended_min_y_for(&existing), -128);
+        assert_eq!(world_top_y_for(&existing), 399);
+        assert_eq!(extended_max_y_for(&existing), 399);
     }
 
     fn parse(extra: &[&str]) -> Args {

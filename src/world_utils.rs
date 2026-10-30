@@ -866,6 +866,25 @@ pub fn install_tall_datapack(world_path: &Path, min_y: i32, max_y: i32) -> Resul
     Ok(())
 }
 
+/// The range an installed tall-world datapack declares, as `(min_y, max_y)`. A run into the
+/// world has to keep it: its chunks were written for it, and a heightmap that happens to have
+/// the length another range expects is read against the wrong floor.
+pub fn tall_datapack_range(world_path: &Path) -> Option<(i32, i32)> {
+    let json = fs::read(
+        world_path
+            .join("datapacks")
+            .join(TALL_DATAPACK_NAME)
+            .join("data/minecraft/dimension_type/overworld.json"),
+    )
+    .ok()?;
+    let dimension: serde_json::Value = serde_json::from_slice(&json).ok()?;
+    let min_y = i32::try_from(dimension["min_y"].as_i64()?).ok()?;
+    let height = i32::try_from(dimension["height"].as_i64()?).ok()?;
+    let max_y = min_y + height - 1;
+    (min_y.rem_euclid(16) == 0 && max_y.rem_euclid(16) == 15 && min_y < max_y)
+        .then_some((min_y, max_y))
+}
+
 /// The whole range the tall-world datapack can declare, which a One World always takes.
 pub const TALL_DATAPACK_FULL_RANGE: (i32, i32) = (-2032, 2031);
 
@@ -2028,6 +2047,18 @@ mod tests {
             written[key] = bundled[key].clone();
         }
         assert_eq!(written, bundled);
+    }
+
+    #[test]
+    fn the_declared_range_reads_back_from_the_installed_pack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        assert_eq!(tall_datapack_range(&world), None);
+        install_tall_datapack(&world, -128, 399).unwrap();
+        assert_eq!(tall_datapack_range(&world), Some((-128, 399)));
+        let (min_y, max_y) = TALL_DATAPACK_FULL_RANGE;
+        install_tall_datapack(&world, min_y, max_y).unwrap();
+        assert_eq!(tall_datapack_range(&world), Some(TALL_DATAPACK_FULL_RANGE));
     }
 
     fn read_json(path: &Path) -> serde_json::Value {
