@@ -9,7 +9,7 @@ use serde_json::json;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
-use zip::write::FileOptions;
+use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 const BANNER_PNG: &[u8] = include_bytes!("../../assets/minecraft/menu_banner.png");
@@ -42,7 +42,7 @@ fn write_pack(existing: &Path, staged: &Path) -> Result<(), String> {
     let err = |e: zip::result::ZipError| e.to_string();
     let file = File::create(staged).map_err(|e| format!("create {}: {e}", staged.display()))?;
     let mut zip = ZipWriter::new(BufWriter::new(file));
-    let deflated = FileOptions::default().compression_method(CompressionMethod::Deflated);
+    let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
     if existing.exists() {
         // The facade pack can be hundreds of megabytes: its entries are copied compressed.
@@ -50,7 +50,10 @@ fn write_pack(existing: &Path, staged: &Path) -> Result<(), String> {
         let mut old = ZipArchive::new(source).map_err(err)?;
         for i in 0..old.len() {
             let entry = old.by_index_raw(i).map_err(err)?;
-            if [FONT_PATH, TEXTURE_PATH, LANG_PATH].contains(&entry.name()) {
+            if entry
+                .name()
+                .is_ok_and(|n| [FONT_PATH, TEXTURE_PATH, LANG_PATH].contains(&n.as_ref()))
+            {
                 continue;
             }
             zip.raw_copy_file(entry).map_err(err)?;
@@ -89,7 +92,7 @@ fn write_pack(existing: &Path, staged: &Path) -> Result<(), String> {
         (
             TEXTURE_PATH,
             BANNER_PNG.to_vec(),
-            FileOptions::default().compression_method(CompressionMethod::Stored),
+            SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
         ),
         (LANG_PATH, lang.to_string().into_bytes(), deflated),
     ] {
@@ -108,7 +111,7 @@ mod tests {
     fn names(path: &Path) -> Vec<String> {
         let mut zip = ZipArchive::new(File::open(path).unwrap()).unwrap();
         (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().into_owned())
             .collect()
     }
 
@@ -146,7 +149,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let pack = dir.path().join("resources.zip");
         let mut zip = ZipWriter::new(File::create(&pack).unwrap());
-        zip.start_file("pack.mcmeta", FileOptions::default())
+        zip.start_file("pack.mcmeta", SimpleFileOptions::default())
             .unwrap();
         zip.write_all(b"{}").unwrap();
         zip.finish().unwrap();

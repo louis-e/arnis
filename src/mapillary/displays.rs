@@ -1582,15 +1582,15 @@ fn write_resource_zip<W: Write + Seek>(
     px: u32,
 ) -> Result<(), String> {
     let mut zip = zip::ZipWriter::new(out);
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
     // A PNG carries deflated pixels already, so deflating it a second time
     // shrinks the pack by a few per cent and costs more than everything else
     // the writer does put together.
     let png_options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let mut put =
-        |path: String, bytes: &[u8], opts: zip::write::FileOptions| -> Result<(), String> {
+        |path: String, bytes: &[u8], opts: zip::write::SimpleFileOptions| -> Result<(), String> {
             zip.start_file(path, opts).map_err(|e| e.to_string())?;
             zip.write_all(bytes).map_err(|e| e.to_string())
         };
@@ -1696,7 +1696,7 @@ pub(crate) fn is_arnis_pack(path: &Path) -> bool {
     };
     (0..zip.len()).any(|i| {
         zip.by_index_raw(i)
-            .map(|f| f.name() == PACK_MARKER)
+            .map(|f| f.name().is_ok_and(|n| n == PACK_MARKER))
             .unwrap_or(false)
     })
 }
@@ -2976,7 +2976,10 @@ mod tests {
 
         let file = std::fs::File::open(world.join("resources.zip")).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        let mut names: Vec<String> = archive
+            .file_names()
+            .map(|n| n.unwrap().into_owned())
+            .collect();
         names.sort();
         assert_eq!(
             names,
@@ -3098,7 +3101,10 @@ mod tests {
 
         let file = std::fs::File::open(world.join("resources.zip")).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
-        let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        let mut names: Vec<String> = archive
+            .file_names()
+            .map(|n| n.unwrap().into_owned())
+            .collect();
         names.sort();
         assert_eq!(
             names,
@@ -3169,7 +3175,7 @@ mod tests {
 
         // A pack that is not ours: a real zip whose pack.mcmeta says so.
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        let opts = zip::write::FileOptions::default();
+        let opts = zip::write::SimpleFileOptions::default();
         zip.start_file("pack.mcmeta", opts).unwrap();
         zip.write_all(br#"{"pack":{"description":"Made with Arnis, then hand painted"}}"#)
             .unwrap();
