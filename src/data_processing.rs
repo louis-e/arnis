@@ -2235,16 +2235,18 @@ pub fn generate_world_with_options(
         eprintln!("[BENCHMARK] block_hash={:016x}", h);
     }
 
-    // Map id 0 is the first map; branding is id 1 with the preview on, else id 0.
+    // The preview is the world's first map and branding the next, or branding the first
+    // with the preview off.
     if place_branding {
         let (sx, sz) = options
             .spawn_point
             .or_else(|| crate::map_item::read_spawn_xz(&output_path))
             .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+        let first = crate::map_item::FIRST_MAP_ID;
         if wants_map_item {
-            editor.place_map_item_frame(sx, sz, 0, 1);
+            editor.place_map_item_frame(sx, sz, first, first + 1);
         } else {
-            editor.place_branding_map_only(sx, sz, 0);
+            editor.place_branding_map_only(sx, sz, first);
         }
     }
 

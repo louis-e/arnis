@@ -180,6 +180,12 @@ fn build_colors(
     colors
 }
 
+/// The first map id Arnis writes. Paper and Spigot keep every world's maps in the main
+/// world's data folder, so an Arnis world hosted beside it would show that world's maps
+/// 0, 1, 2... in its frames. Starting far above them lets the map files be copied over
+/// as they are, without overwriting a map or editing the id counter.
+pub(crate) const FIRST_MAP_ID: i32 = 1_000_000;
+
 // Next free map id; respects existing counter files so user maps are never clobbered.
 // 26.1 renamed idcounts.dat to last_id.dat, so check both.
 pub(crate) fn next_map_id(data_dir: &Path) -> i32 {
@@ -193,7 +199,7 @@ pub(crate) fn next_map_id(data_dir: &Path) -> i32 {
             }
         }
     }
-    highest.map_or(0, |h| h + 1)
+    highest.map_or(FIRST_MAP_ID, |h| h.saturating_add(1).max(FIRST_MAP_ID))
 }
 
 fn build_map_dat(
@@ -493,7 +499,7 @@ mod tests {
         let preview = PreviewAccumulator::new(&xzbbox);
         write_map_item(&world, &preview, &xzbbox).unwrap();
 
-        let Value::Compound(root) = read_gzip_nbt(&world.join("data/map_0.dat")).unwrap() else {
+        let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID)).unwrap() else {
             panic!("map root");
         };
         let Some(Value::Compound(data)) = root.get("data") else {
@@ -517,8 +523,9 @@ mod tests {
         let Some(Value::Compound(iddata)) = idroot.get("data") else {
             panic!("idcounts data");
         };
-        // Preview is map 0; the branding map reserves id 1, so the counter ends at 1.
-        assert_eq!(iddata.get("map"), Some(&Value::Int(1)));
+        // The preview is the first map and the branding map reserves the next id, which
+        // the counter ends at.
+        assert_eq!(iddata.get("map"), Some(&Value::Int(FIRST_MAP_ID + 1)));
 
         let Value::Compound(level) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
             panic!("level root");
@@ -544,8 +551,9 @@ mod tests {
         let preview = PreviewAccumulator::new(&xzbbox);
         write_map_item(&world, &preview, &xzbbox).unwrap();
 
-        // Preview is map 0; the arnismc.com branding map is the next id, 1.
-        let Value::Compound(root) = read_gzip_nbt(&world.join("data/map_1.dat")).unwrap() else {
+        // The arnismc.com branding map takes the id after the preview's.
+        let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID + 1)).unwrap()
+        else {
             panic!("branding map root");
         };
         let Some(Value::Compound(data)) = root.get("data") else {
@@ -561,7 +569,7 @@ mod tests {
         // The bundled art is not blank, so at least some pixels are opaque.
         assert!(colors.iter().any(|&c| c != TRANSPARENT as i8));
 
-        // Branding stays out of the hotbar: only the preview map (id 0) is held.
+        // Branding stays out of the hotbar: only the preview map is held.
         let items = inventory_items(&world);
         assert_eq!(items.iter().filter(|e| is_filled_map(e)).count(), 1);
     }
@@ -573,8 +581,8 @@ mod tests {
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
         write_branding_map_only(&world).unwrap();
 
-        // With the preview off, the branding map is the world's first map (id 0).
-        let Value::Compound(root) = read_gzip_nbt(&world.join("data/map_0.dat")).unwrap() else {
+        // With the preview off, the branding map is the world's first map.
+        let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID)).unwrap() else {
             panic!("branding map root");
         };
         let Some(Value::Compound(data)) = root.get("data") else {
@@ -593,7 +601,7 @@ mod tests {
         let Some(Value::Compound(iddata)) = idroot.get("data") else {
             panic!("idcounts data");
         };
-        assert_eq!(iddata.get("map"), Some(&Value::Int(0)));
+        assert_eq!(iddata.get("map"), Some(&Value::Int(FIRST_MAP_ID)));
 
         // Preview-off path never touches the hotbar.
         assert_eq!(
@@ -696,7 +704,34 @@ mod tests {
             assert!(!world.join(format!("data/map_{id}.dat")).exists());
         }
         assert!(!world.join("data/idcounts.dat").exists());
-        assert_eq!(next_map_id(&maps), 901);
+        assert_eq!(next_map_id(&maps), registry.max_id() + 1);
+    }
+
+    fn map_file(world: &std::path::Path, id: i32) -> std::path::PathBuf {
+        world.join(format!("data/map_{id}.dat"))
+    }
+
+    #[test]
+    fn map_ids_start_far_above_a_server_world_and_follow_a_higher_counter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path();
+        assert_eq!(next_map_id(data), FIRST_MAP_ID);
+
+        // Maps crafted in game below the first id leave it where it is.
+        write_gzip_nbt(
+            &data.join("idcounts.dat"),
+            &build_idcounts(900, DATA_VERSION),
+        )
+        .unwrap();
+        assert_eq!(next_map_id(data), FIRST_MAP_ID);
+
+        // A counter past it, from an earlier run or the game, is continued.
+        write_gzip_nbt(
+            &data.join("idcounts.dat"),
+            &build_idcounts(FIRST_MAP_ID + 41, DATA_VERSION),
+        )
+        .unwrap();
+        assert_eq!(next_map_id(data), FIRST_MAP_ID + 42);
     }
 
     fn inventory_items(world: &std::path::Path) -> Vec<Value> {
@@ -724,7 +759,7 @@ mod tests {
         let preview = PreviewAccumulator::new(&xzbbox);
         write_map_item(&world, &preview, &xzbbox).unwrap();
 
-        let Value::Compound(root) = read_gzip_nbt(&world.join("data/map_0.dat")).unwrap() else {
+        let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID)).unwrap() else {
             panic!("map root");
         };
         let Some(Value::Compound(data)) = root.get("data") else {
@@ -798,14 +833,14 @@ mod tests {
         std::fs::create_dir_all(&data_dir).unwrap();
         write_gzip_nbt(
             &data_dir.join("idcounts.dat"),
-            &build_idcounts(5, DATA_VERSION),
+            &build_idcounts(FIRST_MAP_ID + 5, DATA_VERSION),
         )
         .unwrap();
 
         let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
         write_map_item(&world, &preview, &xzbbox).unwrap();
-        assert!(data_dir.join("map_6.dat").exists());
+        assert!(map_file(&world, FIRST_MAP_ID + 6).exists());
 
         // A second run must not stack a second map item.
         write_map_item(&world, &preview, &xzbbox).unwrap();
