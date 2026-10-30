@@ -54,6 +54,9 @@ struct Landmark {
     suppress_half_z: f64,
     /// Farthest the model reaches from the anchor, in metres.
     reach_m: i32,
+    /// Blocks the model stands above its ground, so the build height can count it without
+    /// decoding it. A test holds it to the model.
+    height: i32,
 }
 
 /// Anchors are measured by matching each model against its real OSM footprint.
@@ -80,6 +83,7 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_x: 135.0,
         suppress_half_z: 145.0,
         reach_m: 240,
+        height: 76,
     },
     Landmark {
         name: "Olympiahalle",
@@ -103,6 +107,7 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_x: 95.0,
         suppress_half_z: 75.0,
         reach_m: 160,
+        height: 70,
     },
     Landmark {
         name: "Olympia-Schwimmhalle",
@@ -127,6 +132,7 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_x: 50.0,
         suppress_half_z: 70.0,
         reach_m: 160,
+        height: 79,
     },
     Landmark {
         name: "Olympiaturm",
@@ -148,6 +154,7 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_x: 22.0,
         suppress_half_z: 22.0,
         reach_m: 30,
+        height: 288,
     },
     Landmark {
         name: "Elizabeth Tower",
@@ -167,6 +174,7 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_x: 8.0,
         suppress_half_z: 8.0,
         reach_m: 13,
+        height: 96,
     },
 ];
 
@@ -201,10 +209,14 @@ impl LandmarkPrescan {
     }
 }
 
-/// The landmarks among `data`, each a tall model as high as it stands above its ground, so
-/// the build height counts them even where their OSM element carries no height.
-pub fn tall_models_in(data: &crate::osm_parser::OsmData) -> Vec<crate::elevation::TallModel> {
-    let present = |landmark: &Landmark| {
+/// The landmarks this world may hold, each a tall model as high as it stands, so the build
+/// height counts them even where their OSM element carries no height: those whose element is
+/// in `data`, and those within reach of `bbox`, which `prescan` places whether or not it is.
+pub fn tall_models_in(
+    data: &crate::osm_parser::OsmData,
+    bbox: Option<&LLBBox>,
+) -> Vec<crate::elevation::TallModel> {
+    let in_data = |landmark: &Landmark| {
         data.elements().iter().any(|e| {
             landmark.osm_ids.contains(&(e.r#type.as_str(), e.id))
                 || e.tags
@@ -213,20 +225,24 @@ pub fn tall_models_in(data: &crate::osm_parser::OsmData) -> Vec<crate::elevation
                     .is_some_and(|q| q.trim() == landmark.qid)
         })
     };
+    let in_reach = |landmark: &Landmark| {
+        bbox.is_some_and(|b| {
+            let lat_m = 111_320.0;
+            let lon_m = lat_m * landmark.lat.to_radians().cos().max(0.01);
+            let reach = f64::from(landmark.reach_m);
+            landmark.lat + reach / lat_m >= b.min().lat()
+                && landmark.lat - reach / lat_m <= b.max().lat()
+                && landmark.lon + reach / lon_m >= b.min().lng()
+                && landmark.lon - reach / lon_m <= b.max().lng()
+        })
+    };
     LANDMARKS
         .iter()
-        .filter(|l| present(l))
-        .filter_map(|l| {
-            let model = match l.model {
-                Source::Schem(bytes) => load_palettized(bytes).ok()?,
-                Source::Built(build) => build(),
-            };
-            let top = model.voxels.iter().map(|v| i32::from(v.1)).max()? + 1;
-            Some(crate::elevation::TallModel {
-                lat: l.lat,
-                lon: l.lon,
-                height_m: f64::from(top - l.ground_y + l.ground_offset.max(0)),
-            })
+        .filter(|l| in_data(l) || in_reach(l))
+        .map(|l| crate::elevation::TallModel {
+            lat: l.lat,
+            lon: l.lon,
+            height_m: f64::from(l.height),
         })
         .collect()
 }
@@ -761,7 +777,7 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        let found = tall_models_in(&data);
+        let found = tall_models_in(&data, None);
         assert_eq!(found.len(), 2, "{found:?}");
         let tower = landmark(TOWER);
         let olympiaturm = found.iter().find(|m| m.lat == tower.lat).unwrap();
@@ -769,7 +785,30 @@ mod tests {
         assert!(olympiaturm.height_m > 280.0, "{olympiaturm:?}");
         let empty: crate::osm_parser::OsmData =
             serde_json::from_str(r#"{"elements": []}"#).unwrap();
-        assert!(tall_models_in(&empty).is_empty());
+        assert!(tall_models_in(&empty, None).is_empty());
+        // Placed from its anchor even when the bbox stops short of its OSM outline.
+        let near = LLBBox::new(48.1740, 11.5530, 48.1743, 11.5536).unwrap();
+        let reached = tall_models_in(&empty, Some(&near));
+        assert!(reached.iter().any(|m| m.lat == tower.lat), "{reached:?}");
+        let far = LLBBox::new(48.0, 11.0, 48.01, 11.01).unwrap();
+        assert!(tall_models_in(&empty, Some(&far)).is_empty());
+    }
+
+    #[test]
+    fn every_landmark_height_is_its_models() {
+        for l in LANDMARKS {
+            let model = match l.model {
+                Source::Schem(bytes) => load_palettized(bytes).unwrap(),
+                Source::Built(build) => build(),
+            };
+            let top = model.voxels.iter().map(|v| i32::from(v.1)).max().unwrap() + 1;
+            assert_eq!(
+                l.height,
+                top - l.ground_y + l.ground_offset.max(0),
+                "{}",
+                l.name
+            );
+        }
     }
 
     #[test]
