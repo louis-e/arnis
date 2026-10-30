@@ -86,11 +86,13 @@ pub fn run_gui() -> Result<(), String> {
 
         // Force software rendering for better compatibility.
         // Only set if not already configured by the user, allowing manual override
-        // for systems where software rendering causes EGL_BAD_PARAMETER (see #1247).
-        if env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
+        // for systems where software rendering causes EGL_BAD_PARAMETER (see #1247),
+        // and left out where the launcher found that only the GPU driver starts.
+        let gpu = crate::linux_gui::current() == Some(crate::linux_gui::Renderer::Gpu);
+        if !gpu && env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
             env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
         }
-        if env::var("GALLIUM_DRIVER").is_err() {
+        if !gpu && env::var("GALLIUM_DRIVER").is_err() {
             env::set_var("GALLIUM_DRIVER", "softpipe");
         }
 
