@@ -36,6 +36,9 @@ pub struct TerrainHints {
     pub tall_structures: Vec<TallModel>,
     /// A second message with Overture's tall structures follows.
     pub overture_follows: bool,
+    /// Points along the ways bored as tunnels, so a fit with water over one can leave it
+    /// room under the bed.
+    pub bores: Vec<(f64, f64)>,
 }
 
 impl TerrainHints {
@@ -55,6 +58,7 @@ impl TerrainHints {
                 Vec::new()
             },
             overture_follows: Self::wants_overture(args),
+            bores: bores_in(data),
         }
     }
 
@@ -95,6 +99,83 @@ fn wants_structures(args: &crate::args::Args) -> bool {
 /// shorter stays under it wherever the terrain itself fits.
 pub(crate) fn may_pass_vanilla(height_m: f64, scale: f64) -> bool {
     height_m * scale > f64::from(super::postprocess::TERRAIN_HEIGHT_BUFFER - 2)
+}
+
+/// Spacing in metres of the points `bores_in` lays along a tunnel: finer than the land
+/// cover, so a bore under a narrow river still puts a point on its water.
+const BORE_STEP_M: f64 = 2.0;
+
+/// Whether a way with these tags is bored as a tunnel: a road or track tagged as one, or a
+/// subway not tagged otherwise. Errs wide, as a hint only leaves room.
+fn is_bored(tags: &HashMap<String, String>) -> bool {
+    let tunnel = tags.get("tunnel").map(String::as_str);
+    let railway = tags.get("railway").map(String::as_str);
+    (tunnel == Some("yes") && (tags.contains_key("highway") || railway.is_some()))
+        || (railway == Some("subway") && tunnel != Some("no"))
+}
+
+/// Points every `BORE_STEP_M` along the ways of a raw OSM fetch that are bored as tunnels.
+pub fn bores_in(data: &crate::osm_parser::OsmData) -> Vec<(f64, f64)> {
+    let ways: Vec<&[u64]> = data
+        .elements()
+        .iter()
+        .filter(|e| e.r#type == "way" && e.tags.as_ref().is_some_and(is_bored))
+        .filter_map(|e| e.nodes.as_deref())
+        .collect();
+    if ways.is_empty() {
+        return Vec::new();
+    }
+    let wanted: HashSet<u64> = ways.iter().flat_map(|w| w.iter().copied()).collect();
+    let at: HashMap<u64, (f64, f64)> = data
+        .elements()
+        .iter()
+        .filter(|e| e.r#type == "node" && wanted.contains(&e.id))
+        .filter_map(|e| Some((e.id, (e.lat?, e.lon?))))
+        .collect();
+    let mut points = Vec::new();
+    for way in ways {
+        let line: Vec<(f64, f64)> = way.iter().filter_map(|id| at.get(id).copied()).collect();
+        points.extend(line.first());
+        for pair in line.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let (ew, ns) = extent_m([a, b].into_iter());
+            let steps = ((ew.hypot(ns) / BORE_STEP_M).ceil() as usize).max(1);
+            points.extend((1..=steps).map(|k| {
+                let t = k as f64 / steps as f64;
+                (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
+            }));
+        }
+    }
+    points
+}
+
+/// The land-cover cells (column, row) of `bores` that lie on water, over `bbox`, in order.
+pub(crate) fn bore_water_cells(
+    land_cover: &crate::land_cover::LandCoverData,
+    bbox: &LLBBox,
+    bores: &[(f64, f64)],
+) -> Vec<(usize, usize)> {
+    let (w, h) = (land_cover.width, land_cover.height);
+    if w < 2 || h < 2 {
+        return Vec::new();
+    }
+    let (min_lat, max_lat) = (bbox.min().lat(), bbox.max().lat());
+    let (min_lon, max_lon) = (bbox.min().lng(), bbox.max().lng());
+    let mut cells: Vec<(usize, usize)> = bores
+        .iter()
+        .filter(|&&(lat, lon)| inside(bbox, lat, lon))
+        .map(|&(lat, lon)| {
+            let x = ((lon - min_lon) / (max_lon - min_lon) * (w - 1) as f64).round() as usize;
+            let y = ((max_lat - lat) / (max_lat - min_lat) * (h - 1) as f64).round() as usize;
+            (x, y)
+        })
+        .filter(|&(x, y)| {
+            land_cover.grid.get(y).and_then(|row| row.get(x)) == Some(&crate::land_cover::LC_WATER)
+        })
+        .collect();
+    cells.sort_unstable();
+    cells.dedup();
+    cells
 }
 
 /// Whether a point lies in `bbox`, edges included.
@@ -644,6 +725,72 @@ mod tests {
         ] {
             assert!(hints(none).is_empty(), "{none:?}");
         }
+    }
+
+    /// A tunnel under a river often has no node on the water, so its points run the whole way.
+    #[test]
+    fn bores_run_along_tunnels_and_find_the_water_they_cross() {
+        let data: crate::osm_parser::OsmData = serde_json::from_str(
+            r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 40.700, "lon": -74.010},
+                {"type": "node", "id": 2, "lat": 40.700, "lon": -74.000},
+                {"type": "node", "id": 3, "lat": 40.705, "lon": -74.010},
+                {"type": "node", "id": 4, "lat": 40.705, "lon": -74.000},
+                {"type": "way", "id": 10, "nodes": [1, 2], "tags": {"railway": "subway"}},
+                {"type": "way", "id": 11, "nodes": [3, 4], "tags": {"highway": "primary", "tunnel": "yes"}},
+                {"type": "way", "id": 12, "nodes": [1, 3], "tags": {"railway": "subway", "tunnel": "no"}},
+                {"type": "way", "id": 13, "nodes": [2, 4], "tags": {"highway": "footway", "tunnel": "building_passage"}},
+                {"type": "way", "id": 14, "nodes": [1, 4], "tags": {"highway": "primary"}}
+            ]}"#,
+        )
+        .unwrap();
+        let bores = bores_in(&data);
+        // Both bored ways, about 840 m each, every two metres; none of the others.
+        assert!((800..900).contains(&bores.len()), "{}", bores.len());
+        assert!(bores.iter().all(|&(lat, _)| lat == 40.700 || lat == 40.705));
+        let gap = bores
+            .windows(2)
+            .filter(|p| p[0].0 == p[1].0)
+            .map(|p| extent_m(p.iter().copied()).0)
+            .fold(0.0, f64::max);
+        assert!(gap <= BORE_STEP_M, "{gap} m between points");
+
+        // A river between lon -74.006 and -74.004, on a 100-cell land cover over the area.
+        let bbox = LLBBox::new(40.695, -74.012, 40.710, -73.998).unwrap();
+        let cover = |water: bool| {
+            let n = 100;
+            let grid = (0..n)
+                .map(|_| {
+                    (0..n)
+                        .map(|x| {
+                            let lon = -74.012 + 0.014 * x as f64 / (n - 1) as f64;
+                            if water && (-74.006..-74.004).contains(&lon) {
+                                crate::land_cover::LC_WATER
+                            } else {
+                                crate::land_cover::LC_GRASSLAND
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            crate::land_cover::LandCoverData {
+                grid,
+                water_distance: vec![vec![0u8; n]; n],
+                water_blend_cache: once_cell::sync::OnceCell::new(),
+                beach_tiles: once_cell::sync::OnceCell::new(),
+                width: n,
+                height: n,
+                cells_per_meter: 1.0,
+            }
+        };
+        let crossed = bore_water_cells(&cover(true), &bbox, &bores);
+        // Both bores cross the river's 14 or so columns, each cell once.
+        assert!((20..=34).contains(&crossed.len()), "{crossed:?}");
+        assert!(crossed.windows(2).all(|p| p[0] < p[1]));
+        assert!(bore_water_cells(&cover(false), &bbox, &bores).is_empty());
+        // Water outside the area the land cover covers does not count.
+        let away = LLBBox::new(40.800, -74.012, 40.815, -73.998).unwrap();
+        assert!(bore_water_cells(&cover(true), &away, &bores).is_empty());
     }
 
     // The IHZ: a 25-storey outline is built as its 93.5 m flat parts, so only they count.

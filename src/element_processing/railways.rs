@@ -92,8 +92,13 @@ const RAIL_BED_REACH: i32 = 10;
 const ROAD_SHIFT_COST: f64 = 4.0;
 /// What a tunnel pays per block it runs shallower than its depth, against 1 for deeper.
 const TUNNEL_SHALLOW_COST: f64 = 0.25;
+/// The same under a carved water bed, where a shallow roof stands up in the water.
+const TUNNEL_SHALLOW_UNDER_WATER_COST: f64 = 1.0;
 /// Cells a tunnel ramp runs for each block it drops from a portal.
 const TUNNEL_RAMP_RUN: i32 = 4;
+// The terrain fit leaves `BORE_ROOM` between the deepest bed and the lowest a bed can lie,
+// which is the lowest a floor can lie, `RAIL_TUNNEL_DEPTH + INTERIOR_HEIGHT + 1` under it.
+const _: () = assert!(RAIL_TUNNEL_DEPTH + INTERIOR_HEIGHT < crate::water_depth::BORE_ROOM);
 
 /// Deterministic spatial hash for tunnel wall/ceiling block variety.
 /// Returns CRACKED_STONE_BRICKS (~15%), MOSSY_STONE_BRICKS (~3%),
@@ -1492,7 +1497,24 @@ fn generate_rail_tunnel_shell(
         .iter()
         .map(|&(x, z)| editor.get_ground_level(x, z))
         .collect();
-    let mut deep: Vec<i32> = ground.iter().map(|g| g - depth).collect();
+    // Under water the terrain is the water's surface, and the carve digs the bed out
+    // below it. The roof keeps its cover under the deepest bed across the shell, or the
+    // bed is laid on the bore and the shell stands up in the water.
+    let bed: Vec<Option<i32>> = cells
+        .iter()
+        .zip(&ground)
+        .map(|(&(x, z), &g)| {
+            editor
+                .lowest_carved_bed(x, z, WALL_RADIUS)
+                .filter(|&b| b < g)
+        })
+        .collect();
+    let surface: Vec<i32> = ground
+        .iter()
+        .zip(&bed)
+        .map(|(&g, b)| b.unwrap_or(g))
+        .collect();
+    let mut deep: Vec<i32> = surface.iter().map(|s| s - depth).collect();
     // Never under the world's floor: low ground keeps its tunnel just below the surface.
     let lowest = crate::world_editor::min_y() + 1;
     let mut pins = vec![None; n];
@@ -1516,7 +1538,8 @@ fn generate_rail_tunnel_shell(
             }
         }
     }
-    // Not `deep`: its portal ramps hang on where this area clipped the way.
+    // Not `deep`: its portal ramps hang on where this area clipped the way. Nor the bed:
+    // each area carves its own water, so only the terrain reads alike from both sides.
     pin_area_edge(&mut pins, rail_joins, &cells, |i| {
         (ground[i] - depth).max(lowest)
     });
@@ -1538,10 +1561,12 @@ fn generate_rail_tunnel_shell(
         },
         |i, y| {
             let shallower = (y - deep[i]) as f64;
-            if shallower > 0.0 {
-                TUNNEL_SHALLOW_COST * shallower
-            } else {
+            if shallower <= 0.0 {
                 -shallower
+            } else if bed[i].is_some() {
+                TUNNEL_SHALLOW_UNDER_WATER_COST * shallower
+            } else {
+                TUNNEL_SHALLOW_COST * shallower
             }
         },
         RAIL_STEP_COST,
@@ -2183,6 +2208,174 @@ mod tests {
         assert!(at(68) >= -1, "{} eight cells in", at(68));
         let deepest = laid.iter().map(|l| l.1).min().unwrap();
         assert_eq!(deepest, -RAIL_TUNNEL_DEPTH - INTERIOR_HEIGHT);
+    }
+
+    /// An editor over a river 100 blocks wide, across x 50..150, flat at `level`.
+    fn river_editor(
+        xzbbox: &XZBBox,
+        level: f32,
+    ) -> (
+        WorldEditor<'_>,
+        crate::ground::Ground,
+        std::sync::Arc<crate::water_depth::BigWaterField>,
+    ) {
+        let ground = crate::ground::test_support::ground_with_water(200, 120, level, |x, _| {
+            (50..150).contains(&x)
+        });
+        let mut editor = test_editor(xzbbox);
+        editor.set_ground(std::sync::Arc::new(ground.clone()));
+        let field =
+            std::sync::Arc::new(crate::water_depth::compute_big_water_field(&ground, xzbbox));
+        editor.set_water_field(std::sync::Arc::clone(&field));
+        (editor, ground, field)
+    }
+
+    /// A subway from x 10 to 190, laid out, the river carved over it, then bored, in the
+    /// order the generator runs them.
+    fn subway_under_river(
+        editor: &mut WorldEditor,
+        ground: &crate::ground::Ground,
+        field: &crate::water_depth::BigWaterField,
+        xzbbox: &XZBBox,
+    ) -> Vec<RailTunnelPoint> {
+        let mut way = straight_rail(&[("railway", "subway")]);
+        way.nodes[0].x = 10;
+        way.nodes[1].x = 190;
+        let mut footprint = CoordinateBitmap::new_empty();
+        add_tunnel_footprint(
+            &[ProcessedElement::Way(way.clone())],
+            xzbbox,
+            &mut footprint,
+        );
+        let points = run_collecting_tunnel_points(editor, &way, &CoordinateBitmap::new(xzbbox));
+        crate::water_depth::carve_lc_water_region(
+            editor,
+            ground,
+            xzbbox,
+            field,
+            &CoordinateBitmap::new_empty(),
+            &footprint,
+            &BridgeSurfaceMap::empty(),
+            xzbbox.min_x(),
+            xzbbox.max_x(),
+            xzbbox.min_z(),
+            xzbbox.max_z(),
+        );
+        carve_rail_tunnel_interior(editor, &points);
+        points
+    }
+
+    const SHELL: &[Block] = &[
+        STONE_BRICKS,
+        CRACKED_STONE_BRICKS,
+        MOSSY_STONE_BRICKS,
+        POLISHED_DEEPSLATE,
+    ];
+
+    /// Every point bored, railed and roofed, with nothing in the bore.
+    fn assert_bore_whole_and_dry(editor: &WorldEditor, points: &[RailTunnelPoint]) {
+        for &(x, z, floor, _) in points {
+            assert!(
+                editor
+                    .get_block_absolute(x, floor + 1, z)
+                    .is_some_and(is_rail_block),
+                "no rail at x={x}"
+            );
+            for y in floor + 2..floor + INTERIOR_HEIGHT + 1 {
+                assert!(
+                    !editor.block_exists_absolute(x, y, z),
+                    "bore filled at ({x}, {y}, {z})"
+                );
+            }
+            // A neighbour a block higher carves this roof row; the roof is then one up.
+            let roof = (floor + INTERIOR_HEIGHT + 1..=floor + INTERIOR_HEIGHT + 2)
+                .find(|&y| editor.block_exists_absolute(x, y, z));
+            assert!(
+                roof.is_some_and(|y| editor.check_for_block_absolute(x, y, z, Some(SHELL), None)),
+                "no roof over x={x}"
+            );
+        }
+    }
+
+    /// Every column of the river over the bore carries the river's own bed, with no shell
+    /// between it and the surface at `level`.
+    fn assert_river_bed_over_bore(editor: &WorldEditor, level: i32) {
+        for x in 50..150 {
+            for z in 50 - WALL_RADIUS..=50 + WALL_RADIUS {
+                let bed = editor.carved_bed(x, z).expect("river");
+                assert!(
+                    editor.block_exists_absolute(x, bed, z)
+                        && !editor.check_for_block_absolute(x, bed, z, Some(&[WATER]), None),
+                    "no bed at ({x}, {bed}, {z})"
+                );
+                for y in bed - 1..=level {
+                    assert!(
+                        !editor.check_for_block_absolute(x, y, z, Some(SHELL), None),
+                        "shell in the river at ({x}, {y}, {z}), bed {bed}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The reported pale stripes: the bore was laid out under the water's surface, and the
+    /// bed over it stayed a block under that surface while the river around it was carved.
+    #[test]
+    fn a_subway_under_a_river_runs_below_the_carved_bed() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let (mut editor, ground, field) = river_editor(&xzbbox, 0.0);
+        let points = subway_under_river(&mut editor, &ground, &field, &xzbbox);
+
+        assert_river_bed_over_bore(&editor, 0);
+        assert_bore_whole_and_dry(&editor, &points);
+        let mid = points.iter().find(|p| p.0 == 100).unwrap();
+        assert!(mid.2 <= -14, "floor {} under a bed at -7", mid.2);
+    }
+
+    /// The base the terrain fit lifts an area to when a bore runs under its water is
+    /// exactly enough to keep the bore under the deepest bed.
+    #[test]
+    fn a_subway_fits_under_a_river_on_the_lifted_base() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        // The carve floor for the deepest tier, and the room for a bore on top.
+        let level = crate::world_editor::min_y() + 6 + 2 + crate::water_depth::BORE_ROOM;
+        let (mut editor, ground, field) = river_editor(&xzbbox, level as f32);
+        let points = subway_under_river(&mut editor, &ground, &field, &xzbbox);
+
+        assert_river_bed_over_bore(&editor, level);
+        assert_bore_whole_and_dry(&editor, &points);
+    }
+
+    /// Over the world's floor there is no room under the deepest bed: the bore goes as deep
+    /// as it can and the river's bed stops on its roof, without water getting in.
+    #[test]
+    fn a_subway_on_the_world_floor_keeps_the_river_out() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let level = crate::world_editor::min_y() + 10;
+        let (mut editor, ground, field) = river_editor(&xzbbox, level as f32);
+        let points = subway_under_river(&mut editor, &ground, &field, &xzbbox);
+
+        assert_bore_whole_and_dry(&editor, &points);
+        let mid = points.iter().find(|p| p.0 == 100).unwrap();
+        assert_eq!(
+            mid.2,
+            crate::world_editor::min_y() + 1,
+            "as deep as it goes"
+        );
+        // The river is carved down to the roof, with the bed on top of it.
+        let roof = mid.2 + INTERIOR_HEIGHT + 1;
+        assert!(editor.check_for_block_absolute(100, level, 50, Some(&[WATER]), None));
+        assert!(!editor.check_for_block_absolute(100, roof + 2, 50, Some(&[WATER]), None));
+        assert!(editor.check_for_block_absolute(100, roof, 50, Some(SHELL), None));
     }
 
     #[test]

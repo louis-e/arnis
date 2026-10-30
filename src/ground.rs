@@ -506,6 +506,7 @@ impl Ground {
                     min_ground_level: h.min_ground_level.max(carve_floor).min(water_floor),
                     disable_height_limit: h.extended,
                     extended_max_y: h.extended_max_y,
+                    floor_y: h.min_y,
                 }
             };
 
@@ -2180,6 +2181,38 @@ pub(crate) mod test_support {
             world_width,
             world_height,
         )
+    }
+
+    /// Flat ground at `level`, its land cover water where `water` says and grassland elsewhere.
+    pub(crate) fn ground_with_water(
+        width: usize,
+        height: usize,
+        level: f32,
+        water: impl Fn(usize, usize) -> bool,
+    ) -> Ground {
+        let grid = (0..height)
+            .map(|z| {
+                (0..width)
+                    .map(|x| {
+                        if water(x, z) {
+                            land_cover::LC_WATER
+                        } else {
+                            land_cover::LC_GRASSLAND
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let lc = LandCoverData {
+            grid,
+            water_distance: vec![vec![0u8; width]; height],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
+            width,
+            height,
+            cells_per_meter: 1.0,
+        };
+        ground_with_land_cover_and_heights(lc, vec![vec![level; width]; height], width, height)
     }
 
     /// `ground_with_land_cover_and_elevation` over the given terrain, in blocks.
