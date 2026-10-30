@@ -1754,7 +1754,10 @@ fn gui_start_generation(
                 }
                 _session_lock = Some(session.lock);
                 if args.disable_height_limit && session.created {
-                    if let Err(e) = crate::world_utils::install_tall_datapack(&world_path) {
+                    let (min_y, max_y) = crate::world_utils::TALL_DATAPACK_FULL_RANGE;
+                    if let Err(e) =
+                        crate::world_utils::install_tall_datapack(&world_path, min_y, max_y)
+                    {
                         let error_msg = format!("Failed to install tall-world datapack: {e}");
                         eprintln!("{error_msg}");
                         emit_gui_error(&error_msg);

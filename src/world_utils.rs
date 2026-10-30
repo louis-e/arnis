@@ -817,7 +817,10 @@ pub fn has_tall_datapack(world_path: &Path) -> bool {
 /// Overlays must declare their range only via
 /// `min_format`/`max_format`; the deprecated `formats` key makes 1.21.9+ drop
 /// the whole overlays section and fall back to the legacy tree.
-pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
+///
+/// Every copy declares `min_y..=max_y`, which must be the bounds the world's chunks are
+/// written for: `TALL_DATAPACK_FULL_RANGE`, or the part of it an area needs.
+pub fn install_tall_datapack(world_path: &Path, min_y: i32, max_y: i32) -> Result<(), String> {
     const PACK_MCMETA: &[u8] = include_bytes!("../assets/minecraft/datapack_tall/pack.mcmeta");
     const OVERWORLD_JSON: &[u8] = include_bytes!(
         "../assets/minecraft/datapack_tall/data/minecraft/dimension_type/overworld.json"
@@ -848,8 +851,11 @@ pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
             .join("dimension_type");
         fs::create_dir_all(&dim_dir)
             .map_err(|e| format!("Failed to create datapack directories: {e}"))?;
-        fs::write(dim_dir.join("overworld.json"), bytes)
-            .map_err(|e| format!("Failed to write overworld.json: {e}"))?;
+        fs::write(
+            dim_dir.join("overworld.json"),
+            dimension_with_range(bytes, min_y, max_y)?,
+        )
+        .map_err(|e| format!("Failed to write overworld.json: {e}"))?;
     }
 
     fs::write(dp_root.join("pack.mcmeta"), PACK_MCMETA)
@@ -858,6 +864,26 @@ pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
     enable_datapack_in_level_dat(world_path, TALL_DATAPACK_NAME)?;
 
     Ok(())
+}
+
+/// The whole range the tall-world datapack can declare, which a One World always takes.
+pub const TALL_DATAPACK_FULL_RANGE: (i32, i32) = (-2032, 2031);
+
+/// A bundled dimension type, its height range set to `min_y..=max_y`.
+fn dimension_with_range(bundled: &[u8], min_y: i32, max_y: i32) -> Result<Vec<u8>, String> {
+    let mut dimension: serde_json::Value = serde_json::from_slice(bundled)
+        .map_err(|e| format!("Failed to read the bundled overworld.json: {e}"))?;
+    let fields = dimension
+        .as_object_mut()
+        .ok_or("The bundled overworld.json is not an object")?;
+    let height = max_y + 1 - min_y;
+    fields.insert("min_y".to_string(), min_y.into());
+    fields.insert("height".to_string(), height.into());
+    fields.insert("logical_height".to_string(), height.into());
+    let mut json = serde_json::to_vec_pretty(&dimension)
+        .map_err(|e| format!("Failed to write overworld.json: {e}"))?;
+    json.push(b'\n');
+    Ok(json)
 }
 
 /// Appends `file/<pack_dir_name>` to `Data.DataPacks.Enabled` if missing, so the
@@ -1969,8 +1995,39 @@ mod tests {
 
     fn install_pack_for_test(tmp: &std::path::Path) -> PathBuf {
         let world = PathBuf::from(create_new_world(tmp).unwrap());
-        install_tall_datapack(&world).unwrap();
+        let (min_y, max_y) = TALL_DATAPACK_FULL_RANGE;
+        install_tall_datapack(&world, min_y, max_y).unwrap();
         world.join("datapacks").join(TALL_DATAPACK_NAME)
+    }
+
+    #[test]
+    fn every_copy_of_the_dimension_declares_the_range_it_is_given() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = PathBuf::from(create_new_world(tmp.path()).unwrap());
+        install_tall_datapack(&world, -128, 399).unwrap();
+        let root = world.join("datapacks").join(TALL_DATAPACK_NAME);
+        for overlay in ["", "overlay_attributes", "overlay_2601"] {
+            let dim = read_json(
+                &root
+                    .join(overlay)
+                    .join("data/minecraft/dimension_type/overworld.json"),
+            );
+            assert_eq!(dim["min_y"], -128, "{overlay}");
+            assert_eq!(dim["height"], 528, "{overlay}");
+            assert_eq!(dim["logical_height"], 528, "{overlay}");
+            // Everything else is the bundled file's.
+            assert_eq!(dim["has_skylight"], true, "{overlay}");
+        }
+        let bundled: serde_json::Value = serde_json::from_slice(include_bytes!(
+            "../assets/minecraft/datapack_tall/overlay_2601/data/minecraft/dimension_type/overworld.json"
+        ))
+        .unwrap();
+        let mut written =
+            read_json(&root.join("overlay_2601/data/minecraft/dimension_type/overworld.json"));
+        for key in ["min_y", "height", "logical_height"] {
+            written[key] = bundled[key].clone();
+        }
+        assert_eq!(written, bundled);
     }
 
     fn read_json(path: &Path) -> serde_json::Value {

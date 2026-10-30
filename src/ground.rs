@@ -7,7 +7,7 @@ use crate::coordinate_system::{
 };
 use crate::ecoregion::{EcoMap, Ecoregion};
 use crate::elevation::{
-    compute_grid_dims, compute_grid_dims_for_world, AffinePolicy, ElevationAffine,
+    compute_grid_dims, compute_grid_dims_for_world, AffinePolicy, ElevationAffine, RaisedFor,
 };
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
@@ -440,6 +440,7 @@ impl Ground {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                raised_for: None,
                 halo: None,
             }),
             land_cover: None,
@@ -1498,7 +1499,8 @@ pub fn generate_ground_data(
             ground.extended_ceiling = height.extended || !flat_fits_vanilla(args, &bbox, peaks);
         }
         if auto && ground.extended_ceiling {
-            extend_world_bounds(args);
+            let raised_for = ground.elevation_data.as_ref().and_then(|d| d.raised_for);
+            extend_world_bounds(args, ground.base_level(), raised_for);
         }
         ground.set_winter(args.winter);
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
@@ -1525,7 +1527,7 @@ pub fn generate_ground_data(
     );
     if auto && (height.extended || !flat_fits_vanilla(args, &bbox, peaks)) {
         ground.extended_ceiling = true;
-        extend_world_bounds(args);
+        extend_world_bounds(args, ground.base_level(), None);
     }
     ground.set_winter(args.winter);
     crate::world_editor::set_base_chunk_y(ground.base_level());
@@ -1684,8 +1686,38 @@ fn height_choice(args: &Args) -> (WorldHeight, Option<WorldHeight>) {
 }
 
 /// Gives the dimension the extended height, once an auto-height run turns out to need it.
-fn extend_world_bounds(args: &Args) {
-    crate::world_editor::set_world_bounds(world_min_y(args, true), world_top_y(args, true));
+/// On Java only as far as the area reaches, when the fit says how far that is: every extra
+/// section costs each loaded chunk memory and time in the game, filled or not.
+fn extend_world_bounds(args: &Args, base: i32, raised_for: Option<RaisedFor>) {
+    let (min, max) = match raised_for {
+        Some(r) if !args.bedrock => sized_world_bounds(base, r),
+        _ => (world_min_y(args, true), world_top_y(args, true)),
+    };
+    crate::world_editor::set_world_bounds(min, max);
+}
+
+/// Room over the highest terrain for what the fit does not count: trees, bridges and the
+/// bundled props, the tallest of which is the 197-block wind turbine, and some to build in.
+const PROP_HEADROOM: i32 = 208;
+
+/// Room over the tallest building or model the fit counted, for what rises past its
+/// mapped height: spires, masts and roofs.
+const STRUCTURE_HEADROOM: i32 = 32;
+
+/// The dimension a Java area raised past vanilla needs, within the pack's full -2032..2031.
+/// The floor is the terrain floor the base already puts bedrock on, and never above
+/// vanilla's; the ceiling clears the terrain and what stands on it, never below vanilla's.
+fn sized_world_bounds(base: i32, raised_for: RaisedFor) -> (i32, i32) {
+    let floor = (base - crate::world_editor::common::TERRAIN_FLOOR_DEPTH).div_euclid(16) * 16;
+    let min = floor.clamp(-2032, crate::world_editor::DEFAULT_MIN_Y);
+    let RaisedFor {
+        terrain_top_y,
+        tallest_blocks,
+    } = raised_for;
+    let top =
+        (terrain_top_y + PROP_HEADROOM).max(terrain_top_y + tallest_blocks + STRUCTURE_HEADROOM);
+    let max = ((top + 16).div_euclid(16) * 16 - 1).clamp(crate::world_editor::DEFAULT_MAX_Y, 2031);
+    (min, max)
 }
 
 /// Without a relief to fit: whether every tall structure stays under vanilla's ceiling.
@@ -1781,11 +1813,16 @@ pub fn settle_build_height(
     if !args.disable_height_limit || args.one_world_run.is_some() {
         return Ok(());
     }
-    crate::world_utils::install_tall_datapack(dir)
+    let (min_y, max_y) = (
+        crate::world_editor::min_y(),
+        crate::world_editor::world_max_y(),
+    );
+    crate::world_utils::install_tall_datapack(dir, min_y, max_y)
         .map_err(|e| format!("Failed to install tall-world datapack: {e}"))?;
     println!(
-        "Note: added the tall-world datapack (Minecraft 1.21.4+). The first load asks about \
-         experimental features, and the world can't be uploaded to Realms.{instead}"
+        "Note: added the tall-world datapack for Y {min_y} to {max_y} (Minecraft 1.21.4+). The \
+         first load asks about experimental features, and the world can't be uploaded to \
+         Realms.{instead}"
     );
     Ok(())
 }
@@ -1815,6 +1852,7 @@ mod tests {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                raised_for: None,
                 halo: None,
             }),
             land_cover: None,
@@ -1970,6 +2008,7 @@ mod tests {
             ground_level: 0,
             soft_top: None,
             extended_ceiling: false,
+            raised_for: None,
             halo: None,
         };
         // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
@@ -2078,6 +2117,53 @@ mod tests {
         // Raised ceiling, 1:1 vertical: the cutoff is the 25 m cliff the guard was written for.
         assert_eq!(at(10.0, 1.0, 1.0, true), 0);
         assert_eq!(at(26.0, 1.0, 1.0, true), 26);
+    }
+
+    #[test]
+    fn a_raised_area_gets_only_the_sections_it_reaches() {
+        let raised = |terrain_top_y, tallest_blocks| RaisedFor {
+            terrain_top_y,
+            tallest_blocks,
+        };
+        // A flat city with one 400-block tower: the bedrock floor the base already had,
+        // and a ceiling over the tower instead of at 2031.
+        assert_eq!(sized_world_bounds(-62, raised(-40, 400)), (-128, 399));
+        // Mountains to Y 1661 with a 146-block tower somewhere: the props' room wins.
+        assert_eq!(sized_world_bounds(-62, raised(1661, 146)), (-128, 1871));
+        // A base the fit sank keeps its 64 blocks of ground, on a section boundary.
+        assert_eq!(sized_world_bounds(-1500, raised(1900, 0)).0, -1568);
+        // Never more than the pack can declare, never less than vanilla.
+        assert_eq!(sized_world_bounds(-2030, raised(2000, 300)), (-2032, 2031));
+        assert_eq!(sized_world_bounds(-62, raised(-50, 0)), (-128, 319));
+        assert_eq!(sized_world_bounds(100, raised(120, 0)).0, -64);
+        for base in [-2030, -700, -62, 0, 64] {
+            for top in [-60, 0, 319, 777, 1500, 2031] {
+                let (min, max) = sized_world_bounds(base, raised(top, 50));
+                assert_eq!(min.rem_euclid(16), 0);
+                assert_eq!(max.rem_euclid(16), 15);
+                assert!(min <= base - 2 || min == -2032);
+                assert!(max >= top + 50 || max == 2031);
+            }
+        }
+    }
+
+    #[test]
+    fn the_prop_headroom_clears_every_bundled_structure() {
+        for entry in std::fs::read_dir("assets/structures").unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "schem") {
+                continue;
+            }
+            let schem =
+                crate::structures::schematic::load_structure(&std::fs::read(&path).unwrap())
+                    .unwrap();
+            let height = schem.voxels.iter().map(|v| v.1).max().unwrap_or(0) + 1;
+            assert!(
+                height + 1 < PROP_HEADROOM,
+                "{} is {height} blocks tall",
+                path.display()
+            );
+        }
     }
 
     #[test]
@@ -2277,6 +2363,7 @@ pub(crate) mod test_support {
                 ground_level: 0,
                 soft_top: None,
                 extended_ceiling: false,
+                raised_for: None,
                 halo: None,
             }),
             land_cover: Some(land_cover),

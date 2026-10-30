@@ -372,7 +372,8 @@ fn run_cli() {
             created: session.created.then(|| world_dir.clone()),
         });
         if args.disable_height_limit && session.created {
-            if let Err(e) = world_utils::install_tall_datapack(&world_dir) {
+            let (min_y, max_y) = world_utils::TALL_DATAPACK_FULL_RANGE;
+            if let Err(e) = world_utils::install_tall_datapack(&world_dir, min_y, max_y) {
                 eprintln!(
                     "{} Failed to install tall-world datapack: {}",
                     "Error:".red().bold(),
