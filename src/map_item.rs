@@ -350,11 +350,13 @@ fn image_map_dat_or_blank(png: &[u8], data_version: i32) -> Value {
     })
 }
 
-// Renders the preview into a locked map covering the entire world and hands it to the player.
+// Renders the preview into locked map `map_id` covering the entire world and hands it to the
+// player; the branding map takes the next id.
 pub fn write_map_item(
     world_path: &Path,
     preview: &PreviewAccumulator,
     xzbbox: &XZBBox,
+    map_id: i32,
 ) -> Result<(), String> {
     let w = xzbbox.max_x() - xzbbox.min_x() + 1;
     let h = xzbbox.max_z() - xzbbox.min_z() + 1;
@@ -378,7 +380,6 @@ pub fn write_map_item(
     );
 
     let store = MapStore::open(world_path)?;
-    let map_id = store.next_id();
 
     let map_dat = build_map_dat(
         colors,
@@ -400,10 +401,9 @@ pub fn write_map_item(
     insert_into_inventory(world_path, map_id)
 }
 
-/// Writes only the arnismc.com branding map (the world's first map) when the preview map is off.
-pub fn write_branding_map_only(world_path: &Path) -> Result<(), String> {
+/// Writes only the arnismc.com branding map, as `map_id`, when the preview map is off.
+pub fn write_branding_map_only(world_path: &Path, map_id: i32) -> Result<(), String> {
     let store = MapStore::open(world_path)?;
-    let map_id = store.next_id();
 
     let branding_dat = image_map_dat_or_blank(BRANDING_MAP_PNG, store.data_version);
     store.write_map(map_id, &branding_dat)?;
@@ -497,7 +497,7 @@ mod tests {
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
         let xzbbox = XZBBox::rect_from_xz_lengths(300.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
-        write_map_item(&world, &preview, &xzbbox).unwrap();
+        write_map_item(&world, &preview, &xzbbox, next_map_id(&world.join("data"))).unwrap();
 
         let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID)).unwrap() else {
             panic!("map root");
@@ -549,7 +549,7 @@ mod tests {
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
         let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
-        write_map_item(&world, &preview, &xzbbox).unwrap();
+        write_map_item(&world, &preview, &xzbbox, next_map_id(&world.join("data"))).unwrap();
 
         // The arnismc.com branding map takes the id after the preview's.
         let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID + 1)).unwrap()
@@ -579,7 +579,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let world =
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
-        write_branding_map_only(&world).unwrap();
+        write_branding_map_only(&world, next_map_id(&world.join("data"))).unwrap();
 
         // With the preview off, the branding map is the world's first map.
         let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID)).unwrap() else {
@@ -757,7 +757,7 @@ mod tests {
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
         let xzbbox = XZBBox::rect_from_xz_lengths(3000.0, 3000.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
-        write_map_item(&world, &preview, &xzbbox).unwrap();
+        write_map_item(&world, &preview, &xzbbox, next_map_id(&world.join("data"))).unwrap();
 
         let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID)).unwrap() else {
             panic!("map root");
@@ -797,7 +797,7 @@ mod tests {
 
         let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
-        write_map_item(&world, &preview, &xzbbox).unwrap();
+        write_map_item(&world, &preview, &xzbbox, next_map_id(&world.join("data"))).unwrap();
 
         let Value::Compound(level) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
             panic!("level root");
@@ -839,11 +839,11 @@ mod tests {
 
         let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
-        write_map_item(&world, &preview, &xzbbox).unwrap();
+        write_map_item(&world, &preview, &xzbbox, next_map_id(&world.join("data"))).unwrap();
         assert!(map_file(&world, FIRST_MAP_ID + 6).exists());
 
         // A second run must not stack a second map item.
-        write_map_item(&world, &preview, &xzbbox).unwrap();
+        write_map_item(&world, &preview, &xzbbox, next_map_id(&world.join("data"))).unwrap();
         let Value::Compound(level) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
             panic!("level root");
         };

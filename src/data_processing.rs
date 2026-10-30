@@ -953,9 +953,11 @@ pub fn generate_world_with_options(
     // generated into again after its last. The preview and branding maps come first.
     let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil && !extending;
     let place_branding = world_format == WorldFormat::JavaAnvil && !extending;
-    let first_map_id = {
+    let first_map_id = if world_format == WorldFormat::JavaAnvil {
         let layout = crate::world_utils::WorldLayout::of(&output_path);
         crate::map_item::next_map_id(&layout.maps_dir(&output_path))
+    } else {
+        crate::map_item::FIRST_MAP_ID
     };
     let first_decal_id = first_map_id
         + if wants_map_item {
@@ -2236,7 +2238,7 @@ pub fn generate_world_with_options(
     }
 
     // The preview is this run's first map and branding the next, or branding the first with
-    // the preview off: the ids the map writers below take from the same counter.
+    // the preview off: the ids the map writers below are given.
     if place_branding {
         let (sx, sz) = options
             .spawn_point
@@ -2298,13 +2300,13 @@ pub fn generate_world_with_options(
 
     if wants_map_item {
         if let Some(p) = preview.as_ref() {
-            match crate::map_item::write_map_item(&output_path, p, &xzbbox) {
+            match crate::map_item::write_map_item(&output_path, p, &xzbbox, first_map_id) {
                 Ok(()) => println!("World map item added to the player inventory."),
                 Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
             }
         }
     } else if place_branding {
-        if let Err(e) = crate::map_item::write_branding_map_only(&output_path) {
+        if let Err(e) = crate::map_item::write_branding_map_only(&output_path, first_map_id) {
             eprintln!("Warning: Failed to create arnismc.com map: {e}");
         }
     }
