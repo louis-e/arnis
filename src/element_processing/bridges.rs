@@ -18,6 +18,8 @@ const FLAT_TERRAIN_DIP_THRESHOLD: i32 = 4;
 /// A deck shorter than this, along its axis, stays at its ends' level over flat ground:
 /// two of the shortest 15-block ramps would leave it less than 10 level blocks between them.
 const SHORT_BRIDGE_LENGTH_BLOCKS: f32 = 40.0;
+/// A deck tagged as an arch lifts over flat ground for its curve from this length on.
+const ARCH_MIN_SPAN_BLOCKS: f32 = 30.0;
 const BRIDGE_NAME_FUSE_DISTANCE_BLOCKS: i32 = 200;
 const DUAL_CARRIAGEWAY_MAX_DISTANCE_BLOCKS: f32 = 12.0;
 const DUAL_CARRIAGEWAY_HEADING_TOLERANCE_DEG: f32 = 20.0;
@@ -831,13 +833,14 @@ impl BridgeStructureMap {
                 let (s, e) = ends(idx);
                 is_edge(s) || is_edge(e)
             });
-            let flat_span = has_boundary_endpoint && dip < FLAT_TERRAIN_DIP_THRESHOLD && !short;
-            let mut clearance = if flat_span {
+            let flat = has_boundary_endpoint && dip < FLAT_TERRAIN_DIP_THRESHOLD;
+            let mut clearance = if flat && !short {
                 max_layer * LAYER_HEIGHT_STEP
             } else {
                 0
             };
-            if group_style == BridgeStyle::Arch && flat_span {
+            // A mapped arch shows its curve from a shorter span than layer ramps need.
+            if group_style == BridgeStyle::Arch && flat && span >= ARCH_MIN_SPAN_BLOCKS {
                 clearance = clearance.max(ARCH_MIN_CLEARANCE);
             }
             if clearance > 0 {
@@ -1715,7 +1718,7 @@ impl BridgeSurfaceMap {
                 if structures.lookup_ramp(way.id).is_some() {
                     continue;
                 }
-                let Some((half, _)) = grade_obstacle(way, scale) else {
+                let Some((half, _, _)) = grade_obstacle(way, scale) else {
                     continue;
                 };
                 // One cell of margin keeps piers off the kerb and the track bed.
@@ -1873,8 +1876,9 @@ fn is_ramp_candidate(way: &ProcessedWay) -> bool {
     false
 }
 
-/// Half-width and headroom of an at-grade way a bridge must clear.
-pub(crate) fn grade_obstacle(way: &ProcessedWay, scale: f64) -> Option<(i32, i32)> {
+/// Half-width and headroom of an at-grade way a bridge must clear, and whether it carries
+/// traffic that cannot pass at the deck's level: a road or railway, not a path or track.
+pub(crate) fn grade_obstacle(way: &ProcessedWay, scale: f64) -> Option<(i32, i32, bool)> {
     if way.nodes.len() < 2
         || way.tags.get("area").map(String::as_str) == Some("yes")
         || way.tags.get("indoor").map(String::as_str) == Some("yes")
@@ -1907,20 +1911,21 @@ pub(crate) fn grade_obstacle(way: &ProcessedWay, scale: f64) -> Option<(i32, i32
         {
             return None;
         }
-        let headroom = if is_non_vehicular_bridge_highway(highway) || highway == "track" {
-            PATH_HEADROOM
-        } else {
-            ROAD_HEADROOM
-        };
-        return Some((highway_block_range(highway, &way.tags, scale), headroom));
+        let path = is_non_vehicular_bridge_highway(highway) || highway == "track";
+        let headroom = if path { PATH_HEADROOM } else { ROAD_HEADROOM };
+        return Some((
+            highway_block_range(highway, &way.tags, scale),
+            headroom,
+            !path,
+        ));
     }
     if railways::is_at_grade_track(way) {
-        let headroom = match way.tags.get("railway").map(String::as_str) {
-            Some("tram") => ROAD_HEADROOM,
-            Some("miniature") => PATH_HEADROOM,
-            _ => RAIL_HEADROOM,
+        let (headroom, must_clear) = match way.tags.get("railway").map(String::as_str) {
+            Some("tram") => (ROAD_HEADROOM, true),
+            Some("miniature") => (PATH_HEADROOM, false),
+            _ => (RAIL_HEADROOM, true),
         };
-        return Some((1, headroom));
+        return Some((1, headroom, must_clear));
     }
     None
 }
@@ -1975,7 +1980,6 @@ impl<'a> GradeObstacles<'a> {
                 continue;
             };
             let Some((half, headroom, must_clear)) = grade_obstacle(way, scale)
-                .map(|(half, headroom)| (half, headroom, headroom >= ROAD_HEADROOM))
                 .or_else(|| waterway_clearance(way).map(|headroom| (0, headroom, false)))
             else {
                 continue;
@@ -2871,9 +2875,24 @@ mod tests {
     }
 
     #[test]
+    fn a_short_arch_still_lifts_for_its_curve_but_a_short_beam_stays_level() {
+        let arch = &[
+            ("highway", "residential"),
+            ("bridge", "yes"),
+            ("bridge:structure", "arch"),
+        ];
+        let (structures, _) = structures_over(&[way_with(1, arch, &[(10, 40), (44, 40)])], |_| 0.0);
+        assert!(*ys(&structures, 1).iter().max().unwrap() > 0);
+        let (structures, _) =
+            structures_over(&[way_with(1, ROAD_BRIDGE, &[(10, 40), (44, 40)])], |_| 0.0);
+        assert!(ys(&structures, 1).iter().all(|&y| y == 0));
+    }
+
+    #[test]
     fn short_bridge_rises_no_steeper_than_a_block_per_cell() {
         let bridge = way_with(1, ROAD_BRIDGE, &[(20, 40), (26, 40)]);
-        let road = way_with(2, &[("highway", "footway")], &[(23, 10), (23, 70)]);
+        // A road, which even a deck this short has to clear.
+        let road = way_with(2, &[("highway", "residential")], &[(23, 10), (23, 70)]);
         let (structures, _) = structures_over(&[bridge, road], |_| 0.0);
         let profile = ys(&structures, 1);
         assert!(*profile.iter().max().unwrap() <= 3, "{profile:?}");
