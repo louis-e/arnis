@@ -132,12 +132,13 @@ fn inland_reach(land_cover: &LandCoverData) -> usize {
         .max(1.0) as usize
 }
 
-/// Spreads the inland mark through connected water; tidal rivers arrive only as centrelines.
-fn spread_inland(grid: &[Vec<u8>], inland: &mut InlandWater, reach: usize) {
+/// Spreads the inland mark through connected water, short of mapped sea; tidal rivers
+/// arrive only as centrelines.
+fn spread_inland(grid: &[Vec<u8>], inland: &mut InlandWater, sea: &InlandWater, reach: usize) {
     let height = grid.len();
     let width = grid.first().map_or(0, |r| r.len());
     let open = |inland: &InlandWater, x: usize, z: usize| {
-        x < width && z < height && grid[z][x] == LC_WATER && !inland.get(x, z)
+        x < width && z < height && grid[z][x] == LC_WATER && !inland.get(x, z) && !sea.get(x, z)
     };
     let around = |x: usize, z: usize| {
         [
@@ -197,6 +198,8 @@ fn rasterize_osm_water(
     let max_x = xzbbox.max_x();
     let max_z = xzbbox.max_z();
     let mut inland = InlandWater::new(width, height);
+    // Bays and harbours, so the spread stops at them; only allocated where they are mapped.
+    let mut sea = InlandWater::new(width, height);
     let mut changed: usize = 0;
     for elem in elements {
         match elem {
@@ -226,7 +229,11 @@ fn rasterize_osm_water(
                         scale_to_grid_x,
                         scale_to_grid_z,
                         write,
-                        is_inland_water(&way.tags).then_some(&mut inland),
+                        Some(if is_inland_water(&way.tags) {
+                            &mut inland
+                        } else {
+                            &mut sea
+                        }),
                     );
                 } else if let Some(waterway_type) = way.tags.get("waterway") {
                     if !crate::element_processing::waterways::is_channel_waterway(waterway_type)
@@ -321,14 +328,14 @@ fn rasterize_osm_water(
                         scale_to_grid_x,
                         scale_to_grid_z,
                         write,
-                        rel_inland.then_some(&mut inland),
+                        Some(if rel_inland { &mut inland } else { &mut sea }),
                     );
                 }
             }
             _ => {}
         }
     }
-    spread_inland(grid, &mut inland, reach);
+    spread_inland(grid, &mut inland, &sea, reach);
     (changed, inland)
 }
 
@@ -357,9 +364,10 @@ fn has_water_polygon_tags(tags: &HashMap<String, String>) -> bool {
         )
 }
 
-// Bays, lagoons, harbours and fjords open onto the sea, so they keep its biome.
+// Bays, lagoons, harbours, docks and fjords open onto the sea, so they keep its biome.
 fn is_inland_water(tags: &HashMap<String, String>) -> bool {
     !matches!(tags.get("natural").map(|s| s.as_str()), Some("bay"))
+        && !matches!(tags.get("waterway").map(|s| s.as_str()), Some("dock"))
         && !matches!(
             tags.get("water").map(|s| s.as_str()),
             Some("lagoon" | "bay" | "sea" | "harbour" | "fjord")
@@ -939,6 +947,40 @@ mod tests {
         assert!(!lc.inland_water.get(5, 24));
         // Flat worlds keep their water as it was.
         assert!(lc.grid == before);
+    }
+
+    #[test]
+    fn river_mark_stops_at_mapped_sea() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 31, 7).unwrap();
+        let grid = vec![vec![LC_WATER; 32]; 8];
+        let mut lc = LandCoverData {
+            water_distance: compute_water_distance(&grid, 32, 8),
+            grid,
+            water_blend_cache: Default::default(),
+            beach_tiles: Default::default(),
+            inland_water: Default::default(),
+            width: 32,
+            height: 8,
+            // A 600 m reach is 30 cells, past the harbour's far side.
+            cells_per_meter: 0.05,
+        };
+        let elements = [
+            water_way(
+                1,
+                &[("waterway", "river"), ("width", "2")],
+                vec![node(1, 0, 4), node(2, 8, 4)],
+            ),
+            water_way(
+                2,
+                &[("natural", "water"), ("water", "harbour")],
+                square(16, 0, 23, 7),
+            ),
+            water_way(3, &[("waterway", "dock")], square(24, 0, 31, 7)),
+        ];
+        mark_inland_water(&mut lc, 32, 8, &elements, &bbox);
+        assert!(lc.inland_water.get(12, 4));
+        assert!(!lc.inland_water.get(20, 4));
+        assert!(!lc.inland_water.get(28, 4));
     }
 
     #[test]

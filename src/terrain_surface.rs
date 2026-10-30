@@ -13,6 +13,7 @@ use crate::block_definitions::{
 };
 use crate::climate::Climate;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::ecoregion::Ecoregion;
 use crate::ground::Ground;
 use crate::ground_generation::{ground_noise, patch_noise, value_noise_salted};
 use crate::land_cover::{
@@ -33,6 +34,7 @@ const SALT_SNOW_LINE: u32 = 0x5A0E_11A4;
 const SALT_SNOW_DRIFT: u32 = 0xD41F_7B05;
 const SALT_SNOW_FIELD: u32 = 0xF1E1_D5A0;
 const SALT_STREAK: u32 = 0x57EA_C0DE;
+const SALT_FRAY: u32 = 0xF4A7_3D19;
 const SALT_STREAK_RUN: u32 = 0x57EA_0F11;
 const SALT_TALUS: u32 = 0x07A1_05CE;
 const SALT_TALUS_ROCK: u32 = 0x07A1_0B0D;
@@ -67,6 +69,26 @@ pub(crate) enum Rock {
 }
 
 impl Rock {
+    /// Red where a dry climate meets red earth at world block (x, z). The sample is shifted
+    /// by noise, so the border frays instead of tracing the ecoregion map's square cells.
+    pub(crate) fn at(
+        climate: Climate,
+        x: i32,
+        z: i32,
+        eco: impl FnOnce(i32, i32) -> Option<Ecoregion>,
+    ) -> Self {
+        if !climate.is_dry() {
+            return Rock::Grey;
+        }
+        let shift = |salt| ((value_noise_salted(x, z, 32, salt) - 0.5) * 80.0) as i32;
+        let (sx, sz) = (x + shift(SALT_FRAY), z + shift(SALT_FRAY.rotate_left(11)));
+        if crate::biome::red_earth(climate, eco(sx, sz)) {
+            Rock::Red
+        } else {
+            Rock::Grey
+        }
+    }
+
     fn ramp(self) -> &'static [Block; 6] {
         match self {
             Rock::Grey => &FACE_RAMP,
@@ -292,8 +314,7 @@ pub(crate) fn fill_strata(
     editor.fill_column_with_absolute(x, z, y_min, y_max, block_at);
 }
 
-/// Weathering streak down a sheer face in this column: deepslate at the core, tuff around;
-/// on red rock the dark desert varnish.
+/// Weathering streak down a sheer face: deepslate core and tuff rim, or desert varnish.
 fn streak_block(x: i32, z: i32, rock: Rock) -> Option<Block> {
     let n = patch_noise(x, z, 3, SALT_STREAK);
     let (core, rim) = match rock {
@@ -730,6 +751,27 @@ pub(crate) fn is_glacier_cover(cover: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn red_earth_border_is_sampled_near_the_block() {
+        let red = crate::ecoregion::lookup(210);
+        assert_eq!(Rock::at(Climate::HotDesert, 3, 7, |_, _| red), Rock::Red);
+        assert_eq!(Rock::at(Climate::HotDesert, 3, 7, |_, _| None), Rock::Grey);
+        assert_eq!(
+            Rock::at(Climate::Temperate, 3, 7, |_, _| unreachable!()),
+            Rock::Grey
+        );
+        let mut shifted = 0;
+        for i in 0..400 {
+            let (x, z) = (i * 37 - 5000, i * 53 + 900);
+            Rock::at(Climate::ColdSteppe, x, z, |sx, sz| {
+                assert!((sx - x).abs() <= 40 && (sz - z).abs() <= 40);
+                shifted += usize::from((sx, sz) != (x, z));
+                red
+            });
+        }
+        assert!(shifted > 300);
+    }
 
     #[test]
     fn red_rock_is_red_from_scree_to_cliff_beds() {

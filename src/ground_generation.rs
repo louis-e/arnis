@@ -18,8 +18,9 @@ use crate::block_definitions::{
     AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
     CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS, GRASS_BLOCK, GRAVEL,
     GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE, MOSS_BLOCK, MUD,
-    OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE,
-    STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE, YELLOW_CONCRETE,
+    OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, RED_SAND, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK,
+    STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE,
+    YELLOW_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
@@ -357,18 +358,6 @@ pub fn generate_ground_region(
             let chunk_min_z = (chunk_z << 4).max(iter_min_z);
             let chunk_max_z = ((chunk_z << 4) + 15).min(iter_max_z);
             let forest_fern_share = fern_share_at((chunk_x << 4) + 8, (chunk_z << 4) + 8);
-            // Ecoregions run kilometres across, so one sample per chunk places red earth.
-            let rock = if crate::biome::red_earth(
-                climate,
-                ground.ecoregion(XZPoint::new(
-                    (chunk_x << 4) + 8 - xzbbox.min_x(),
-                    (chunk_z << 4) + 8 - xzbbox.min_z(),
-                )),
-            ) {
-                terrain_surface::Rock::Red
-            } else {
-                terrain_surface::Rock::Grey
-            };
             // Fallen rock is only looked for where the relief could hold a cliff.
             let talus_field = (terrain_enabled && planetary_body.is_none())
                 .then(|| {
@@ -476,6 +465,9 @@ pub fn generate_ground_region(
                     };
 
                     let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
+                    let rock = terrain_surface::Rock::at(climate, x, z, |sx, sz| {
+                        ground.ecoregion(XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z()))
+                    });
 
                     // Slope once per column (used for surface selection and depth), from
                     // unrounded heights so a contour doesn't flicker between tiers.
@@ -507,17 +499,26 @@ pub fn generate_ground_region(
                                 x,
                                 ground_y,
                                 z,
-                                Some(&[SAND]),
+                                Some(&[SAND, RED_SAND]),
                                 None,
                             ));
                     let mut did_underfill = false;
 
+                    // Mapped stone keeps its column where no snow falls. Under snow, or as
+                    // bare ground's own rock, it takes the snow and scree around it, so a
+                    // mapped rock area doesn't snow only on its andesite and gravel.
+                    let has_existing_stone =
+                        editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None)
+                            && snow_line.depth(x, z, ground_y) < terrain_surface::SNOW_MIN_DEPTH
+                            && !(has_land_cover
+                                && matches!(
+                                    ground.cover_class(coord),
+                                    land_cover::LC_BARE | land_cover::LC_SNOW_ICE
+                                ));
+
                     // Determine surface and under-block material for this column.
                     // steep_override means we always compute & place the right blocks,
                     // even if OSM already placed something here.
-                    let has_existing_stone =
-                        editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None);
-
                     if steep_override || !has_existing_stone {
                         // Handle ESA water with variable depth as a special case.
                         // Use bilinear interpolation of the water grid to produce
@@ -714,8 +715,7 @@ pub fn generate_ground_region(
                                     match cover {
                                         land_cover::LC_TREE_COVER => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_SHRUBLAND => {
-                                            // Grass with coarse-dirt patches on a fifth of
-                                            // the ground; the odd grass block peeks through.
+                                            // Coarse-dirt patches on a fifth of the ground.
                                             let noise = ground_noise(x, z, 5, SALT_SHRUB_DIRT);
                                             let h = land_cover::coord_hash(x, z);
                                             if noise < 0.2 {

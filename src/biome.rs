@@ -46,14 +46,7 @@ const RED_EARTH: [u16; 9] = [207, 208, 209, 210, 211, 213, 214, 215, 429];
 
 /// Whether the ground is red earth: a dry climate in one of the `RED_EARTH` ecoregions.
 pub(crate) fn red_earth(climate: Climate, eco: Option<Ecoregion>) -> bool {
-    matches!(
-        climate,
-        Climate::HotDesert
-            | Climate::ColdDesert
-            | Climate::HotSteppe
-            | Climate::ColdSteppe
-            | Climate::DryContinental
-    ) && eco.is_some_and(|e| RED_EARTH.contains(&e.id))
+    climate.is_dry() && eco.is_some_and(|e| RED_EARTH.contains(&e.id))
 }
 
 /// Slope from which bare ground reads as a rock face, in `Ground::slope` units.
@@ -309,14 +302,20 @@ fn classify_input(g: &Ground, coord: XZPoint, snow_y: i32, sea_max_y: Option<i32
         inland: lc == LC_WATER
             && (g.inland_water_mapped(coord) || sea_max_y.is_some_and(|s| y > s)),
         shore: lc == LC_BARE
-            && [
-                (SHORE_REACH, 0),
-                (-SHORE_REACH, 0),
-                (0, SHORE_REACH),
-                (0, -SHORE_REACH),
-            ]
-            .iter()
-            .any(|&(dx, dz)| water_at(dx, dz)),
+            && [SHORE_REACH / 2, SHORE_REACH].iter().any(|&r| {
+                [
+                    (r, 0),
+                    (-r, 0),
+                    (0, r),
+                    (0, -r),
+                    (r, r),
+                    (r, -r),
+                    (-r, r),
+                    (-r, -r),
+                ]
+                .iter()
+                .any(|&(dx, dz)| water_at(dx, dz))
+            }),
         above_snow_m: (snow_y != i32::MAX).then(|| match snow_y {
             i32::MIN => f64::INFINITY,
             t => f64::from(y - t) / g.blocks_per_meter(),
@@ -336,7 +335,6 @@ pub fn winter_biome(name: &'static str) -> &'static str {
         "minecraft:ocean" | "minecraft:lukewarm_ocean" | "minecraft:warm_ocean" => {
             "minecraft:cold_ocean"
         }
-        "minecraft:deep_ocean" | "minecraft:deep_lukewarm_ocean" => "minecraft:deep_cold_ocean",
         "minecraft:forest"
         | "minecraft:taiga"
         | "minecraft:old_growth_pine_taiga"

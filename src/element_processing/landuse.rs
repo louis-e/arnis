@@ -493,7 +493,9 @@ fn military_ground(
         }
         _ => {
             // Arid and polar bases sit on the region's own ground.
-            let red = crate::biome::red_earth(climate, editor.ecoregion(x, z));
+            let red =
+                crate::terrain_surface::Rock::at(climate, x, z, |sx, sz| editor.ecoregion(sx, sz))
+                    == crate::terrain_surface::Rock::Red;
             if let Some((surface, _)) = climate.surface_palette(cover, x, z, red) {
                 return Some(surface);
             }

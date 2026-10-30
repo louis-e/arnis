@@ -225,26 +225,10 @@ fn natural_area(
 
                 // Scrub and grassland in dry country keep the region's own ground, not a lawn.
                 let dry_ground = matches!(natural_type.as_str(), "scrub" | "grassland" | "heath")
-                    && matches!(
-                        editor.climate(),
-                        Climate::HotDesert
-                            | Climate::HotSteppe
-                            | Climate::ColdDesert
-                            | Climate::ColdSteppe
-                            | Climate::DryContinental
-                    );
+                    && editor.climate().is_dry();
 
                 let bare_rock = matches!(natural_type.as_str(), "bare_rock" | "rock" | "stone");
-                // Ecoregions run kilometres across, so one look per area decides red earth.
-                let rock = way
-                    .nodes
-                    .first()
-                    .map_or(Rock::Grey, |n| rock_kind(editor, n.x, n.z));
-                let block_type = if block_type == SAND && rock == Rock::Red {
-                    RED_SAND
-                } else {
-                    block_type
-                };
+                let needs_rock = dry_ground || bare_rock || block_type == SAND;
 
                 let mut shrubbery_species: Option<Block> = None;
                 for &(x, z) in filled_area.iter() {
@@ -257,6 +241,17 @@ fn natural_area(
                     if !editor.in_bounds(x, z) && !editor.owns(x, z) {
                         continue;
                     }
+                    // Per cell, so an area on the red earth border matches the ground beside it.
+                    let rock = if needs_rock {
+                        Rock::at(editor.climate(), x, z, |sx, sz| editor.ecoregion(sx, sz))
+                    } else {
+                        Rock::Grey
+                    };
+                    let block_type = if block_type == SAND && rock == Rock::Red {
+                        RED_SAND
+                    } else {
+                        block_type
+                    };
                     // Roads, paths and paved areas keep their own surface. Checked
                     // by mask because a gravel or dirt road is not in the block list.
                     let sealed = editor.surface_is_sealed(x, z);
@@ -770,15 +765,6 @@ fn beach_block(surface: Option<&String>) -> Block {
         Some("rock" | "stone" | "bare_rock") => STONE,
         Some("mud") => MUD,
         _ => SAND,
-    }
-}
-
-/// Rock of the ground here: red in red earth country, grey elsewhere.
-fn rock_kind(editor: &WorldEditor, x: i32, z: i32) -> Rock {
-    if crate::biome::red_earth(editor.climate(), editor.ecoregion(x, z)) {
-        Rock::Red
-    } else {
-        Rock::Grey
     }
 }
 

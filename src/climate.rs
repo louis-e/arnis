@@ -49,6 +49,18 @@ pub enum Climate {
 }
 
 impl Climate {
+    /// Deserts, steppes and dry-summer continental climates.
+    pub fn is_dry(self) -> bool {
+        matches!(
+            self,
+            Climate::HotDesert
+                | Climate::ColdDesert
+                | Climate::HotSteppe
+                | Climate::ColdSteppe
+                | Climate::DryContinental
+        )
+    }
+
     fn from_class(c: u8) -> Climate {
         match c {
             3 => Climate::TropicalSavanna,                  // Aw
