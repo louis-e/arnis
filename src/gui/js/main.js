@@ -546,7 +546,7 @@ const EARTH_ONLY_SETTINGS = [
   'tile-theme-select',
   'custom-tile-url'
 ];
-const EARTH_ONLY_SEGMENTED = ['max-tree-size-group', 'signage-group'];
+const EARTH_ONLY_SEGMENTED = ['max-tree-size-group', 'field-preset-group', 'signage-group'];
 
 // A tile URL template Leaflet can actually fill in. Deliberately permissive
 // about the host - the entire point is to reach something we do not know about -
@@ -1297,6 +1297,14 @@ function initSettings() {
   maxTreeSizeGroup.querySelectorAll(".segment").forEach((btn) => {
     btn.addEventListener("click", () => {
       maxTreeSizeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  const fieldPresetGroup = document.getElementById("field-preset-group");
+  fieldPresetGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      fieldPresetGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
     });
   });
@@ -3470,6 +3478,8 @@ async function startGeneration() {
     var canopy_height = document.getElementById("canopy-height-toggle").checked;
     var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
     var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
+    var fieldPresetBtn = document.querySelector("#field-preset-group .segment.active");
+    var fieldPreset = fieldPresetBtn ? fieldPresetBtn.dataset.fieldPreset : "patchwork";
     var overture = document.getElementById("overture-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var heightLimitToggle = document.getElementById("disable-height-limit-toggle");
@@ -3533,6 +3543,7 @@ async function startGeneration() {
         cavesEnabled: caves,
         legacyTreesEnabled: legacy_trees,
         maxTreeSize: maxTreeSize,
+        fieldPreset: fieldPreset,
         canopyHeightEnabled: canopy_height,
         overtureEnabled: overture,
         use3dEnabled: use_3d,

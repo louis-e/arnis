@@ -890,6 +890,9 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         519 => "mcl_core:lapisblock",
         520 => "mcl_core:redsand",
         521 => "mcl_core:redsandstone",
+        522 => "mcl_mud:packed_mud",
+        523 => "mcl_lush_caves:rooted_dirt",
+        524 => "mcl_farming:beetroot",
         _ => "mcl_core:stone",
     };
     LuantiNode {

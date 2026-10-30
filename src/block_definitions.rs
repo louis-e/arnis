@@ -607,6 +607,9 @@ impl Block {
             519 => "lapis_block",
             520 => "red_sand",
             521 => "red_sandstone",
+            522 => "packed_mud",
+            523 => "rooted_dirt",
+            524 => "beetroots",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -666,6 +669,11 @@ impl Block {
             109 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
+                map
+            })),
+            524 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("3".to_string()));
                 map
             })),
             116 => Some(Value::Compound({
@@ -1729,6 +1737,21 @@ pub const RAW_GOLD_BLOCK: Block = Block::new(518);
 pub const LAPIS_BLOCK: Block = Block::new(519);
 pub const RED_SAND: Block = Block::new(520);
 pub const RED_SANDSTONE: Block = Block::new(521);
+pub const PACKED_MUD: Block = Block::new(522);
+pub const ROOTED_DIRT: Block = Block::new(523);
+pub const BEETROOTS: Block = Block::new(524);
+
+/// Flower species a flower parcel draws from.
+pub static FIELD_FLOWERS: [Block; 8] = [
+    RED_FLOWER,
+    YELLOW_FLOWER,
+    ALLIUM,
+    CORNFLOWER,
+    LILY_OF_THE_VALLEY,
+    ORANGE_TULIP,
+    PINK_TULIP,
+    OXEYE_DAISY,
+];
 /// A vine clinging to the wall on its north, east, south or west side.
 pub const VINES: [Block; 4] = [
     Block::new(499),

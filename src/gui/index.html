@@ -32,6 +32,7 @@
     <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
     <symbol id="i-trees" viewBox="0 0 24 24"><path d="M10 10v.2A3 3 0 0 1 8.9 16H5a3 3 0 0 1-1-5.8V10a3 3 0 0 1 6 0Z"/><path d="M7 16v6"/><path d="M13 19v3"/><path d="M12 19h8.3a1 1 0 0 0 .7-1.7L18 14h.3a1 1 0 0 0 .7-1.7L16 9h.2a1 1 0 0 0 .8-1.7L13 3l-1.4 1.5"/></symbol>
     <symbol id="i-tree" viewBox="0 0 24 24"><path d="M8 19a4 4 0 0 1-2.24-7.32A3.5 3.5 0 0 1 9 6.03V6a3 3 0 1 1 6 0v.04a3.5 3.5 0 0 1 3.24 5.65A4 4 0 0 1 16 19Z"/><path d="M12 19v3"/></symbol>
+    <symbol id="i-wheat" viewBox="0 0 24 24"><path d="M2 22 16 8"/><path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z"/><path d="M11.47 17.47 13 19l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L5 19l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M15.47 13.47 17 15l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L9 15l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M19.47 9.47 21 11l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L13 11l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/></symbol>
     <symbol id="i-mountain" viewBox="0 0 24 24"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/><path d="M4.14 15.08c2.62-1.57 5.24-1.43 7.86.42 2.74 1.94 5.49 2 8.23.19"/></symbol>
     <symbol id="i-cave" viewBox="0 0 24 24"><path d="m8 3 4 8 5-5 5 15H2L8 3z"/><path d="M9 21v-2.5a3 3 0 0 1 6 0V21"/></symbol>
     <symbol id="i-pickaxe" viewBox="0 0 24 24"><path d="M9 4.5Q18.5 4 19.5 15"/><path d="M15.5 8.5 4 20"/></symbol>
@@ -680,6 +681,29 @@
                       <button type="button" class="segment" data-max-tree-size="tall" data-localize="tree_size_tall">Tall</button>
                       <!-- data-default marks the shipped default; the active class is moved by JS -->
                       <button type="button" class="segment active" data-default data-max-tree-size="giant" data-localize="tree_size_giant">Giant</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-wheat"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="field_preset">Farmland Style</span>
+                        <span class="tooltip-icon" data-tooltip="How farmland is laid out. Classic is one uniform sheet of mixed crops. The others give every field its own crop: Smallholding is many small plots, Patchwork is balanced mixed farmland, Prairie is large wheat-led fields, Pasture is mostly grass and wildflowers.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="field_preset_desc">Each field grows its own crop instead of a mixed sheet.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="field-preset-group">
+                      <button type="button" class="segment" data-field-preset="classic" data-localize="field_preset_classic">Classic</button>
+                      <button type="button" class="segment" data-field-preset="smallholding" data-localize="field_preset_smallholding">Smallholding</button>
+                      <!-- data-default marks the shipped default; the active class is moved by JS -->
+                      <button type="button" class="segment active" data-default data-field-preset="patchwork" data-localize="field_preset_patchwork">Patchwork</button>
+                      <button type="button" class="segment" data-field-preset="prairie" data-localize="field_preset_prairie">Prairie</button>
+                      <button type="button" class="segment" data-field-preset="pasture" data-localize="field_preset_pasture">Pasture</button>
                     </div>
                   </div>
                 </div>
