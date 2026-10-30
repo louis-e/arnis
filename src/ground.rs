@@ -2163,11 +2163,24 @@ mod tests {
 
     #[test]
     fn the_prop_headroom_clears_every_bundled_structure() {
-        for entry in std::fs::read_dir("assets/structures").unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "schem") {
-                continue;
+        // Landmarks count as tall models in the fit (`landmarks::tall_models_in`); every
+        // other bundled schematic has to fit in the margin.
+        let mut paths = Vec::new();
+        let mut dirs = vec![std::path::PathBuf::from("assets/structures")];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|n| n != "landmarks") {
+                        dirs.push(path);
+                    }
+                } else if path.extension().is_some_and(|e| e == "schem") {
+                    paths.push(path);
+                }
             }
+        }
+        assert!(paths.len() > 40, "found only {} schematics", paths.len());
+        for path in paths {
             let schem =
                 crate::structures::schematic::load_structure(&std::fs::read(&path).unwrap())
                     .unwrap();

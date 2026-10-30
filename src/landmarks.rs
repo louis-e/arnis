@@ -201,6 +201,36 @@ impl LandmarkPrescan {
     }
 }
 
+/// The landmarks among `data`, each a tall model as high as it stands above its ground, so
+/// the build height counts them even where their OSM element carries no height.
+pub fn tall_models_in(data: &crate::osm_parser::OsmData) -> Vec<crate::elevation::TallModel> {
+    let present = |landmark: &Landmark| {
+        data.elements().iter().any(|e| {
+            landmark.osm_ids.contains(&(e.r#type.as_str(), e.id))
+                || e.tags
+                    .as_ref()
+                    .and_then(|t| t.get("wikidata"))
+                    .is_some_and(|q| q.trim() == landmark.qid)
+        })
+    };
+    LANDMARKS
+        .iter()
+        .filter(|l| present(l))
+        .filter_map(|l| {
+            let model = match l.model {
+                Source::Schem(bytes) => load_palettized(bytes).ok()?,
+                Source::Built(build) => build(),
+            };
+            let top = model.voxels.iter().map(|v| i32::from(v.1)).max()? + 1;
+            Some(crate::elevation::TallModel {
+                lat: l.lat,
+                lon: l.lon,
+                height_m: f64::from(top - l.ground_y + l.ground_offset.max(0)),
+            })
+        })
+        .collect()
+}
+
 /// Resolve the landmarks inside this world and collect what they replace.
 pub fn prescan(
     elements: &[ProcessedElement],
@@ -720,6 +750,27 @@ mod tests {
     const TOWER: &str = "Q599148";
     const SWIM_HALL: &str = "Q3882013";
     const EVENT_HALL: &str = "Q48849";
+
+    #[test]
+    fn a_landmark_in_the_data_counts_as_tall_as_its_model() {
+        let data: crate::osm_parser::OsmData = serde_json::from_str(
+            r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 48.17, "lon": 11.55},
+                {"type": "way", "id": 164084344, "nodes": [1], "tags": {"building": "tower"}},
+                {"type": "node", "id": 2, "lat": 51.5, "lon": -0.12, "tags": {"wikidata": "Q41225"}}
+            ]}"#,
+        )
+        .unwrap();
+        let found = tall_models_in(&data);
+        assert_eq!(found.len(), 2, "{found:?}");
+        let tower = landmark(TOWER);
+        let olympiaturm = found.iter().find(|m| m.lat == tower.lat).unwrap();
+        // The 291 m tower, less the empty layers at the top of its schematic.
+        assert!(olympiaturm.height_m > 280.0, "{olympiaturm:?}");
+        let empty: crate::osm_parser::OsmData =
+            serde_json::from_str(r#"{"elements": []}"#).unwrap();
+        assert!(tall_models_in(&empty).is_empty());
+    }
 
     #[test]
     fn every_landmark_asset_parses() {

@@ -55,7 +55,9 @@ impl TerrainHints {
         Self {
             peaks: peaks_in(data),
             tall_models: if args.use_3d && !args.skip_objects() {
-                crate::models_3d::wikidata::tall_models_in(data)
+                let mut models = crate::models_3d::wikidata::tall_models_in(data);
+                models.extend(crate::landmarks::tall_models_in(data));
+                models
             } else {
                 Vec::new()
             },
