@@ -5,8 +5,8 @@ use crate::coordinate_system::cartesian::XZPoint;
 use crate::ecoregion::{EcoBiome, Ecoregion};
 use crate::ground::Ground;
 use crate::land_cover::{
-    LC_BARE, LC_BEACH, LC_BUILT_UP, LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND,
-    LC_SNOW_ICE, LC_TREE_COVER, LC_WATER, LC_WETLAND,
+    LC_BARE, LC_BEACH, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
+    LC_TREE_COVER, LC_WATER, LC_WETLAND,
 };
 use fastnbt::{LongArray, Value};
 use std::collections::HashMap;
@@ -49,11 +49,9 @@ const ROCK_FACE_SLOPE: i32 = 4;
 
 /// Minecraft biome for one cell.
 pub fn cell_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
-    // A mountain area's ET or EF comes from its peaks; the valleys below are boreal.
+    // Below 60° ET/EF come from peaks or subpolar islands, whose lowlands are green in summer.
     let climate = match climate {
-        Climate::Tundra | Climate::IceCap if lat_deg.abs() < 60.0 && c.above_snow_m.is_some() => {
-            Climate::Boreal
-        }
+        Climate::Tundra | Climate::IceCap if lat_deg.abs() < 60.0 => Climate::Boreal,
         c => c,
     };
     if c.lc == LC_WATER {
@@ -72,15 +70,17 @@ pub fn cell_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
 
 /// Lakes and rivers take the river biome, the sea an ocean by latitude.
 fn water_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
-    let polar = matches!(climate, Climate::Tundra | Climate::IceCap);
-    if c.above_snow_m.is_some_and(|m| m >= 0.0) || (c.inland && polar) {
-        return "minecraft:frozen_river";
-    }
+    let frozen = matches!(climate, Climate::Tundra | Climate::IceCap)
+        || c.above_snow_m.is_some_and(|m| m >= 0.0);
     if c.inland {
-        return "minecraft:river";
+        return if frozen {
+            "minecraft:frozen_river"
+        } else {
+            "minecraft:river"
+        };
     }
     let abs_lat = lat_deg.abs();
-    if polar {
+    if frozen {
         "minecraft:frozen_ocean"
     } else if abs_lat < 23.5
         || matches!(
@@ -96,12 +96,7 @@ fn water_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
     }
 }
 
-/// High-mountain biome for a cell at or above the snow line, or within the alpine band
-/// below it; `None` lower down, where the land-cover mapping holds.
-///
-/// Above the line everything is snow country, which also lets the game snow and
-/// freeze there. Up to a kilometre below it, open ground is alpine meadow and bare
-/// ground is stony peaks.
+/// Snow biomes above the snow line, meadow and stony peaks in the alpine band below it.
 fn mountain_biome(c: &Cell, climate: Climate) -> Option<&'static str> {
     let above_m = c.above_snow_m?;
     if above_m >= 0.0 {
@@ -136,7 +131,8 @@ fn ecoregion_biome(lc: u8, climate: Climate, eco: Option<Ecoregion>) -> Option<&
             | Climate::ColdSteppe
             | Climate::DryContinental
     );
-    if dry && RED_EARTH.contains(&eco.id) && !matches!(lc, LC_BUILT_UP | LC_CROPLAND) {
+    let open = matches!(lc, LC_TREE_COVER | LC_SHRUBLAND | LC_GRASSLAND | LC_BARE);
+    if dry && open && RED_EARTH.contains(&eco.id) {
         return Some(if lc == LC_TREE_COVER {
             "minecraft:wooded_badlands"
         } else {
@@ -179,6 +175,8 @@ fn ecoregion_biome(lc: u8, climate: Climate, eco: Option<Ecoregion>) -> Option<&
 /// Land biome from the climate and land cover alone.
 fn land_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
     let abs_lat = lat_deg.abs();
+    // Dry highland steppe near the equator is no jungle.
+    let tropical = abs_lat < 23.5 && climate == Climate::Temperate;
     if c.lc == LC_MANGROVES {
         return "minecraft:mangrove_swamp";
     }
@@ -195,10 +193,10 @@ fn land_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
         },
         Climate::ColdSteppe | Climate::Boreal | Climate::Temperate => match c.lc {
             LC_TREE_COVER if climate == Climate::Boreal || abs_lat > 55.0 => "minecraft:taiga",
-            LC_TREE_COVER if abs_lat < 23.5 => "minecraft:jungle",
+            LC_TREE_COVER if tropical => "minecraft:jungle",
             LC_TREE_COVER => "minecraft:forest",
             LC_SHRUBLAND if climate == Climate::Boreal => "minecraft:taiga",
-            LC_SHRUBLAND if abs_lat < 23.5 => "minecraft:sparse_jungle",
+            LC_SHRUBLAND if tropical => "minecraft:sparse_jungle",
             LC_MOSS => "minecraft:taiga",
             LC_BARE if c.shore => "minecraft:stony_shore",
             LC_BARE if c.slope >= ROCK_FACE_SLOPE => "minecraft:stony_peaks",
@@ -224,15 +222,12 @@ fn game_temperature(name: &str) -> Option<f32> {
     })
 }
 
-/// Lowest Y at which the game snows on a biome. Arnis writes flat-generator worlds, whose
-/// sea level of -63 starts the cooling at Y -46: 0.05 per 40 blocks, snow below 0.15.
+/// Lowest Y the game snows on a biome: flat worlds cool 0.05 per 40 blocks above Y -46.
 fn game_snow_y(name: &str) -> Option<i32> {
     game_temperature(name).map(|t| -46 + ((t - 0.15) / 0.00125) as i32)
 }
 
-/// Swaps a biome the game would snow on at `y` for a warmer one of the same kind, so
-/// ground Arnis leaves green stays green. Keeps the warmest when none is warm enough,
-/// so the swaps band uphill in one direction.
+/// Swaps a biome the game would snow on at `y` for a warmer one of its kind, else the warmest.
 fn snow_safe(name: &'static str, y: i32, trees: bool) -> &'static str {
     // Height noise shifts the onset by up to 8 blocks; canopies stand above the ground.
     let top = y + 8 + if trees { 24 } else { 2 };
@@ -484,6 +479,8 @@ mod tests {
         }
     }
 
+    use crate::land_cover::LC_BUILT_UP;
+
     fn at(lc: u8, climate: Climate, lat: f64) -> &'static str {
         cell_biome(&Cell::land(lc), climate, lat)
     }
@@ -569,7 +566,15 @@ mod tests {
         // Below the alpine band, and forests at any height, keep the land-cover mapping.
         assert_eq!(high(LC_GRASSLAND, -1500.0, 2, 0), "minecraft:plains");
         assert_eq!(high(LC_TREE_COVER, -300.0, 2, 0), "minecraft:forest");
-        assert_eq!(high(LC_WATER, 50.0, 0, 0), "minecraft:frozen_river");
+        let tarn = Cell {
+            inland: true,
+            above_snow_m: Some(50.0),
+            ..Cell::land(LC_WATER)
+        };
+        assert_eq!(
+            cell_biome(&tarn, Climate::Temperate, 46.0),
+            "minecraft:frozen_river"
+        );
     }
 
     #[test]
@@ -588,6 +593,32 @@ mod tests {
         assert_eq!(
             cell_biome(&c, Climate::Tundra, 70.0),
             "minecraft:snowy_taiga"
+        );
+        // Without terrain too, so the result does not hinge on it.
+        assert_eq!(at(LC_GRASSLAND, Climate::Tundra, 52.0), "minecraft:plains");
+    }
+
+    #[test]
+    fn steppe_near_the_equator_is_no_jungle() {
+        assert_eq!(
+            at(LC_SHRUBLAND, Climate::ColdSteppe, -16.0),
+            "minecraft:plains"
+        );
+        assert_eq!(
+            at(LC_TREE_COVER, Climate::ColdSteppe, -16.0),
+            "minecraft:forest"
+        );
+    }
+
+    #[test]
+    fn sea_above_the_snow_line_is_frozen_ocean() {
+        let c = Cell {
+            above_snow_m: Some(10.0),
+            ..Cell::land(LC_WATER)
+        };
+        assert_eq!(
+            cell_biome(&c, Climate::Temperate, 50.0),
+            "minecraft:frozen_ocean"
         );
     }
 
@@ -692,9 +723,13 @@ mod tests {
             ecoregion_biome(LC_TREE_COVER, Climate::ColdDesert, lookup(429)),
             Some("minecraft:wooded_badlands")
         );
-        // Towns there are no badlands, nor is the wetter rim around the plateau.
+        // Towns, wetlands and the wetter rim around the plateau are no badlands.
         assert_eq!(
             ecoregion_biome(LC_BUILT_UP, Climate::HotDesert, lookup(210)),
+            None
+        );
+        assert_eq!(
+            ecoregion_biome(LC_WETLAND, Climate::HotDesert, lookup(210)),
             None
         );
         assert_eq!(

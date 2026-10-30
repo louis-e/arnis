@@ -750,8 +750,7 @@ impl Ground {
         (measured > 0).then(|| (f64::from(wooded) / f64::from(measured), top))
     }
 
-    /// Force LC_WATER inside OSM water, sinking those cells onto that water's surface. Flat
-    /// worlds only learn which water is inland.
+    /// Force LC_WATER inside OSM water and sink it onto that water; flat worlds only mark inland.
     pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
         use crate::land_cover::osm_water_override::{apply_osm_water_override, mark_inland_water};
         let (world_width, world_height) = self.world_dims();
@@ -902,16 +901,19 @@ impl Ground {
     /// Returns 0 if land cover data is not available.
     #[inline(always)]
     pub fn cover_class(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let (world_w, world_h) = self.world_dims();
-            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
-            let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
-            let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
-            lc.grid[z][x]
-        } else {
-            0
-        }
+        self.lc_cell(coord).map_or(0, |(lc, x, z)| lc.grid[z][x])
+    }
+
+    /// Land-cover cell under a coordinate, clamped to the grid.
+    #[inline(always)]
+    fn lc_cell(&self, coord: XZPoint) -> Option<(&land_cover::LandCoverData, usize, usize)> {
+        let lc = self.land_cover.as_ref()?;
+        let (world_w, world_h) = self.world_dims();
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
+        let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
+        Some((lc, x, z))
     }
 
     /// Whether beach land cover lies within `reach` blocks of the given coordinates.
@@ -934,34 +936,18 @@ impl Ground {
     /// 0 = non-water, 1 = shore, 2+ = progressively deeper water.
     #[inline(always)]
     pub fn water_distance(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let (world_w, world_h) = self.world_dims();
-            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
-            let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
-            let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
-            lc.water_distance[z][x]
-        } else {
-            0
-        }
+        self.lc_cell(coord)
+            .map_or(0, |(lc, x, z)| lc.water_distance[z][x])
     }
 
     /// Whether OSM maps this cell as a lake, river or canal rather than open sea.
     #[inline]
     pub fn inland_water_mapped(&self, coord: XZPoint) -> bool {
-        let Some(ref lc) = self.land_cover else {
-            return false;
-        };
-        let (world_w, world_h) = self.world_dims();
-        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
-        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
-        let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
-        let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
-        lc.inland_water.get(x, z)
+        self.lc_cell(coord)
+            .is_some_and(|(lc, x, z)| lc.inland_water.get(x, z))
     }
 
-    /// Highest Y the sea surface reaches, or `None` without terrain. Water above it is
-    /// a lake or river even where OSM does not map it.
+    /// Highest Y of the sea surface, `None` without terrain; water above it is inland.
     pub fn sea_surface_max_y(&self) -> Option<i32> {
         const SEA_SURFACE_MAX_M: f64 = 5.0;
         match &self.elevation_data {

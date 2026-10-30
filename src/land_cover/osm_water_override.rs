@@ -57,6 +57,7 @@ pub fn apply_osm_water_override(
         context.as_ref(),
         (scale_to_grid_x, scale_to_grid_z),
         reach,
+        true,
         elements,
         xzbbox,
     );
@@ -117,11 +118,10 @@ pub fn mark_inland_water(
         (width as f64 - 1.0) / (world_width as f64 - 1.0),
         (height as f64 - 1.0) / (world_height as f64 - 1.0),
     );
-    // Without a height context the guard never reads heights.
-    let mut scratch = land_cover.grid.clone();
     let reach = inland_reach(land_cover);
+    let grid = &mut land_cover.grid;
     land_cover.inland_water =
-        rasterize_osm_water(&mut scratch, &[], None, scale, reach, elements, xzbbox).1;
+        rasterize_osm_water(grid, &[], None, scale, reach, false, elements, xzbbox).1;
 }
 
 /// How far the inland mark spreads from mapped water, in grid cells.
@@ -132,8 +132,7 @@ fn inland_reach(land_cover: &LandCoverData) -> usize {
         .max(1.0) as usize
 }
 
-/// Spreads the inland mark across connected water up to `reach` cells. Wide rivers often
-/// come only as a centreline: tidal ones lose their area polygons to the fetch filter.
+/// Spreads the inland mark through connected water; tidal rivers arrive only as centrelines.
 fn spread_inland(grid: &[Vec<u8>], inland: &mut InlandWater, reach: usize) {
     let height = grid.len();
     let width = grid.first().map_or(0, |r| r.len());
@@ -168,14 +167,15 @@ fn spread_inland(grid: &[Vec<u8>], inland: &mut InlandWater, reach: usize) {
     }
 }
 
-/// Burns OSM water polygons and channel waterways into `grid`, returning the cells
-/// turned to water and the mask of water mapped as inland, spread `reach` cells.
+/// Burns OSM water into `grid` when `write`, returning the cells changed and the inland mask.
+#[allow(clippy::too_many_arguments)]
 fn rasterize_osm_water(
     grid: &mut [Vec<u8>],
     heights: &[Vec<f32>],
     context: Option<&WaterContext>,
     (scale_to_grid_x, scale_to_grid_z): (f64, f64),
     reach: usize,
+    write: bool,
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
 ) -> (usize, InlandWater) {
@@ -214,6 +214,7 @@ fn rasterize_osm_water(
                         height,
                         scale_to_grid_x,
                         scale_to_grid_z,
+                        write,
                         is_inland_water(&way.tags).then_some(&mut inland),
                     );
                 } else if let Some(waterway_type) = way.tags.get("waterway") {
@@ -241,6 +242,7 @@ fn rasterize_osm_water(
                         height,
                         scale_to_grid_x,
                         scale_to_grid_z,
+                        write,
                         Some(&mut inland),
                     );
                 }
@@ -307,6 +309,7 @@ fn rasterize_osm_water(
                         height,
                         scale_to_grid_x,
                         scale_to_grid_z,
+                        write,
                         rel_inland.then_some(&mut inland),
                     );
                 }
@@ -343,12 +346,12 @@ fn has_water_polygon_tags(tags: &HashMap<String, String>) -> bool {
         )
 }
 
-// Bays and lagoons open onto the sea, so they keep its biome.
+// Bays, lagoons, harbours and fjords open onto the sea, so they keep its biome.
 fn is_inland_water(tags: &HashMap<String, String>) -> bool {
     !matches!(tags.get("natural").map(|s| s.as_str()), Some("bay"))
         && !matches!(
             tags.get("water").map(|s| s.as_str()),
-            Some("lagoon" | "bay" | "sea")
+            Some("lagoon" | "bay" | "sea" | "harbour" | "fjord")
         )
 }
 
@@ -387,6 +390,7 @@ fn fill_polygon_scanline(
     height: usize,
     scale_to_grid_x: f64,
     scale_to_grid_z: f64,
+    write: bool,
     mut inland: Option<&mut InlandWater>,
 ) -> usize {
     if outers.is_empty() || width < 2 || height < 2 {
@@ -461,6 +465,7 @@ fn fill_polygon_scanline(
             width,
             scale_to_grid_x,
             scale_inv_x,
+            write,
             inland.as_deref_mut(),
         );
     }
@@ -480,6 +485,7 @@ fn fill_row_spans(
     width: usize,
     scale_to_grid_x: f64,
     scale_inv_x: f64,
+    write: bool,
     mut inland: Option<&mut InlandWater>,
 ) -> usize {
     // Cyclic rings always yield an even crossing count; pairing ignores any trailing odd one.
@@ -514,7 +520,7 @@ fn fill_row_spans(
             if let Some(m) = inland.as_deref_mut() {
                 m.set(gx, gz);
             }
-            if !passes_water_guard(heights, context, gx, gz) {
+            if !write || !passes_water_guard(heights, context, gx, gz) {
                 continue;
             }
             if row[gx] != LC_WATER {
@@ -571,6 +577,7 @@ fn rasterize_line(
     height: usize,
     scale_to_grid_x: f64,
     scale_to_grid_z: f64,
+    write: bool,
     mut inland: Option<&mut InlandWater>,
 ) -> usize {
     if nodes.len() < 2 || half_width < 0 {
@@ -615,7 +622,7 @@ fn rasterize_line(
                     if let Some(m) = inland.as_deref_mut() {
                         m.set(gx_u, gz_u);
                     }
-                    if !passes_water_guard(heights, context, gx_u, gz_u) {
+                    if !write || !passes_water_guard(heights, context, gx_u, gz_u) {
                         continue;
                     }
                     if grid[gz_u][gx_u] != LC_WATER {
@@ -876,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn lakes_and_waterways_are_inland_bays_are_sea() {
+    fn lakes_and_waterways_are_inland_harbours_are_sea() {
         let bbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
         // Land splits the water into quarters, so the mark can't cross between them.
         let mut grid = vec![vec![LC_WATER; 32]; 32];
@@ -897,7 +904,11 @@ mod tests {
         };
         let elements = [
             water_way(1, &[("natural", "water")], square(2, 2, 10, 10)),
-            water_way(2, &[("natural", "bay")], square(20, 2, 28, 10)),
+            water_way(
+                2,
+                &[("natural", "water"), ("water", "harbour")],
+                square(20, 2, 28, 10),
+            ),
             water_way(
                 3,
                 &[("waterway", "river"), ("width", "2")],
@@ -907,7 +918,7 @@ mod tests {
         let before = lc.grid.clone();
         mark_inland_water(&mut lc, 32, 32, &elements, &bbox);
         assert!(lc.inland_water.get(5, 5));
-        // The lake's mark spreads three steps, the bay's water stays sea.
+        // The lake's mark spreads three steps, the harbour's water stays sea.
         assert!(lc.inland_water.get(13, 5));
         assert!(!lc.inland_water.get(14, 14));
         assert!(!lc.inland_water.get(24, 5));
@@ -948,6 +959,7 @@ mod tests {
             16,
             1.0,
             1.0,
+            true,
             None,
         );
         assert!(n > 0);
@@ -977,6 +989,7 @@ mod tests {
             16,
             1.0,
             1.0,
+            true,
             None,
         );
         assert!(n > 0);
