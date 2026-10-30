@@ -1,15 +1,14 @@
-//! Starting the GUI on Linux. WebKitGTK aborts the whole process when it cannot set up
-//! EGL ("Could not create surfaceless EGL display: EGL_NOT_INITIALIZED. Aborting..."),
+//! Starting the GUI on Linux. WebKitGTK aborts the whole process when it cannot set up EGL
+//! ("Could not create surfaceless EGL display: EGL_NOT_INITIALIZED. Aborting..."),
 //! so the failure never reaches Rust as an error. The GUI therefore runs in a child
-//! process, and a child that dies that way is started again with the next renderer
-//! that has worked for users: zink (#799, #833) and the GPU's own driver (#1247).
-//! The one that worked is remembered, so later starts don't crash first.
+//! process, and a child that dies that way while the window comes up is started again
+//! with the next renderer that has worked for users: zink (#799, #833) and the GPU's own
+//! driver (#1247). The one that worked is remembered, so later starts don't crash first.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
-use std::io::{BufRead, BufReader, Write};
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
 /// Set on the child, naming the renderer it runs with.
@@ -22,8 +21,23 @@ const USER_OVERRIDES: [&str; 3] = [
     "GALLIUM_DRIVER",
 ];
 
-/// How long a child that said it is aborting gets to exit before it is killed.
-const ABORT_GRACE: Duration = Duration::from_secs(3);
+/// How long a renderer has to bring the window up. WebKit gives up on EGL as it starts;
+/// a crash after this is not the renderer's, and starts nothing again.
+const STARTUP: Duration = Duration::from_secs(15);
+
+/// What the child exits with when the window failed on EGL with an error, not an abort.
+pub const EGL_FAILED_EXIT: i32 = 86;
+
+/// What a child dies of when WebKit or Mesa gives up natively. A Rust panic exits with 101
+/// instead, and a stop the user asked for (SIGINT, SIGTERM) is none of these.
+const CRASH_SIGNALS: [i32; 6] = [
+    libc::SIGILL,
+    libc::SIGTRAP,
+    libc::SIGABRT,
+    libc::SIGBUS,
+    libc::SIGFPE,
+    libc::SIGSEGV,
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Renderer {
@@ -65,6 +79,14 @@ pub fn current() -> Option<Renderer> {
         .and_then(|name| Renderer::from_name(&name))
 }
 
+/// Whether an error the GUI returned is EGL failing to start, which another renderer may fix.
+pub fn is_egl_error(message: &str) -> bool {
+    let lowered = message.to_ascii_lowercase();
+    lowered.contains("egl_not_initialized")
+        || lowered.contains("surfaceless egl")
+        || (lowered.contains("libegl") && lowered.contains("failed"))
+}
+
 /// Runs the GUI in a child process and returns the exit code to leave with, or `None`
 /// when this process should open the window itself: it is the child already, or the
 /// user picked a driver with one of `USER_OVERRIDES`.
@@ -85,16 +107,14 @@ pub fn supervise() -> Option<i32> {
     for (i, &renderer) in order.iter().enumerate() {
         let mut cmd = Command::new(&exe);
         renderer.configure(&mut cmd);
-        match run_child(cmd) {
-            Ok(Outcome::Exited(code)) => {
-                if Some(renderer) != remembered {
-                    if let Some(path) = memory.as_deref() {
-                        remember(path, renderer);
-                    }
-                }
-                return Some(code);
+        let started = || {
+            if let Some(path) = memory.as_deref() {
+                remember(path, renderer);
             }
-            Ok(Outcome::EglFailed) => {
+        };
+        match run_child(cmd, STARTUP, started) {
+            Ok(Outcome::Exited(code)) => return Some(code),
+            Ok(Outcome::Failed) => {
                 if let Some(next) = order.get(i + 1) {
                     eprintln!(
                         "Warning: the window could not start with the {} renderer, trying {}.",
@@ -113,9 +133,9 @@ pub fn supervise() -> Option<i32> {
         let _ = std::fs::remove_file(path);
     }
     eprintln!(
-        "Error: Arnis could not open its window because no graphics driver would start \
-         (EGL). Installing your distribution's Mesa Vulkan drivers can help, or use \
-         the command line instead: arnis --help"
+        "Error: Arnis could not open its window with any renderer. If the messages above \
+         say EGL could not start, installing your distribution's Mesa Vulkan drivers can \
+         help; the command line works without a window: arnis --help"
     );
     Some(1)
 }
@@ -153,79 +173,64 @@ fn remember(path: &Path, renderer: Renderer) {
 #[derive(Debug, PartialEq, Eq)]
 enum Outcome {
     Exited(i32),
-    EglFailed,
+    /// The window never came up: the child crashed or reported EGL failing within `STARTUP`.
+    Failed,
 }
 
-/// WebKitGTK's last words before it aborts on EGL, in all the forms reported so far:
-/// "Could not create surfaceless EGL display: EGL_NOT_INITIALIZED. Aborting..." and
-/// "Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...".
-fn is_egl_abort(line: &str) -> bool {
-    line.contains("EGL display") && line.contains("Aborting")
-}
-
-/// Runs `cmd` with its stderr passed through, until it exits or WebKit says it is
-/// aborting on EGL, whichever comes first.
-fn run_child(mut cmd: Command) -> Result<Outcome, String> {
+/// Runs `cmd` until it exits, its output going straight to this process's. `started` runs
+/// once the child has outlived `startup`, or exits cleanly before it.
+fn run_child(
+    mut cmd: Command,
+    startup: Duration,
+    started: impl FnOnce(),
+) -> Result<Outcome, String> {
     let mut child = cmd
-        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("could not start the GUI process: {e}"))?;
-    let stderr = child.stderr.take().ok_or("the GUI process has no stderr")?;
-    let (tx, rx) = mpsc::channel();
-    let forward = std::thread::spawn(move || {
-        let mut out = std::io::stderr();
-        for line in BufReader::new(stderr).split(b'\n') {
-            let Ok(line) = line else { break };
-            let _ = out.write_all(&line);
-            let _ = out.write_all(b"\n");
-            if is_egl_abort(&String::from_utf8_lossy(&line)) {
-                let _ = tx.send(());
-            }
-        }
-    });
-    // Not joined: WebKit's helper processes share the pipe and may hold it open a
-    // little past the child.
-    drop(forward);
+    let begun = Instant::now();
+    let mut started = Some(started);
     loop {
-        match rx.recv_timeout(Duration::from_millis(250)) {
-            Ok(()) => {
-                // The abort may be the web process's alone, which leaves a blank window.
-                end_within(&mut child, ABORT_GRACE);
-                return Ok(Outcome::EglFailed);
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            let early = begun.elapsed() < startup;
+            if early && failed_to_start(status) {
+                return Ok(Outcome::Failed);
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-                    // An abort line can still be in the pipe when the exit is noticed.
-                    if rx.recv_timeout(Duration::from_millis(500)).is_ok() {
-                        return Ok(Outcome::EglFailed);
-                    }
-                    return Ok(Outcome::Exited(status.code().unwrap_or(1)));
+            if status.success() || !early {
+                if let Some(started) = started.take() {
+                    started();
                 }
             }
-            // The pipe closed without an abort line, so the child is done or about to be.
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let status = child.wait().map_err(|e| e.to_string())?;
-                return Ok(Outcome::Exited(status.code().unwrap_or(1)));
-            }
+            return Ok(Outcome::Exited(exit_code(status)));
         }
+        if begun.elapsed() >= startup {
+            if let Some(started) = started.take() {
+                started();
+            }
+            let status = child.wait().map_err(|e| e.to_string())?;
+            return Ok(Outcome::Exited(exit_code(status)));
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
-fn end_within(child: &mut Child, grace: Duration) {
-    let deadline = Instant::now() + grace;
-    while Instant::now() < deadline {
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+fn failed_to_start(status: ExitStatus) -> bool {
+    status.code() == Some(EGL_FAILED_EXIT)
+        || status
+            .signal()
+            .is_some_and(|signal| CRASH_SIGNALS.contains(&signal))
+}
+
+/// The child's exit code, or the shell's 128 plus the signal that ended it.
+fn exit_code(status: ExitStatus) -> i32 {
+    status
+        .code()
+        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     fn sh(script: &str) -> Command {
         let mut cmd = Command::new("sh");
@@ -233,44 +238,51 @@ mod tests {
         cmd
     }
 
-    #[test]
-    fn recognises_both_reported_abort_lines() {
-        assert!(is_egl_abort(
-            "Could not create surfaceless EGL display: EGL_NOT_INITIALIZED. Aborting..."
-        ));
-        assert!(is_egl_abort(
-            "Could not create default EGL display: EGL_BAD_PARAMETER. Aborting..."
-        ));
-        // Mesa's warnings come before the abort, and on their own are not fatal.
-        assert!(!is_egl_abort(
-            "MESA-EGL: warning: egl: failed to create dri2 screen"
-        ));
-        assert!(!is_egl_abort(
-            "libEGL warning: DRI2: failed to create screen"
-        ));
+    /// The outcome of `script` given `startup`, and whether it counted as started.
+    fn run(script: &str, startup: Duration) -> (Outcome, bool) {
+        let started = Cell::new(false);
+        let outcome = run_child(sh(script), startup, || started.set(true)).unwrap();
+        (outcome, started.get())
     }
 
     #[test]
-    fn an_egl_abort_is_told_apart_from_an_ordinary_exit() {
-        let aborted = sh("echo 'Could not create surfaceless EGL display: \
-             EGL_NOT_INITIALIZED. Aborting...' >&2; kill -ABRT $$");
-        assert_eq!(run_child(aborted).unwrap(), Outcome::EglFailed);
-        assert_eq!(
-            run_child(sh("echo fine >&2; exit 3")).unwrap(),
-            Outcome::Exited(3)
-        );
-        assert_eq!(run_child(sh("exit 0")).unwrap(), Outcome::Exited(0));
+    fn a_crash_or_an_egl_error_while_starting_is_a_failed_renderer() {
+        let startup = Duration::from_secs(10);
+        assert_eq!(run("kill -ABRT $$", startup), (Outcome::Failed, false));
+        assert_eq!(run("kill -SEGV $$", startup), (Outcome::Failed, false));
+        assert_eq!(run("exit 86", startup), (Outcome::Failed, false));
     }
 
     #[test]
-    fn a_child_left_hanging_after_the_abort_line_is_ended() {
-        let hung = sh(
-            "echo 'Could not create default EGL display: EGL_BAD_PARAMETER. \
-             Aborting...' >&2; sleep 30",
-        );
-        let started = Instant::now();
-        assert_eq!(run_child(hung).unwrap(), Outcome::EglFailed);
-        assert!(started.elapsed() < Duration::from_secs(10));
+    fn an_ordinary_exit_or_a_stop_is_passed_on_and_not_retried() {
+        let startup = Duration::from_secs(10);
+        assert_eq!(run("exit 0", startup), (Outcome::Exited(0), true));
+        // An error that is not EGL's says nothing about the renderer.
+        assert_eq!(run("exit 3", startup), (Outcome::Exited(3), false));
+        assert_eq!(run("kill -TERM $$", startup), (Outcome::Exited(143), false));
+    }
+
+    #[test]
+    fn a_crash_after_the_window_is_up_is_not_the_renderers() {
+        let started = Cell::new(false);
+        let outcome = run_child(
+            sh("sleep 1; kill -ABRT $$"),
+            Duration::from_millis(200),
+            || started.set(true),
+        )
+        .unwrap();
+        assert_eq!(outcome, Outcome::Exited(128 + libc::SIGABRT));
+        assert!(started.get(), "remembered once it outlived the start");
+    }
+
+    #[test]
+    fn egl_errors_are_told_from_other_errors() {
+        assert!(is_egl_error(
+            "Error while starting the application UI (Tauri): EGL_NOT_INITIALIZED"
+        ));
+        assert!(is_egl_error("Could not create surfaceless EGL display"));
+        assert!(is_egl_error("libEGL: eglInitialize failed"));
+        assert!(!is_egl_error("Failed to get main window"));
     }
 
     #[test]

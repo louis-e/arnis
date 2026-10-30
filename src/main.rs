@@ -84,7 +84,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(feature = "gui")]
 mod gui;
-#[cfg(all(feature = "gui", any(target_os = "linux", test)))]
+#[cfg(all(feature = "gui", any(target_os = "linux", all(test, unix))))]
 mod linux_gui;
 
 // If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
@@ -871,6 +871,13 @@ fn main() {
 
             if let Err(e) = gui::run_gui() {
                 eprintln!("{} {}", "Error:".red().bold(), e);
+                // Tells the launcher this renderer failed, so it tries the next.
+                #[cfg(target_os = "linux")]
+                {
+                    if linux_gui::current().is_some() && linux_gui::is_egl_error(&e) {
+                        std::process::exit(linux_gui::EGL_FAILED_EXIT);
+                    }
+                }
                 std::process::exit(1);
             }
 
