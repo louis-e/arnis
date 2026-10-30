@@ -37,7 +37,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 use vek::Vec2;
-use zip::write::FileOptions;
+use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 use zip::ZipWriter;
 
@@ -1192,7 +1192,7 @@ impl BedrockWriter {
     fn write_mcworld_archive(&self, dir: &Path, archive: &Path) -> Result<(), BedrockSaveError> {
         let file = File::create(archive)?;
         let mut writer = ZipWriter::new(file);
-        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
         // Add top-level files
         for file_name in ["levelname.txt", "metadata.json", "level.dat"] {
@@ -1313,7 +1313,7 @@ fn add_directory_to_zip(
     writer: &mut ZipWriter<File>,
     dir_path: &std::path::Path,
     zip_prefix: &str,
-    options: FileOptions,
+    options: SimpleFileOptions,
 ) -> Result<(), BedrockSaveError> {
     // Add directory entry
     writer.add_directory(format!("{}/", zip_prefix), options)?;
@@ -2228,7 +2228,7 @@ mod tests {
         let mut entries: Vec<String> = Vec::new();
         for i in 0..archive.len() {
             if let Ok(file) = archive.by_index(i) {
-                entries.push(file.name().to_string());
+                entries.push(file.name().unwrap().into_owned());
             }
         }
         entries.sort();
@@ -2308,7 +2308,7 @@ mod tests {
         let mut entries: Vec<String> = Vec::new();
         for i in 0..archive.len() {
             if let Ok(f) = archive.by_index(i) {
-                entries.push(f.name().to_string());
+                entries.push(f.name().unwrap().into_owned());
             }
         }
 
@@ -2392,7 +2392,7 @@ mod tests {
         let file = fs::File::open(output_dir.with_extension("mcworld")).expect("archive");
         let mut archive = ZipArchive::new(file).expect("zip readable");
         let entries: Vec<String> = (0..archive.len())
-            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .map(|i| archive.by_index(i).unwrap().name().unwrap().into_owned())
             .collect();
         let mut unique = entries.clone();
         unique.sort();
