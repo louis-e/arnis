@@ -39,12 +39,19 @@ pub struct TerrainHints {
     /// Points along the ways bored as tunnels, so a fit with water over one can leave it
     /// room under the bed.
     pub bores: Vec<(f64, f64)>,
+    /// The roads, railways and waterways graded into the ground, as `(lat, lon)` lines, so
+    /// the detail added to steep, coarsely sampled ground stays off them.
+    pub graded: Vec<Vec<(f64, f64)>>,
 }
 
 impl TerrainHints {
     /// The hints a run's terrain fit wants from its raw OSM data. Models and structures only
     /// count where the mode builds them.
     pub fn from_osm(data: &crate::osm_parser::OsmData, args: &crate::args::Args) -> Self {
+        // The graded ways only matter where the steep-slope detail can run, on Mapterhorn
+        // terrain. Terrain-only builds no roads but keeps the waterways.
+        let graded = (args.terrain() && !args.aws_only_elevation).then_some(!args.skip_objects());
+        let (bores, graded) = terrain_ways(data, graded);
         Self {
             peaks: peaks_in(data),
             tall_models: if args.use_3d && !args.skip_objects() {
@@ -58,7 +65,8 @@ impl TerrainHints {
                 Vec::new()
             },
             overture_follows: Self::wants_overture(args),
-            bores: bores_in(data),
+            bores,
+            graded,
         }
     }
 
@@ -101,7 +109,7 @@ pub(crate) fn may_pass_vanilla(height_m: f64, scale: f64) -> bool {
     height_m * scale > f64::from(super::postprocess::TERRAIN_HEIGHT_BUFFER - 2)
 }
 
-/// Spacing in metres of the points `bores_in` lays along a tunnel: finer than the land
+/// Spacing in metres of the points `terrain_ways` lays along a tunnel: finer than the land
 /// cover, so a bore under a narrow river still puts a point on its water.
 const BORE_STEP_M: f64 = 2.0;
 
@@ -114,27 +122,22 @@ fn is_bored(tags: &HashMap<String, String>) -> bool {
         || (railway == Some("subway") && tunnel != Some("no"))
 }
 
-/// Points every `BORE_STEP_M` along the ways of a raw OSM fetch that are bored as tunnels.
-pub fn bores_in(data: &crate::osm_parser::OsmData) -> Vec<(f64, f64)> {
-    let ways: Vec<&[u64]> = data
-        .elements()
-        .iter()
-        .filter(|e| e.r#type == "way" && e.tags.as_ref().is_some_and(is_bored))
-        .filter_map(|e| e.nodes.as_deref())
-        .collect();
-    if ways.is_empty() {
-        return Vec::new();
-    }
-    let wanted: HashSet<u64> = ways.iter().flat_map(|w| w.iter().copied()).collect();
-    let at: HashMap<u64, (f64, f64)> = data
-        .elements()
-        .iter()
-        .filter(|e| e.r#type == "node" && wanted.contains(&e.id))
-        .filter_map(|e| Some((e.id, (e.lat?, e.lon?))))
-        .collect();
+/// Points along the bored ways, and the `(lat, lon)` lines of the graded ones.
+type TerrainWays = (Vec<(f64, f64)>, Vec<Vec<(f64, f64)>>);
+
+/// The ways of a raw OSM fetch the terrain needs, from one pass over it: points every
+/// `BORE_STEP_M` along those bored as tunnels, and the `(lat, lon)` lines of those graded
+/// into the ground when `graded` is set, with roads and railways if it is true.
+fn terrain_ways(data: &crate::osm_parser::OsmData, graded: Option<bool>) -> TerrainWays {
+    let [bored, graded] = way_lines(data, |tags| {
+        if is_bored(tags) {
+            Some(0)
+        } else {
+            graded.filter(|&roads| is_graded(tags, roads)).map(|_| 1)
+        }
+    });
     let mut points = Vec::new();
-    for way in ways {
-        let line: Vec<(f64, f64)> = way.iter().filter_map(|id| at.get(id).copied()).collect();
+    for line in bored {
         points.extend(line.first());
         for pair in line.windows(2) {
             let (a, b) = (pair[0], pair[1]);
@@ -146,7 +149,104 @@ pub fn bores_in(data: &crate::osm_parser::OsmData) -> Vec<(f64, f64)> {
             }));
         }
     }
-    points
+    (points, graded)
+}
+
+/// Whether a way with these tags is graded into the ground: a waterway, or with `roads` a
+/// road, railway or building outline, on the ground rather than through or over it. Trails
+/// keep the ground's own lie.
+fn is_graded(tags: &HashMap<String, String>, roads: bool) -> bool {
+    if ["tunnel", "bridge"]
+        .iter()
+        .any(|key| tags.get(*key).is_some_and(|v| v != "no"))
+    {
+        return false;
+    }
+    let is =
+        |key: &str, values: &[&str]| tags.get(key).is_some_and(|v| values.contains(&v.as_str()));
+    is(
+        "waterway",
+        &[
+            "river",
+            "stream",
+            "canal",
+            "ditch",
+            "drain",
+            "brook",
+            "tidal_channel",
+        ],
+    ) || (roads
+        && (tags.get("building").is_some_and(|v| v != "no")
+            || tags.get("highway").is_some_and(|v| {
+                !matches!(
+                    v.as_str(),
+                    "path"
+                        | "footway"
+                        | "bridleway"
+                        | "steps"
+                        | "via_ferrata"
+                        | "corridor"
+                        | "elevator"
+                        | "platform"
+                        | "proposed"
+                        | "abandoned"
+                        | "razed"
+                        | "disused"
+                )
+            })
+            || is(
+                "railway",
+                &[
+                    "rail",
+                    "light_rail",
+                    "narrow_gauge",
+                    "tram",
+                    "funicular",
+                    "monorail",
+                    "preserved",
+                    "miniature",
+                ],
+            )))
+}
+
+/// The `(lat, lon)` lines of the ways `kind` sorts into one of `N` kinds, by kind: one pass
+/// over the ways and one node index for all kinds. A way is split where the fetch lacks a
+/// node, so a road leaving the area and coming back is not joined across the gap.
+fn way_lines<const N: usize>(
+    data: &crate::osm_parser::OsmData,
+    kind: impl Fn(&HashMap<String, String>) -> Option<usize>,
+) -> [Vec<Vec<(f64, f64)>>; N] {
+    let ways: Vec<(usize, &[u64])> = data
+        .elements()
+        .iter()
+        .filter(|e| e.r#type == "way")
+        .filter_map(|e| Some((kind(e.tags.as_ref()?)?, e.nodes.as_deref()?)))
+        .collect();
+    let mut lines: [Vec<Vec<(f64, f64)>>; N] = std::array::from_fn(|_| Vec::new());
+    if ways.is_empty() {
+        return lines;
+    }
+    let wanted: HashSet<u64> = ways.iter().flat_map(|(_, w)| w.iter().copied()).collect();
+    let at: HashMap<u64, (f64, f64)> = data
+        .elements()
+        .iter()
+        .filter(|e| e.r#type == "node" && wanted.contains(&e.id))
+        .filter_map(|e| Some((e.id, (e.lat?, e.lon?))))
+        .collect();
+    for (k, way) in ways {
+        let mut line = Vec::new();
+        for id in way {
+            match at.get(id) {
+                Some(&p) => line.push(p),
+                None if !line.is_empty() => lines[k].push(std::mem::take(&mut line)),
+                None => {}
+            }
+        }
+        if !line.is_empty() {
+            lines[k].push(line);
+        }
+    }
+    lines
 }
 
 /// The land-cover cells (column, row) of `bores` that lie on water, over `bbox`, in order.
@@ -727,6 +827,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn graded_ways_are_surface_roads_railways_waterways_and_buildings() {
+        let data: crate::osm_parser::OsmData = serde_json::from_str(
+            r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 46.000, "lon": 8.000},
+                {"type": "node", "id": 2, "lat": 46.001, "lon": 8.000},
+                {"type": "way", "id": 10, "nodes": [1, 2], "tags": {"highway": "secondary"}},
+                {"type": "way", "id": 11, "nodes": [1, 2], "tags": {"highway": "track"}},
+                {"type": "way", "id": 12, "nodes": [1, 2], "tags": {"railway": "rail"}},
+                {"type": "way", "id": 13, "nodes": [1, 2], "tags": {"waterway": "stream"}},
+                {"type": "way", "id": 14, "nodes": [1, 2], "tags": {"highway": "path"}},
+                {"type": "way", "id": 15, "nodes": [1, 2], "tags": {"highway": "primary", "tunnel": "yes"}},
+                {"type": "way", "id": 16, "nodes": [1, 2], "tags": {"railway": "abandoned"}},
+                {"type": "way", "id": 17, "nodes": [1, 2], "tags": {"natural": "cliff"}},
+                {"type": "way", "id": 18, "nodes": [1, 99], "tags": {"waterway": "river"}},
+                {"type": "way", "id": 19, "nodes": [1, 2], "tags": {"railway": "rail", "bridge": "viaduct"}},
+                {"type": "way", "id": 20, "nodes": [1, 2], "tags": {"railway": "subway"}},
+                {"type": "way", "id": 21, "nodes": [1, 2, 1], "tags": {"building": "hut"}},
+                {"type": "way", "id": 22, "nodes": [1, 98, 2], "tags": {"highway": "tertiary"}}
+            ]}"#,
+        )
+        .unwrap();
+        // The road, the track, the railway, both waterways and the hut, not the viaduct or
+        // the subway; the river keeps the node the fetch has.
+        let lines = terrain_ways(&data, Some(true)).1;
+        let (p1, p2) = ((46.000, 8.000), (46.001, 8.000));
+        assert_eq!(lines.len(), 8);
+        assert_eq!(lines[0], vec![p1, p2]);
+        assert_eq!(lines[4], vec![p1]);
+        assert_eq!(lines[5], vec![p1, p2, p1]);
+        // A way missing a node in the middle is split there, not joined across the gap.
+        assert_eq!(&lines[6..], &[vec![p1], vec![p2]]);
+        // Without roads only the waterways.
+        assert_eq!(terrain_ways(&data, Some(false)).1.len(), 2);
+        // Nor anything where no detail can run.
+        assert!(terrain_ways(&data, None).1.is_empty());
+    }
+
     /// A tunnel under a river often has no node on the water, so its points run the whole way.
     #[test]
     fn bores_run_along_tunnels_and_find_the_water_they_cross() {
@@ -744,7 +882,7 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        let bores = bores_in(&data);
+        let bores = terrain_ways(&data, None).0;
         // Both bored ways, about 840 m each, every two metres; none of the others.
         assert!((800..900).contains(&bores.len()), "{}", bores.len());
         assert!(bores.iter().all(|&(lat, _)| lat == 40.700 || lat == 40.705));

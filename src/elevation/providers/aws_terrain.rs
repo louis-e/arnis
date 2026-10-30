@@ -162,6 +162,9 @@ impl ElevationProvider for AwsTerrain {
 
         Ok(RawElevationGrid {
             heights_meters: height_grid,
+            // Terrarium mixes 3 m LiDAR and 30 m SRTM into one zoom, so the source behind a
+            // pixel is unknown.
+            source_pixels: None,
         })
     }
 }
