@@ -531,7 +531,7 @@ fn write_region_to_disk(
                 let mut existing = region_to_modify.get_chunk(chunk_x, chunk_z);
 
                 // A chunk that is present but holds nothing is written like an absent one.
-                if existing.is_some_and(|c| c.sections.is_empty() && c.other.is_empty()) {
+                if existing.is_some_and(holds_nothing) {
                     existing = None;
                 }
                 // A fresh void region holds only the chunks the area touches; the void
@@ -675,6 +675,12 @@ pub(crate) fn morton_16(index: usize) -> (i32, i32) {
 /// above the tallest roof is never marked here, yet it still gets ingested,
 /// because the level-1..4 sections it falls into are live from the content
 /// below it. That is what `region_content_span`'s `+ 1` relies on.
+/// A chunk present in the region but holding nothing to write. The writer gives it what an
+/// absent chunk gets, so everything that predicts the written chunks must read it that way.
+fn holds_nothing(chunk: &ChunkToModify) -> bool {
+    chunk.sections.is_empty() && chunk.other.is_empty()
+}
+
 fn live_lod_sections(
     region: &super::common::RegionToModify,
     region_x: i32,
@@ -687,13 +693,13 @@ fn live_lod_sections(
             let chunk_x = region_x * 32 + local_x;
             let chunk_z = region_z * 32 + local_z;
             match region.get_chunk(local_x, local_z) {
-                Some(chunk) => {
+                Some(chunk) if !holds_nothing(chunk) => {
                     for section_y in chunk.sections.keys() {
                         crate::voxy::mark_live(&mut live, chunk_x, section_y as i32, chunk_z);
                     }
                 }
                 // Filler chunks are a flat plane at the terrain base.
-                None => crate::voxy::mark_live(&mut live, chunk_x, base_section_y, chunk_z),
+                _ => crate::voxy::mark_live(&mut live, chunk_x, base_section_y, chunk_z),
             }
         }
     }
@@ -2556,6 +2562,19 @@ mod merge_tests {
         };
         let sectors: u64 = header.chunks(4).map(|loc| u64::from(loc[3])).sum();
         assert_eq!(file.metadata().unwrap().len(), (2 + sectors) * 4096);
+    }
+
+    #[test]
+    fn an_empty_chunk_feeds_the_voxy_lod_like_an_absent_one() {
+        let mut with_empty = region_with(&[(5, 5)], STONE);
+        // A whole 2x2 group, since one absent neighbour would mark the group anyway.
+        for (cx, cz) in [(6, 6), (6, 7), (7, 6), (7, 7)] {
+            with_empty.get_or_create_chunk(cx, cz);
+        }
+        assert_eq!(
+            live_lod_sections(&with_empty, 0, 0),
+            live_lod_sections(&region_with(&[(5, 5)], STONE), 0, 0)
+        );
     }
 
     #[test]
