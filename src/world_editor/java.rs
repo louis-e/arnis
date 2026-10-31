@@ -338,8 +338,8 @@ fn strip_stale_side_chunks(
 ///
 /// A fresh region is assembled in memory and written with one call: fastanvil seeks and
 /// writes about eight times per chunk, and a fresh file holds nothing an interrupted save
-/// could cost. Its file is opened up front all the same, so a target that cannot be written
-/// fails the save before any chunk is built.
+/// could cost. Its file is opened up front all the same, so a path that cannot be created
+/// fails the save before any chunk is built; a full disk shows at the write.
 ///
 /// A merge writes in place, as fastanvil does: the file holds the chunks of other areas,
 /// and rewriting it whole would put all of them at stake on every save.
@@ -352,13 +352,13 @@ enum RegionSink {
 }
 
 impl RegionSink {
-    /// A fresh `r.X.Z.mca` under `world_dir/region`. A flat world starts from the template;
-    /// a void world starts empty, since nothing outside the area is written.
+    /// A fresh `r.X.Z.mca` under `world_dir/region`. It starts empty for either world type:
+    /// a flat world writes every slot (the filler where the area has nothing), and a void
+    /// world leaves the slots outside the area to the void generator.
     fn create(
         world_dir: &std::path::Path,
         region_x: i32,
         region_z: i32,
-        void_world: bool,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let region_dir = world_dir.join("region");
         let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
@@ -368,13 +368,10 @@ impl RegionSink {
             .create(true)
             .truncate(true)
             .open(&out_path)?;
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
-        let region = if void_world {
-            Region::create(Cursor::new(Vec::new()))?
-        } else {
-            Region::from_stream(Cursor::new(REGION_TEMPLATE.to_vec()))?
-        };
-        Ok(Self::Fresh { region, file })
+        Ok(Self::Fresh {
+            region: Region::create(Cursor::new(Vec::new()))?,
+            file,
+        })
     }
 
     fn write_chunk(&mut self, x: usize, z: usize, zlib: &[u8]) -> fastanvil::Result<()> {
@@ -488,7 +485,7 @@ fn write_region_to_disk(
     let merge = merge_dir.is_some();
     let mut region = match &merge_dir {
         Some(dir) => RegionSink::Merge(open_region_file_for_merge(dir, region_x, region_z)?),
-        None => RegionSink::create(world_dir, region_x, region_z, void_world)?,
+        None => RegionSink::create(world_dir, region_x, region_z)?,
     };
     let mut ser_buffer = Vec::with_capacity(8192);
     let mut compressor = flate2::Compress::new(flate2::Compression::fast(), true);
@@ -534,8 +531,6 @@ fn write_region_to_disk(
                 let mut existing = region_to_modify.get_chunk(chunk_x, chunk_z);
 
                 // A chunk that is present but holds nothing is written like an absent one.
-                // Skipping it would leave a flat world the template's placeholder there,
-                // which carries another region's position.
                 if existing.is_some_and(|c| c.sections.is_empty() && c.other.is_empty()) {
                     existing = None;
                 }
@@ -614,6 +609,13 @@ fn write_region_to_disk(
                 ser_buffer.clear();
                 fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
                 let len = compress_chunk_to_fit(&mut compressor, &ser_buffer, &mut compressed)?;
+                if len > MAX_COMPRESSED_CHUNK {
+                    return Err(format!(
+                        "chunk ({abs_chunk_x}, {abs_chunk_z}) compresses to {len} bytes, more \
+                         than the {MAX_COMPRESSED_CHUNK} a region file can hold"
+                    )
+                    .into());
+                }
                 region.write_chunk(chunk_x as usize, chunk_z as usize, &compressed[..len])?;
                 if merge {
                     written_chunks.push((chunk_x, chunk_z));
@@ -629,14 +631,16 @@ fn write_region_to_disk(
         }
     }
 
+    // Before the LOD caches finish, so a region that fails to reach disk leaves them
+    // unfinished, as a chunk that failed to write does.
+    region.finish()?;
+
     if let Some(mut lod) = lod {
         lod.finish();
     }
     if let Some(mut lod) = dh_lod {
         lod.finish();
     }
-
-    region.finish()?;
 
     if let Some(dir) = merge_dir.filter(|_| !written_chunks.is_empty()) {
         strip_stale_side_chunks(&dir, region_x, region_z, &written_chunks);
@@ -2491,12 +2495,67 @@ mod merge_tests {
         let raw = noise(1_000_000);
         let mut compressor = flate2::Compress::new(flate2::Compression::fast(), true);
         let mut out = Vec::new();
+        // Without this the test would pass on a backend that never needs the retry.
+        let fast = compress_chunk(&mut compressor, &raw, &mut out).unwrap();
+        assert!(fast > MAX_COMPRESSED_CHUNK, "fast level fits: {fast} bytes");
         let len = compress_chunk_to_fit(&mut compressor, &raw, &mut out).unwrap();
         assert!(len <= MAX_COMPRESSED_CHUNK, "{len} bytes");
         assert_eq!(inflate(&out[..len]), raw);
         // The region's compressor is left fit for the next chunk.
         let len = compress_chunk_to_fit(&mut compressor, b"next", &mut out).unwrap();
         assert_eq!(inflate(&out[..len]), b"next");
+    }
+
+    #[test]
+    fn a_chunk_too_large_to_store_fails_the_write_and_names_the_chunk() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut region = region_with(&[(5, 5)], STONE);
+        let junk = noise(1_200_000).into_iter().map(|b| b as i8).collect();
+        region
+            .get_or_create_chunk(3, 4)
+            .other
+            .insert("junk".to_string(), Value::ByteArray(ByteArray::new(junk)));
+        let err = write_region_to_disk(
+            dir.path(),
+            &llbbox(),
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            0,
+            0,
+            &region,
+            &RegionWriteMode::Fresh,
+            (0, 0),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("chunk (3, 4)"), "{err}");
+    }
+
+    #[test]
+    fn a_fresh_flat_region_is_written_compact() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut region = region_with(&[(5, 5)], STONE);
+        // Several sectors, so a start from the template would have moved it and left a gap.
+        let junk = noise(10_000).into_iter().map(|b| b as i8).collect();
+        region
+            .get_or_create_chunk(5, 5)
+            .other
+            .insert("junk".to_string(), Value::ByteArray(ByteArray::new(junk)));
+        write(dir.path(), &region, RegionWriteMode::Fresh);
+        // Header plus each chunk's own sectors, with no template chunk left in a gap.
+        let file = File::open(dir.path().join("region").join("r.0.0.mca")).unwrap();
+        let header = {
+            use std::io::Read;
+            let mut header = vec![0u8; 4096];
+            (&file).read_exact(&mut header).unwrap();
+            header
+        };
+        let sectors: u64 = header.chunks(4).map(|loc| u64::from(loc[3])).sum();
+        assert_eq!(file.metadata().unwrap().len(), (2 + sectors) * 4096);
     }
 
     #[test]
