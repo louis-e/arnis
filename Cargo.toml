@@ -33,7 +33,7 @@ dda-voxelize = { git = "https://github.com/MIERUNE/dda-voxelize-rs", rev = "1e08
 dirs = "6.0.0"
 fastanvil = "0.32.0"
 fastnbt = "2.6.0"
-flate2 = "1.1"
+flate2 = { version = "1.1", features = ["zlib-rs"] }
 fnv = "1.0.7"
 fs2 = "0.4"
 geo = "0.33.1"
