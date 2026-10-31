@@ -425,22 +425,31 @@ label[for].setting-label {
   min-width: 0;
 }
 
-/* One row: a long name wraps inside its own box and keeps the tooltip and revert
-   buttons beside it, rather than pushing them onto a line of their own. */
+/* Inline, so the tooltip and revert icons follow the last word when a long name wraps. */
 .setting-heading {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 6px;
+  display: block;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
 }
 
-/* The name gives way, down to breaking a long compound word, before the buttons do. */
+/* A long compound word, as in German or Finnish, breaks rather than overflowing. */
 .setting-heading > [data-localize] {
-  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.setting-heading > .tooltip-icon,
+.setting-heading > .setting-revert {
+  vertical-align: middle;
+}
+
+/* Markup whitespace already spaces the tooltip; the injected revert button has none. */
+.setting-heading > .tooltip-icon {
+  margin-left: 2px;
+}
+
+.setting-heading > .setting-revert {
+  margin-left: 6px;
 }
 
 .setting-desc {
