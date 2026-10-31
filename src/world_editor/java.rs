@@ -533,14 +533,11 @@ fn write_region_to_disk(
                 }
                 let mut existing = region_to_modify.get_chunk(chunk_x, chunk_z);
 
-                // A chunk that is present but holds nothing is left unwritten,
-                // as it was before this loop was reordered. A merge fills it.
+                // A chunk that is present but holds nothing is written like an absent one.
+                // Skipping it would leave a flat world the template's placeholder there,
+                // which carries another region's position.
                 if existing.is_some_and(|c| c.sections.is_empty() && c.other.is_empty()) {
-                    if merge {
-                        existing = None;
-                    } else {
-                        continue;
-                    }
+                    existing = None;
                 }
                 // A fresh void region holds only the chunks the area touches; the void
                 // generator makes the rest. A merge stays inside its area anyway.
@@ -2396,6 +2393,34 @@ mod merge_tests {
             base_block_name(dir.path(), 5, 5).as_deref(),
             Some("minecraft:stone")
         );
+    }
+
+    /// The `xPos`/`zPos` chunk `(cx, cz)` of `r.0.0.mca` says it is at, and its sections.
+    fn stored_chunk(dir: &std::path::Path, cx: usize, cz: usize) -> ((i32, i32), Value) {
+        let file = File::open(dir.join("region").join("r.0.0.mca")).unwrap();
+        let mut region = Region::from_stream(file).unwrap();
+        let data = region.read_chunk(cx, cz).unwrap().unwrap();
+        let Value::Compound(root) = fastnbt::from_bytes(&data).unwrap() else {
+            panic!("chunk ({cx}, {cz}) is not a compound");
+        };
+        let (Some(Value::Int(x)), Some(Value::Int(z))) = (root.get("xPos"), root.get("zPos"))
+        else {
+            panic!("chunk ({cx}, {cz}) has no position");
+        };
+        ((*x, *z), root["sections"].clone())
+    }
+
+    #[test]
+    fn a_fresh_flat_write_gives_an_empty_chunk_the_filler_not_a_template_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut region = region_with(&[(5, 5)], STONE);
+        // Present but holding nothing, as a write dropped above the ceiling leaves one.
+        region.get_or_create_chunk(6, 6);
+        write(dir.path(), &region, RegionWriteMode::Fresh);
+        let (position, sections) = stored_chunk(dir.path(), 6, 6);
+        assert_eq!(position, (6, 6));
+        // Untouched, so it got the filler.
+        assert_eq!(sections, stored_chunk(dir.path(), 7, 7).1);
     }
 
     #[test]
