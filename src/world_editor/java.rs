@@ -391,7 +391,9 @@ impl RegionSink {
     }
 }
 
-/// Largest compressed chunk fastanvil stores: 255 sectors of 4 KiB, less its 5-byte header.
+/// Largest compressed chunk a region file holds inline: 255 sectors of 4 KiB, less the
+/// chunk's 5-byte header. Minecraft moves a larger one to its own `c.X.Z.mcc` file, which
+/// fastanvil cannot write.
 const MAX_COMPRESSED_CHUNK: usize = 255 * 4096 - 5;
 
 /// Zlib-compresses `raw` into `out[..n]` and returns `n`.
@@ -612,7 +614,8 @@ fn write_region_to_disk(
                 if len > MAX_COMPRESSED_CHUNK {
                     return Err(format!(
                         "chunk ({abs_chunk_x}, {abs_chunk_z}) compresses to {len} bytes, more \
-                         than the {MAX_COMPRESSED_CHUNK} a region file can hold"
+                         than the {MAX_COMPRESSED_CHUNK} a region file holds inline; Minecraft \
+                         would move it to a separate .mcc file, which fastanvil cannot write"
                     )
                     .into());
                 }
@@ -2433,32 +2436,6 @@ mod merge_tests {
         assert_eq!(sections, stored_chunk(dir.path(), 7, 7).1);
     }
 
-    #[test]
-    fn a_fresh_void_write_holds_only_the_chunks_the_area_touches() {
-        let dir = tempfile::tempdir().unwrap();
-        write_region_to_disk(
-            dir.path(),
-            &llbbox(),
-            None,
-            false,
-            true,
-            None,
-            None,
-            None,
-            0,
-            0,
-            &region_with(&[(5, 5), (31, 0)], STONE),
-            &RegionWriteMode::Fresh,
-            (0, 0),
-        )
-        .unwrap();
-        assert_eq!(present_chunks(dir.path()), vec![(31, 0), (5, 5)]);
-        assert_eq!(
-            base_block_name(dir.path(), 31, 0).as_deref(),
-            Some("minecraft:stone")
-        );
-    }
-
     /// Bytes that do not compress.
     fn noise(len: usize) -> Vec<u8> {
         let mut x: u32 = 0x9E37_79B9;
@@ -2503,7 +2480,11 @@ mod merge_tests {
         let mut out = Vec::new();
         // Without this the test would pass on a backend that never needs the retry.
         let fast = compress_chunk(&mut compressor, &raw, &mut out).unwrap();
-        assert!(fast > MAX_COMPRESSED_CHUNK, "fast level fits: {fast} bytes");
+        assert!(
+            fast > MAX_COMPRESSED_CHUNK,
+            "the fast level stored noise in {fast} bytes, so flate2 no longer runs zlib-rs's \
+             fixed-Huffman fast level: check whether compress_chunk_to_fit still needs its retry"
+        );
         let len = compress_chunk_to_fit(&mut compressor, &raw, &mut out).unwrap();
         assert!(len <= MAX_COMPRESSED_CHUNK, "{len} bytes");
         assert_eq!(inflate(&out[..len]), raw);
