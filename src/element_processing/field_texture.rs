@@ -141,6 +141,24 @@ pub struct Plot {
     rows_along_x: bool,
 }
 
+/// Every block a plot or a classic field grows, for passes that clear plants again.
+pub const PLOT_PLANTS: &[Block] = &[
+    GRASS,
+    FERN,
+    DEAD_BUSH,
+    HAY_BALE,
+    PUMPKIN,
+    SUNFLOWER_LOWER,
+    WHEAT,
+    WHEAT_YOUNG,
+    CARROTS,
+    CARROTS_YOUNG,
+    POTATOES,
+    POTATOES_YOUNG,
+    BEETROOTS,
+    BEETROOTS_YOUNG,
+];
+
 /// What grows on a plot cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cover {
@@ -194,11 +212,9 @@ impl Plot {
                 }
             }
             Crop::Fallow => {
-                if n < 0.33 {
-                    COARSE_DIRT
-                } else if n < 0.45 {
+                if (0.33..0.45).contains(&n) {
                     MUD
-                } else if n < 0.70 {
+                } else if (0.45..0.70).contains(&n) {
                     GRASS_BLOCK
                 } else {
                     COARSE_DIRT
@@ -294,8 +310,7 @@ impl FieldLayout {
     pub fn new(preset: FieldPreset, scale: f64, id: u64, nodes: &[ProcessedNode]) -> Option<Self> {
         let params = preset.params()?;
         let scale = sane_scale(scale);
-        // Edge directions folded by 4x, so parallel and perpendicular edges vote together.
-        // Edges the clipper made along the generation bounds get no vote.
+        // Clipper-made edges skipped; 4x folding lets parallel and perpendicular edges agree.
         let (mut c, mut s) = (0.0f64, 0.0f64);
         for w in nodes.windows(2) {
             if is_invented_node_id(w[0].id) && is_invented_node_id(w[1].id) {
@@ -660,6 +675,23 @@ mod tests {
             (0..200).all(|x| !tall(x, 11)),
             "a sunflower stands between rows"
         );
+    }
+
+    #[test]
+    fn every_plant_a_plot_grows_can_be_cleared() {
+        let p = FieldPreset::Patchwork.params().unwrap();
+        for k in 0..400 {
+            let plot = p.plot(mix(k), k % 2 == 0);
+            for x in 0..40 {
+                for z in 0..4 {
+                    let lower = match plot.cover(plot.surface(x, z), x, z) {
+                        Some(Cover::Single(b)) | Some(Cover::Tall(b, _)) => b,
+                        None => continue,
+                    };
+                    assert!(PLOT_PLANTS.contains(&lower), "{} is missing", lower.name());
+                }
+            }
+        }
     }
 
     #[test]
