@@ -15,7 +15,7 @@ use rayon::prelude::*;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Write;
+use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -230,24 +230,21 @@ fn open_region_file_for_merge(
     overworld_dir: &std::path::Path,
     region_x: i32,
     region_z: i32,
-) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(MemRegion, std::path::PathBuf), Box<dyn std::error::Error + Send + Sync>> {
     let region_dir = overworld_dir.join("region");
     let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
     if out_path.is_file() {
-        let file = File::options().read(true).write(true).open(&out_path)?;
+        let bytes = std::fs::read(&out_path)?;
         // Refused rather than replaced: the file holds chunks of other areas.
-        return Region::from_stream(file).map_err(|e| {
-            format!("{} is not a readable region file: {e}", out_path.display()).into()
-        });
+        return match Region::from_stream(Cursor::new(bytes)) {
+            Ok(region) => Ok((region, out_path)),
+            Err(e) => {
+                Err(format!("{} is not a readable region file: {e}", out_path.display()).into())
+            }
+        };
     }
     std::fs::create_dir_all(&region_dir)?;
-    let file = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&out_path)?;
-    Ok(Region::create(file)?)
+    Ok((Region::create(Cursor::new(Vec::new()))?, out_path))
 }
 
 /// Removes chunks whose stored position does not match their slot, as left
@@ -334,30 +331,52 @@ fn strip_stale_side_chunks(
     }
 }
 
-/// Open (truncating) a fresh `r.X.Z.mca` under `world_dir/region`. A flat world starts
-/// from the template; a void world starts empty, since nothing outside the area is written.
+/// A region assembled in memory and written to its `.mca` in one go: fastanvil seeks and
+/// writes a handful of times per chunk, which against the file is ~8 syscalls a chunk.
+type MemRegion = Region<Cursor<Vec<u8>>>;
+
+/// A fresh `r.X.Z.mca` under `world_dir/region`, in memory until written. A flat world
+/// starts from the template; a void world starts empty, since nothing outside the area is
+/// written.
 fn create_region_file(
     world_dir: &std::path::Path,
     region_x: i32,
     region_z: i32,
     void_world: bool,
-) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(MemRegion, std::path::PathBuf), Box<dyn std::error::Error + Send + Sync>> {
     let region_dir = world_dir.join("region");
     let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
     std::fs::create_dir_all(&region_dir)?;
-
-    let mut region_file: File = File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&out_path)?;
     if void_world {
-        return Ok(Region::create(region_file)?);
+        return Ok((Region::create(Cursor::new(Vec::new()))?, out_path));
     }
     const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
-    region_file.write_all(REGION_TEMPLATE)?;
-    Ok(Region::from_stream(region_file)?)
+    Ok((
+        Region::from_stream(Cursor::new(REGION_TEMPLATE.to_vec()))?,
+        out_path,
+    ))
+}
+
+/// Zlib-compress `raw` into `out` with a compressor reused across a region's chunks;
+/// fastanvil's `write_chunk` builds a fresh one, state tables and all, for every chunk.
+fn compress_chunk(
+    compressor: &mut flate2::Compress,
+    raw: &[u8],
+    out: &mut Vec<u8>,
+) -> std::io::Result<()> {
+    compressor.reset();
+    out.clear();
+    out.reserve(raw.len() / 2 + 64);
+    loop {
+        let consumed = compressor.total_in() as usize;
+        let status = compressor
+            .compress_vec(&raw[consumed..], out, flate2::FlushCompress::Finish)
+            .map_err(std::io::Error::other)?;
+        match status {
+            flate2::Status::StreamEnd => return Ok(()),
+            _ => out.reserve(out.capacity().max(4096)),
+        }
+    }
 }
 
 /// Serialize one region's chunks to its `.mca`. Shared by the synchronous save
@@ -394,11 +413,13 @@ fn write_region_to_disk(
         RegionWriteMode::Fresh => None,
     };
     let merge = merge_dir.is_some();
-    let mut region = match &merge_dir {
+    let (mut region, out_path) = match &merge_dir {
         Some(dir) => open_region_file_for_merge(dir, region_x, region_z)?,
         None => create_region_file(world_dir, region_x, region_z, void_world)?,
     };
     let mut ser_buffer = Vec::with_capacity(8192);
+    let mut compressor = flate2::Compress::new(flate2::Compression::fast(), true);
+    let mut compressed = Vec::with_capacity(8192);
     let mut written_chunks: Vec<(i32, i32)> = Vec::new();
 
     // World-center latitude drives temperature-based biome variants (taiga
@@ -522,7 +543,13 @@ fn write_region_to_disk(
                 let chunk_nbt = create_chunk_nbt_with_lighting(&chunk, lighting, &biome_value);
                 ser_buffer.clear();
                 fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
-                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+                compress_chunk(&mut compressor, &ser_buffer, &mut compressed)?;
+                region.write_compressed_chunk(
+                    chunk_x as usize,
+                    chunk_z as usize,
+                    fastanvil::CompressionScheme::Zlib,
+                    &compressed,
+                )?;
                 if merge {
                     written_chunks.push((chunk_x, chunk_z));
                 }
@@ -544,8 +571,9 @@ fn write_region_to_disk(
         lod.finish();
     }
 
+    std::fs::write(&out_path, region.into_inner()?.into_inner())?;
+
     if let Some(dir) = merge_dir.filter(|_| !written_chunks.is_empty()) {
-        drop(region);
         strip_stale_side_chunks(&dir, region_x, region_z, &written_chunks);
     }
 
@@ -2300,6 +2328,58 @@ mod merge_tests {
             base_block_name(dir.path(), 5, 5).as_deref(),
             Some("minecraft:stone")
         );
+    }
+
+    #[test]
+    fn a_fresh_void_write_holds_only_the_chunks_the_area_touches() {
+        let dir = tempfile::tempdir().unwrap();
+        write_region_to_disk(
+            dir.path(),
+            &llbbox(),
+            None,
+            false,
+            true,
+            None,
+            None,
+            None,
+            0,
+            0,
+            &region_with(&[(5, 5), (31, 0)], STONE),
+            &RegionWriteMode::Fresh,
+            (0, 0),
+        )
+        .unwrap();
+        assert_eq!(present_chunks(dir.path()), vec![(31, 0), (5, 5)]);
+        assert_eq!(
+            base_block_name(dir.path(), 31, 0).as_deref(),
+            Some("minecraft:stone")
+        );
+    }
+
+    #[test]
+    fn a_reused_compressor_round_trips_every_chunk() {
+        use std::io::Read;
+        // Noise does not compress, so its output outgrows the first reservation.
+        let mut noise = Vec::with_capacity(300_000);
+        let mut x: u32 = 0x9E37_79B9;
+        for _ in 0..300_000 {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            noise.push(x as u8);
+        }
+        let inputs = [b"short".to_vec(), vec![7u8; 100_000], noise];
+        let mut compressor = flate2::Compress::new(flate2::Compression::fast(), true);
+        let mut out = Vec::new();
+        // Twice over, so every input also follows a different one through the compressor.
+        for raw in inputs.iter().chain(inputs.iter()) {
+            compress_chunk(&mut compressor, raw, &mut out).unwrap();
+            let mut back = Vec::new();
+            flate2::read::ZlibDecoder::new(out.as_slice())
+                .read_to_end(&mut back)
+                .unwrap();
+            assert_eq!(&back, raw);
+        }
     }
 
     #[test]
