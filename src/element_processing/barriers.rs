@@ -791,7 +791,9 @@ pub fn generate_barrier_nodes(
         .then(|| bridge_surface.supported_top(editor, node.x, node.z, BRIDGE_BARRIER_NEARBY_RADIUS))
         .flatten();
     let place = |editor: &mut WorldEditor<'_>, block: Block, dy: i32| match deck {
-        Some(deck_y) => editor.set_block_absolute(block, node.x, deck_y + dy, node.z, None, None),
+        Some(deck_y) => {
+            editor.set_block_absolute(block, node.x, deck_y + dy, node.z, None, None);
+        }
         None => editor.set_block(block, node.x, dy, node.z, None, None),
     };
     match node.tags.get("barrier").map(|s| s.as_str()) {

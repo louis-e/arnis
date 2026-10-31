@@ -47,13 +47,20 @@ fn joins(own: Block, neighbour: Block) -> bool {
 }
 
 /// Places a wall, bar or fence (into an empty cell) joined to its neighbours, updating them too.
-pub(crate) fn place_connected(editor: &mut WorldEditor, block: Block, x: i32, y: i32, z: i32) {
+pub(crate) fn place_connected(
+    editor: &mut WorldEditor,
+    block: Block,
+    x: i32,
+    y: i32,
+    z: i32,
+) -> bool {
     editor.set_block_absolute(block, x, y, z, None, None);
     if editor.get_block_absolute(x, y, z) != Some(block) || family(block).is_none() {
-        return;
+        return false;
     }
     refresh(editor, block, x, y, z);
     refresh_neighbours(editor, x, y, z, |n| family(n) == family(block));
+    true
 }
 
 /// Places a closed fence gate (into an empty cell) in a run along x, or else along z,

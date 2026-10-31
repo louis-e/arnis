@@ -1695,6 +1695,7 @@ pub fn generate_world_with_options(
             }
 
             let tile_road_overrides = tile_editor.take_road_surface_overrides();
+            let tile_transparent_to_snow = std::mem::take(&mut tile_editor.transparent_to_snow);
 
             // Emit on whole-percent steps only; the monotonic clamp
             // reconciles these with the merge-side emits.
@@ -1710,6 +1711,7 @@ pub fn generate_world_with_options(
                 tile_rail_tunnel_points,
                 tile_tunnel_cells,
                 tile_road_overrides,
+                tile_transparent_to_snow,
             )
         };
 
@@ -1769,6 +1771,7 @@ pub fn generate_world_with_options(
                         tile_rail_tunnel_points,
                         tile_tunnel_cells,
                         tile_road_overrides,
+                        tile_transparent_to_snow,
                     )) = pending.remove(&next_merge)
                     {
                         let merge_start = std::time::Instant::now();
@@ -1793,6 +1796,8 @@ pub fn generate_world_with_options(
                             ),
                             (eviction_active && !keep_roads).then_some(&road_regions),
                         );
+
+                        editor.transparent_to_snow.merge(&tile_transparent_to_snow);
 
                         if eviction_active {
                             // This tile contributes to its own region and its 8 neighbours.
@@ -1845,6 +1850,7 @@ pub fn generate_world_with_options(
                                     if keep_roads && !model_regions.contains(&d) {
                                         editor.release_road_surface_overrides(d.0, d.1);
                                     }
+                                    editor.transparent_to_snow.clear_region(d.0, d.1);
                                     if hash_check {
                                         hash_acc = hash_acc
                                             .wrapping_add(editor.region_content_hash(d.0, d.1));

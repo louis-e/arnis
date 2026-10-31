@@ -39,6 +39,7 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::luanti_block_map::LuantiGame;
 use crate::progress::emit_gui_progress_update;
+use crate::world_editor::common::WorldColumnBitVec;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -227,6 +228,8 @@ pub struct WorldEditor<'a> {
     /// Uses the cheap coordinate hasher (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), and the merge thread extends it per tile.
     road_surface_overrides: CoordMap<i32>,
+    /// Block where this is true will be transparent to snow
+    pub(crate) transparent_to_snow: WorldColumnBitVec,
     /// Bridge pier columns and their material, extended to the bed by the water carve.
     support_columns: FnvHashMap<(i32, i32), Block>,
     /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
@@ -326,6 +329,7 @@ impl<'a> WorldEditor<'a> {
             water_field: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: CoordMap::default(),
+            transparent_to_snow: WorldColumnBitVec::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
@@ -392,6 +396,7 @@ impl<'a> WorldEditor<'a> {
             water_field: None,
             format,
             road_surface_overrides: CoordMap::default(),
+            transparent_to_snow: WorldColumnBitVec::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
@@ -458,6 +463,7 @@ impl<'a> WorldEditor<'a> {
             water_field: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: CoordMap::default(),
+            transparent_to_snow: WorldColumnBitVec::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
@@ -2328,6 +2334,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Sets a block of the specified type at the given coordinates with absolute Y value.
+    /// Return true if the block was placed
     #[inline]
     pub fn set_block_absolute(
         &mut self,
@@ -2337,7 +2344,7 @@ impl<'a> WorldEditor<'a> {
         z: i32,
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
-    ) {
+    ) -> bool {
         self.set_block_with_properties_absolute(
             BlockWithProperties {
                 block,
@@ -2360,6 +2367,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Sets a block with properties at the given coordinates with absolute Y value.
+    /// Return true if the block was placed
     #[inline]
     pub fn set_block_with_properties_absolute(
         &mut self,
@@ -2369,27 +2377,27 @@ impl<'a> WorldEditor<'a> {
         z: i32,
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
-    ) {
+    ) -> bool {
         // Check if coordinates are within bounds
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
+            return false;
         }
         // Drop writes to regions already flushed to disk (stream-to-disk eviction).
         if self.is_region_flushed(x, z) {
-            return;
+            return false;
         }
         // A tile's halo repeats what the owning tile draws there, and the merge lets
         // it in wherever the owner left air: on its water, under its trunks. The owner
         // draws its own undergrowth, so the halo keeps none.
         if !self.owns(x, z) && crate::ground_decoration::is_undergrowth(block_with_props.block) {
-            return;
+            return false;
         }
 
         // None/None is the dominant pattern; skip the redundant get_block() read.
         if override_whitelist.is_none() && override_blacklist.is_none() {
-            self.world
+            return self
+                .world
                 .set_with_props_if_absent(x, absolute_y, z, block_with_props);
-            return;
         }
 
         // An empty cell is always written; an occupied one per the whitelist or blacklist.
@@ -2407,7 +2415,7 @@ impl<'a> WorldEditor<'a> {
             }
         };
         self.world
-            .set_block_with_properties_if(x, absolute_y, z, block_with_props, replace);
+            .set_block_with_properties_if(x, absolute_y, z, block_with_props, replace)
     }
 
     /// Fill a rectangular volume with a block using absolute Y coordinates.

@@ -16,8 +16,8 @@ use crate::block_definitions::{
     MOSSY_COBBLESTONE_STAIRS, MOSSY_COBBLESTONE_WALL, MOSSY_STONE_BRICKS, MOSSY_STONE_BRICK_SLAB,
     MOSSY_STONE_BRICK_STAIRS, MOSSY_STONE_BRICK_WALL, MOSS_BLOCK, MOSS_CARPET, MUD, NETHERRACK,
     NETHER_BRICK, PODZOL, POLISHED_ANDESITE, POLISHED_BLACKSTONE_BRICKS, SMOOTH_QUARTZ_SLAB,
-    SMOOTH_QUARTZ_STAIRS, SMOOTH_STONE, SNOWY_GRASS_BLOCK, SNOWY_PODZOL, SNOW_LAYERS, STONE,
-    STONE_BRICKS, STONE_BRICK_SLAB, STONE_BRICK_STAIRS, STONE_BRICK_WALL, TALL_GRASS_BOTTOM,
+    SMOOTH_QUARTZ_STAIRS, SMOOTH_STONE, SNOWY_GRASS_BLOCK, SNOWY_PODZOL, SNOW_BLOCK, SNOW_LAYERS,
+    STONE, STONE_BRICKS, STONE_BRICK_SLAB, STONE_BRICK_STAIRS, STONE_BRICK_WALL, TALL_GRASS_BOTTOM,
     TALL_GRASS_TOP, VINES,
 };
 use crate::coordinate_system::cartesian::XZPoint;
@@ -25,6 +25,8 @@ use crate::floodfill_cache::{CoordinateBitmap, SealedSurfaceBitmap};
 use crate::ground::Ground;
 use crate::ground_generation::patch_noise;
 use crate::land_cover::{coord_hash, LC_WATER};
+use crate::world_editor::common::WorldColumnBitVec;
+use crate::world_editor::min_y;
 
 const SALT_COLLAPSE: u32 = 0x5255_494E;
 const SALT_JAG: u32 = 0x4A41_4747;
@@ -291,6 +293,7 @@ struct Terrain<'a> {
     origin: (i32, i32),
     overrides: &'a super::CoordMap<i32>,
     sealed: Option<&'a SealedSurfaceBitmap>,
+    transparent_to_snow: &'a WorldColumnBitVec,
 }
 
 impl Terrain<'_> {
@@ -337,6 +340,7 @@ impl WorldEditor<'_> {
             origin: (self.ground_origin_x, self.ground_origin_z),
             overrides: &self.road_surface_overrides,
             sealed: self.sealed_surface.as_deref(),
+            transparent_to_snow: &self.transparent_to_snow,
         };
         let Some(region) = self.world.regions.get_mut(&(rx, rz)) else {
             return;
@@ -714,7 +718,14 @@ fn rubble(h: u64) -> Block {
     }
 }
 
-/// Lays snow over the column's top, buries its small plants, and freezes open water.
+fn checked_substract_y(y: i32) -> Option<i32> {
+    if y <= min_y() {
+        None
+    } else {
+        Some(y - 1)
+    }
+}
+
 fn snow_over(
     chunk: &mut ChunkToModify,
     col: Column,
@@ -722,33 +733,110 @@ fn snow_over(
     terrain: &Terrain,
     bare: Option<Block>,
 ) {
-    let Some((top, block)) = col.top(chunk) else {
+    let Some((mut pos_y, initial_block)) = col.top(chunk) else {
         return;
     };
-    let on_ground = top <= ground_y + 1;
-    match kind(block) {
+    snow_over_single(
+        chunk,
+        col,
+        ground_y,
+        terrain,
+        pos_y,
+        initial_block,
+        true,
+        bare,
+    );
+
+    if let Some(transparent_to_snow_col) = terrain.transparent_to_snow.get_column((col.x, col.z)) {
+        'main: loop {
+            let mut nb_transparent_to_snow_block_traversed = 0;
+            let mut over_is_air = false;
+            while transparent_to_snow_col.get(pos_y) {
+                nb_transparent_to_snow_block_traversed += 1;
+                pos_y = match checked_substract_y(pos_y) {
+                    Some(v) => v,
+                    None => {
+                        break 'main;
+                    }
+                };
+            }
+            if nb_transparent_to_snow_block_traversed == 0 {
+                break;
+            }
+
+            let first_block;
+            loop {
+                match col.get(chunk, pos_y) {
+                    Some(AIR) | None => {
+                        over_is_air = true;
+                        pos_y = match checked_substract_y(pos_y) {
+                            Some(v) => v,
+                            None => {
+                                break 'main;
+                            }
+                        };
+                        continue;
+                    }
+                    Some(other) => {
+                        first_block = other;
+                        break;
+                    }
+                }
+            }
+
+            snow_over_single(
+                chunk,
+                col,
+                ground_y,
+                terrain,
+                pos_y,
+                first_block,
+                over_is_air,
+                bare,
+            );
+        }
+    }
+}
+
+/// Lays snow over the column's top, buries its small plants, and freezes open water.
+/// pos_y is the first non-air block that need to be filled, pos_block is the kind of said block.
+/// This may different from the (predicted) ground_y, if the block to fill is aerial. Will never snow on underground floor.
+#[allow(clippy::too_many_arguments)]
+fn snow_over_single(
+    chunk: &mut ChunkToModify,
+    col: Column,
+    ground_y: i32,
+    terrain: &Terrain,
+    pos_y: i32,
+    pos_block: Block,
+    over_is_air: bool,
+    bare: Option<Block>,
+) {
+    let on_ground = pos_y <= ground_y + 1;
+    match kind(pos_block) {
         Kind::Water => {
             if terrain.freezes(col.x, col.z) {
-                col.set(chunk, top, ICE);
+                col.set(chunk, pos_y, ICE);
             }
         }
         Kind::Plant => {
-            col.set(chunk, top, snow_layer(col, on_ground, false));
-            snowy_ground(chunk, col, top - 1);
+            col.set(chunk, pos_y, snow_layer(col, on_ground, false));
+            snowy_ground(chunk, col, pos_y - 1, true);
         }
         Kind::TallPlant => {
-            let lower = col.get(chunk, top - 1);
-            let at = if lower == Some(block) || lower.is_some_and(|b| kind(b) == Kind::TallPlant) {
-                col.set(chunk, top, AIR);
-                top - 1
-            } else {
-                top
-            };
+            let lower = col.get(chunk, pos_y - 1);
+            let at =
+                if lower == Some(pos_block) || lower.is_some_and(|b| kind(b) == Kind::TallPlant) {
+                    col.set(chunk, pos_y, AIR);
+                    pos_y - 1
+                } else {
+                    pos_y
+                };
             col.set(chunk, at, snow_layer(col, on_ground, false));
-            snowy_ground(chunk, col, at - 1);
+            snowy_ground(chunk, col, at - 1, true);
         }
-        Kind::Leaves | Kind::Solid | Kind::Shaped if top < world_max_y() => {
-            if on_ground && bare == Some(block) {
+        Kind::Leaves | Kind::Solid | Kind::Shaped if pos_y < world_max_y() => {
+            if on_ground && bare == Some(pos_block) {
                 return;
             }
             // Ploughed roads keep only scattered ridges of snow.
@@ -756,20 +844,22 @@ fn snow_over(
             if road && patch_noise(col.x, col.z, 3, SALT_PLOW) < 0.92 {
                 return;
             }
-            if kind(block) == Kind::Shaped
-                && !full_top(col.properties(chunk, top, block).as_deref())
+            if kind(pos_block) == Kind::Shaped
+                && !full_top(col.properties(chunk, pos_y, pos_block).as_deref())
             {
                 // Snow slides off a bottom slab or stair, so most such roofs turn white.
                 if patch_noise(col.x, col.z, 10, SALT_ROOF) < WHITE_ROOF_SHARE {
-                    if let Some(white) = whitened(block) {
-                        col.swap(chunk, top, white);
+                    if let Some(white) = whitened(pos_block) {
+                        col.swap(chunk, pos_y, white);
                     }
                 }
                 return;
             }
-            let thin = road || kind(block) == Kind::Leaves;
-            col.set(chunk, top + 1, snow_layer(col, on_ground, thin));
-            snowy_ground(chunk, col, top);
+            let thin = road || kind(pos_block) == Kind::Leaves;
+            if over_is_air {
+                col.set(chunk, pos_y + 1, snow_layer(col, on_ground, thin));
+            }
+            snowy_ground(chunk, col, pos_y, over_is_air);
         }
         _ => {}
     }
@@ -814,12 +904,20 @@ fn snow_layer(col: Column, on_ground: bool, thin: bool) -> Block {
 /// Grass and podzol under snow turn to their snowy variants, which the game only does on
 /// a block update. Farmland, paths and mud sit lower than a full block, which snow needs,
 /// so they turn to dirt.
-fn snowy_ground(chunk: &mut ChunkToModify, col: Column, y: i32) {
-    let snowy = match col.get(chunk, y) {
-        Some(GRASS_BLOCK) => SNOWY_GRASS_BLOCK,
-        Some(PODZOL) => SNOWY_PODZOL,
-        Some(FARMLAND | DIRT_PATH | MUD) => DIRT,
-        _ => return,
+fn snowy_ground(chunk: &mut ChunkToModify, col: Column, y: i32, covered_by_snow: bool) {
+    let previous_block = col.get(chunk, y);
+    let snowy = if covered_by_snow {
+        match previous_block {
+            Some(GRASS_BLOCK) => SNOWY_GRASS_BLOCK,
+            Some(PODZOL) => SNOWY_PODZOL,
+            Some(FARMLAND | DIRT_PATH | MUD) => DIRT,
+            _ => return,
+        }
+    } else {
+        match previous_block {
+            Some(GRASS_BLOCK | PODZOL | FARMLAND | DIRT_PATH | MUD) => SNOW_BLOCK,
+            _ => return,
+        }
     };
     col.set(chunk, y, snowy);
 }
@@ -878,19 +976,24 @@ mod tests {
         chunk
     }
 
-    fn terrain_without_ground(overrides: &crate::world_editor::CoordMap<i32>) -> Terrain<'_> {
+    fn terrain_without_ground<'a>(
+        overrides: &'a crate::world_editor::CoordMap<i32>,
+        transparent_to_snow: &'a WorldColumnBitVec,
+    ) -> Terrain<'a> {
         Terrain {
             ground: None,
             origin: (0, 0),
             overrides,
             sealed: None,
+            transparent_to_snow,
         }
     }
 
     #[test]
     fn snow_buries_grass_and_greys_nothing_it_cannot_sit_on() {
         let overrides = Default::default();
-        let terrain = terrain_without_ground(&overrides);
+        let transparent_to_snow = WorldColumnBitVec::default();
+        let terrain = terrain_without_ground(&overrides, &transparent_to_snow);
         let col = Column {
             lx: 3,
             lz: 4,
@@ -1002,7 +1105,8 @@ mod tests {
     #[test]
     fn snow_rests_only_on_full_slabs_and_upper_stairs() {
         let overrides = Default::default();
-        let terrain = terrain_without_ground(&overrides);
+        let transparent_to_snow = Default::default();
+        let terrain = terrain_without_ground(&overrides, &transparent_to_snow);
         let col = Column {
             lx: 3,
             lz: 4,
@@ -1057,7 +1161,8 @@ mod tests {
     #[test]
     fn snow_on_a_field_turns_its_farmland_to_dirt() {
         let overrides = Default::default();
-        let terrain = terrain_without_ground(&overrides);
+        let transparent_to_snow = Default::default();
+        let terrain = terrain_without_ground(&overrides, &transparent_to_snow);
         let col = Column {
             lx: 3,
             lz: 4,
@@ -1074,7 +1179,8 @@ mod tests {
     fn snow_leaves_a_blueprint_outline_bare() {
         use crate::block_definitions::LIGHT_BLUE_CONCRETE;
         let overrides = Default::default();
-        let terrain = terrain_without_ground(&overrides);
+        let transparent_to_snow = WorldColumnBitVec::default();
+        let terrain = terrain_without_ground(&overrides, &transparent_to_snow);
         let col = Column {
             lx: 3,
             lz: 4,
