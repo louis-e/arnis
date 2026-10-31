@@ -1,5 +1,6 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::field_texture::PLOT_PLANTS;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -160,13 +161,14 @@ fn create_water_channel(
                 if let Some(water_y) = water_y {
                     editor.set_block_absolute(WATER, x, water_y, z, None, None);
 
-                    // Clear vegetation above the water
+                    // Clear vegetation above the water, a sunflower's top half too.
+                    editor.set_block_absolute(AIR, x, water_y + 1, z, Some(PLOT_PLANTS), None);
                     editor.set_block_absolute(
                         AIR,
                         x,
-                        water_y + 1,
+                        water_y + 2,
                         z,
-                        Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
+                        Some(&[SUNFLOWER_UPPER]),
                         None,
                     );
                 }

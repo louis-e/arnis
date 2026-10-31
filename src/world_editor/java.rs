@@ -849,6 +849,7 @@ fn is_light_transparent(name: &str) -> bool {
         "wheat",
         "carrots",
         "potatoes",
+        "beetroots",
         "lily_pad",
         "sea_pickle",
         "cobweb",

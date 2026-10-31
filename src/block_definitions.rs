@@ -307,15 +307,15 @@ impl Block {
             202 => "flower_pot",
             203 => "sea_lantern",
             204 => "polished_diorite_slab",
-            205 => "warped_slab",
-            206 => "warped_stairs",
+            205 => "beetroots",
+            206 => "wheat",
             207 => "green_concrete",
             208 => "brick_wall",
-            209 => "redstone_block",
+            209 => "carrots",
             210 => "chain",
             211 => "warped_trapdoor",
-            212 => "stripped_warped_stem",
-            213 => "stripped_warped_hyphae",
+            212 => "potatoes",
+            213 => "beetroots",
             214 => "smooth_stone_slab",
             215 => "cobbled_deepslate_slab",
             216 => "light_gray_terracotta",
@@ -607,6 +607,12 @@ impl Block {
             519 => "lapis_block",
             520 => "red_sand",
             521 => "red_sandstone",
+            // Moved up so the field crops could take their sub-256 ids.
+            522 => "warped_slab",
+            523 => "warped_stairs",
+            524 => "redstone_block",
+            525 => "stripped_warped_stem",
+            526 => "stripped_warped_hyphae",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -666,6 +672,22 @@ impl Block {
             109 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
+                map
+            })),
+            // Field crops: ripe beetroots, then the young stage of each crop.
+            205 | 206 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("3".to_string()));
+                map
+            })),
+            209 | 212 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("2".to_string()));
+                map
+            })),
+            213 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("1".to_string()));
                 map
             })),
             116 => Some(Value::Compound({
@@ -1410,7 +1432,7 @@ pub const ORANGE_WOOL: Block = Block::new(360);
 pub const BLUE_WOOL: Block = Block::new(361);
 pub const GREEN_CONCRETE: Block = Block::new(207);
 pub const BRICK_WALL: Block = Block::new(208);
-pub const REDSTONE_BLOCK: Block = Block::new(209);
+pub const REDSTONE_BLOCK: Block = Block::new(524);
 pub const CHAIN_X: Block = Block::new(210);
 pub const CHAIN_Z: Block = Block::new(362);
 pub const SPRUCE_DOOR_LOWER: Block = Block::new(364);
@@ -1564,11 +1586,11 @@ pub const CHISELED_QUARTZ_BLOCK: Block = Block::new(356);
 pub const QUARTZ_PILLAR: Block = Block::new(357);
 pub const REDSTONE_WALL_TORCH: Block = Block::new(358);
 pub const EMPTY_FLOWER_POT: Block = Block::new(202);
-pub const WARPED_SLAB: Block = Block::new(205);
-pub const WARPED_STAIRS: Block = Block::new(206);
+pub const WARPED_SLAB: Block = Block::new(522);
+pub const WARPED_STAIRS: Block = Block::new(523);
 pub const WARPED_TRAPDOOR: Block = Block::new(211);
-pub const STRIPPED_WARPED_STEM: Block = Block::new(212);
-pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(213);
+pub const STRIPPED_WARPED_STEM: Block = Block::new(525);
+pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(526);
 pub const ORANGE_CONCRETE: Block = Block::new(145);
 pub const REDSTONE_LAMP: Block = Block::new(218);
 // Reuses the retired open-trapdoor slot.
@@ -1729,6 +1751,12 @@ pub const RAW_GOLD_BLOCK: Block = Block::new(518);
 pub const LAPIS_BLOCK: Block = Block::new(519);
 pub const RED_SAND: Block = Block::new(520);
 pub const RED_SANDSTONE: Block = Block::new(521);
+// Sub-256 so farmland sections keep the one-byte storage and its merge fast path.
+pub const BEETROOTS: Block = Block::new(205);
+pub const WHEAT_YOUNG: Block = Block::new(206);
+pub const CARROTS_YOUNG: Block = Block::new(209);
+pub const POTATOES_YOUNG: Block = Block::new(212);
+pub const BEETROOTS_YOUNG: Block = Block::new(213);
 /// A vine clinging to the wall on its north, east, south or west side.
 pub const VINES: [Block; 4] = [
     Block::new(499),

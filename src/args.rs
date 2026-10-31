@@ -159,6 +159,12 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub legacy_trees: bool,
 
+    /// Farmland style: classic (one sheet of mixed crops), smallholding (narrow strips),
+    /// patchwork (mixed fields of medium width) or prairie (wide, wheat-led fields).
+    /// Anything but classic gives each field one crop, split inside its OSM outline.
+    #[arg(long, value_enum, default_value_t)]
+    pub fields: crate::element_processing::field_texture::FieldPreset,
+
     /// Largest schematic tree to place: small (<=6 blocks), medium (<=12),
     /// big (<=20), tall (<=28) or giant. Oversized picks fall back to a smaller
     /// species in the same community where there is one.

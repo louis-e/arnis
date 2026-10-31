@@ -5,6 +5,7 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
 use crate::element_processing::construction_site;
+use crate::element_processing::field_texture::{place_cover, FieldLayout, Plot};
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{
     in_hole, without_holes, BuildingFootprintBitmap, FloodFillCache, Holes, InnerRings,
@@ -143,6 +144,10 @@ fn landuse_area(
     let climate = editor.climate();
     let site_arid = construction_site::is_arid(climate);
 
+    let field_layout = (landuse_tag == "farmland")
+        .then(|| FieldLayout::new(args.fields, args.scale, element.id, &element.nodes))
+        .flatten();
+
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
@@ -157,8 +162,12 @@ fn landuse_area(
             }
             continue;
         }
+        let plot = field_layout.as_ref().map(|l| l.plot_at(x, z));
+
         // Apply per-block randomness for certain landuse types
-        let actual_block = if landuse_tag == "industrial" {
+        let actual_block = if let Some(p) = &plot {
+            p.surface(x, z)
+        } else if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone
             let random_value = rng.random_range(0..100);
             if random_value < 70 {
@@ -300,6 +309,11 @@ fn landuse_area(
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
                     }
+                }
+            }
+            "farmland" if field_layout.is_some() => {
+                if let Some(p) = plot.filter(|_| !is_protected) {
+                    plant_plot(editor, &p, actual_block, x, z);
                 }
             }
             "farmland" if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
@@ -452,6 +466,17 @@ fn landuse_area(
     if landuse_tag == "farmland" {
         let floor_area = without_holes(&floor_area, holes);
         crate::structures::tractor::maybe_place_tractor(editor, floor_area.as_slice());
+    }
+}
+
+/// Grows a field plot's cell, which holds `surface` if nothing else claimed it first.
+fn plant_plot(editor: &mut WorldEditor, plot: &Plot, surface: Block, x: i32, z: i32) {
+    if !editor.check_for_block(x, 0, z, Some(&[surface])) {
+        return;
+    }
+    if let Some(cover) = plot.cover(surface, x, z) {
+        let ground_y = editor.get_absolute_y(x, 0, z);
+        place_cover(editor, cover, x, ground_y, z);
     }
 }
 

@@ -19,6 +19,7 @@ pub(crate) mod connected_blocks;
 pub mod construction_site;
 pub mod doors;
 pub mod emergency;
+pub mod field_texture;
 pub mod fuel_stations;
 pub mod highways;
 pub mod historic;

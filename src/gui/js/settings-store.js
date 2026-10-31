@@ -31,6 +31,7 @@ const SETTINGS = [
   { id: 'caves-toggle', kind: 'checkbox', store: OWN },
   { id: 'canopy-height-toggle', kind: 'checkbox', store: OWN },
   { id: 'max-tree-size-group', kind: 'segmented', store: OWN, valueAttr: 'data-max-tree-size' },
+  { id: 'field-preset-group', kind: 'segmented', store: OWN, valueAttr: 'data-field-preset' },
   { id: 'legacy-trees-toggle', kind: 'checkbox', store: OWN },
   { id: 'winter-toggle', kind: 'checkbox', store: OWN },
   { id: 'post-apocalyptic-toggle', kind: 'checkbox', store: OWN },
