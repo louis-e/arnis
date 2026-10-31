@@ -585,122 +585,129 @@ fn write_region_to_disk(
     });
     let mut dh_lod = dh.map(|writer| writer.region_lod());
 
-    for column in 0..256usize {
-        let (sx, sz) = morton_16(column);
-        for dz in 0..2 {
-            for dx in 0..2 {
-                let chunk_x = sx * 2 + dx;
-                let chunk_z = sz * 2 + dz;
-                let abs_chunk_x = chunk_x + (region_x * 32);
-                let abs_chunk_z = chunk_z + (region_z * 32);
-                let (sections, other, lighting, span) = match slots[slot_index(chunk_x, chunk_z)] {
-                    SlotWrite::Skip => continue,
-                    SlotWrite::Chunk(chunk_to_modify) => {
-                        let sections: Vec<Section> = chunk_to_modify.sections().collect();
-                        let span = chunk_section_span(&sections);
-                        let lighting =
-                            bake_lighting.then(|| compute_chunk_lighting(&sections, span));
-                        (
-                            sections,
-                            strip_orphan_block_entities(chunk_to_modify),
-                            lighting,
-                            span,
-                        )
+    let mut write_chunks = || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        for column in 0..256usize {
+            let (sx, sz) = morton_16(column);
+            for dz in 0..2 {
+                for dx in 0..2 {
+                    let chunk_x = sx * 2 + dx;
+                    let chunk_z = sz * 2 + dz;
+                    let abs_chunk_x = chunk_x + (region_x * 32);
+                    let abs_chunk_z = chunk_z + (region_z * 32);
+                    let (sections, other, lighting, span) =
+                        match slots[slot_index(chunk_x, chunk_z)] {
+                            SlotWrite::Skip => continue,
+                            SlotWrite::Chunk(chunk_to_modify) => {
+                                let sections: Vec<Section> = chunk_to_modify.sections().collect();
+                                let span = chunk_section_span(&sections);
+                                let lighting =
+                                    bake_lighting.then(|| compute_chunk_lighting(&sections, span));
+                                (
+                                    sections,
+                                    strip_orphan_block_entities(chunk_to_modify),
+                                    lighting,
+                                    span,
+                                )
+                            }
+                            SlotWrite::Filler => (
+                                base_sections.to_vec(),
+                                FnvHashMap::default(),
+                                base_lighting.clone(),
+                                (base_min_y, base_max_y),
+                            ),
+                        };
+
+                    let biome_names = crate::biome::chunk_biome_names(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        ground,
+                        center_lat,
+                        ground_origin,
+                    );
+                    let biome_value = crate::biome::biome_nbt_from_names(&biome_names);
+
+                    if let Some(lod) = lod.as_mut() {
+                        lod.ingest_chunk(
+                            abs_chunk_x,
+                            abs_chunk_z,
+                            &sections,
+                            (span.0 as i32, span.1 as i32),
+                            lighting.as_deref(),
+                            &biome_names,
+                        );
                     }
-                    SlotWrite::Filler => (
-                        base_sections.to_vec(),
-                        FnvHashMap::default(),
-                        base_lighting.clone(),
-                        (base_min_y, base_max_y),
-                    ),
-                };
+                    if let Some(lod) = dh_lod.as_mut() {
+                        lod.ingest_chunk(
+                            abs_chunk_x,
+                            abs_chunk_z,
+                            &sections,
+                            (span.0 as i32, span.1 as i32),
+                            lighting.as_deref(),
+                            &biome_names,
+                        );
+                    }
 
-                let biome_names = crate::biome::chunk_biome_names(
-                    abs_chunk_x,
-                    abs_chunk_z,
-                    ground,
-                    center_lat,
-                    ground_origin,
-                );
-                let biome_value = crate::biome::biome_nbt_from_names(&biome_names);
-
-                if let Some(lod) = lod.as_mut() {
-                    lod.ingest_chunk(
+                    crate::datapack::disasters::record_chunk(
                         abs_chunk_x,
                         abs_chunk_z,
                         &sections,
-                        (span.0 as i32, span.1 as i32),
-                        lighting.as_deref(),
                         &biome_names,
                     );
-                }
-                if let Some(lod) = dh_lod.as_mut() {
-                    lod.ingest_chunk(
-                        abs_chunk_x,
-                        abs_chunk_z,
-                        &sections,
-                        (span.0 as i32, span.1 as i32),
-                        lighting.as_deref(),
-                        &biome_names,
-                    );
-                }
 
-                crate::datapack::disasters::record_chunk(
-                    abs_chunk_x,
-                    abs_chunk_z,
-                    &sections,
-                    &biome_names,
-                );
-
-                let chunk = Chunk {
-                    sections,
-                    x_pos: abs_chunk_x,
-                    z_pos: abs_chunk_z,
-                    is_light_on: 0,
-                    other,
-                };
-                let chunk_nbt = create_chunk_nbt_with_lighting(&chunk, lighting, &biome_value);
-                ser_buffer.clear();
-                fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
-                let len = compress_chunk_to_fit(&mut compressor, &ser_buffer, &mut compressed)?;
-                if len > MAX_COMPRESSED_CHUNK {
-                    return Err(format!(
-                        "chunk ({abs_chunk_x}, {abs_chunk_z}) compresses to {len} bytes, more \
-                     than the {MAX_COMPRESSED_CHUNK} a region file holds inline; Minecraft \
-                     would move it to a separate .mcc file, which fastanvil cannot write"
-                    )
-                    .into());
-                }
-                region.write_chunk(chunk_x as usize, chunk_z as usize, &compressed[..len])?;
-                if merge {
-                    written_chunks.push((chunk_x, chunk_z));
+                    let chunk = Chunk {
+                        sections,
+                        x_pos: abs_chunk_x,
+                        z_pos: abs_chunk_z,
+                        is_light_on: 0,
+                        other,
+                    };
+                    let chunk_nbt = create_chunk_nbt_with_lighting(&chunk, lighting, &biome_value);
+                    ser_buffer.clear();
+                    fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
+                    let len = compress_chunk_to_fit(&mut compressor, &ser_buffer, &mut compressed)?;
+                    if len > MAX_COMPRESSED_CHUNK {
+                        return Err(format!(
+                            "chunk ({abs_chunk_x}, {abs_chunk_z}) compresses to {len} bytes, more \
+                         than the {MAX_COMPRESSED_CHUNK} a region file holds inline; Minecraft \
+                         would move it to a separate .mcc file, which fastanvil cannot write"
+                        )
+                        .into());
+                    }
+                    region.write_chunk(chunk_x as usize, chunk_z as usize, &compressed[..len])?;
+                    if merge {
+                        written_chunks.push((chunk_x, chunk_z));
+                    }
                 }
             }
-        }
 
-        if let Some(lod) = lod.as_mut() {
-            lod.end_column(column);
+            if let Some(lod) = lod.as_mut() {
+                lod.end_column(column);
+            }
+            if let Some(lod) = dh_lod.as_mut() {
+                lod.end_column(column);
+            }
         }
-        if let Some(lod) = dh_lod.as_mut() {
-            lod.end_column(column);
+        Ok(())
+    };
+    // The region is finished before the LOD caches, so a region that fails to reach disk
+    // leaves them unfinished, as a chunk that failed to write does.
+    let written = write_chunks().and_then(|()| Ok(region.finish()?));
+    if written.is_ok() {
+        if let Some(mut lod) = lod {
+            lod.finish();
+        }
+        if let Some(mut lod) = dh_lod {
+            lod.finish();
         }
     }
-    // Before the LOD caches finish, so a region that fails to reach disk leaves them
-    // unfinished, as a chunk that failed to write does.
-    region.finish()?;
 
-    if let Some(mut lod) = lod {
-        lod.finish();
-    }
-    if let Some(mut lod) = dh_lod {
-        lod.finish();
-    }
-
+    // A merge rewrites its chunks in place as it goes, so the earlier run's entities for
+    // the ones it reached go even when a later chunk fails the save.
     if let Some(dir) = merge_dir.filter(|_| !written_chunks.is_empty()) {
         strip_stale_side_chunks(&dir, region_x, region_z, &written_chunks);
     }
 
-    Ok(())
+    written
 }
 
 /// Morton (Z-order) index into a 16x16 grid of 2x2-chunk columns.
@@ -2744,6 +2751,70 @@ mod merge_tests {
         assert!(
             region.read_chunk(5, 5).unwrap().is_some(),
             "untouched chunk lost its entities"
+        );
+    }
+
+    #[test]
+    fn a_merge_that_fails_partway_still_drops_the_entities_of_what_it_rewrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let entities = dir.path().join("entities");
+        std::fs::create_dir_all(&entities).unwrap();
+        {
+            let file = File::options()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(entities.join("r.0.0.mca"))
+                .unwrap();
+            let mut region = Region::create(file).unwrap();
+            let payload = fastnbt::to_bytes(&Value::Compound(HashMap::from([(
+                "Entities".to_string(),
+                Value::List(vec![]),
+            )])))
+            .unwrap();
+            region.write_chunk(0, 0, &payload).unwrap();
+            region.write_chunk(5, 5, &payload).unwrap();
+        }
+        // The writer visits (0, 0) first and (1, 1) fourth, long before (5, 5).
+        let mut region = region_with(&[(0, 0)], STONE);
+        let junk = noise(1_200_000).into_iter().map(|b| b as i8).collect();
+        region
+            .get_or_create_chunk(1, 1)
+            .other
+            .insert("junk".to_string(), Value::ByteArray(ByteArray::new(junk)));
+        let err = write_region_to_disk(
+            dir.path(),
+            &llbbox(),
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            0,
+            0,
+            &region,
+            &RegionWriteMode::Merge {
+                min_x: 0,
+                min_z: 0,
+                max_x: 511,
+                max_z: 511,
+                layout: crate::world_utils::WorldLayout::Legacy,
+            },
+            (0, 0),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("chunk (1, 1)"), "{err}");
+        let file = File::open(entities.join("r.0.0.mca")).unwrap();
+        let mut entity_region = Region::from_stream(file).unwrap();
+        assert!(
+            entity_region.read_chunk(0, 0).unwrap().is_none(),
+            "a chunk rewritten before the failure keeps stale entities"
+        );
+        assert!(
+            entity_region.read_chunk(5, 5).unwrap().is_some(),
+            "a chunk the merge never reached lost its entities"
         );
     }
 
