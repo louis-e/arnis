@@ -391,6 +391,43 @@ impl RegionSink {
     }
 }
 
+/// What one chunk slot of a region is written with.
+///
+/// The voxy builder is told before the write which sections can hold a block, so it reads
+/// every slot through [`slot_write`] too: deciding it in two places is how the two drifted
+/// apart before.
+enum SlotWrite<'a> {
+    /// The area's own chunk.
+    Chunk(&'a ChunkToModify),
+    /// The filler: a plane at the terrain base, or no sections at all in a void world.
+    Filler,
+    /// Nothing: outside a merge's bounds, or left to the void generator.
+    Skip,
+}
+
+/// What [`write_region_to_disk`] writes into chunk slot `(chunk_x, chunk_z)` of a region.
+fn slot_write<'a>(
+    region: &'a super::common::RegionToModify,
+    (region_x, region_z): (i32, i32),
+    (chunk_x, chunk_z): (i32, i32),
+    mode: &RegionWriteMode,
+    void_world: bool,
+) -> SlotWrite<'a> {
+    if !mode.writes_chunk(region_x * 32 + chunk_x, region_z * 32 + chunk_z) {
+        return SlotWrite::Skip;
+    }
+    match region.get_chunk(chunk_x, chunk_z) {
+        // A chunk that is present but holds nothing gets what an absent one gets.
+        Some(chunk) if !(chunk.sections.is_empty() && chunk.other.is_empty()) => {
+            SlotWrite::Chunk(chunk)
+        }
+        // A fresh void region holds only the chunks the area touches; the void generator
+        // makes the rest. A merge stays inside its area anyway.
+        _ if void_world && matches!(mode, RegionWriteMode::Fresh) => SlotWrite::Skip,
+        _ => SlotWrite::Filler,
+    }
+}
+
 /// Largest compressed chunk a region file holds inline: 255 sectors of 4 KiB, less the
 /// chunk's 5-byte header. Minecraft moves a larger one to its own `c.X.Z.mcc` file, which
 /// fastanvil cannot write.
@@ -514,7 +551,7 @@ fn write_region_to_disk(
         writer.region_lod(
             min_y,
             max_y,
-            live_lod_sections(region_to_modify, region_x, region_z),
+            live_lod_sections(region_to_modify, region_x, region_z, mode, void_world),
         )
     });
     let mut dh_lod = dh.map(|writer| writer.region_lod());
@@ -527,20 +564,17 @@ fn write_region_to_disk(
                 let chunk_z = sz * 2 + dz;
                 let abs_chunk_x = chunk_x + (region_x * 32);
                 let abs_chunk_z = chunk_z + (region_z * 32);
-                if !mode.writes_chunk(abs_chunk_x, abs_chunk_z) {
-                    continue;
-                }
-                let mut existing = region_to_modify.get_chunk(chunk_x, chunk_z);
-
-                // A chunk that is present but holds nothing is written like an absent one.
-                if existing.is_some_and(holds_nothing) {
-                    existing = None;
-                }
-                // A fresh void region holds only the chunks the area touches; the void
-                // generator makes the rest. A merge stays inside its area anyway.
-                if void_world && !merge && existing.is_none() {
-                    continue;
-                }
+                let existing = match slot_write(
+                    region_to_modify,
+                    (region_x, region_z),
+                    (chunk_x, chunk_z),
+                    mode,
+                    void_world,
+                ) {
+                    SlotWrite::Chunk(chunk) => Some(chunk),
+                    SlotWrite::Filler => None,
+                    SlotWrite::Skip => continue,
+                };
 
                 let biome_names = crate::biome::chunk_biome_names(
                     abs_chunk_x,
@@ -678,16 +712,15 @@ pub(crate) fn morton_16(index: usize) -> (i32, i32) {
 /// above the tallest roof is never marked here, yet it still gets ingested,
 /// because the level-1..4 sections it falls into are live from the content
 /// below it. That is what `region_content_span`'s `+ 1` relies on.
-/// A chunk present in the region but holding nothing to write. The writer gives it what an
-/// absent chunk gets, so everything that predicts the written chunks must read it that way.
-fn holds_nothing(chunk: &ChunkToModify) -> bool {
-    chunk.sections.is_empty() && chunk.other.is_empty()
-}
-
+///
+/// Each slot is read through [`slot_write`], the same call the writer makes, so a slot
+/// is live exactly when the written chunk there can hold a block.
 fn live_lod_sections(
     region: &super::common::RegionToModify,
     region_x: i32,
     region_z: i32,
+    mode: &RegionWriteMode,
+    void_world: bool,
 ) -> crate::voxy::LiveSections {
     let base_section_y = crate::world_editor::base_chunk_y() >> 4;
     let mut live: crate::voxy::LiveSections = Default::default();
@@ -695,14 +728,24 @@ fn live_lod_sections(
         for local_z in 0..32 {
             let chunk_x = region_x * 32 + local_x;
             let chunk_z = region_z * 32 + local_z;
-            match region.get_chunk(local_x, local_z) {
-                Some(chunk) if !holds_nothing(chunk) => {
+            match slot_write(
+                region,
+                (region_x, region_z),
+                (local_x, local_z),
+                mode,
+                void_world,
+            ) {
+                SlotWrite::Chunk(chunk) => {
                     for section_y in chunk.sections.keys() {
                         crate::voxy::mark_live(&mut live, chunk_x, section_y as i32, chunk_z);
                     }
                 }
-                // Filler chunks are a flat plane at the terrain base.
-                _ => crate::voxy::mark_live(&mut live, chunk_x, base_section_y, chunk_z),
+                // A flat world's filler is a plane at the terrain base; a void world's has
+                // no sections at all.
+                SlotWrite::Filler if !void_world => {
+                    crate::voxy::mark_live(&mut live, chunk_x, base_section_y, chunk_z)
+                }
+                SlotWrite::Filler | SlotWrite::Skip => {}
             }
         }
     }
@@ -2545,16 +2588,58 @@ mod merge_tests {
         assert_eq!(file.metadata().unwrap().len(), (2 + sectors) * 4096);
     }
 
+    /// Whether the level-0 voxy section over chunks (6..=7, 6..=7) at the filler's height is
+    /// live, with the area's one chunk at (5, 5).
+    fn filler_group_live(region: &RegionToModify, mode: &RegionWriteMode, void: bool) -> bool {
+        // Other tests move the base the filler sits on.
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let base = crate::world_editor::base_chunk_y() >> 4;
+        let live = live_lod_sections(region, 0, 0, mode, void);
+        assert!(live[0].contains(&(2, 0, 2)), "the area's chunk is live");
+        live[0].contains(&(3, base >> 1, 3))
+    }
+
     #[test]
     fn an_empty_chunk_feeds_the_voxy_lod_like_an_absent_one() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let mut with_empty = region_with(&[(5, 5)], STONE);
         // A whole 2x2 group, since one absent neighbour would mark the group anyway.
         for (cx, cz) in [(6, 6), (6, 7), (7, 6), (7, 7)] {
             with_empty.get_or_create_chunk(cx, cz);
         }
-        assert_eq!(
-            live_lod_sections(&with_empty, 0, 0),
-            live_lod_sections(&region_with(&[(5, 5)], STONE), 0, 0)
+        let fresh = RegionWriteMode::Fresh;
+        for void in [false, true] {
+            assert_eq!(
+                live_lod_sections(&with_empty, 0, 0, &fresh, void),
+                live_lod_sections(&region_with(&[(5, 5)], STONE), 0, 0, &fresh, void)
+            );
+        }
+    }
+
+    #[test]
+    fn the_voxy_lod_marks_filler_only_where_the_writer_writes_it() {
+        let area = region_with(&[(5, 5)], STONE);
+        let fresh = RegionWriteMode::Fresh;
+        assert!(filler_group_live(&area, &fresh, false), "flat filler");
+        assert!(
+            !filler_group_live(&area, &fresh, true),
+            "a void world writes no filler"
+        );
+        // A merge whose bounds end before chunk 6 writes nothing there.
+        let merge = RegionWriteMode::Merge {
+            min_x: 0,
+            min_z: 0,
+            max_x: 95,
+            max_z: 95,
+            layout: crate::world_utils::WorldLayout::Legacy,
+        };
+        assert!(
+            !filler_group_live(&area, &merge, false),
+            "outside the merge"
         );
     }
 
