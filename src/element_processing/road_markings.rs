@@ -9,6 +9,7 @@ use crate::decals::region::SignRegion;
 use crate::element_processing::highways::{
     highway_block_range, lane_marking_count, surface_palette,
 };
+use crate::element_processing::raceways::RacewayPaint;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use fnv::{FnvHashMap, FnvHashSet};
 use std::collections::HashMap;
@@ -128,6 +129,7 @@ pub struct RoadMarkingIndex {
     signal_crossing_lines: bool,
     /// Nodes where a crossing way meets a road.
     crossing_road_nodes: FnvHashSet<u64>,
+    raceways: RacewayPaint,
 }
 
 /// Vehicular carriageway attributes the junction rules need.
@@ -442,6 +444,10 @@ impl RoadMarkingIndex {
         self.ways.get(&id)
     }
 
+    pub fn raceway_paint(&self) -> &RacewayPaint {
+        &self.raceways
+    }
+
     /// Carriageways a crossing way runs over; None when it shares no node with a road.
     pub fn crossing_clips(&self, id: u64) -> Option<&[CarriagewayClip]> {
         self.crossings.get(&id).map(Vec::as_slice)
@@ -526,6 +532,7 @@ impl RoadMarkingIndex {
                 region,
                 SignRegion::Germanic | SignRegion::UkIreland
             )),
+            raceways: RacewayPaint::build(elements, scale),
             ..Self::default()
         };
 

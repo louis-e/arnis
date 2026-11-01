@@ -3,6 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
+use crate::element_processing::raceways;
 use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{
@@ -65,6 +66,7 @@ fn leisure_area(
             "outdoor_seating" => SMOOTH_STONE, //Usually stone or stone bricks
             "water_park" | "slipway" => LIGHT_GRAY_CONCRETE, // Water park area, not the pool. Usually is concrete
             "ice_rink" => PACKED_ICE, // TODO: Ice for Ice Rink, needs building defined
+            "track" => raceways::track_area_block(&element.tags).unwrap_or(GRASS_BLOCK),
             _ => GRASS_BLOCK,
         };
         // Explicit surface=* overrides the category default. Leave

@@ -82,6 +82,7 @@ fn natural_area(
                 "beach" | "shoal" => beach_block(element.tags().get("surface")),
                 "water" | "reef" | "bay" => WATER,
                 "bare_rock" | "rock" | "stone" => STONE,
+                "shingle" => GRAVEL,
                 "blockfield" => COBBLESTONE,
                 "glacier" => PACKED_ICE,
                 "mud" | "wetland" => MUD,
@@ -1025,6 +1026,14 @@ mod tests {
         let editor = render_natural(place, &[("natural", "rock")]);
         assert_eq!(count(&editor, 0, &[GRASS_BLOCK]), 0);
         assert!(count(&editor, 0, &[STONE, ANDESITE, COBBLESTONE]) > 1000);
+    }
+
+    #[test]
+    fn shingle_is_gravel_not_grass() {
+        let place = LLBBox::new(50.43, 5.96, 50.44, 5.97).unwrap();
+        let editor = render_natural(place, &[("natural", "shingle")]);
+        assert_eq!(count(&editor, 0, &[GRASS_BLOCK]), 0);
+        assert_eq!(count(&editor, 0, &[GRAVEL]), 1600);
     }
 
     #[test]
