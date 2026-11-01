@@ -6067,7 +6067,15 @@ fn infer_building_height(
         return InferredHeight::HallBlocks(blocks);
     }
 
+    // An arena is one tall bowl of seats under a roof, a big one as tall as a stand.
+    let arena = matches!(building_type, "stadium" | "arena")
+        || (building_type == "yes" && tags.get("leisure").map(String::as_str) == Some("stadium"));
     let (is_hall, table): (bool, &[(i32, u32)]) = match building_type {
+        _ if arena && area_m2 >= 5000 => (true, &[(20, 40), (24, 40), (28, 20)]),
+        _ if arena => (true, &[(10, 50), (12, 50)]),
+        "sports_hall" | "sports_centre" | "gymnasium" | "riding_hall" => {
+            (true, &[(8, 40), (10, 40), (12, 20)])
+        }
         "bungalow" | "static_caravan" => (false, &[(1, 100)]),
         "house" | "detached" | "villa" | "farm" => (false, &[(1, 25), (2, 55), (3, 20)]),
         "semidetached_house" => (false, &[(2, 70), (3, 30)]),

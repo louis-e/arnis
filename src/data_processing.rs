@@ -70,7 +70,7 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     {
         return None;
     }
-    let fills_ground = if swimming_pools::is_swimming_pool(tags) {
+    let fills_ground = if swimming_pools::is_swimming_pool(tags) || golf::claims(tags) {
         true
     } else if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
@@ -93,7 +93,9 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
 fn relation_ground_fill_area(rel: &ProcessedRelation) -> Option<f64> {
     let tags = &rel.tags;
     match RelationArea::of(tags) {
-        Some(RelationArea::Natural | RelationArea::Leisure | RelationArea::Pool) => {}
+        Some(
+            RelationArea::Natural | RelationArea::Leisure | RelationArea::Golf | RelationArea::Pool,
+        ) => {}
         Some(RelationArea::Landuse) if landuse_paints_ground(tags) => {}
         _ => return None,
     }
@@ -411,6 +413,8 @@ fn process_element(
                     timeout: args.timeout.as_ref(),
                 };
                 swimming_pools::generate_swimming_pool(editor, way, &ctx);
+            } else if golf::claims(&way.tags) {
+                golf::generate_golf(editor, way, args, flood_fill_cache);
             } else if way.tags.contains_key("landuse") {
                 landuse::generate_landuse(
                     editor,
@@ -518,6 +522,8 @@ fn process_element(
                 }
             } else if way.tags.contains_key("place") {
                 landuse::generate_place(editor, way, args, flood_fill_cache);
+            } else if golf::is_hole(&way.tags) {
+                golf::generate_hole_flag(editor, way);
             }
         }
         ProcessedElement::Node(node) => {
@@ -651,6 +657,9 @@ fn process_element(
                     building_footprints,
                     bridge_surface,
                 );
+            }
+            Some(RelationArea::Golf) => {
+                golf::generate_golf_from_relation(editor, rel, args, flood_fill_cache);
             }
             Some(RelationArea::Pool) => {
                 let ctx = swimming_pools::PoolContext {
@@ -1346,12 +1355,23 @@ pub fn generate_world_with_options(
     let landmark_suppressed: &HashSet<(&'static str, u64)> = landmarks.suppressed();
     let has_landmarks = !landmark_suppressed.is_empty();
 
+    // Venues a landmark or model already replaces are left to it.
+    let stadiums = {
+        let taken: HashSet<(&'static str, u64)> = models_3d_suppressed
+            .union(landmark_suppressed)
+            .copied()
+            .collect();
+        crate::element_processing::stadiums::prescan(&elements, args, &taken)
+    };
+    let stadium_suppressed = stadiums.suppressed();
+
     // Post-merge placements, numbered in the order they go in: 3D models, planes, then
     // landmarks, last because they clear their own footprint.
     let model_count = models_3d_pipeline
         .as_ref()
         .map_or(0, |p| p.placement_count());
-    let landmark_from = model_count + planes.placement_count();
+    let stadium_from = model_count + planes.placement_count();
+    let landmark_from = stadium_from + stadiums.placement_count();
     let placement_total = landmark_from + landmarks.placement_count();
     let place_units = |editor: &mut WorldEditor, units: &[usize]| {
         let pick = |lo: usize, hi: usize| -> Vec<usize> {
@@ -1367,7 +1387,12 @@ pub fn generate_world_with_options(
         crate::structures::plane::place_plane_models(
             editor,
             &planes,
-            &pick(model_count, landmark_from),
+            &pick(model_count, stadium_from),
+        );
+        crate::element_processing::stadiums::place_stadiums(
+            editor,
+            &stadiums,
+            &pick(stadium_from, landmark_from),
         );
         landmarks.place(editor, args, &pick(landmark_from, placement_total));
     };
@@ -1456,6 +1481,7 @@ pub fn generate_world_with_options(
                 .map(|p| p.placement_regions(args.scale))
                 .unwrap_or_default();
             units.extend(planes.placement_regions());
+            units.extend(stadiums.placement_regions());
             units.extend(landmarks.placement_regions(args.scale));
             deferred = crate::deferred_placement::DeferredPlacements::new(units, |r| {
                 real_regions.contains(&r)
@@ -1592,6 +1618,7 @@ pub fn generate_world_with_options(
                 let suppression_key = (element.kind(), element.id());
                 if models_3d_suppressed.contains(&suppression_key)
                     || (has_landmarks && landmark_suppressed.contains(&suppression_key))
+                    || stadium_suppressed.contains(&suppression_key)
                     || outline_suppression.contains(&suppression_key)
                 {
                     continue;
@@ -2012,6 +2039,7 @@ pub fn generate_world_with_options(
             let suppression_key = (element.kind(), element.id());
             if models_3d_suppressed.contains(&suppression_key)
                 || (has_landmarks && landmark_suppressed.contains(&suppression_key))
+                || stadium_suppressed.contains(&suppression_key)
                 || outline_suppression.contains(&suppression_key)
             {
                 // Still the last reader on record, so release its fills.

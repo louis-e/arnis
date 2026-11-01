@@ -21,6 +21,7 @@ pub mod doors;
 pub mod emergency;
 pub mod field_texture;
 pub mod fuel_stations;
+pub mod golf;
 pub mod highways;
 pub mod historic;
 pub mod landuse;
@@ -36,6 +37,7 @@ pub mod road_markings;
 pub mod rooftops;
 pub mod signage;
 pub mod sport_pitches;
+pub mod stadiums;
 pub mod stations;
 pub mod street_furniture;
 pub(crate) mod structure_kit;
@@ -65,6 +67,8 @@ pub enum RelationArea {
     Landuse,
     /// Parks, and track areas raced by motor sport.
     Leisure,
+    /// Fairways, greens and the rest of a golf course's turf.
+    Golf,
     ManMade,
     Pool,
 }
@@ -81,6 +85,8 @@ impl RelationArea {
             Some(Self::Pool)
         } else if tags.contains_key("water") || matches!(natural, Some("water" | "bay")) {
             Some(Self::Water)
+        } else if golf::claims(tags) {
+            Some(Self::Golf)
         } else if natural.is_some() {
             Some(Self::Natural)
         } else if tags.contains_key("landuse") {
@@ -99,7 +105,7 @@ impl RelationArea {
     /// groynes are areas.
     pub fn fills_members(self, tags: &HashMap<String, String>) -> bool {
         match self {
-            Self::Natural | Self::Leisure | Self::Pool => true,
+            Self::Natural | Self::Leisure | Self::Golf | Self::Pool => true,
             Self::Landuse => landuse_paints_ground(tags),
             Self::ManMade => matches!(
                 tags.get("man_made").map(String::as_str),

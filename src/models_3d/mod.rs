@@ -1,6 +1,5 @@
-//! 3D model substitution pipelines (3DMR glTF, Wikidata P4896 STL, Arnis-hosted archetypes).
+//! 3D model substitution pipelines (3DMR glTF, Wikidata P4896 STL).
 
-pub(crate) mod custom;
 pub(crate) mod pipeline;
 pub(crate) mod three_dmr;
 pub(crate) mod voxelize;
@@ -51,7 +50,7 @@ pub(crate) fn lowest_ground_in_bbox(
 const TREE_SWEEP_HEIGHT: i32 = 64;
 
 /// How far past the footprint the sweep follows a tree; a crown reaches no further.
-const TREE_SWEEP_REACH: i32 = 10;
+pub(crate) const TREE_SWEEP_REACH: i32 = 10;
 
 /// Writes model voxels over whatever stands there. Trees inside the footprint go
 /// first, whole, so none grows through a lattice or a hollow statue.
@@ -75,8 +74,23 @@ fn clear_trees_in_footprint(editor: &mut WorldEditor, voxels: &[([i32; 3], Block
     for ([x, _, z], _) in voxels {
         mask[(x - min_x) as usize + (z - min_z) as usize * span_x] = true;
     }
+    clear_trees_in_mask(editor, min_x, min_z, span_x, span_z, &mask, top);
+}
+
+/// Takes out every tree growing in `mask` (row-major from `min_x`, `min_z`) below `top`,
+/// and what it encloses, whole.
+pub(crate) fn clear_trees_in_mask(
+    editor: &mut WorldEditor,
+    min_x: i32,
+    min_z: i32,
+    span_x: usize,
+    span_z: usize,
+    mask: &[bool],
+    top: i32,
+) {
+    let (max_x, max_z) = (min_x + span_x as i32 - 1, min_z + span_z as i32 - 1);
     // Under a ring of legs or a platform edge counts as inside.
-    let mask = crate::landmarks::fill_enclosed(&mask, span_x, span_z);
+    let mask = crate::landmarks::fill_enclosed(mask, span_x, span_z);
     // Crowns touch across a wood, so an unbounded flood would clear the trees around it too.
     let (reach_x, reach_z) = (
         min_x - TREE_SWEEP_REACH..=max_x + TREE_SWEEP_REACH,
@@ -111,13 +125,20 @@ pub(crate) fn region_keys_around(cx: i32, cz: i32, r: i32) -> Vec<(i32, i32)> {
     out
 }
 
+/// Where the retired stadium model was cached; still listed so the panel can clear it.
+fn retired_archetype_cache_root() -> std::path::PathBuf {
+    dirs::cache_dir()
+        .map(|d| d.join("arnis/custom_models"))
+        .unwrap_or_else(|| std::path::PathBuf::from("./.arnis_custom_cache"))
+}
+
 /// Every root the 3D model fetchers cache into, for the settings panel's size
 /// readout.
 pub fn model_cache_roots() -> Vec<std::path::PathBuf> {
     vec![
         three_dmr::client::cache_root(),
         wikidata::client::cache_root(),
-        custom::client::cache_root(),
+        retired_archetype_cache_root(),
     ]
 }
 
@@ -125,5 +146,5 @@ pub fn model_cache_roots() -> Vec<std::path::PathBuf> {
 pub fn clear_model_caches() -> CacheClearStats {
     clear_cache_dir(&three_dmr::client::cache_root())
         .combined(clear_cache_dir(&wikidata::client::cache_root()))
-        .combined(clear_cache_dir(&custom::client::cache_root()))
+        .combined(clear_cache_dir(&retired_archetype_cache_root()))
 }

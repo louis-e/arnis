@@ -70,6 +70,13 @@ fn leisure_area(
             "track" => raceways::track_area_block(&element.tags).unwrap_or(GRASS_BLOCK),
             _ => GRASS_BLOCK,
         };
+        if matches!(leisure_type.as_str(), "pitch" | "track") {
+            if let Some(block) =
+                crate::element_processing::sport_pitches::default_surface(&element.tags)
+            {
+                block_type = block;
+            }
+        }
         // Explicit surface=* overrides the category default. Leave
         // `block_type` untouched for unknown surface values so existing
         // behaviour is preserved.
@@ -120,6 +127,11 @@ fn leisure_area(
             previous_node = Some((node.x, node.z));
         }
 
+        // A paved ground the sealing mask leaves open, such as a stadium's concourse,
+        // would otherwise repave the grass of the pitches inside it.
+        let spares_nested_turf = block_type != GRASS_BLOCK
+            && !crate::floodfill_cache::SEALED_LEISURE.contains(&leisure_type.as_str());
+
         // Flood-fill the interior of the leisure area using cache
         if corner_count > 0 {
             // Use deterministic RNG seeded by element ID for consistent results across region boundaries
@@ -130,6 +142,9 @@ fn leisure_area(
                     continue;
                 }
                 if leisure_type == "schoolyard" && editor.nested_area_owns(x, z) {
+                    continue;
+                }
+                if spares_nested_turf && editor.surface_is_sealed(x, z) {
                     continue;
                 }
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
