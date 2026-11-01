@@ -70,7 +70,11 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     {
         return None;
     }
-    let fills_ground = if swimming_pools::is_swimming_pool(tags) || golf::claims(tags) {
+    let fills_ground = if swimming_pools::is_swimming_pool(tags)
+        || golf::claims(tags)
+        || cemetery::claims(tags)
+        || camp_sites::claims(tags)
+    {
         true
     } else if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
@@ -415,6 +419,25 @@ fn process_element(
                 swimming_pools::generate_swimming_pool(editor, way, &ctx);
             } else if golf::claims(&way.tags) {
                 golf::generate_golf(editor, way, args, flood_fill_cache);
+            } else if camp_sites::claims(&way.tags) {
+                camp_sites::generate_camp_site(
+                    editor,
+                    way,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    args.timeout.as_ref(),
+                );
+            } else if cemetery::claims(&way.tags) {
+                cemetery::generate_cemetery(
+                    editor,
+                    way,
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    bridge_surface,
+                );
             } else if way.tags.contains_key("landuse") {
                 landuse::generate_landuse(
                     editor,
@@ -597,12 +620,16 @@ fn process_element(
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
+            } else if camp_sites::is_pitch(&node.tags) {
+                camp_sites::generate_pitch_node(editor, node);
             } else if node.tags.contains_key("tourism") {
                 tourisms::generate_tourisms(editor, node, road_mask);
             } else if node.tags.contains_key("man_made") {
                 man_made::generate_man_made_nodes(editor, node, args, building_footprints);
             } else if node.tags.contains_key("power") {
                 power::generate_power_nodes(editor, node);
+            } else if cemetery::is_mapped_grave(&node.tags) {
+                cemetery::generate_mapped_grave(editor, node, building_footprints);
             } else if node.tags.contains_key("historic") {
                 historic::generate_historic(editor, node);
             } else if node.tags.contains_key("emergency") {
@@ -1223,6 +1250,8 @@ pub fn generate_world_with_options(
         editor.set_tree_pack(Arc::clone(tp));
     }
 
+    cemetery::prepare(&mut elements, sign_region);
+    camp_sites::prepare(&mut elements);
     // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 

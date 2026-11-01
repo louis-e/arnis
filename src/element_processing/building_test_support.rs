@@ -79,3 +79,45 @@ pub fn bitmap_with_rect(xzbbox: &XZBBox, x0: i32, z0: i32, x1: i32, z1: i32) -> 
     }
     bitmap
 }
+
+/// Args for a flat world with its ground at Y=0.
+pub fn flat_ground_args() -> crate::args::Args {
+    use clap::Parser as _;
+    crate::args::Args::parse_from([
+        "arnis",
+        "--bbox",
+        "1,2,3,4",
+        "--mode",
+        "geo-only",
+        "--ground-level",
+        "0",
+    ])
+}
+
+/// A bridge surface map with no bridges in it.
+pub fn no_bridges(editor: &WorldEditor) -> crate::element_processing::bridges::BridgeSurfaceMap {
+    use crate::element_processing::bridge_styles::BridgeOutlineIndex;
+    use crate::element_processing::bridges::{BridgeStructureMap, BridgeSurfaceMap};
+    use crate::element_processing::highways::HighwayConnectivityMap;
+    let outlines = BridgeOutlineIndex::build(&[]);
+    let structures =
+        BridgeStructureMap::build(&[], editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+    BridgeSurfaceMap::build(&[], &structures, 1.0)
+}
+
+/// Counts the columns of `x`/`z` ranges whose block at `y` above ground is one of `blocks`.
+pub fn count_blocks(
+    editor: &WorldEditor,
+    xs: std::ops::Range<i32>,
+    zs: std::ops::Range<i32>,
+    y: i32,
+    blocks: &[crate::block_definitions::Block],
+) -> usize {
+    let mut n = 0;
+    for x in xs {
+        for z in zs.clone() {
+            n += editor.check_for_block(x, y, z, Some(blocks)) as usize;
+        }
+    }
+    n
+}

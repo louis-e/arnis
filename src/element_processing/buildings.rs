@@ -6100,6 +6100,9 @@ fn infer_building_height(
             (true, &[(5, 20), (7, 50), (9, 30)])
         }
         "garage" | "garages" | "carport" | "shed" | "hut" => (true, &[(3, 100)]),
+        // A garden glasshouse, else a commercial one about 6.5 m to the gutter.
+        "greenhouse" | "glasshouse" if area_m2 < 200 => (true, &[(3, 100)]),
+        "greenhouse" | "glasshouse" => (true, &[(6, 50), (7, 50)]),
         "cabin" => (false, &[(1, 80), (2, 20)]),
         // building=yes and unrecognised types: infer from footprint size.
         _ => match area_m2 {
@@ -13428,7 +13431,9 @@ pub fn generate_buildings(
             &config,
             style.generate_roof,
             effective_passages,
-            open_hall || config.shell_glass == ShellGlass::Hall,
+            open_hall
+                || config.shell_glass == ShellGlass::Hall
+                || config.category == BuildingCategory::Greenhouse,
             interior_plan.is_some(),
             &roof_cover,
         );
@@ -17932,6 +17937,14 @@ fn generate_roof(
     let mut surface = RoofSurface::default();
     match roof_type {
         // The cover already ranks OSM tags over the preset over the membrane.
+        RoofType::Flat
+            if osm_roof_block.is_none() && super::greenhouses::is_greenhouse(&element.tags) =>
+        {
+            let roof_y = config.base_height + abs_terrain_offset;
+            super::greenhouses::venlo_roof(editor, roof_area, ridge.along_x, roof_y);
+            let floor_y = start_y_offset + abs_terrain_offset;
+            super::greenhouses::plant_rows(editor, roof_area, ridge.along_x, floor_y, element.id);
+        }
         RoofType::Flat => {
             generate_flat_roof(
                 editor,

@@ -79,6 +79,40 @@ pub fn maybe_place_car_on_deck(
     park(editor, cx, cz, base_y, rot_base, h, max_height);
 }
 
+/// The camper van, or one of the private cars, at (cx, cz) with its length turned by `rot_base`.
+pub fn place_vehicle(
+    editor: &mut WorldEditor,
+    cx: i32,
+    cz: i32,
+    rot_base: u8,
+    camper: bool,
+    h: u64,
+) {
+    if !editor.place_prop(super::Prop::Car) {
+        return;
+    }
+    // Indices into `cars()`: the camper, then pickup, SUV and sedan.
+    let i = if camper {
+        6
+    } else {
+        [7, 8, 9][(h % 3) as usize]
+    };
+    let Some((schem, align)) = cars().get(i) else {
+        return;
+    };
+    let flip = if (h >> 16) & 1 == 0 { 0 } else { 2 };
+    let base_y = editor.get_absolute_y(cx, 1, cz);
+    place_structure(
+        editor,
+        schem,
+        cx,
+        cz,
+        base_y,
+        (rot_base + align + flip) & 3,
+        None,
+    );
+}
+
 fn car_height(car: &StructureSchematic) -> i32 {
     car.voxels.iter().map(|v| v.1 + 1).max().unwrap_or(0)
 }
