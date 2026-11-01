@@ -42,6 +42,16 @@ pub struct TerrainHints {
     /// The roads, railways and waterways graded into the ground, as `(lat, lon)` lines, so
     /// the detail added to steep, coarsely sampled ground stays off them.
     pub graded: Vec<Vec<(f64, f64)>>,
+    /// Points of the platforms halls are dug round, with how deep under the street each
+    /// hall's floor goes, so the fit leaves it room over the world's floor.
+    pub stations: Vec<StationHint>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StationHint {
+    pub lat: f64,
+    pub lon: f64,
+    pub depth: i32,
 }
 
 impl TerrainHints {
@@ -69,6 +79,12 @@ impl TerrainHints {
             overture_follows: Self::wants_overture(args),
             bores,
             graded,
+            stations: if args.skip_objects() || args.mode == crate::args::GenerationMode::Blueprint
+            {
+                Vec::new()
+            } else {
+                station_hints(data)
+            },
         }
     }
 
@@ -103,6 +119,107 @@ fn wants_structures(args: &crate::args::Args) -> bool {
     !args.skip_objects()
         && args.mode != crate::args::GenerationMode::Blueprint
         && crate::ground::auto_height(args)
+}
+
+/// Distance within which underground platforms count as one interchange, in metres.
+const INTERCHANGE_M: f64 = 250.0;
+
+/// Underground platform points, each as deep as the crossing lines at its interchange push it.
+fn station_hints(data: &crate::osm_parser::OsmData) -> Vec<StationHint> {
+    use crate::element_processing::stations::{depth_key, is_rail_platform, tagged_underground};
+    let elements = data.elements();
+    let wanted =
+        |tags: &HashMap<String, String>| is_rail_platform(tags) && tagged_underground(tags);
+    let ways: HashMap<u64, &[u64]> = elements
+        .iter()
+        .filter(|e| e.r#type == "way")
+        .filter_map(|e| Some((e.id, e.nodes.as_deref()?)))
+        .collect();
+    let mut platforms: Vec<(i32, Vec<u64>)> = Vec::new();
+    for e in elements {
+        let Some(tags) = e.tags.as_ref().filter(|t| wanted(t)) else {
+            continue;
+        };
+        let key = depth_key(tags).unwrap_or(-1);
+        let nodes: Vec<u64> = match e.r#type.as_str() {
+            "way" => e.nodes.clone().unwrap_or_default(),
+            "relation" => e
+                .members
+                .iter()
+                .filter(|m| m.r#type == "way")
+                .filter_map(|m| ways.get(&m.r#ref))
+                .flat_map(|n| n.iter().copied())
+                .collect(),
+            _ => continue,
+        };
+        platforms.push((key, nodes));
+    }
+    if platforms.is_empty() {
+        return Vec::new();
+    }
+    let wanted_nodes: HashSet<u64> = platforms.iter().flat_map(|p| p.1.iter().copied()).collect();
+    let at: HashMap<u64, (f64, f64)> = elements
+        .iter()
+        .filter(|e| e.r#type == "node" && wanted_nodes.contains(&e.id))
+        .filter_map(|e| Some((e.id, (e.lat?, e.lon?))))
+        .collect();
+    let points: Vec<(i32, Vec<(f64, f64)>)> = platforms
+        .into_iter()
+        .map(|(k, nodes)| (k, nodes.iter().filter_map(|n| at.get(n).copied()).collect()))
+        .filter(|(_, p): &(i32, Vec<(f64, f64)>)| !p.is_empty())
+        .collect();
+    if points.is_empty() {
+        return Vec::new();
+    }
+    // Middle and heading in metres east and north of the first platform.
+    let (lat0, lon0) = points[0].1[0];
+    let m_per_lon = 111_320.0 * lat0.to_radians().cos();
+    let local = |&(lat, lon): &(f64, f64)| ((lon - lon0) * m_per_lon, (lat - lat0) * 111_320.0);
+    let shape: Vec<((f64, f64), (f64, f64))> = points
+        .iter()
+        .map(|(_, p)| {
+            let q: Vec<(f64, f64)> = p.iter().map(local).collect();
+            let n = q.len() as f64;
+            let (cx, cy) = (
+                q.iter().map(|a| a.0).sum::<f64>() / n,
+                q.iter().map(|a| a.1).sum::<f64>() / n,
+            );
+            let (mut xx, mut yy, mut xy) = (0.0, 0.0, 0.0);
+            for a in &q {
+                xx += (a.0 - cx).powi(2);
+                yy += (a.1 - cy).powi(2);
+                xy += (a.0 - cx) * (a.1 - cy);
+            }
+            let angle = 0.5 * (2.0 * xy).atan2(xx - yy);
+            ((cx, cy), (angle.cos(), angle.sin()))
+        })
+        .collect();
+    let parallel = |a: (f64, f64), b: (f64, f64)| (a.0 * b.0 + a.1 * b.1).abs() >= 0.9;
+    let mut out = Vec::new();
+    for (i, (key, pts)) in points.iter().enumerate() {
+        // Crossing lines mapped at or over this one, one per heading; a tie may end up either way.
+        let mut over: Vec<(f64, f64)> = Vec::new();
+        for (j, (other, _)) in points.iter().enumerate() {
+            let (a, b) = (shape[i], shape[j]);
+            let near = (a.0 .0 - b.0 .0).hypot(a.0 .1 - b.0 .1) <= INTERCHANGE_M;
+            if near
+                && i != j
+                && *other >= *key
+                && !parallel(a.1, b.1)
+                && !over.iter().any(|&h| parallel(h, b.1))
+            {
+                over.push(b.1);
+            }
+        }
+        let rank = over.len().min(2) as i32;
+        let depth = crate::element_processing::stations::HALL_DEPTH
+            + crate::element_processing::stations::HALL_STACK * rank;
+        out.extend(
+            pts.iter()
+                .map(|&(lat, lon)| StationHint { lat, lon, depth }),
+        );
+    }
+    out
 }
 
 /// Whether a structure this tall could reach past the vanilla ceiling at `scale`. Anything
@@ -766,6 +883,46 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn crossing_underground_lines_ask_for_room_a_storey_under_each_other() {
+        use crate::element_processing::stations::{HALL_DEPTH, HALL_STACK};
+        // An east-west and a north-south platform crossing, a far one and a surface one.
+        let hints = |levels: [&str; 2]| {
+            let data: crate::osm_parser::OsmData = serde_json::from_str(&format!(
+                r#"{{"elements": [
+                    {{"type": "node", "id": 1, "lat": 48.0, "lon": 11.0}},
+                    {{"type": "node", "id": 2, "lat": 48.0, "lon": 11.001}},
+                    {{"type": "node", "id": 3, "lat": 47.9996, "lon": 11.0005}},
+                    {{"type": "node", "id": 4, "lat": 48.0004, "lon": 11.0005}},
+                    {{"type": "node", "id": 5, "lat": 48.0, "lon": 11.02}},
+                    {{"type": "node", "id": 6, "lat": 48.0, "lon": 11.021}},
+                    {{"type": "way", "id": 10, "nodes": [1, 2], "tags": {{"railway": "platform", "location": "underground"{}}}}},
+                    {{"type": "way", "id": 11, "nodes": [3, 4], "tags": {{"railway": "platform", "location": "underground"{}}}}},
+                    {{"type": "way", "id": 12, "nodes": [5, 6], "tags": {{"railway": "platform", "tunnel": "yes"}}}},
+                    {{"type": "way", "id": 13, "nodes": [1, 2], "tags": {{"railway": "platform"}}}}
+                ]}}"#,
+                levels[0], levels[1]
+            ))
+            .unwrap();
+            let hints = station_hints(&data);
+            assert_eq!(hints.len(), 6);
+            [(48.0, 11.0), (47.9996, 11.0005), (48.0, 11.02)].map(|(lat, lon)| {
+                hints
+                    .iter()
+                    .find(|h| h.lat == lat && h.lon == lon)
+                    .unwrap()
+                    .depth
+            })
+        };
+        let (one, two) = (HALL_DEPTH, HALL_DEPTH + HALL_STACK);
+        // Untagged, either may end up under the other.
+        assert_eq!(hints(["", ""]), [two, two, one]);
+        assert_eq!(
+            hints([r#", "level": "-1""#, r#", "level": "-2""#]),
+            [one, two, one]
+        );
     }
 
     #[test]

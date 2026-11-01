@@ -213,6 +213,10 @@ pub struct WorldEditor<'a> {
     mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
     /// Lift lines and terminals, kept free of trees.
     clear_corridors: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// Stations laid out for the whole area, shared with the tile editors.
+    stations: Option<Arc<crate::element_processing::stations::StationIndex>>,
+    /// Every rail block laid here, halo included, for the clearing of the track's gauge.
+    laid_rails: Vec<(i32, i32, i32)>,
     fuel_index: Option<Arc<crate::element_processing::fuel_stations::FuelIndex>>,
     /// Water carve depths, so a bore can keep its cover under the bed it will get.
     water_field: Option<Arc<crate::water_depth::BigWaterField>>,
@@ -322,6 +326,8 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            stations: None,
+            laid_rails: Vec::new(),
             fuel_index: None,
             water_field: None,
             format: WorldFormat::JavaAnvil,
@@ -388,6 +394,8 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            stations: None,
+            laid_rails: Vec::new(),
             fuel_index: None,
             water_field: None,
             format,
@@ -454,6 +462,8 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            stations: None,
+            laid_rails: Vec::new(),
             fuel_index: None,
             water_field: None,
             format: WorldFormat::LuantiWorld,
@@ -624,11 +634,32 @@ impl<'a> WorldEditor<'a> {
         self.clear_corridors = Some(map);
     }
 
-    /// True where a lift line or terminal keeps trees off.
+    /// True where a lift line or terminal, a track or a platform keeps trees off.
     pub fn in_clear_corridor(&self, x: i32, z: i32) -> bool {
         self.clear_corridors
             .as_ref()
             .is_some_and(|m| !m.is_empty() && m.contains(x, z))
+            || self
+                .stations
+                .as_ref()
+                .is_some_and(|s| s.keeps_trees_off(x, z))
+    }
+
+    /// Sets the stations (shared across the main and tile editors).
+    pub fn set_stations(
+        &mut self,
+        stations: Arc<crate::element_processing::stations::StationIndex>,
+    ) {
+        self.stations = Some(stations);
+    }
+
+    pub fn stations(&self) -> Option<Arc<crate::element_processing::stations::StationIndex>> {
+        self.stations.clone()
+    }
+
+    /// Every rail block laid so far, clearing the record.
+    pub fn take_laid_rails(&mut self) -> Vec<(i32, i32, i32)> {
+        std::mem::take(&mut self.laid_rails)
     }
 
     /// Sets the mapped tree trunks (shared across the main and tile editors).
@@ -838,6 +869,16 @@ impl<'a> WorldEditor<'a> {
     /// exactly one tile even though the element is processed by every tile it overlaps.
     pub fn set_strict_bounds(&mut self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) {
         self.strict_bounds = Some((min_x, min_z, max_x, max_z));
+    }
+
+    /// The columns this editor covers: min x, min z, max x, max z.
+    pub fn bounds(&self) -> (i32, i32, i32, i32) {
+        (
+            self.xzbbox.min_x(),
+            self.xzbbox.min_z(),
+            self.xzbbox.max_x(),
+            self.xzbbox.max_z(),
+        )
     }
 
     /// Whether a column lies inside this editor, where its writes land.
@@ -1465,7 +1506,10 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Records that `way` laid a rail in the block at `y` of column (x, z).
-    pub fn register_rail(&self, way: u64, x: i32, z: i32, y: i32) {
+    pub fn register_rail(&mut self, way: u64, x: i32, z: i32, y: i32) {
+        if self.in_bounds(x, z) {
+            self.laid_rails.push((x, z, y));
+        }
         // Only the owner's rail survives the merge; other tiles see other roads there.
         if !self.owns(x, z) {
             return;
