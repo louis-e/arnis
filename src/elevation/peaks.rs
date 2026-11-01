@@ -79,11 +79,11 @@ impl TerrainHints {
             overture_follows: Self::wants_overture(args),
             bores,
             graded,
-            stations: if args.skip_objects() || args.mode == crate::args::GenerationMode::Blueprint
-            {
-                Vec::new()
-            } else {
+            // Only a run fitting its own height lifts the terrain for its halls.
+            stations: if wants_structures(args) {
                 station_hints(data)
+            } else {
+                Vec::new()
             },
         }
     }
@@ -121,23 +121,31 @@ fn wants_structures(args: &crate::args::Args) -> bool {
         && crate::ground::auto_height(args)
 }
 
+/// How far an untagged platform's middle lies from a bored track it serves, in metres.
+const BORE_PLATFORM_M: f64 = 12.0;
+
 /// Distance within which underground platforms count as one interchange, in metres.
 const INTERCHANGE_M: f64 = 250.0;
 
 /// Underground platform points, each as deep as the crossing lines at its interchange push it.
 fn station_hints(data: &crate::osm_parser::OsmData) -> Vec<StationHint> {
-    use crate::element_processing::stations::{depth_key, is_rail_platform, tagged_underground};
+    use crate::element_processing::stations::{
+        depth_key, is_low, is_rail_platform, tagged_surface, tagged_underground,
+    };
     let elements = data.elements();
-    let wanted =
-        |tags: &HashMap<String, String>| is_rail_platform(tags) && tagged_underground(tags);
     let ways: HashMap<u64, &[u64]> = elements
         .iter()
         .filter(|e| e.r#type == "way")
         .filter_map(|e| Some((e.id, e.nodes.as_deref()?)))
         .collect();
-    let mut platforms: Vec<(i32, Vec<u64>)> = Vec::new();
+    // Platforms the tags put under ground, and untagged ones a bored track may.
+    let mut platforms: Vec<(i32, Vec<u64>, bool)> = Vec::new();
     for e in elements {
-        let Some(tags) = e.tags.as_ref().filter(|t| wanted(t)) else {
+        let Some(tags) = e
+            .tags
+            .as_ref()
+            .filter(|t| is_rail_platform(t) && !tagged_surface(t) && !is_low(t))
+        else {
             continue;
         };
         let key = depth_key(tags).unwrap_or(-1);
@@ -152,29 +160,87 @@ fn station_hints(data: &crate::osm_parser::OsmData) -> Vec<StationHint> {
                 .collect(),
             _ => continue,
         };
-        platforms.push((key, nodes));
+        platforms.push((key, nodes, tagged_underground(tags)));
     }
     if platforms.is_empty() {
         return Vec::new();
     }
-    let wanted_nodes: HashSet<u64> = platforms.iter().flat_map(|p| p.1.iter().copied()).collect();
+    let bores: Vec<&[u64]> = if platforms.iter().all(|p| p.2) {
+        Vec::new()
+    } else {
+        elements
+            .iter()
+            .filter(|e| e.r#type == "way")
+            .filter(|e| {
+                e.tags.as_ref().is_some_and(|t| {
+                    matches!(
+                        t.get("railway").map(String::as_str),
+                        Some("rail" | "subway" | "light_rail" | "narrow_gauge" | "monorail")
+                    ) && is_bored(t)
+                })
+            })
+            .filter_map(|e| e.nodes.as_deref())
+            .collect()
+    };
+    let wanted_nodes: HashSet<u64> = platforms
+        .iter()
+        .flat_map(|p| p.1.iter().copied())
+        .chain(bores.iter().flat_map(|n| n.iter().copied()))
+        .collect();
     let at: HashMap<u64, (f64, f64)> = elements
         .iter()
         .filter(|e| e.r#type == "node" && wanted_nodes.contains(&e.id))
         .filter_map(|e| Some((e.id, (e.lat?, e.lon?))))
         .collect();
+    let Some(&(lat0, lon0)) = platforms
+        .iter()
+        .flat_map(|p| p.1.iter())
+        .find_map(|n| at.get(n))
+    else {
+        return Vec::new();
+    };
+    let m_per_lon = 111_320.0 * lat0.to_radians().cos();
+    let local = |&(lat, lon): &(f64, f64)| ((lon - lon0) * m_per_lon, (lat - lat0) * 111_320.0);
+    let segments: Vec<((f64, f64), (f64, f64))> = bores
+        .iter()
+        .flat_map(|nodes| {
+            nodes
+                .windows(2)
+                .filter_map(|w| Some((local(at.get(&w[0])?), local(at.get(&w[1])?))))
+        })
+        .collect();
+    // An untagged platform counts when its middle lies within a track's reach of a bore.
+    let beside_bore = |(px, py): (f64, f64)| {
+        segments.iter().any(|&((ax, ay), (bx, by))| {
+            let (dx, dy) = (bx - ax, by - ay);
+            let t =
+                (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy).max(1e-9)).clamp(0.0, 1.0);
+            (ax + t * dx - px).hypot(ay + t * dy - py) <= BORE_PLATFORM_M
+        })
+    };
     let points: Vec<(i32, Vec<(f64, f64)>)> = platforms
         .into_iter()
-        .map(|(k, nodes)| (k, nodes.iter().filter_map(|n| at.get(n).copied()).collect()))
-        .filter(|(_, p): &(i32, Vec<(f64, f64)>)| !p.is_empty())
+        .map(|(k, nodes, tagged)| {
+            let pts: Vec<(f64, f64)> = nodes.iter().filter_map(|n| at.get(n).copied()).collect();
+            (k, pts, tagged)
+        })
+        .filter(|(_, p, tagged)| {
+            !p.is_empty() && {
+                let q: Vec<(f64, f64)> = p.iter().map(local).collect();
+                let n = q.len() as f64;
+                *tagged
+                    || beside_bore((
+                        q.iter().map(|a| a.0).sum::<f64>() / n,
+                        q.iter().map(|a| a.1).sum::<f64>() / n,
+                    ))
+            }
+        })
+        .map(|(k, p, _)| (k, p))
         .collect();
     if points.is_empty() {
         return Vec::new();
     }
     // Middle and heading in metres east and north of the first platform.
-    let (lat0, lon0) = points[0].1[0];
-    let m_per_lon = 111_320.0 * lat0.to_radians().cos();
-    let local = |&(lat, lon): &(f64, f64)| ((lon - lon0) * m_per_lon, (lat - lat0) * 111_320.0);
     let shape: Vec<((f64, f64), (f64, f64))> = points
         .iter()
         .map(|(_, p)| {
@@ -923,6 +989,31 @@ mod tests {
             hints([r#", "level": "-1""#, r#", "level": "-2""#]),
             [one, two, one]
         );
+    }
+
+    #[test]
+    fn an_untagged_platform_beside_a_bored_track_asks_for_room() {
+        use crate::element_processing::stations::HALL_DEPTH;
+        let data: crate::osm_parser::OsmData = serde_json::from_str(
+            r#"{"elements": [
+                {"type": "node", "id": 1, "lat": 48.0001, "lon": 11.0},
+                {"type": "node", "id": 2, "lat": 48.0001, "lon": 11.001},
+                {"type": "node", "id": 3, "lat": 48.0, "lon": 10.999},
+                {"type": "node", "id": 4, "lat": 48.0, "lon": 11.002},
+                {"type": "node", "id": 5, "lat": 48.01, "lon": 11.0},
+                {"type": "node", "id": 6, "lat": 48.01, "lon": 11.001},
+                {"type": "way", "id": 10, "nodes": [1, 2], "tags": {"railway": "platform"}},
+                {"type": "way", "id": 11, "nodes": [3, 4], "tags": {"railway": "subway"}},
+                {"type": "way", "id": 12, "nodes": [5, 6], "tags": {"railway": "platform"}},
+                {"type": "way", "id": 13, "nodes": [1, 2], "tags": {"railway": "platform", "tunnel": "no"}}
+            ]}"#,
+        )
+        .unwrap();
+        let hints = station_hints(&data);
+        assert_eq!(hints.len(), 2);
+        assert!(hints
+            .iter()
+            .all(|h| h.lat == 48.0001 && h.depth == HALL_DEPTH));
     }
 
     #[test]

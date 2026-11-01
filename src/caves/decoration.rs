@@ -283,6 +283,7 @@ pub(super) fn decorate(
     shape: &CaveShape,
     plan: &WaterPlan,
     region: Rect,
+    keep_out: &dyn Fn(i32, i32) -> bool,
 ) {
     let seed = d.seed;
 
@@ -686,7 +687,7 @@ pub(super) fn decorate(
     }
 
     // amethyst geodes — rare, per ~chunk, embedded in rock (independent of caves).
-    place_geodes(ed, seed, shape, plan, region);
+    place_geodes(ed, seed, shape, plan, region, keep_out);
 
     // NO springs/drips of any kind: water exists ONLY as rivers and pool caves. Isolated
     // single-source trickles invariably read as bugs — do not reintroduce them.
@@ -875,8 +876,9 @@ fn place_geodes(
     shape: &CaveShape,
     plan: &WaterPlan,
     region: Rect,
+    keep_out: &dyn Fn(i32, i32) -> bool,
 ) {
-    for write in plan_geodes(seed, shape, plan, region) {
+    for write in plan_geodes(seed, shape, plan, region, keep_out) {
         match write {
             GeodeWrite::Block((x, y, z), block) => geode_set(ed, block, x, y, z),
             GeodeWrite::Cluster { budding, center } => {
@@ -904,6 +906,7 @@ pub(super) fn plan_geodes(
     shape: &CaveShape,
     plan: &WaterPlan,
     region: Rect,
+    keep_out: &dyn Fn(i32, i32) -> bool,
 ) -> Vec<GeodeWrite> {
     let mut writes: Vec<GeodeWrite> = Vec::new();
     let r_inner = 4.2_f64;
@@ -947,6 +950,10 @@ pub(super) fn plan_geodes(
             // vanilla geodes do too. The center test ignores other geodes, so whether a geode exists
             // never depends on one a tile may not have planned.
             if gy + ri + 2 >= shape.surf(gx, gz) || !plan.solid(shape, gx, gy, gz) {
+                continue;
+            }
+            // Nor where a tunnel or station is dug, which it would fill.
+            if (-ri..=ri).any(|dx| (-ri..=ri).any(|dz| keep_out(gx + dx, gz + dz))) {
                 continue;
             }
 
@@ -1039,42 +1046,10 @@ pub(super) fn plan_geodes(
     writes
 }
 
-/// What a geode carves into: rock, ores, cave air and fluids, never a tunnel or hall dug there.
-const GEODE_HOST: &[Block] = &[
-    STONE,
-    DEEPSLATE,
-    TUFF,
-    COBBLED_DEEPSLATE,
-    GRANITE,
-    DIORITE,
-    ANDESITE,
-    GRAVEL,
-    DIRT,
-    AIR,
-    WATER,
-    LAVA,
-    SMOOTH_BASALT,
-    AMETHYST_BLOCK,
-    BUDDING_AMETHYST,
-    COAL_ORE,
-    DEEPSLATE_COAL_ORE,
-    IRON_ORE,
-    DEEPSLATE_IRON_ORE,
-    COPPER_ORE,
-    DEEPSLATE_COPPER_ORE,
-    GOLD_ORE,
-    DEEPSLATE_GOLD_ORE,
-    REDSTONE_ORE,
-    DEEPSLATE_REDSTONE_ORE,
-    LAPIS_ORE,
-    DEEPSLATE_LAPIS_ORE,
-    DIAMOND_ORE,
-    DEEPSLATE_DIAMOND_ORE,
-];
-
-/// Geode shells and hollows replace solid rock (the None/None path only fills air).
+/// overwrite any block (except bedrock) — used for the geode shells/hollow so they carve into solid
+/// rock (the None/None path only fills air).
 fn geode_set(ed: &mut WorldEditor, b: Block, x: i32, y: i32, z: i32) {
-    ed.set_block_absolute(b, x, y, z, Some(GEODE_HOST), None);
+    ed.set_block_absolute(b, x, y, z, None, Some(&[BEDROCK]));
 }
 
 /// exact 1-in-`denom` rarity (unlike `chance`, which is ‰-resolution and can't express anything

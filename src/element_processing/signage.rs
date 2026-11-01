@@ -913,8 +913,11 @@ fn keys_for_element(
         }
         ProcessedElement::Relation(_) => {}
     }
+    // Only a surface platform standing clear of the ground shows its board.
     if !matches!(element, ProcessedElement::Node(_))
         && crate::element_processing::stations::is_rail_platform(tags)
+        && !crate::element_processing::stations::tagged_underground(tags)
+        && !crate::element_processing::stations::is_low(tags)
     {
         if let Some(NameSign::Decal(k)) = platform_name_sign(tags.get("name")) {
             keys.insert(k);

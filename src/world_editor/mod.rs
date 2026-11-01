@@ -1510,6 +1510,11 @@ impl<'a> WorldEditor<'a> {
         if self.in_bounds(x, z) {
             self.laid_rails.push((x, z, y));
         }
+        self.register_buried_rail(way, x, z, y);
+    }
+
+    /// `register_rail` for a rail in a bore, whose gauge has nothing to clear.
+    pub fn register_buried_rail(&self, way: u64, x: i32, z: i32, y: i32) {
         // Only the owner's rail survives the merge; other tiles see other roads there.
         if !self.owns(x, z) {
             return;

@@ -1544,6 +1544,7 @@ fn generate_rail_tunnel_shell(
     // Never under the world's floor: low ground keeps its tunnel just below the surface.
     let lowest = crate::world_editor::min_y() + 1;
     let mut pins = vec![None; n];
+    let mut joint_low: Option<i32> = None;
     for (e, end) in ends.iter().enumerate() {
         // At a portal the floor comes up to the track outside; underground it keeps its depth.
         let at = end_cell(n, e);
@@ -1551,10 +1552,12 @@ fn generate_rail_tunnel_shell(
             ground[at]
         } else {
             // Next to a deep hall the joint lies lower, so both ways share the climb.
-            editor
+            let joint = editor
                 .stations()
                 .and_then(|s| s.joint_floor(cells[at].0, cells[at].1))
-                .map_or(deep[at], |j| j.min(deep[at]))
+                .filter(|&j| j < deep[at]);
+            joint_low = joint.map_or(joint_low, |j| Some(joint_low.map_or(j, |l| l.min(j))));
+            joint.unwrap_or(deep[at])
         };
         pin_end(&mut pins, e, end, level.max(lowest));
     }
@@ -1588,8 +1591,13 @@ fn generate_rail_tunnel_shell(
             *pin = Some(h.floor);
         }
     }
-    // Room to ramp down to a hall's floor, however far under the usual depth it lies.
-    let pin_low = hall_pins.iter().flatten().map(|h| h.floor).min();
+    // Room to ramp down to a hall's floor or a lowered joint, however deep it lies.
+    let pin_low = hall_pins
+        .iter()
+        .flatten()
+        .map(|h| h.floor)
+        .chain(joint_low)
+        .min();
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -1632,17 +1640,15 @@ fn generate_rail_tunnel_shell(
         let ceil_y = floor_y + INTERIOR_HEIGHT + 1;
         // Lanterns are counted along the way, not the shared list, so they don't move with
         // how many tiles recorded the tunnel or in which order they merged.
-        // A hall lights and walls the track itself.
-        let in_hall = hall_pins[i].is_some_and(|h| h.in_hall);
-        rail_tunnel_points.push((
-            bx,
-            bz,
-            floor_y,
-            i.is_multiple_of(LIGHT_INTERVAL) && !in_hall,
-        ));
+        // A hall hollows, lights and walls the track itself: carving its bore too would eat
+        // the shell of the next cell where that ramps out of the hall.
+        if hall_pins[i].is_some_and(|h| h.in_hall) {
+            continue;
+        }
+        rail_tunnel_points.push((bx, bz, floor_y, i.is_multiple_of(LIGHT_INTERVAL)));
 
         // Safety: skip if the tunnel would go below world minimum.
-        if floor_y <= crate::world_editor::min_y() || in_hall {
+        if floor_y <= crate::world_editor::min_y() {
             continue;
         }
 
@@ -1694,7 +1700,7 @@ fn generate_rail_tunnel_shell(
         if lays_cell(&ends, n, i) {
             editor.set_block_absolute(shapes[i], bx, floor_y + 1, bz, Some(over), None);
         }
-        editor.register_rail(element.id, bx, bz, floor_y + 1);
+        editor.register_buried_rail(element.id, bx, bz, floor_y + 1);
     }
 }
 

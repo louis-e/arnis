@@ -1658,6 +1658,10 @@ pub fn generate_world_with_options(
             // Caves bring their own vanilla ore table, placed after the carve so no
             // vein hangs in a cave; the plain veins only fill caveless ground.
             if args.caves {
+                let dug = |x: i32, z: i32| {
+                    (!tunnel_footprint.is_empty() && tunnel_footprint.contains(x, z))
+                        || stations.digs(x, z)
+                };
                 crate::caves::carve_region(
                     &mut tile_editor,
                     args,
@@ -1666,6 +1670,7 @@ pub fn generate_world_with_options(
                     g_max_x,
                     g_min_z,
                     g_max_z,
+                    &dug,
                 );
             } else if args.fillground {
                 crate::ore_generation::generate_ores_region(
@@ -2105,7 +2110,11 @@ pub fn generate_world_with_options(
         if args.caves {
             println!("{} Carving caves...", "[6b/7]".bold());
             emit_gui_progress_update(89.0, "Carving caves...");
-            crate::caves::carve(&mut editor, args, &xzbbox);
+            let dug = |x: i32, z: i32| {
+                (!tunnel_footprint.is_empty() && tunnel_footprint.contains(x, z))
+                    || stations.digs(x, z)
+            };
+            crate::caves::carve(&mut editor, args, &xzbbox, &dug);
         } else if args.fillground {
             crate::ore_generation::generate_ores(&mut editor, &xzbbox);
         }

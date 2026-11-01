@@ -34,14 +34,14 @@ pub(crate) const HALL_STACK: i32 = 8;
 const WALK_HEIGHT: i32 = 4;
 /// Largest platform taken, in cells; anything bigger is a mapping error.
 const MAX_PLATFORM_CELLS: usize = 40_000;
-/// Cells either side of a surface track trees keep their trunks off.
+/// Cells either side of a surface track trees keep their trunks off (one beside a tram).
 const TRACK_TREE_REACH: i32 = 2;
 /// Furthest a subway entrance lies from the platform it leads down to, in blocks.
 const ENTRANCE_REACH: i32 = 160;
 /// Platform cells tried for the foot of the flight into a hall, nearest the entrance first.
 const LANDING_TRIES: usize = 48;
-/// Steps of the flight from a platform up to the walk over the hall.
-const HALL_FLIGHT: i32 = HALL_HEIGHT - 2;
+/// Steps of the flight from a platform up to the walk over the hall, one per block it climbs.
+const HALL_FLIGHT: i32 = HALL_HEIGHT - 1;
 /// How close halls of one line lie to share a floor.
 const SIBLING_REACH: i32 = 24;
 /// Cells either way along a track its heading is taken over.
@@ -105,7 +105,17 @@ pub(crate) fn depth_key(tags: &HashMap<String, String>) -> Option<i32> {
     ["layer", "level"]
         .iter()
         .find_map(|k| tags.get(*k).and_then(|v| tag_number(v)))
-        .map(|v| v.floor() as i32)
+        .map(|v| v.floor().clamp(-16.0, 16.0) as i32)
+}
+
+/// Whether the tags keep a platform out of a tunnel.
+pub(crate) fn tagged_surface(tags: &HashMap<String, String>) -> bool {
+    tags.get("tunnel").map(String::as_str) == Some("no")
+        || matches!(
+            tags.get("location").map(String::as_str),
+            Some("overground" | "surface")
+        )
+        || depth_key(tags).is_some_and(|k| k >= 0)
 }
 
 /// Whether the tags put a platform under ground.
@@ -116,7 +126,7 @@ pub(crate) fn tagged_underground(tags: &HashMap<String, String>) -> bool {
 }
 
 /// A low kerb platform, as trams use: under half a metre, or a tram's with no height given.
-fn is_low(tags: &HashMap<String, String>) -> bool {
+pub(crate) fn is_low(tags: &HashMap<String, String>) -> bool {
     let height = tags.get("height").and_then(|h| {
         let n = tag_number(h)?;
         Some(if h.contains("cm") { n / 100.0 } else { n })
@@ -145,10 +155,16 @@ struct Platform {
     colour: Option<Block>,
     depth: Option<i32>,
     underground: bool,
+    surface: bool,
 }
 
 /// The cells a closed ring covers, its outline included.
 fn ring_cells(ring: &[(i32, i32)], timeout: Option<&Duration>) -> Vec<(i32, i32)> {
+    // The fill refuses a ring this big, and its outline alone is no platform.
+    let (x0, z0, x1, z1) = bbox_of(ring.iter().copied());
+    if i64::from(x1 - x0 + 1) * i64::from(z1 - z0 + 1) > crate::floodfill::MAX_FLOOD_FILL_AREA {
+        return Vec::new();
+    }
     let mut cells = crate::floodfill::flood_fill_area(ring, timeout);
     for w in ring.windows(2) {
         for (x, _, z) in bresenham_line(w[0].0, 0, w[0].1, w[1].0, 0, w[1].1) {
@@ -249,6 +265,7 @@ fn collect_platforms(elements: &[ProcessedElement], timeout: Option<&Duration>) 
             colour: tags.get("colour").and_then(|c| concrete_for_colour(c)),
             depth: depth_key(tags),
             underground: tagged_underground(tags),
+            surface: tagged_surface(tags),
         });
     }
     out
@@ -334,8 +351,10 @@ enum Deck {
 enum Prop {
     None,
     Lamp,
-    /// A post holding up the canopy, with a lantern hung beside it.
+    /// A post holding up the canopy.
     Post,
+    /// A lantern hung from the canopy.
+    Hanging,
     /// A bench whose back faces this way.
     Bench(i8, i8),
     Bin,
@@ -512,6 +531,8 @@ pub struct StationIndex {
     tree_free: SparseCells,
     /// Surface platform cells, kept clear of catenary masts.
     on_platform: SparseCells,
+    /// Columns a hall or an entrance is dug into, which cave geodes keep out of.
+    dug: SparseCells,
 }
 
 /// Union-find over indices.
@@ -688,6 +709,7 @@ impl StationIndex {
             .collect();
         let mut tracks: FnvHashMap<(i32, i32), Vec<TrackCell>> = FnvHashMap::default();
         let mut tunnel_ways: FnvHashMap<u64, Vec<(i32, i32)>> = FnvHashMap::default();
+        let mut tunnel_nodes: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
         for element in elements {
             let ProcessedElement::Way(way) = element else {
                 continue;
@@ -697,8 +719,14 @@ impl StationIndex {
             };
             let cells = track_cells(way).0;
             if level == TrackLevel::Surface {
+                // A tram runs down the street, its trees a step off the rail.
+                let reach = if way.tags.get("railway").map(String::as_str) == Some("tram") {
+                    1
+                } else {
+                    TRACK_TREE_REACH
+                };
                 for &(x, z) in &cells {
-                    index.tree_free.set_square(x, z, TRACK_TREE_REACH);
+                    index.tree_free.set_square(x, z, reach);
                 }
             }
             if near.is_empty() {
@@ -715,6 +743,7 @@ impl StationIndex {
                 && cells.iter().any(|&(x, z)| near.contains(&(x >> 4, z >> 4)))
             {
                 tunnel_ways.insert(way.id, cells.clone());
+                tunnel_nodes.insert(way.id, way.nodes.iter().map(|n| n.id).collect());
             }
             for (i, &(x, z)) in cells.iter().enumerate() {
                 if !near.contains(&(x >> 4, z >> 4)) {
@@ -806,7 +835,7 @@ impl StationIndex {
             .map(|(p, adj)| {
                 if p.underground {
                     true
-                } else if p.low || p.depth.is_some_and(|d| d >= 0) {
+                } else if p.low || p.surface {
                     false
                 } else {
                     adj.iter().filter(|t| t.tunnel).count() * 2 > adj.len()
@@ -845,7 +874,14 @@ impl StationIndex {
                 index.lay_surface(&platforms, &adjacent, &set, inputs);
             }
         }
-        index.lay_halls(&platforms, &adjacent, hall_sets, &tracks, inputs);
+        index.lay_halls(
+            &platforms,
+            &adjacent,
+            hall_sets,
+            &tracks,
+            &tunnel_nodes,
+            inputs,
+        );
         index.lay_joints(&tunnel_ways, inputs);
         index.lay_entrances(elements, inputs);
         index
@@ -1125,6 +1161,8 @@ impl StationIndex {
                 }
             } else if roofed && t.rem_euclid(8) == 0 {
                 Prop::Post
+            } else if roofed && !low && t.rem_euclid(8) == 4 {
+                Prop::Hanging
             } else if !roofed && !low && t.rem_euclid(14) == 7 {
                 Prop::Lamp
             } else if width >= 5 && t.rem_euclid(16) == 3 {
@@ -1182,6 +1220,7 @@ impl StationIndex {
         adjacent: &[Vec<TrackCell>],
         sets: Vec<Vec<usize>>,
         tracks: &FnvHashMap<(i32, i32), Vec<TrackCell>>,
+        tunnel_nodes: &FnvHashMap<u64, Vec<u64>>,
         inputs: &StationInputs,
     ) {
         let editor = inputs.editor;
@@ -1309,9 +1348,85 @@ impl StationIndex {
             .iter()
             .map(|(_, fp, _)| bbox_of(fp.iter().copied()))
             .collect();
-        // Stacked if footprints meet, or a hall's tracks cross the other too close to dive under.
+        // Each hall's line: its own tracks and the ways joined to them inside its footprint.
+        let line: Vec<FnvHashSet<u64>> = halls
+            .iter()
+            .zip(&through)
+            .map(|((draft, _, _), cells)| {
+                let mut ways: Vec<u64> = cells.iter().map(|t| t.way).collect();
+                ways.dedup();
+                let mut line = draft.members.clone();
+                let mut nodes: FnvHashSet<u64> = line
+                    .iter()
+                    .filter_map(|w| tunnel_nodes.get(w))
+                    .flatten()
+                    .copied()
+                    .collect();
+                loop {
+                    let joined: Vec<u64> = ways
+                        .iter()
+                        .copied()
+                        .filter(|w| {
+                            !line.contains(w)
+                                && tunnel_nodes
+                                    .get(w)
+                                    .is_some_and(|ns| ns.iter().any(|n| nodes.contains(n)))
+                        })
+                        .collect();
+                    if joined.is_empty() {
+                        break;
+                    }
+                    for w in joined {
+                        nodes.extend(tunnel_nodes[&w].iter().copied());
+                        line.insert(w);
+                    }
+                }
+                line
+            })
+            .collect();
+        // Halls of one line side by side, as single-track tubes are, share the deeper floor.
+        let mut siblings = Groups::new(halls.len());
+        for a in 0..halls.len() {
+            for b in a + 1..halls.len() {
+                let (da, db) = (&halls[a].0, &halls[b].0);
+                if boxes_within(boxes[a], boxes[b], SIBLING_REACH)
+                    && parallel(da.heading, db.heading)
+                    && (da.depth - db.depth).abs() <= 1
+                {
+                    siblings.join(a, b);
+                }
+            }
+        }
+        let sibling_sets = siblings.sets();
+        let sibling: Vec<usize> = (0..halls.len()).map(|k| siblings.find(k)).collect();
+        let along = |t: &TrackCell, k: usize| {
+            let h = halls[k].0.heading;
+            (t.dir.0 as f64 * h.0 + t.dir.1 as f64 * h.1).abs() >= PARALLEL_DEG.to_radians().cos()
+        };
+        let near = |t: &TrackCell, bx: (i32, i32, i32, i32)| {
+            t.x >= bx.0 - STACK_REACH
+                && t.x <= bx.2 + STACK_REACH
+                && t.z >= bx.1 - STACK_REACH
+                && t.z <= bx.3 + STACK_REACH
+        };
+        // A track of hall `b` crossing hall `a` too close to `b` to dive under `a`.
+        let crosses = |a: usize, b: usize| {
+            through[a].iter().any(|t| {
+                halls[b].0.members.contains(&t.way)
+                    && !halls[a].0.members.contains(&t.way)
+                    && !along(t, a)
+                    && near(t, boxes[b])
+            })
+        };
+        // Stacked if footprints meet or a line crosses; one line's halls never stack.
         let stacked = |a: usize, b: usize| -> bool {
-            if !boxes_within(boxes[a], boxes[b], STACK_REACH) {
+            if sibling[a] == sibling[b] || !boxes_within(boxes[a], boxes[b], STACK_REACH) {
+                return false;
+            }
+            let (da, db) = (&halls[a].0, &halls[b].0);
+            let joined = db.members.iter().any(|w| line[a].contains(w))
+                || da.members.iter().any(|w| line[b].contains(w));
+            if joined && parallel(da.heading, db.heading) {
                 return false;
             }
             let (fa, fb) = (&halls[a].1, &halls[b].1);
@@ -1320,21 +1435,7 @@ impl StationIndex {
             } else {
                 (fb, fa)
             };
-            if small.iter().any(|c| big.contains(c)) {
-                return true;
-            }
-            let near = |t: &TrackCell, bx: (i32, i32, i32, i32)| {
-                t.x >= bx.0 - STACK_REACH
-                    && t.x <= bx.2 + STACK_REACH
-                    && t.z >= bx.1 - STACK_REACH
-                    && t.z <= bx.3 + STACK_REACH
-            };
-            through[a]
-                .iter()
-                .any(|t| halls[b].0.members.contains(&t.way) && near(t, boxes[b]))
-                || through[b]
-                    .iter()
-                    .any(|t| halls[a].0.members.contains(&t.way) && near(t, boxes[a]))
+            small.iter().any(|c| big.contains(c)) || crosses(a, b) || crosses(b, a)
         };
         let mut placed: Vec<(usize, i32)> = Vec::new();
         let mut floors: Vec<Option<i32>> = Vec::new();
@@ -1353,20 +1454,6 @@ impl StationIndex {
             }
         }
 
-        // Halls of one line side by side, as single-track tubes are, share the deeper floor.
-        let mut siblings = Groups::new(halls.len());
-        for a in 0..halls.len() {
-            for b in a + 1..halls.len() {
-                let (da, db) = (&halls[a].0, &halls[b].0);
-                if boxes_within(boxes[a], boxes[b], SIBLING_REACH)
-                    && parallel(da.heading, db.heading)
-                    && (da.depth - db.depth).abs() <= 1
-                {
-                    siblings.join(a, b);
-                }
-            }
-        }
-        let sibling_sets = siblings.sets();
         for _ in 0..4 {
             let before = floors.clone();
             for set in &sibling_sets {
@@ -1396,7 +1483,7 @@ impl StationIndex {
         // Every hall's own tracks keep its floor through it.
         let mut level_tracks: Vec<FnvHashSet<(i32, i32)>> =
             vec![FnvHashSet::default(); halls.len()];
-        let mut member_floor: FnvHashMap<u64, i32> = FnvHashMap::default();
+        let mut halls_of: FnvHashMap<u64, Vec<usize>> = FnvHashMap::default();
         for (k, (draft, _, _)) in halls.iter().enumerate() {
             let Some(floor) = floors[k] else {
                 continue;
@@ -1412,39 +1499,55 @@ impl StationIndex {
                 level_tracks[k].insert((t.x, t.z));
             }
             for &way in &draft.members {
-                let f = member_floor.entry(way).or_insert(floor);
-                *f = (*f).max(floor);
+                halls_of.entry(way).or_default().push(k);
             }
         }
-        // Foreign tracks go under a hall, or through it when there is no room below.
+        // Other ways: level through a hall if they carry its line on or run along it at its
+        // floor, over it if their own hall is stacked above, else under it (or through, with
+        // no room below).
         for (k, (draft, _, _)) in halls.iter().enumerate() {
             let Some(floor) = floors[k] else {
                 continue;
             };
-            for t in through[k]
+            let foreign: Vec<TrackCell> = through[k]
                 .iter()
                 .filter(|t| !draft.members.contains(&t.way))
-            {
-                let key = (t.way, t.x, t.z);
-                if self.floors.get(&key).is_some_and(|p| p.in_hall)
-                    || member_floor.get(&t.way).is_some_and(|&f| f > floor)
+                .copied()
+                .collect();
+            for cells in foreign.chunk_by(|a, b| a.way == b.way) {
+                let way = cells[0].way;
+                let own = halls_of.get(&way).map_or(&[][..], Vec::as_slice);
+                let level = line[k].contains(&way)
+                    || own.iter().any(|&j| floors[j] == Some(floor))
+                    || (own.is_empty()
+                        && cells.iter().filter(|t| along(t, k)).count() * 2 > cells.len());
+                if !level
+                    && own
+                        .iter()
+                        .any(|&j| floors[j].is_some_and(|f| f > floor) && stacked(j, k))
                 {
                     continue;
                 }
-                let under = floor - HALL_STACK;
-                let pin = if under >= lowest {
-                    TunnelPin {
-                        floor: self.floors.get(&key).map_or(under, |p| p.floor.min(under)),
-                        in_hall: false,
+                for t in cells {
+                    let key = (t.way, t.x, t.z);
+                    if self.floors.get(&key).is_some_and(|p| p.in_hall) {
+                        continue;
                     }
-                } else {
-                    level_tracks[k].insert((t.x, t.z));
-                    TunnelPin {
-                        floor,
-                        in_hall: true,
-                    }
-                };
-                self.floors.insert(key, pin);
+                    let under = floor - HALL_STACK;
+                    let pin = if !level && under >= lowest {
+                        TunnelPin {
+                            floor: self.floors.get(&key).map_or(under, |p| p.floor.min(under)),
+                            in_hall: false,
+                        }
+                    } else {
+                        level_tracks[k].insert((t.x, t.z));
+                        TunnelPin {
+                            floor,
+                            in_hall: true,
+                        }
+                    };
+                    self.floors.insert(key, pin);
+                }
             }
         }
 
@@ -1586,6 +1689,9 @@ impl StationIndex {
                 .iter()
                 .find_map(|&i| platforms[i].colour)
                 .unwrap_or(HALL_ACCENTS[(mix(name_seed, 2) % HALL_ACCENTS.len() as u64) as usize]);
+            for c in &cells {
+                self.dug.set(c.x, c.z);
+            }
             let bbox = bbox_of(cells.iter().map(|c| (c.x, c.z)));
             let platform_edge = cells
                 .iter()
@@ -1629,7 +1735,7 @@ impl StationIndex {
         if nodes.is_empty() {
             return;
         }
-        let carriageway = carriageway_near(elements, &nodes, inputs.scale);
+        let (carriageway, fenced) = carriageway_near(elements, &nodes, inputs.scale);
         let surface_at = |x: i32, z: i32| {
             let g = editor
                 .terrain_level(x, z)
@@ -1646,6 +1752,7 @@ impl StationIndex {
         let ctx = EntranceContext {
             inputs,
             carriageway: &carriageway,
+            fenced: &fenced,
             cover: &cover,
         };
         // Routed in parallel, then accepted in order; a clash is re-routed round the taken cells.
@@ -1677,7 +1784,7 @@ impl StationIndex {
     ) -> Option<Route> {
         let inputs = ctx.inputs;
         let editor = inputs.editor;
-        let (carriageway, cover) = (ctx.carriageway, ctx.cover);
+        let (carriageway, fenced, cover) = (ctx.carriageway, ctx.fenced, ctx.cover);
         let surface_at = |x: i32, z: i32| {
             let g = editor
                 .terrain_level(x, z)
@@ -1769,7 +1876,16 @@ impl StationIndex {
                 break;
             }
             for d in [frame_dir, (-frame_dir.0, -frame_dir.1)] {
-                if let Some(f) = Flight::fit(hall, p, d) {
+                // Clear of upper halls and the stairs of entrances taken before.
+                let Some(f) = Flight::fit(hall, p, d) else {
+                    continue;
+                };
+                if f.cells
+                    .iter()
+                    .copied()
+                    .chain(f.sides.iter().map(|s| s.0))
+                    .all(&mut free)
+                {
                     flights.push(f);
                     break;
                 }
@@ -1812,7 +1928,18 @@ impl StationIndex {
                         }
                     })
                 });
-                if fits {
+                // The way out at the top: level with the street or under it, and open.
+                let entry = fits
+                    && (-1..=1).all(|l| {
+                        let c = at(-1, l);
+                        in_world(c.0, c.1)
+                            && !inputs.building_footprints.contains(c.0, c.1)
+                            && !fenced.contains(&c)
+                            && !self.on_platform.contains(c.0, c.1)
+                            && !editor.is_lc_water(c.0, c.1)
+                            && surface(c) <= street
+                    });
+                if entry {
                     street_flights.push((e, q, c0));
                 }
             }
@@ -1843,6 +1970,17 @@ impl StationIndex {
                 .flat_map(|j| (-1..=1).map(move |l| (j, l)))
                 .map(|(j, l)| at(j, l))
                 .collect();
+            // The street flight comes down beside the flight into the hall, never over it.
+            let hall_flight: FnvHashSet<(i32, i32)> = flight
+                .cells
+                .iter()
+                .copied()
+                .chain(flight.sides.iter().map(|s| s.0))
+                .chain([flight.top])
+                .collect();
+            if (0..=steps + 1).any(|j| (-2..=2).any(|l| hall_flight.contains(&at(j, l)))) {
+                continue;
+            }
             // The walk may pass the stairwells, not run down either of them.
             let path = l_path(at(steps + 1, 0), flight.top, x_first);
             if path.iter().skip(1).any(|c| flight_cells.contains(c))
@@ -1861,6 +1999,7 @@ impl StationIndex {
             }
             let opening: Vec<(i32, i32)> = (0..=steps + 1)
                 .flat_map(|j| (-2..=2).map(move |l| (j, l)))
+                .chain((-1..=1).map(|l| (-1, l)))
                 .map(|(j, l)| at(j, l))
                 .collect();
             chosen = Some((fi, e, q, c0, path, opening, flight_cells));
@@ -1905,6 +2044,20 @@ impl StationIndex {
             let y = street - j;
             (y + 4 < surface_at(c.0, c.1)).then_some(y + 4)
         };
+        // The top step lies in the pavement, so the last rise onto it is half a block too.
+        for l in -1..=1 {
+            let c = at(0, l);
+            cells.push(EntranceCell {
+                x: c.0,
+                z: c.1,
+                part: EntrancePart::Stair {
+                    y: street,
+                    facing: climb,
+                    base: street,
+                    roof: None,
+                },
+            });
+        }
         for j in 1..=steps {
             for l in -1..=1 {
                 let c = at(j, l);
@@ -2047,6 +2200,9 @@ impl StationIndex {
         for &c in &opening {
             self.tree_free.set(c.0, c.1);
         }
+        for c in &cells {
+            self.dug.set(c.x, c.z);
+        }
         let bbox = bbox_of(cells.iter().map(|c| (c.x, c.z)));
         let (style, accent) = (self.halls[h].style, self.halls[h].accent);
         self.entrances.push(Entrance {
@@ -2060,6 +2216,11 @@ impl StationIndex {
     /// Whether trees keep their trunks off (x, z): beside a surface track or on a platform.
     pub fn keeps_trees_off(&self, x: i32, z: i32) -> bool {
         !self.tree_free.is_empty() && self.tree_free.contains(x, z)
+    }
+
+    /// Whether a hall or an entrance is dug into the column (x, z).
+    pub fn digs(&self, x: i32, z: i32) -> bool {
+        !self.dug.is_empty() && self.dug.contains(x, z)
     }
 
     /// Whether a surface platform covers (x, z).
@@ -2165,6 +2326,31 @@ fn void(editor: &mut WorldEditor, voids: &mut Vec<StationVoid>, x: i32, z: i32, 
     voids.push((x, z, lo, hi));
 }
 
+/// Walls off the open space where nothing else bounds it, so without the ground fill no gap
+/// shows the void; only under the crust the ground pass lays anyway.
+fn seal(editor: &mut WorldEditor, voids: &[StationVoid], block: Block) {
+    for &(x, z, lo, hi) in voids {
+        for (nx, nz) in NEIGHBOURS4.map(|(dx, dz)| (x + dx, z + dz)) {
+            if !editor.in_bounds(nx, nz) {
+                continue;
+            }
+            let top = hi.min(editor.get_ground_level(nx, nz) - CRUST);
+            for y in lo..=top {
+                editor.set_block_absolute(block, nx, y, nz, None, None);
+            }
+        }
+        let top = editor.get_ground_level(x, z) - CRUST;
+        for y in [lo - 1, hi + 1] {
+            if y <= top {
+                editor.set_block_absolute(block, x, y, z, None, None);
+            }
+        }
+    }
+}
+
+/// Blocks under the surface the ground pass lays without `--fillground`.
+const CRUST: i32 = 3;
+
 /// Empties the open space of every station once the ground fill is done.
 pub fn carve_voids(editor: &mut WorldEditor, voids: &[StationVoid]) {
     for &(x, z, lo, hi) in voids {
@@ -2197,7 +2383,10 @@ fn render_surface(editor: &mut WorldEditor, station: &SurfaceStation) {
                 Deck::Line => SMOOTH_QUARTZ_SLAB,
                 Deck::Inner => SMOOTH_STONE_SLAB,
             };
-            put_with(editor, slab(block, "bottom"), x, y, z);
+            // Furniture stands in the kerb's place, its seat flush with the slabs.
+            if c.prop == Prop::None {
+                put_with(editor, slab(block, "bottom"), x, y, z);
+            }
             continue;
         }
         let y = c.top;
@@ -2226,8 +2415,9 @@ fn render_surface(editor: &mut WorldEditor, station: &SurfaceStation) {
                 editor.set_block_absolute(IRON_BARS, x, y + 1, z, None, None);
             }
         }
+        // A bottom slab, so the posts reach right up to it.
         if c.roof {
-            put_with(editor, slab(SMOOTH_STONE_SLAB, "top"), x, y + 5, z);
+            put_with(editor, slab(SMOOTH_STONE_SLAB, "bottom"), x, y + 5, z);
         }
     }
     for c in &station.cells {
@@ -2301,6 +2491,14 @@ fn render_props(editor: &mut WorldEditor, c: &DeckCell, y: i32, low: bool, name:
                 None,
             );
         }
+        Prop::Hanging => editor.set_block_with_properties_absolute(
+            with_props(LANTERN, &[("hanging", "true")]),
+            x,
+            y + 3,
+            z,
+            None,
+            None,
+        ),
         Prop::Bin => editor.set_block_absolute(CAULDRON, x, y, z, None, None),
         Prop::BoardPost => {
             for dy in 0..3 {
@@ -2324,22 +2522,13 @@ fn render_props(editor: &mut WorldEditor, c: &DeckCell, y: i32, low: bool, name:
         }
         Prop::Pillar | Prop::None => {}
     }
-    if c.roof && !low && c.prop == Prop::Post {
-        editor.set_block_with_properties_absolute(
-            with_props(LANTERN, &[("hanging", "true")]),
-            x,
-            y + 3,
-            z,
-            None,
-            None,
-        );
-    }
     if c.roof && low {
         put_with(editor, slab(SMOOTH_STONE_SLAB, "bottom"), x, y + 3, z);
     }
 }
 
 fn render_hall(editor: &mut WorldEditor, hall: &Hall, voids: &mut Vec<StationVoid>) {
+    let start = voids.len();
     let f = hall.floor;
     let roof = f + HALL_HEIGHT;
     let s = hall.style;
@@ -2426,6 +2615,7 @@ fn render_hall(editor: &mut WorldEditor, hall: &Hall, voids: &mut Vec<StationVoi
             }
         }
     }
+    seal(editor, &voids[start..], s.wall);
 }
 
 /// The flight from a platform up through a hall's roof.
@@ -2502,12 +2692,13 @@ fn l_path(a: (i32, i32), b: (i32, i32), x_first: bool) -> Vec<(i32, i32)> {
     out
 }
 
-/// The carriageway cells round the entrances, which their stairs keep off.
+/// The carriageway cells round the entrances, which their stairs keep off, and the barriers
+/// there, which none may open onto.
 fn carriageway_near(
     elements: &[ProcessedElement],
     nodes: &[&ProcessedNode],
     scale: f64,
-) -> FnvHashSet<(i32, i32)> {
+) -> (FnvHashSet<Xz>, FnvHashSet<Xz>) {
     const NEAR: i32 = 32;
     let buckets: FnvHashSet<(i32, i32)> = nodes
         .iter()
@@ -2516,11 +2707,31 @@ fn carriageway_near(
             (-1..=1).flat_map(move |dx| (-1..=1).map(move |dz| (bx + dx, bz + dz)))
         })
         .collect();
+    let near_nodes = |way: &crate::osm_parser::ProcessedWay| {
+        let (x0, z0, x1, z1) = bbox_of(way.nodes.iter().map(|n| (n.x, n.z)));
+        (((x0 - NEAR) >> 5)..=((x1 + NEAR) >> 5)).any(|bx| {
+            (((z0 - NEAR) >> 5)..=((z1 + NEAR) >> 5)).any(|bz| buckets.contains(&(bx, bz)))
+        })
+    };
     let mut out = FnvHashSet::default();
+    let mut fenced = FnvHashSet::default();
     for element in elements {
         let ProcessedElement::Way(way) = element else {
             continue;
         };
+        if way
+            .tags
+            .get("barrier")
+            .is_some_and(|b| b != "kerb" && b != "ditch")
+            && near_nodes(way)
+        {
+            for w in way.nodes.windows(2) {
+                for (x, _, z) in bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z) {
+                    fenced.insert((x, z));
+                }
+            }
+            continue;
+        }
         let Some(kind) = crate::element_processing::highways::surface_highway_type(way) else {
             continue;
         };
@@ -2531,11 +2742,7 @@ fn carriageway_near(
         {
             continue;
         }
-        let (x0, z0, x1, z1) = bbox_of(way.nodes.iter().map(|n| (n.x, n.z)));
-        let touches = (((x0 - NEAR) >> 5)..=((x1 + NEAR) >> 5)).any(|bx| {
-            (((z0 - NEAR) >> 5)..=((z1 + NEAR) >> 5)).any(|bz| buckets.contains(&(bx, bz)))
-        });
-        if !touches {
+        if !near_nodes(way) {
             continue;
         }
         let r = crate::element_processing::highways::highway_block_range(kind, &way.tags, scale);
@@ -2552,7 +2759,7 @@ fn carriageway_near(
             }
         }
     }
-    out
+    (out, fenced)
 }
 
 fn render_entrance(
@@ -2561,6 +2768,7 @@ fn render_entrance(
     voids: &mut Vec<StationVoid>,
     open: bool,
 ) {
+    let start = voids.len();
     let s = entrance.style;
     for c in &entrance.cells {
         let (x, z) = (c.x, c.z);
@@ -2673,12 +2881,16 @@ fn render_entrance(
             _ => {}
         }
     }
+    if open {
+        seal(editor, &voids[start..], s.wall);
+    }
 }
 
 /// What every entrance's route reads.
 struct EntranceContext<'a> {
     inputs: &'a StationInputs<'a>,
     carriageway: &'a FnvHashSet<(i32, i32)>,
+    fenced: &'a FnvHashSet<(i32, i32)>,
     cover: &'a FnvHashMap<(i32, i32), Vec<usize>>,
 }
 
@@ -2705,6 +2917,7 @@ impl Route {
             .into_iter()
             .chain(self.opening.iter().copied())
             .chain(self.flight.cells.iter().copied())
+            .chain(self.flight.sides.iter().map(|s| s.0))
     }
 }
 
@@ -2921,6 +3134,34 @@ mod tests {
         for &(x, z, lo, hi) in &voids {
             assert!((lo..=hi).all(|y| editor.get_block_absolute(x, y, z) != Some(VOID)));
         }
+        // Without the ground fill nothing under the crust may open onto the void.
+        let open_space: FnvHashSet<(i32, i32, i32)> = voids
+            .iter()
+            .flat_map(|&(x, z, lo, hi)| (lo..=hi).map(move |y| (x, y, z)))
+            .collect();
+        for &(x, z, lo, hi) in &voids {
+            for y in lo..=hi.min(-CRUST - 1) {
+                for (nx, ny, nz) in [
+                    (x + 1, y, z),
+                    (x - 1, y, z),
+                    (x, y, z + 1),
+                    (x, y, z - 1),
+                    (x, y - 1, z),
+                    (x, y + 1, z),
+                ] {
+                    if ny <= -CRUST
+                        && editor.in_bounds(nx, nz)
+                        && !open_space.contains(&(nx, ny, nz))
+                    {
+                        assert!(
+                            editor.block_exists_absolute(nx, ny, nz),
+                            "gap at {:?}",
+                            (nx, ny, nz)
+                        );
+                    }
+                }
+            }
+        }
         // Clear headroom over every platform cell free of the stairs and furniture.
         let entrance = &index.entrances[0];
         let hall = &index.halls[0];
@@ -2939,13 +3180,14 @@ mod tests {
             assert!(editor.block_exists_absolute(c.x, floor + 1, c.z));
             assert!((floor + 2..floor + HALL_HEIGHT).all(|y| open(&editor, c.x, y, c.z)));
         }
-        // A step at the street, a walk over the hall and a flight down through its roof.
+        // A step in the pavement, a walk over the hall and a flight down through its roof, each
+        // flight a stair for every block it climbs.
         let mut parts = (false, false, false);
         for c in &entrance.cells {
             match c.part {
-                EntrancePart::Stair { y: -1, .. } => {
+                EntrancePart::Stair { y: 0, .. } => {
                     parts.0 = true;
-                    assert!(open(&editor, c.x, 0, c.z) && open(&editor, c.x, 1, c.z));
+                    assert!(open(&editor, c.x, 1, c.z) && open(&editor, c.x, 2, c.z));
                 }
                 EntrancePart::Walk { floor: f, .. } => {
                     parts.1 = true;
@@ -2953,7 +3195,7 @@ mod tests {
                     assert!((f + 1..f + WALK_HEIGHT).all(|y| open(&editor, c.x, y, c.z)));
                 }
                 EntrancePart::HallStair { y, .. } => {
-                    parts.2 |= y == floor + 1 + HALL_FLIGHT;
+                    parts.2 |= y == floor + HALL_HEIGHT;
                     assert_eq!(
                         editor.get_block_absolute(c.x, y, c.z),
                         Some(POLISHED_ANDESITE_STAIRS)
@@ -2996,6 +3238,133 @@ mod tests {
                 })
             );
         }
+    }
+
+    const UNDER: &[(&str, &str)] = &[("railway", "platform"), ("location", "underground")];
+
+    #[test]
+    fn a_way_split_past_the_platform_keeps_the_hall_floor() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 200, 100).unwrap();
+        for split in 121..=128 {
+            let node = |id, x| ProcessedNode {
+                id,
+                tags: HashMap::new(),
+                x,
+                z: 50,
+            };
+            let part = |id, a, b| {
+                ProcessedElement::Way(ProcessedWay {
+                    id,
+                    nodes: vec![a, b],
+                    tags: tags(SUBWAY),
+                })
+            };
+            let index = lay_out(
+                &[
+                    part(1, node(10, 10), node(11, split)),
+                    part(2, node(11, split), node(12, 190)),
+                    way(3, &rect(60, 52, 120, 57), UNDER),
+                ],
+                &xzbbox,
+            );
+            for x in 100..140 {
+                for way in [1, 2] {
+                    if let Some(pin) = index.tunnel_pin(way, x, 50) {
+                        assert_eq!(pin.floor, -HALL_DEPTH, "split {split}, way {way} at {x}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn halls_along_one_line_never_stack() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 400, 100).unwrap();
+        for gap in [10, 20, 30, 40, 60] {
+            let b = 120 + gap;
+            let index = lay_out(
+                &[
+                    way(1, &[(10, 50), (390, 50)], SUBWAY),
+                    way(3, &rect(60, 52, 120, 57), UNDER),
+                    way(4, &rect(b, 52, b + 60, 57), UNDER),
+                ],
+                &xzbbox,
+            );
+            assert!(
+                index.halls.iter().all(|h| h.floor == -HALL_DEPTH),
+                "gap {gap}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_line_from_a_far_station_goes_under_a_hall_it_crosses() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 400, 400).unwrap();
+        let elements = [
+            way(1, &[(10, 100), (390, 100)], SUBWAY),
+            way(2, &rect(70, 102, 130, 107), UNDER),
+            way(3, &[(100, 10), (100, 390)], SUBWAY),
+            way(4, &rect(102, 250, 107, 310), UNDER),
+        ];
+        // The far station stands on higher ground, so its hall lies shallower.
+        let mut editor = test_editor(&xzbbox);
+        for x in 80..130 {
+            for z in 230..330 {
+                editor.register_road_surface_y(x, z, 3);
+            }
+        }
+        let outlines = BridgeOutlineIndex::build(&[]);
+        let bridges =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+        let none = CoordinateBitmap::new(&xzbbox);
+        let index = StationIndex::build(
+            &elements,
+            &StationInputs {
+                editor: &editor,
+                xzbbox: &xzbbox,
+                bridges: &bridges,
+                tunnel_footprint: &none,
+                building_footprints: &none,
+                road_mask: &none,
+                rail_joins: &RailJoins::default(),
+                scale: 1.0,
+                timeout: None,
+                underground: true,
+            },
+        );
+        let floors: Vec<i32> = index.halls.iter().map(|h| h.floor).collect();
+        assert_eq!(floors, vec![-HALL_DEPTH, 3 - HALL_DEPTH]);
+        assert_eq!(
+            index.tunnel_pin(3, 100, 104),
+            Some(TunnelPin {
+                floor: -HALL_DEPTH - HALL_STACK,
+                in_hall: false
+            })
+        );
+    }
+
+    #[test]
+    fn a_wild_layer_tag_is_kept_in_range() {
+        assert_eq!(depth_key(&tags(&[("layer", "99999999999")])), Some(16));
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 200, 200).unwrap();
+        let index = lay_out(
+            &[
+                way(1, &[(10, 50), (190, 50)], SUBWAY),
+                way(
+                    3,
+                    &rect(60, 52, 120, 57),
+                    &[
+                        ("railway", "platform"),
+                        ("tunnel", "yes"),
+                        ("layer", "-99999999999"),
+                    ],
+                ),
+                way(2, &[(10, 150), (190, 150)], SUBWAY),
+                way(4, &rect(60, 152, 120, 157), UNDER),
+            ],
+            &xzbbox,
+        );
+        assert_eq!(index.halls.len(), 2);
     }
 
     #[test]
