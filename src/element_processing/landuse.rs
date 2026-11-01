@@ -1,6 +1,5 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
@@ -57,19 +56,76 @@ fn landuse_area(
     let binding: String = "".to_string();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
 
+    if matches!(
+        landuse_tag.as_str(),
+        "vineyard" | "orchard" | "allotments" | "greenhouse_horticulture"
+    ) {
+        let fill = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+        if landuse_tag == "greenhouse_horticulture" {
+            super::greenhouses::horticulture_area(
+                editor,
+                element,
+                &fill,
+                road_mask,
+                building_footprints,
+                holes,
+            );
+        } else if landuse_tag == "allotments" {
+            super::allotments::allotments_area(
+                editor,
+                element,
+                &fill,
+                road_mask,
+                building_footprints,
+                holes,
+            );
+        } else if landuse_tag == "vineyard" {
+            super::plantations::vineyard_area(
+                editor,
+                element,
+                &fill,
+                road_mask,
+                building_footprints,
+                holes,
+            );
+        } else {
+            super::plantations::orchard_area(
+                editor,
+                element,
+                &fill,
+                road_mask,
+                building_footprints,
+                holes,
+            );
+        }
+        return;
+    }
+
+    if landuse_tag == "cemetery" {
+        super::cemetery::cemetery_area(
+            editor,
+            element,
+            args,
+            flood_fill_cache,
+            building_footprints,
+            road_mask,
+            bridge_surface,
+            holes,
+        );
+        return;
+    }
+
     // Use deterministic RNG seeded by element ID for consistent results across region boundaries
     let mut rng = element_rng(element.id);
 
     let block_type = match landuse_tag.as_str() {
-        "greenfield" | "meadow" | "grass" | "orchard" | "forest" => GRASS_BLOCK,
+        "greenfield" | "meadow" | "grass" | "forest" => GRASS_BLOCK,
         "farmland" => FARMLAND,
-        "cemetery" => PODZOL,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
         "industrial" => STONE,     // Randomized per-block below
         "military" => GRASS_BLOCK, // Chosen per block by military_ground below
         "railway" => GRAVEL,
-        "vineyard" => COARSE_DIRT,
         "flowerbed" => DIRT,
         "brownfield" => COARSE_DIRT,
         "farmyard" => COARSE_DIRT,
@@ -133,7 +189,6 @@ fn landuse_area(
         trees
     };
 
-    let is_cemetery = landuse_tag == "cemetery";
     let is_military = landuse_tag == "military";
     // Training grounds and ranges are churned up far more than a barracks lawn.
     let military_rough = is_military
@@ -198,27 +253,7 @@ fn landuse_area(
             block_type
         };
 
-        // Don't overwrite roads, paved areas or water with landuse ground blocks.
-        // The mask catches the surfaces the block list cannot, such as a gravel
-        // or dirt track that would otherwise be repainted as grass and then
-        // planted on.
-        let is_protected = editor.surface_is_sealed(x, z)
-            || editor.check_for_block(
-                x,
-                0,
-                z,
-                Some(&[
-                    BLACK_CONCRETE,
-                    GRAY_CONCRETE_POWDER,
-                    CYAN_TERRACOTTA,
-                    GRAY_CONCRETE,
-                    LIGHT_GRAY_CONCRETE,
-                    WHITE_CONCRETE,
-                    DIRT_PATH,
-                    SMOOTH_STONE,
-                    WATER,
-                ]),
-            );
+        let is_protected = ground_is_protected(editor, x, z);
 
         if landuse_tag == "traffic_island" {
             editor.set_block(actual_block, x, 1, z, None, None);
@@ -248,30 +283,6 @@ fn landuse_area(
 
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
-            "cemetery" if (x % 3 == 0) && (z % 3 == 0) => {
-                // Flowers and ground cover only; tombstones are stamped below in this loop.
-                // 0..15 left empty to keep the original flower rates.
-                let random_choice: i32 = rng.random_range(0..100);
-                if (15..30).contains(&random_choice) {
-                    if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
-                        editor.set_block(RED_FLOWER, x, 1, z, None, None);
-                    }
-                } else if (30..33).contains(&random_choice) && editor.land_cover_backs_trees(x, z) {
-                    Tree::create(
-                        editor,
-                        (x, 1, z),
-                        Some(building_footprints),
-                        Some(bridge_surface),
-                    );
-                } else if !is_protected && (33..35).contains(&random_choice) {
-                    place_bush(editor, x, z, BushKind::Garden);
-                } else if !is_protected && (35..37).contains(&random_choice) {
-                    editor.set_block(FERN, x, 1, z, None, None);
-                } else if !is_protected && (37..41).contains(&random_choice) {
-                    editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
-                    editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
-                }
-            }
             "forest" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 // Density-modulated spawn: thickets in some patches, clearings in others.
                 let density = crate::ground_generation::value_noise_01(x, z, 32);
@@ -378,32 +389,8 @@ fn landuse_area(
                     editor.set_block(GRASS, x, 1, z, None, None);
                 }
             }
-            "orchard" => {
-                if x % 18 == 0 && z % 10 == 0 {
-                    Tree::create(
-                        editor,
-                        (x, 1, z),
-                        Some(building_footprints),
-                        Some(bridge_surface),
-                    );
-                } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
-                    match rng.random_range(0..100) {
-                        0 => place_bush(editor, x, z, BushKind::Wild),
-                        1..=2 => editor.set_block(FERN, x, 1, z, None, None),
-                        3..=20 => editor.set_block(GRASS, x, 1, z, None, None),
-                        _ => {}
-                    }
-                }
-            }
-            "vineyard" | "brownfield" | "landfill"
-                if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT])) =>
-            {
-                // Sparse weeds/regrowth on coarse-dirt surfaces: vineyard rows
-                // grow some grass between vines, and brownfield/landfill are
-                // abandoned land that nature is slowly reclaiming. Kept rare so
-                // the ground still reads as dry/disturbed rather than meadow.
-                // (Skipped for landfill spoil heaps — those are GRAVEL, not
-                // COARSE_DIRT, and the guard above filters them out.)
+            "brownfield" | "landfill" if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT])) => {
+                // Sparse regrowth on abandoned land; spoil heaps are gravel and skipped.
                 match rng.random_range(0..150) {
                     0..=3 => place_bush(editor, x, z, BushKind::Low),
                     4 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
@@ -438,15 +425,6 @@ fn landuse_area(
             }
             _ => {}
         }
-
-        if is_cemetery {
-            crate::structures::tombstone::maybe_place(editor, x, z, road_mask);
-        }
-    }
-
-    // Generate a stone brick wall fence around cemeteries
-    if landuse_tag == "cemetery" {
-        generate_cemetery_fence(editor, element);
     }
 
     // Large construction sites get a centre crane plus scattered excavators, and
@@ -545,19 +523,26 @@ fn military_ground(
     }
 }
 
-/// Draws a stone-brick wall fence (with slab cap) along the outline of a
-/// cemetery way.
-fn generate_cemetery_fence(editor: &mut WorldEditor, element: &ProcessedWay) {
-    for i in 1..element.nodes.len() {
-        let prev = &element.nodes[i - 1];
-        let cur = &element.nodes[i];
-
-        let points = bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z);
-        for (bx, _, bz) in points {
-            editor.set_block(STONE_BRICK_WALL, bx, 1, bz, None, None);
-            editor.set_block(STONE_BRICK_SLAB, bx, 2, bz, None, None);
-        }
-    }
+/// Roads, paved areas and water, which landuse ground must not overwrite. The mask catches
+/// the surfaces the block list cannot, such as a gravel or dirt track.
+pub(crate) fn ground_is_protected(editor: &WorldEditor, x: i32, z: i32) -> bool {
+    editor.surface_is_sealed(x, z)
+        || editor.check_for_block(
+            x,
+            0,
+            z,
+            Some(&[
+                BLACK_CONCRETE,
+                GRAY_CONCRETE_POWDER,
+                CYAN_TERRACOTTA,
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
+                DIRT_PATH,
+                SMOOTH_STONE,
+                WATER,
+            ]),
+        )
 }
 
 pub fn generate_landuse_from_relation(

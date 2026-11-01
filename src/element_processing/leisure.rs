@@ -66,7 +66,6 @@ fn leisure_area(
             "bathing_place" => SMOOTH_SANDSTONE, // Could be sand or concrete
             "outdoor_seating" => SMOOTH_STONE, //Usually stone or stone bricks
             "water_park" | "slipway" => LIGHT_GRAY_CONCRETE, // Water park area, not the pool. Usually is concrete
-            "ice_rink" => PACKED_ICE, // TODO: Ice for Ice Rink, needs building defined
             "track" => raceways::track_area_block(&element.tags).unwrap_or(GRASS_BLOCK),
             _ => GRASS_BLOCK,
         };
@@ -91,6 +90,10 @@ fn leisure_area(
         // Hole cells are skipped where read, so the shared fill is not copied.
         let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
         if filled_area.is_empty() && is_oversized_ring(element) {
+            return;
+        }
+        if leisure_type == "ice_rink" {
+            super::ice_rinks::generate_ice_rink(editor, element, &filled_area, holes);
             return;
         }
 
