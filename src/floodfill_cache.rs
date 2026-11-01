@@ -325,7 +325,7 @@ pub type SealedSurfaceBitmap = CoordinateBitmap;
 
 /// Leisure areas rendered as a managed or paved surface. Trees, flowers and
 /// grass tufts on these read as a bug, so they join the sealed-surface mask.
-const SEALED_LEISURE: &[&str] = &[
+pub(crate) const SEALED_LEISURE: &[&str] = &[
     "pitch",
     "track",
     "playground",
@@ -363,6 +363,9 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
         if SEALED_AMENITY.contains(&v.as_str()) {
             return true;
         }
+    }
+    if crate::element_processing::golf::is_managed(&way.tags) {
+        return true;
     }
     // Pedestrian plazas and other highway=* areas are flood-filled, not stamped
     // along a centerline, so the road mask does not cover them.
@@ -689,6 +692,8 @@ impl FloodFillCache {
             || way.tags.get("tomb").map(|v| v == "pyramid").unwrap_or(false)
             // Pier and breakwater areas -> waterfront
             || Self::is_waterfront(&way.tags)
+            // Golf turf -> golf::generate_golf
+            || crate::element_processing::golf::claims(&way.tags)
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
                 && way.tags.get("generator:source").map(String::as_str) == Some("solar")))
@@ -832,6 +837,19 @@ impl FloodFillCache {
         let mut planted_ids: Vec<u64> = Vec::new();
         let mut sealed_ids: Vec<(u64, bool)> = Vec::new();
         for element in elements {
+            // Fairways are often multipolygons; their outer rings keep the turf clear.
+            if let ProcessedElement::Relation(r) = element {
+                if crate::element_processing::golf::is_managed(&r.tags) {
+                    sealed_ids.extend(
+                        r.members
+                            .iter()
+                            .filter(|m| m.role == crate::osm_parser::ProcessedMemberRole::Outer)
+                            .filter(|m| self.contains(m.way.id))
+                            .map(|m| (m.way.id, false)),
+                    );
+                }
+                continue;
+            }
             let ProcessedElement::Way(w) = element else {
                 continue;
             };
