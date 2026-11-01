@@ -200,7 +200,9 @@ impl Bbox {
     }
 }
 
-/// The rings of an area, outer and inner alike; filled even-odd.
+/// The rings of an area, outer and inner alike; filled even-odd. Each ring is a polyline:
+/// a way is closed onto its first node, while the members of a multipolygon stay the open
+/// pieces they were mapped as and only close the ring together.
 #[derive(Clone, Debug)]
 struct Shape {
     rings: Vec<Vec<(i32, i32)>>,
@@ -216,7 +218,11 @@ fn shape_of(element: &ProcessedElement) -> Option<Shape> {
     let mut rings: Vec<(Vec<(i32, i32)>, bool)> = Vec::new();
     match element {
         ProcessedElement::Way(w) => {
-            rings.push((w.nodes.iter().map(|n| (n.x, n.z)).collect(), true))
+            let mut ring: Vec<(i32, i32)> = w.nodes.iter().map(|n| (n.x, n.z)).collect();
+            if ring.len() >= 3 && ring.first() != ring.last() {
+                ring.push(ring[0]);
+            }
+            rings.push((ring, true));
         }
         ProcessedElement::Relation(r) => {
             for m in &r.members {
@@ -230,7 +236,7 @@ fn shape_of(element: &ProcessedElement) -> Option<Shape> {
         }
         ProcessedElement::Node(_) => return None,
     }
-    rings.retain(|(r, _)| r.len() >= 3);
+    rings.retain(|(r, _)| r.len() >= 2);
     if rings.is_empty() {
         return None;
     }
@@ -250,19 +256,30 @@ fn shape_of(element: &ProcessedElement) -> Option<Shape> {
         bbox = Some(bbox.map_or(b, |a| a.union(b)));
     }
     let bbox = bbox?;
-    let area: f64 = rings
-        .iter()
-        .map(|(r, outer)| ring_area(r) * if *outer { 1.0 } else { -1.0 })
-        .sum::<f64>()
-        .abs();
-    Some(Shape {
+    let mut shape = Shape {
         has_hole: rings.iter().any(|(_, o)| !o),
         outer: rings.iter().map(|(_, o)| *o).collect(),
         rings: rings.into_iter().map(|(r, _)| r).collect(),
         bbox,
         centroid: ((sx / n) as i32, (sz / n) as i32),
-        area,
-    })
+        area: 0.0,
+    };
+    shape.area = if shape.rings.iter().all(|r| r.first() == r.last()) {
+        (0..shape.rings.len())
+            .map(|i| ring_area(&shape.rings[i]) * if shape.outer[i] { 1.0 } else { -1.0 })
+            .sum::<f64>()
+            .abs()
+    } else {
+        // Pieces of rings have no area of their own; count the cells they enclose.
+        let grid = Grid::of(bbox);
+        if grid.len() > MAX_GRID_CELLS {
+            return None;
+        }
+        let mut mask = vec![false; grid.len()];
+        rasterize(&grid, &shape, &mut mask);
+        mask.iter().filter(|&&m| m).count() as f64
+    };
+    Some(shape)
 }
 
 impl Shape {
@@ -280,14 +297,21 @@ impl Shape {
             ..self.clone()
         }
     }
+
+    /// Every mapped edge, closing edges of ways included.
+    fn edges(&self) -> impl Iterator<Item = ((i32, i32), (i32, i32))> + '_ {
+        self.rings
+            .iter()
+            .flat_map(|r| r.windows(2).map(|w| (w[0], w[1])))
+    }
 }
 
+/// Shoelace area of a closed ring (first node repeated last).
 fn ring_area(r: &[(i32, i32)]) -> f64 {
-    let mut s = 0.0;
-    for i in 0..r.len() {
-        let (a, b) = (r[i], r[(i + 1) % r.len()]);
-        s += a.0 as f64 * b.1 as f64 - b.0 as f64 * a.1 as f64;
-    }
+    let s: f64 = r
+        .windows(2)
+        .map(|w| w[0].0 as f64 * w[1].1 as f64 - w[1].0 as f64 * w[0].1 as f64)
+        .sum();
     (s / 2.0).abs()
 }
 
@@ -339,31 +363,25 @@ fn rasterize(grid: &Grid, shape: &Shape, out: &mut [bool]) {
     for z in b.min_z.max(grid.z0)..=b.max_z.min(grid.z0 + grid.h as i32 - 1) {
         let zs = z as f64 + 1e-4;
         let mut xs: Vec<f64> = Vec::new();
-        for ring in &shape.rings {
-            for i in 0..ring.len() {
-                let (a, c) = (ring[i], ring[(i + 1) % ring.len()]);
-                let (za, zc) = (a.1 as f64, c.1 as f64);
-                if (za <= zs) != (zc <= zs) {
-                    xs.push(a.0 as f64 + (zs - za) * (c.0 - a.0) as f64 / (zc - za));
-                }
+        for (a, c) in shape.edges() {
+            let (za, zc) = (a.1 as f64, c.1 as f64);
+            if (za <= zs) != (zc <= zs) {
+                xs.push(a.0 as f64 + (zs - za) * (c.0 - a.0) as f64 / (zc - za));
             }
         }
         xs.sort_by(|p, q| p.total_cmp(q));
-        for pair in xs.chunks_exact(2) {
-            for x in pair[0].ceil() as i32..=pair[1].floor() as i32 {
+        for k in 0..xs.len() / 2 {
+            for x in xs[2 * k].ceil() as i32..=xs[2 * k + 1].floor() as i32 {
                 if let Some(i) = grid.idx(x, z) {
                     out[i] = true;
                 }
             }
         }
     }
-    for ring in &shape.rings {
-        for i in 0..ring.len() {
-            let (a, c) = (ring[i], ring[(i + 1) % ring.len()]);
-            for (x, _, z) in bresenham_line(a.0, 0, a.1, c.0, 0, c.1) {
-                if let Some(i) = grid.idx(x, z) {
-                    out[i] = true;
-                }
+    for (a, c) in shape.edges() {
+        for (x, _, z) in bresenham_line(a.0, 0, a.1, c.0, 0, c.1) {
+            if let Some(i) = grid.idx(x, z) {
+                out[i] = true;
             }
         }
     }
@@ -448,32 +466,10 @@ fn frame_of(cells: impl Iterator<Item = (i32, i32)> + Clone) -> Option<Frame> {
     })
 }
 
-// Andrew monotone chain; returns the hull CCW without the closing point.
-fn convex_hull(points: &[(i32, i32)]) -> Vec<(f64, f64)> {
-    let mut pts: Vec<(f64, f64)> = points.iter().map(|&(x, z)| (x as f64, z as f64)).collect();
-    pts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
-    pts.dedup();
-    if pts.len() < 3 {
-        return pts;
-    }
-    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| {
-        (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
-    };
-    let mut hull: Vec<(f64, f64)> = Vec::with_capacity(pts.len() * 2);
-    for &p in pts.iter().chain(pts.iter().rev()) {
-        while hull.len() >= 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
-            hull.pop();
-        }
-        hull.push(p);
-    }
-    hull.pop();
-    hull
-}
-
 /// Minimum-area enclosing rectangle by rotating calipers:
 /// (centre x, centre z, long extent, short extent, long-axis angle from +X).
 fn min_area_rect(points: &[(i32, i32)]) -> Option<(f64, f64, f64, f64, f64)> {
-    let hull = convex_hull(points);
+    let hull = sport_pitches::hull_ccw(points);
     if hull.len() < 3 {
         return None;
     }
@@ -617,6 +613,9 @@ struct Venue {
     /// Stands shallower than this, in blocks, stay open: a roof over a few rows of
     /// bleachers would need a wall as tall as the main stand to hold it.
     roof_min_depth: f32,
+    /// Blocks between the top row and the roof, and from the top row to a mast's lamps.
+    roof_clearance: i32,
+    mast_above: i32,
     palette: Palette,
     front_radius: f64,
 }
@@ -652,17 +651,34 @@ impl StadiumPlan {
         self.venues.len()
     }
 
-    /// Exactly the regions each venue's grid covers; masts and roofs stay inside it.
+    /// The regions each venue's grid covers, masts and roofs included, widened by the reach
+    /// of the tree sweep that clears its footprint first.
     pub fn placement_regions(&self) -> Vec<Vec<(i32, i32)>> {
         self.venues
             .iter()
             .map(|v| {
-                let b = v.grid.bbox();
+                let b = v.grid.bbox().pad(crate::models_3d::TREE_SWEEP_REACH);
                 ((b.min_x >> 9)..=(b.max_x >> 9))
                     .flat_map(|rx| ((b.min_z >> 9)..=(b.max_z >> 9)).map(move |rz| (rx, rz)))
                     .collect()
             })
             .collect()
+    }
+}
+
+/// A planned venue, the elements it draws in their place, and those it only takes up:
+/// its outline and fields, which still draw themselves but start no second venue.
+struct Planned {
+    venue: Venue,
+    suppress: Vec<Key>,
+    taken: Vec<Key>,
+}
+
+impl StadiumPlan {
+    fn take(&mut self, p: Planned, claimed: &mut HashSet<Key>) {
+        claimed.extend(p.suppress.iter().chain(&p.taken).copied());
+        self.suppressed.extend(p.suppress);
+        self.venues.push(p.venue);
     }
 }
 
@@ -765,10 +781,8 @@ pub fn prescan(elements: &[ProcessedElement], args: &Args, already: &HashSet<Key
         if claimed.contains(&v.key()) {
             continue;
         }
-        if let Some((venue, keys)) = plan_venue(v, &stands, &fields, &others, &claimed, scale) {
-            claimed.extend(keys.iter().copied());
-            plan.suppressed.extend(keys);
-            plan.venues.push(venue);
+        if let Some(p) = plan_venue(v, &stands, &fields, &others, &claimed, scale) {
+            plan.take(p, &mut claimed);
         }
     }
 
@@ -782,10 +796,8 @@ pub fn prescan(elements: &[ProcessedElement], args: &Args, already: &HashSet<Key
         if claimed.contains(&s.key()) {
             continue;
         }
-        if let Some((venue, keys)) = plan_venue(s, &stands, &fields, &others, &claimed, scale) {
-            claimed.extend(keys.iter().copied());
-            plan.suppressed.extend(keys);
-            plan.venues.push(venue);
+        if let Some(p) = plan_venue(s, &stands, &fields, &others, &claimed, scale) {
+            plan.take(p, &mut claimed);
         }
     }
 
@@ -816,12 +828,8 @@ pub fn prescan(elements: &[ProcessedElement], args: &Args, already: &HashSet<Key
     group_list.sort();
     for (field_idx, members) in group_list {
         let members: Vec<&Candidate> = members.iter().map(|&i| &stands[i]).collect();
-        if let Some((venue, keys)) =
-            plan_grandstands(&fields[field_idx], &members, &others, &claimed, scale)
-        {
-            claimed.extend(keys.iter().copied());
-            plan.suppressed.extend(keys);
-            plan.venues.push(venue);
+        if let Some(p) = plan_grandstands(&fields[field_idx], &members, &others, &claimed, scale) {
+            plan.take(p, &mut claimed);
         }
     }
     plan
@@ -902,7 +910,7 @@ fn plan_venue(
     others: &[Candidate],
     claimed: &HashSet<Key>,
     scale: f64,
-) -> Option<(Venue, Vec<Key>)> {
+) -> Option<Planned> {
     let tags = outline.tags();
     let outline_building = tags.get("building").filter(|b| b.as_str() != "no");
     let outline_is_stand =
@@ -929,10 +937,14 @@ fn plan_venue(
         probe.idx(x, z).is_some_and(|i| inside[i])
     };
 
-    let inner_fields: Vec<&Candidate> = fields
+    // A second outline round a field another venue already seats would seat it again.
+    if fields
         .iter()
-        .filter(|f| !claimed.contains(&f.key()) && within(f))
-        .collect();
+        .any(|f| claimed.contains(&f.key()) && within(f))
+    {
+        return None;
+    }
+    let inner_fields: Vec<&Candidate> = fields.iter().filter(|f| within(f)).collect();
     let inner_stands: Vec<&Candidate> = stands
         .iter()
         .filter(|s| s.key() != outline.key() && !claimed.contains(&s.key()) && within(s))
@@ -1074,7 +1086,13 @@ fn plan_venue(
     keys.extend(covered_buildings(&venue, others, claimed));
     keys.sort();
     keys.dedup();
-    Some((venue, keys))
+    let mut taken: Vec<Key> = field_set.iter().map(|f| f.key()).collect();
+    taken.push(outline.key());
+    Some(Planned {
+        venue,
+        suppress: keys,
+        taken,
+    })
 }
 
 /// Grandstands without a stadium outline, seated toward the pitch or track they line.
@@ -1084,7 +1102,7 @@ fn plan_grandstands(
     others: &[Candidate],
     claimed: &HashSet<Key>,
     scale: f64,
-) -> Option<(Venue, Vec<Key>)> {
+) -> Option<Planned> {
     let mut bbox = field_elem.shape.bbox;
     for s in members {
         bbox = bbox.union(s.shape.bbox);
@@ -1129,7 +1147,11 @@ fn plan_grandstands(
     keys.extend(covered_buildings(&venue, others, claimed));
     keys.sort();
     keys.dedup();
-    Some((venue, keys))
+    Some(Planned {
+        venue,
+        suppress: keys,
+        taken: vec![field_elem.key()],
+    })
 }
 
 /// A building of its own rather than a slice of the stands.
@@ -1260,7 +1282,7 @@ fn synthesize_field(
         tags,
     };
     let shape = Shape {
-        rings: vec![corners[..4].to_vec()],
+        rings: vec![corners.to_vec()],
         outer: vec![true],
         bbox: Bbox {
             min_x: corners.iter().map(|c| c.0).min()?,
@@ -1441,6 +1463,8 @@ fn build_venue(
         roof_cover,
         roof_top,
         roof_min_depth,
+        roof_clearance: blocks(ROOF_CLEARANCE_M).max(3),
+        mast_above: blocks(MAST_ABOVE_M).max(8),
         palette: palette_for(key.1, tags),
         front_radius: front_radius.max(1.0),
     })
@@ -1551,7 +1575,7 @@ fn place_venue(editor: &mut WorldEditor, v: &Venue) {
             .map(|i| p.at(v.front[i] as f32 / UNIT).0)
             .max()
             .unwrap_or(p.lip);
-        base + top + (ROOF_CLEARANCE_M.max(4.0)) as i32
+        base + top + v.roof_clearance
     });
     let sections = (std::f64::consts::TAU * v.front_radius / AISLE_SPACING)
         .round()
@@ -1705,7 +1729,7 @@ fn place_masts(editor: &mut WorldEditor, v: &Venue, base: i32) {
         .map(|i| p.at(v.front[i] as f32 / UNIT).0)
         .max()
         .unwrap_or(0);
-    let mast_top = base + top_seat + (MAST_ABOVE_M as i32).max(12);
+    let mast_top = base + top_seat + v.mast_above;
     for (sa, sb) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
         let (tx, tz) = (
             fr.cx + sa * fr.half_len * fr.ux + sb * fr.half_wid * vx,
@@ -1717,7 +1741,9 @@ fn place_masts(editor: &mut WorldEditor, v: &Venue, base: i32) {
         // The last stand cell along the diagonal, else open ground past the corner.
         let mut spot: Option<(i32, i32)> = None;
         let mut t = len;
-        while t < len + 120.0 {
+        // Out to the edge of the grid, which holds every stand.
+        let far = len + (g.w + g.h) as f64;
+        while t < far {
             let (x, z) = (
                 (fr.cx + dx * t).round() as i32,
                 (fr.cz + dz * t).round() as i32,
@@ -1768,7 +1794,7 @@ mod tests {
 
     fn rect_shape(x0: i32, z0: i32, x1: i32, z1: i32) -> Shape {
         Shape {
-            rings: vec![vec![(x0, z0), (x1, z0), (x1, z1), (x0, z1)]],
+            rings: vec![vec![(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)]],
             outer: vec![true],
             bbox: Bbox {
                 min_x: x0,
@@ -1810,7 +1836,7 @@ mod tests {
         let mut shape = rect_shape(0, 0, 40, 40);
         shape
             .rings
-            .push(vec![(10, 10), (30, 10), (30, 30), (10, 30)]);
+            .push(vec![(10, 10), (30, 10), (30, 30), (10, 30), (10, 10)]);
         let mut out = vec![false; grid.len()];
         rasterize(&grid, &shape, &mut out);
         assert!(out[grid.idx(5, 20).unwrap()]);
@@ -1865,7 +1891,7 @@ mod tests {
         let mut stand = vec![false; grid.len()];
         let mut ring = rect_shape(5, 5, 55, 55);
         ring.rings
-            .push(vec![(15, 15), (45, 15), (45, 45), (15, 45)]);
+            .push(vec![(15, 15), (45, 15), (45, 45), (15, 45), (15, 15)]);
         rasterize(&grid, &ring, &mut stand);
         let dist = chamfer(&grid, |i| field[i]);
         let (front, back) = edges(&grid, &stand, &field, &dist);
@@ -2006,6 +2032,20 @@ mod tests {
                 .0
         };
         assert!(h(10) > h(28));
+    }
+
+    #[test]
+    fn nested_outline_round_the_same_pitch_builds_one_venue() {
+        let els = [
+            way(1, &rect(0, 0, 220, 180), &[("leisure", "stadium")]),
+            way(2, &rect(20, 20, 200, 160), &[("leisure", "stadium")]),
+            way(
+                3,
+                &rect(58, 56, 162, 124),
+                &[("leisure", "pitch"), ("sport", "soccer")],
+            ),
+        ];
+        assert_eq!(plan(&els).placement_count(), 1);
     }
 
     #[test]

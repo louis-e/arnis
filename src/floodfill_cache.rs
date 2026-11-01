@@ -837,16 +837,17 @@ impl FloodFillCache {
         let mut planted_ids: Vec<u64> = Vec::new();
         let mut sealed_ids: Vec<(u64, bool)> = Vec::new();
         for element in elements {
-            // Fairways are often multipolygons; their outer rings keep the turf clear.
+            // Fairways are often multipolygons: the outer rings keep the turf clear, and the
+            // inner ones give their holes (rough, a copse) back to whatever grows there.
             if let ProcessedElement::Relation(r) = element {
                 if crate::element_processing::golf::is_managed(&r.tags) {
-                    sealed_ids.extend(
-                        r.members
-                            .iter()
-                            .filter(|m| m.role == crate::osm_parser::ProcessedMemberRole::Outer)
-                            .filter(|m| self.contains(m.way.id))
-                            .map(|m| (m.way.id, false)),
-                    );
+                    for m in r.members.iter().filter(|m| self.contains(m.way.id)) {
+                        match m.role {
+                            ProcessedMemberRole::Outer => sealed_ids.push((m.way.id, true)),
+                            ProcessedMemberRole::Inner => planted_ids.push(m.way.id),
+                            ProcessedMemberRole::Part => {}
+                        }
+                    }
                 }
                 continue;
             }

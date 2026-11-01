@@ -205,9 +205,7 @@ pub fn draw_pitch_markings(
                     let goal = a * 5.0 / 6.0;
                     let step = goal / 10.0;
                     let k = (u.abs() / step).round();
-                    let yard_line = u.abs() <= goal + 0.6 && line(u.abs() - k * step);
-                    let hash = line(v.abs() - b * 0.35) && line(u.abs() - (u.abs()).round());
-                    yard_line || (hash && u.abs() < goal)
+                    u.abs() <= goal + 0.6 && line(u.abs() - k * step)
                 }
                 PitchKind::Rugby => {
                     // Try lines 50 m out, 22 m lines, dashed 10 m lines.
@@ -449,7 +447,8 @@ fn home_plate(way: &ProcessedWay, filled_area: &[(i32, i32)]) -> Option<((f64, f
     Some((apex, (dx / len, dz / len)))
 }
 
-fn hull_ccw(points: &[(i32, i32)]) -> Vec<(f64, f64)> {
+/// Convex hull, counter-clockwise without the closing point (Andrew's monotone chain).
+pub(crate) fn hull_ccw(points: &[(i32, i32)]) -> Vec<(f64, f64)> {
     let mut pts: Vec<(f64, f64)> = points.iter().map(|&(x, z)| (x as f64, z as f64)).collect();
     pts.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
     pts.dedup();
@@ -459,9 +458,17 @@ fn hull_ccw(points: &[(i32, i32)]) -> Vec<(f64, f64)> {
     let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| {
         (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
     };
-    let mut hull: Vec<(f64, f64)> = Vec::with_capacity(pts.len() * 2);
-    for &p in pts.iter().chain(pts.iter().rev()) {
+    let mut hull: Vec<(f64, f64)> = Vec::with_capacity(pts.len() + 1);
+    for &p in &pts {
         while hull.len() >= 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+            hull.pop();
+        }
+        hull.push(p);
+    }
+    // The upper chain may not pop back into the finished lower one.
+    let lower = hull.len() + 1;
+    for &p in pts.iter().rev().skip(1) {
+        while hull.len() >= lower && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
             hull.pop();
         }
         hull.push(p);
@@ -487,11 +494,13 @@ fn draw_diamond(
         .iter()
         .map(|&(x, z)| (x as f64 - hx).hypot(z as f64 - hz))
         .fold(0.0, f64::max);
-    if reach < 30.0 {
+    // Sizes in metres, measured on the world's scale.
+    let scale = editor.scale();
+    if reach < 30.0 * scale {
         return;
     }
     // 90 ft bases on a 400 ft park, 60 ft on a little league or softball field.
-    let base = (reach * 0.27).clamp(12.0, 27.4);
+    let base = (reach * 0.27).clamp(12.0 * scale, 27.4 * scale);
     let s2 = std::f64::consts::FRAC_1_SQRT_2;
     let mound = base * 0.672;
     let clay = TERRACOTTA;
@@ -561,7 +570,7 @@ fn draw_diamond(
     }
 
     // A padded wall round the outfield of a full-size park.
-    if reach >= 85.0 {
+    if reach >= 85.0 * scale {
         for &(x, z) in filled_area {
             let (px, pz) = (x as f64 - hx, z as f64 - hz);
             let along = px * ux + pz * uz;
@@ -849,5 +858,14 @@ mod tests {
         assert_eq!(default_surface(&tags("beachvolleyball")), Some(SAND));
         assert_eq!(default_surface(&tags("athletics")), Some(RED_TERRACOTTA));
         assert_eq!(default_surface(&tags("soccer")), None);
+    }
+
+    #[test]
+    fn hull_keeps_every_corner_of_a_rectangle() {
+        let hull = hull_ccw(&[(0, 0), (10, 0), (10, 5), (0, 5), (4, 2)]);
+        assert_eq!(hull.len(), 4, "{hull:?}");
+        for corner in [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)] {
+            assert!(hull.contains(&corner), "{corner:?} missing from {hull:?}");
+        }
     }
 }

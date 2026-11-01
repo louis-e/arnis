@@ -50,7 +50,7 @@ pub(crate) fn lowest_ground_in_bbox(
 const TREE_SWEEP_HEIGHT: i32 = 64;
 
 /// How far past the footprint the sweep follows a tree; a crown reaches no further.
-const TREE_SWEEP_REACH: i32 = 10;
+pub(crate) const TREE_SWEEP_REACH: i32 = 10;
 
 /// Writes model voxels over whatever stands there. Trees inside the footprint go
 /// first, whole, so none grows through a lattice or a hollow statue.

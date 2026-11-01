@@ -2460,6 +2460,7 @@ fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
     tags.contains_key("natural")
         || tags.contains_key("landuse")
         || tags.contains_key("leisure")
+        || crate::element_processing::golf::claims(tags)
         || matches!(
             tags.get("man_made").map(String::as_str),
             Some("pier" | "breakwater" | "groyne")
