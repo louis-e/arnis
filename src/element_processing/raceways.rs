@@ -115,6 +115,20 @@ fn is_start_line(tags: &HashMap<String, String>) -> bool {
     )
 }
 
+/// Deck a raceway is drawn on: 0 at grade, else its layer, at least 1 on a bridge.
+pub(crate) fn deck(tags: &HashMap<String, String>) -> i32 {
+    let layer = tags
+        .get("layer")
+        .and_then(|l| l.parse::<i32>().ok())
+        .unwrap_or(0)
+        .max(0);
+    if matches!(tags.get("bridge").map(String::as_str), Some(v) if v != "no") {
+        layer.max(1)
+    } else {
+        layer
+    }
+}
+
 /// Raceways the highway renderer lays as a line on the surface.
 fn at_surface(way: &ProcessedWay) -> bool {
     let tags = &way.tags;
@@ -132,6 +146,7 @@ fn at_surface(way: &ProcessedWay) -> bool {
 struct Track<'a> {
     way: &'a ProcessedWay,
     half: i32,
+    deck: i32,
     kerbs: bool,
 }
 
@@ -148,6 +163,7 @@ struct Cell {
     /// A tight corner, kerbed on both sides.
     both: bool,
     half: i32,
+    deck: i32,
 }
 
 struct Chain {
@@ -302,6 +318,7 @@ fn build_chain(tracks: &[Track], run: &[(usize, bool)], scale: f32) -> Chain {
                 kerb: 0,
                 both: false,
                 half: track.half,
+                deck: track.deck,
             });
             kerbed.push(track.kerbs);
         }
@@ -380,40 +397,84 @@ fn drop_short_runs(flags: &mut [i8], min: usize, closed: bool) {
     }
 }
 
-/// Paint for every cell of a paved raceway that is not plain asphalt, resolved over the
-/// whole area at once so every tile paints a track alike.
+/// Paint for every cell of a paved raceway that is not plain asphalt, by deck, resolved over
+/// the whole area at once so every tile paints a track alike.
 #[derive(Default)]
 pub struct RacewayPaint {
-    cells: FnvHashMap<(i32, i32), Block>,
+    cells: FnvHashMap<(i32, i32, i32), Block>,
+}
+
+/// The renderer's centreline cells of a way.
+fn way_cells(way: &ProcessedWay) -> Vec<(i32, i32)> {
+    let mut cells: Vec<(i32, i32)> = Vec::new();
+    for w in way.nodes.windows(2) {
+        let pts = bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z);
+        let skip = usize::from(!cells.is_empty());
+        cells.extend(pts.into_iter().skip(skip).map(|(x, _, z)| (x, z)));
+    }
+    cells
 }
 
 impl RacewayPaint {
-    pub fn at(&self, x: i32, z: i32) -> Option<Block> {
+    pub fn at(&self, deck: i32, x: i32, z: i32) -> Option<Block> {
         if self.cells.is_empty() {
             return None;
         }
-        self.cells.get(&(x, z)).copied()
+        self.cells.get(&(deck, x, z)).copied()
     }
 
     pub fn build(elements: &[ProcessedElement], scale: f64) -> Self {
         let mut paint = Self::default();
-        let mut surface = SparseCells::default();
-        let mut paved = SparseCells::default();
-        let mut tracks: Vec<Track> = Vec::new();
-        for element in elements {
-            let ProcessedElement::Way(way) = element else {
-                continue;
-            };
-            if !at_surface(way) {
-                continue;
+        let ways: Vec<(&ProcessedWay, i32, i32)> = elements
+            .iter()
+            .filter_map(|e| match e {
+                ProcessedElement::Way(w) if at_surface(w) => Some((
+                    w,
+                    highway_block_range("raceway", &w.tags, scale),
+                    deck(&w.tags),
+                )),
+                _ => None,
+            })
+            .collect();
+        if !ways
+            .iter()
+            .any(|(w, half, _)| *half >= 2 && is_paved(&w.tags))
+        {
+            return paint;
+        }
+        let mut end_decks: FnvHashMap<u64, Vec<i32>> = FnvHashMap::default();
+        for (w, _, d) in &ways {
+            for id in [w.nodes[0].id, w.nodes.last().unwrap().id] {
+                end_decks.entry(id).or_default().push(*d);
             }
-            let half = highway_block_range("raceway", &way.tags, scale);
+        }
+
+        let mut surface: FnvHashMap<i32, SparseCells> = FnvHashMap::default();
+        let mut paved: FnvHashMap<i32, SparseCells> = FnvHashMap::default();
+        let mut tracks: Vec<Track> = Vec::new();
+        for &(way, half, d) in &ways {
             let painted = half >= 2 && is_paved(&way.tags);
-            for w in way.nodes.windows(2) {
-                for (x, _, z) in bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z) {
-                    surface.set_square(x, z, half);
-                    if painted {
-                        paved.set_square(x, z, half);
+            let cells = way_cells(way);
+            for &(x, z) in &cells {
+                surface.entry(d).or_default().set_square(x, z, half);
+                if painted {
+                    paved.entry(d).or_default().set_square(x, z, half);
+                }
+            }
+            // Where a way runs onto another deck, its end counts there too, so the joint stays open.
+            let reach = ((half + 2) as usize).min(cells.len());
+            let ends = [
+                (way.nodes[0].id, &cells[..reach]),
+                (way.nodes.last().unwrap().id, &cells[cells.len() - reach..]),
+            ];
+            for (id, end) in ends {
+                for &other in end_decks.get(&id).map_or(&[][..], Vec::as_slice) {
+                    if other == d {
+                        continue;
+                    }
+                    let layer = surface.entry(other).or_default();
+                    for &(x, z) in end {
+                        layer.set_square(x, z, half);
                     }
                 }
             }
@@ -421,12 +482,10 @@ impl RacewayPaint {
                 tracks.push(Track {
                     way,
                     half,
+                    deck: d,
                     kerbs: !is_pit_lane(&way.tags),
                 });
             }
-        }
-        if tracks.is_empty() {
-            return paint;
         }
 
         let chains: Vec<Chain> = join_tracks(&tracks)
@@ -443,59 +502,69 @@ impl RacewayPaint {
             }
         }
         let reach = max_half * 3 / 2 + 2;
-        let nearest = |x: i32, z: i32| -> Option<(usize, usize)> {
-            let mut best: Option<(i64, u32, u32)> = None;
+        // Nearest centreline cell on `deck`, preferring those whose stamp covers (x, z): a closer
+        // track that does not reach the cell must not take over its paint.
+        let nearest = |x: i32, z: i32, deck: Option<i32>| -> Option<(usize, usize)> {
+            let mut best: Option<(bool, i64, u32, u32)> = None;
             for gx in (x - reach) >> 3..=(x + reach) >> 3 {
                 for gz in (z - reach) >> 3..=(z + reach) >> 3 {
                     for &(ci, i) in grid.get(&(gx, gz)).map_or(&[][..], Vec::as_slice) {
                         let c = &chains[ci as usize].cells[i as usize];
+                        if deck.is_some_and(|d| d != c.deck) {
+                            continue;
+                        }
+                        let outside = (c.x - x).abs().max((c.z - z).abs()) > c.half;
                         let d = ((c.x - x) as i64).pow(2) + ((c.z - z) as i64).pow(2);
-                        if best.is_none_or(|b| (d, ci, i) < b) {
-                            best = Some((d, ci, i));
+                        if best.is_none_or(|b| (outside, d, ci, i) < b) {
+                            best = Some((outside, d, ci, i));
                         }
                     }
                 }
             }
-            best.map(|(_, ci, i)| (ci as usize, i as usize))
+            best.map(|(_, _, ci, i)| (ci as usize, i as usize))
         };
 
-        let off = |x: i32, z: i32| !surface.contains(x, z);
-        let rim = |x: i32, z: i32| {
-            surface.contains(x, z)
-                && (off(x + 1, z) || off(x - 1, z) || off(x, z + 1) || off(x, z - 1))
-        };
-        for (x, z) in paved.iter() {
-            let depth = if rim(x, z) {
-                0
-            } else if rim(x + 1, z) || rim(x - 1, z) || rim(x, z + 1) || rim(x, z - 1) {
-                1
-            } else {
+        for (&d, cells) in &paved {
+            let Some(surface) = surface.get(&d) else {
                 continue;
             };
-            let Some((ci, i)) = nearest(x, z) else {
-                continue;
+            let off = |x: i32, z: i32| !surface.contains(x, z);
+            let rim = |x: i32, z: i32| {
+                surface.contains(x, z)
+                    && (off(x + 1, z) || off(x - 1, z) || off(x, z + 1) || off(x, z - 1))
             };
-            let c = &chains[ci].cells[i];
-            let rel = ((x - c.x) as f32, (z - c.z) as f32);
-            let side = cross(c.t, rel);
-            let side = if side > 0.5 {
-                1
-            } else if side < -0.5 {
-                -1
-            } else {
-                0
-            };
-            let kerb = c.kerb != 0
-                && side != 0
-                && (side == c.kerb || c.both)
-                && (depth == 0 || c.half >= WIDE_KERB_HALF);
-            if kerb {
-                let red = (c.s / STRIPE).floor() as i64 % 2 == 0;
-                paint
-                    .cells
-                    .insert((x, z), if red { RED_CONCRETE } else { WHITE_CONCRETE });
-            } else if depth == 0 {
-                paint.cells.insert((x, z), WHITE_CONCRETE);
+            for (x, z) in cells.iter() {
+                let depth = if rim(x, z) {
+                    0
+                } else if rim(x + 1, z) || rim(x - 1, z) || rim(x, z + 1) || rim(x, z - 1) {
+                    1
+                } else {
+                    continue;
+                };
+                let Some((ci, i)) = nearest(x, z, Some(d)) else {
+                    continue;
+                };
+                let c = &chains[ci].cells[i];
+                let rel = ((x - c.x) as f32, (z - c.z) as f32);
+                let side = cross(c.t, rel);
+                let side = if side > 0.5 {
+                    1
+                } else if side < -0.5 {
+                    -1
+                } else {
+                    0
+                };
+                let kerb = c.kerb != 0
+                    && side != 0
+                    && (side == c.kerb || c.both)
+                    && (depth == 0 || c.half >= WIDE_KERB_HALF);
+                if kerb {
+                    let red = (c.s / STRIPE).floor() as i64 % 2 == 0;
+                    let block = if red { RED_CONCRETE } else { WHITE_CONCRETE };
+                    paint.cells.insert((d, x, z), block);
+                } else if depth == 0 {
+                    paint.cells.insert((d, x, z), WHITE_CONCRETE);
+                }
             }
         }
 
@@ -515,14 +584,17 @@ impl RacewayPaint {
         &mut self,
         node: &ProcessedNode,
         chains: &[Chain],
-        paved: &SparseCells,
-        nearest: &dyn Fn(i32, i32) -> Option<(usize, usize)>,
+        paved: &FnvHashMap<i32, SparseCells>,
+        nearest: &dyn Fn(i32, i32, Option<i32>) -> Option<(usize, usize)>,
     ) {
-        let Some((ci, i)) = nearest(node.x, node.z) else {
+        let Some((ci, i)) = nearest(node.x, node.z, None) else {
             return;
         };
         let chain = &chains[ci];
         let p = &chain.cells[i];
+        let Some(paved) = paved.get(&p.deck) else {
+            return;
+        };
         let r = p.half * 3 / 2 + 1;
         if (p.x - node.x).abs().max((p.z - node.z).abs()) > p.half + 2 {
             return;
@@ -538,7 +610,7 @@ impl RacewayPaint {
                     continue;
                 }
                 // Not where a parallel stretch or pit lane runs closer.
-                match nearest(x, z) {
+                match nearest(x, z, Some(p.deck)) {
                     Some((cj, j)) if cj == ci && chain.gap(chain.cells[j].s, p.s) <= 3.0 => {}
                     _ => continue,
                 }
@@ -549,7 +621,7 @@ impl RacewayPaint {
                 } else {
                     BLACK_CONCRETE
                 };
-                self.cells.insert((x, z), block);
+                self.cells.insert((p.deck, x, z), block);
             }
         }
     }
@@ -621,16 +693,30 @@ mod tests {
         assert_eq!(track_area_block(&relation), Some(GRAY_CONCRETE_POWDER));
         // A closed loop is a line: its infield stays as it was.
         assert_eq!(track_area_block(&tags(&[("sport", "motor")])), None);
+        use crate::element_processing::RelationArea;
+        let rel = |t: &[(&str, &str)]| RelationArea::of(&tags(t));
+        let motor = [
+            ("leisure", "track"),
+            ("sport", "motor"),
+            ("type", "multipolygon"),
+        ];
+        assert_eq!(rel(&motor), Some(RelationArea::Leisure));
+        let running = [
+            ("leisure", "track"),
+            ("sport", "running"),
+            ("type", "multipolygon"),
+        ];
+        assert_eq!(rel(&running), None);
     }
 
     #[test]
     fn a_straight_gets_edge_lines_and_no_kerbs() {
         let paint = RacewayPaint::build(&[circuit(1, &[(1, 0, 0), (2, 200, 0)])], 1.0);
         for x in 10..190 {
-            assert_eq!(paint.at(x, -6), Some(WHITE_CONCRETE), "x={x}");
-            assert_eq!(paint.at(x, 6), Some(WHITE_CONCRETE), "x={x}");
+            assert_eq!(paint.at(0, x, -6), Some(WHITE_CONCRETE), "x={x}");
+            assert_eq!(paint.at(0, x, 6), Some(WHITE_CONCRETE), "x={x}");
             for z in -5..=5 {
-                assert_eq!(paint.at(x, z), None, "({x},{z})");
+                assert_eq!(paint.at(0, x, z), None, "({x},{z})");
             }
         }
     }
@@ -640,15 +726,14 @@ mod tests {
         // Along +x, then a right-angle turn to +z: the inside is the +x/+z corner.
         let paint =
             RacewayPaint::build(&[circuit(1, &[(1, 0, 0), (2, 100, 0), (3, 100, 100)])], 1.0);
-        let kerb = |x: i32, z: i32| matches!(paint.at(x, z), Some(RED_CONCRETE));
+        let kerb = |x: i32, z: i32| matches!(paint.at(0, x, z), Some(RED_CONCRETE));
         let inside: usize = (85..95).filter(|&x| kerb(x, 6)).count();
         assert!(inside > 0, "red kerb on the inner edge before the apex");
-        assert!((85..95).any(
-            |x| paint.at(x, 5) == Some(RED_CONCRETE) || paint.at(x, 5) == Some(WHITE_CONCRETE)
-        ));
+        assert!((85..95).any(|x| paint.at(0, x, 5) == Some(RED_CONCRETE)
+            || paint.at(0, x, 5) == Some(WHITE_CONCRETE)));
         // Far from the corner the edges are plain lines.
-        assert_eq!(paint.at(20, 6), Some(WHITE_CONCRETE));
-        assert_eq!(paint.at(20, -6), Some(WHITE_CONCRETE));
+        assert_eq!(paint.at(0, 20, 6), Some(WHITE_CONCRETE));
+        assert_eq!(paint.at(0, 20, -6), Some(WHITE_CONCRETE));
         assert!(!(20..60).any(|x| kerb(x, 6) || kerb(x, -6)));
         // A right angle is tight, so the outside is kerbed as well.
         assert!((90..110).any(|x| kerb(x, -6)));
@@ -685,7 +770,7 @@ mod tests {
         let centre = (0.0f32, 60.0f32);
         let mut inner = 0;
         let mut outer = 0;
-        for (&(x, z), &b) in &paint.cells {
+        for (&(_, x, z), &b) in &paint.cells {
             if b != RED_CONCRETE {
                 continue;
             }
@@ -704,7 +789,7 @@ mod tests {
     fn kerbs_stripe_red_and_white() {
         let paint =
             RacewayPaint::build(&[circuit(1, &[(1, 0, 0), (2, 100, 0), (3, 100, 100)])], 1.0);
-        let row: Vec<Block> = (80..100).filter_map(|x| paint.at(x, 6)).collect();
+        let row: Vec<Block> = (80..100).filter_map(|x| paint.at(0, x, 6)).collect();
         assert!(row.contains(&RED_CONCRETE) && row.contains(&WHITE_CONCRETE));
     }
 
@@ -745,7 +830,7 @@ mod tests {
         );
         let paint = RacewayPaint::build(&[pit], 1.0);
         assert!(!paint.cells.values().any(|&b| b == RED_CONCRETE));
-        assert_eq!(paint.at(20, 6), Some(WHITE_CONCRETE));
+        assert_eq!(paint.at(0, 20, 6), Some(WHITE_CONCRETE));
     }
 
     #[test]
@@ -759,7 +844,7 @@ mod tests {
             1.0,
         );
         for x in 96..=104 {
-            assert_ne!(paint.at(x, 6), Some(WHITE_CONCRETE), "x={x}");
+            assert_ne!(paint.at(0, x, 6), Some(WHITE_CONCRETE), "x={x}");
         }
     }
 
@@ -775,7 +860,7 @@ mod tests {
             1.0,
         );
         for z in -6..=6 {
-            let pair = (paint.at(99, z), paint.at(100, z));
+            let pair = (paint.at(0, 99, z), paint.at(0, 100, z));
             assert!(
                 matches!(
                     pair,
@@ -785,8 +870,68 @@ mod tests {
                 "z={z}: {pair:?}"
             );
         }
-        assert_eq!(paint.at(98, 0), None);
-        assert_eq!(paint.at(101, 0), None);
+        assert_eq!(paint.at(0, 98, 0), None);
+        assert_eq!(paint.at(0, 101, 0), None);
+    }
+
+    #[test]
+    fn a_bridge_keeps_both_tracks_edges_where_they_cross() {
+        let bridge = raceway(
+            2,
+            &[(3, 100, -80), (4, 100, 80)],
+            &[
+                ("sport", "motor"),
+                ("surface", "asphalt"),
+                ("bridge", "yes"),
+                ("layer", "1"),
+            ],
+        );
+        let paint = RacewayPaint::build(&[circuit(1, &[(1, 0, 0), (2, 200, 0)]), bridge], 1.0);
+        for x in 94..=106 {
+            assert_eq!(paint.at(0, x, 6), Some(WHITE_CONCRETE), "ground edge x={x}");
+        }
+        for z in -6..=6 {
+            assert_eq!(paint.at(1, 106, z), Some(WHITE_CONCRETE), "deck edge z={z}");
+            assert_eq!(paint.at(1, 100, z), None, "deck middle z={z}");
+        }
+    }
+
+    #[test]
+    fn no_line_across_where_a_track_runs_onto_a_bridge() {
+        let deck = [
+            ("sport", "motor"),
+            ("surface", "asphalt"),
+            ("bridge", "yes"),
+        ];
+        let paint = RacewayPaint::build(
+            &[
+                circuit(1, &[(1, 0, 0), (2, 100, 0)]),
+                raceway(2, &[(2, 100, 0), (3, 140, 0)], &deck),
+                circuit(3, &[(3, 140, 0), (4, 240, 0)]),
+            ],
+            1.0,
+        );
+        for (d, x) in [(0, 100), (1, 100), (1, 140), (0, 140)] {
+            for z in -5..=5 {
+                assert_eq!(paint.at(d, x, z), None, "deck {d} ({x},{z})");
+            }
+        }
+        assert_eq!(paint.at(1, 120, 6), Some(WHITE_CONCRETE));
+    }
+
+    #[test]
+    fn a_pit_lane_beside_a_corner_leaves_the_circuit_its_kerbs() {
+        // The pit lane's centreline is nearer the circuit's inner rim than the circuit's own.
+        let pit = raceway(
+            2,
+            &[(5, 40, 11), (6, 94, 11)],
+            &[("sport", "motor"), ("raceway", "pitlane"), ("width", "4")],
+        );
+        let paint = RacewayPaint::build(
+            &[circuit(1, &[(1, 0, 0), (2, 100, 0), (3, 100, 100)]), pit],
+            1.0,
+        );
+        assert!((85..92).any(|x| paint.at(0, x, 6) == Some(RED_CONCRETE)));
     }
 
     #[test]
@@ -802,8 +947,9 @@ mod tests {
             let dx = if cx == 0 { 1 } else { -1 };
             let dz = if cz == 0 { 1 } else { -1 };
             let near = (0..12).any(|k| {
-                (0..12)
-                    .any(|j| paint.at(cx + dx * (4 + k), cz + dz * (4 + j)) == Some(RED_CONCRETE))
+                (0..12).any(|j| {
+                    paint.at(0, cx + dx * (4 + k), cz + dz * (4 + j)) == Some(RED_CONCRETE)
+                })
             });
             assert!(near, "corner ({cx},{cz})");
         }

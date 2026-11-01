@@ -93,7 +93,7 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
 fn relation_ground_fill_area(rel: &ProcessedRelation) -> Option<f64> {
     let tags = &rel.tags;
     match RelationArea::of(tags) {
-        Some(RelationArea::Natural | RelationArea::Park | RelationArea::Pool) => {}
+        Some(RelationArea::Natural | RelationArea::Leisure | RelationArea::Pool) => {}
         Some(RelationArea::Landuse) if landuse_paints_ground(tags) => {}
         _ => return None,
     }
@@ -642,7 +642,7 @@ fn process_element(
                     bridge_surface,
                 );
             }
-            Some(RelationArea::Park) => {
+            Some(RelationArea::Leisure) => {
                 leisure::generate_leisure_from_relation(
                     editor,
                     rel,
