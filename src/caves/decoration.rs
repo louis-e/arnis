@@ -1039,10 +1039,42 @@ pub(super) fn plan_geodes(
     writes
 }
 
-/// overwrite any block (except bedrock) — used for the geode shells/hollow so they carve into solid
-/// rock (the None/None path only fills air).
+/// What a geode carves into: rock, ores, cave air and fluids, never a tunnel or hall dug there.
+const GEODE_HOST: &[Block] = &[
+    STONE,
+    DEEPSLATE,
+    TUFF,
+    COBBLED_DEEPSLATE,
+    GRANITE,
+    DIORITE,
+    ANDESITE,
+    GRAVEL,
+    DIRT,
+    AIR,
+    WATER,
+    LAVA,
+    SMOOTH_BASALT,
+    AMETHYST_BLOCK,
+    BUDDING_AMETHYST,
+    COAL_ORE,
+    DEEPSLATE_COAL_ORE,
+    IRON_ORE,
+    DEEPSLATE_IRON_ORE,
+    COPPER_ORE,
+    DEEPSLATE_COPPER_ORE,
+    GOLD_ORE,
+    DEEPSLATE_GOLD_ORE,
+    REDSTONE_ORE,
+    DEEPSLATE_REDSTONE_ORE,
+    LAPIS_ORE,
+    DEEPSLATE_LAPIS_ORE,
+    DIAMOND_ORE,
+    DEEPSLATE_DIAMOND_ORE,
+];
+
+/// Geode shells and hollows replace solid rock (the None/None path only fills air).
 fn geode_set(ed: &mut WorldEditor, b: Block, x: i32, y: i32, z: i32) {
-    ed.set_block_absolute(b, x, y, z, None, Some(&[BEDROCK]));
+    ed.set_block_absolute(b, x, y, z, Some(GEODE_HOST), None);
 }
 
 /// exact 1-in-`denom` rarity (unlike `chance`, which is ‰-resolution and can't express anything
