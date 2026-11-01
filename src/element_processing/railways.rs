@@ -27,6 +27,8 @@ const CATENARY_WIRE_HEIGHT: i32 = 6;
 
 /// Vertical offset in blocks from the terrain surface to the tunnel ceiling.
 const RAIL_TUNNEL_DEPTH: i32 = 3;
+/// Surface to the floor of a rail tunnel.
+pub(crate) const RAIL_TUNNEL_FLOOR_DEPTH: i32 = RAIL_TUNNEL_DEPTH + INTERIOR_HEIGHT + 1;
 
 pub(crate) const RAIL_BRIDGE_FLAT_CLEARANCE: i32 = 4;
 pub(crate) const RAIL_BRIDGE_DIP_THRESHOLD: i32 = 4;
@@ -305,6 +307,14 @@ fn generate_at_grade_rail(
         pin_end(&mut pins, e, end, level.unwrap_or(ground[end_cell(n, e)]));
     }
     pin_area_edge(&mut pins, rail_joins, &cells, |i| ground[i]);
+    // Along a platform the rail lies level with it.
+    if let Some(stations) = editor.stations() {
+        for (i, &(x, z)) in cells.iter().enumerate() {
+            if let Some(bed) = stations.track_bed(element.id, x, z) {
+                pins[i] = Some(bed);
+            }
+        }
+    }
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -521,6 +531,11 @@ fn mast_base_clear(
     !rail_within(rail_mask, cx, cz, dx, dz, CATENARY_MAST_OFFSET + 2)
 }
 
+/// Whether a station platform covers the mast's spot.
+fn on_platform(editor: &WorldEditor, x: i32, z: i32) -> bool {
+    editor.stations().is_some_and(|s| s.is_platform(x, z))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn place_catenary_mast(
     editor: &mut WorldEditor,
@@ -534,9 +549,17 @@ fn place_catenary_mast(
     rail_mask: &CoordinateBitmap,
 ) {
     // one consistent side, flipped if that side is blocked
-    let side = if mast_base_clear(cx, cz, px, pz, road_mask, building_footprints, rail_mask) {
+    let clear = |sx: i32, sz: i32| {
+        mast_base_clear(cx, cz, sx, sz, road_mask, building_footprints, rail_mask)
+            && !on_platform(
+                editor,
+                cx + sx * CATENARY_MAST_OFFSET,
+                cz + sz * CATENARY_MAST_OFFSET,
+            )
+    };
+    let side = if clear(px, pz) {
         (px, pz)
-    } else if mast_base_clear(cx, cz, -px, -pz, road_mask, building_footprints, rail_mask) {
+    } else if clear(-px, -pz) {
         (-px, -pz)
     } else {
         return;
@@ -1115,8 +1138,11 @@ fn generate_rail_bridge(
                 let Some(railing) = railing else {
                     continue;
                 };
-                // No railing where the ramp is nearly back on the ground.
-                if y - ground < 2 {
+                // No railing where the ramp is nearly back on the ground, nor along a platform.
+                let by_platform = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .any(|&(dx, dz)| on_platform(editor, cx + dx, cz + dz));
+                if y - ground < 2 || by_platform {
                     prev_tops[s] = None;
                     continue;
                 }
@@ -1492,7 +1518,7 @@ fn generate_rail_tunnel_shell(
         return;
     }
     let ends = rail_joins.ends(element.id);
-    let depth = RAIL_TUNNEL_DEPTH + INTERIOR_HEIGHT + 1;
+    let depth = RAIL_TUNNEL_FLOOR_DEPTH;
     let ground: Vec<i32> = cells
         .iter()
         .map(|&(x, z)| editor.get_ground_level(x, z))
@@ -1518,13 +1544,20 @@ fn generate_rail_tunnel_shell(
     // Never under the world's floor: low ground keeps its tunnel just below the surface.
     let lowest = crate::world_editor::min_y() + 1;
     let mut pins = vec![None; n];
+    let mut joint_low: Option<i32> = None;
     for (e, end) in ends.iter().enumerate() {
         // At a portal the floor comes up to the track outside; underground it keeps its depth.
         let at = end_cell(n, e);
         let level = if end.meets_surface {
             ground[at]
         } else {
-            deep[at]
+            // Next to a deep hall the joint lies lower, so both ways share the climb.
+            let joint = editor
+                .stations()
+                .and_then(|s| s.joint_floor(cells[at].0, cells[at].1))
+                .filter(|&j| j < deep[at]);
+            joint_low = joint.map_or(joint_low, |j| Some(joint_low.map_or(j, |l| l.min(j))));
+            joint.unwrap_or(deep[at])
         };
         pin_end(&mut pins, e, end, level.max(lowest));
     }
@@ -1543,6 +1576,28 @@ fn generate_rail_tunnel_shell(
     pin_area_edge(&mut pins, rail_joins, &cells, |i| {
         (ground[i] - depth).max(lowest)
     });
+    // Through a station hall the track keeps the hall's floor, and goes under another's.
+    let stations = editor.stations();
+    let hall_pins: Vec<Option<crate::element_processing::stations::TunnelPin>> = cells
+        .iter()
+        .map(|&(x, z)| {
+            stations
+                .as_ref()
+                .and_then(|s| s.tunnel_pin(element.id, x, z))
+        })
+        .collect();
+    for (pin, hall) in pins.iter_mut().zip(&hall_pins) {
+        if let Some(h) = hall {
+            *pin = Some(h.floor);
+        }
+    }
+    // Room to ramp down to a hall's floor or a lowered joint, however deep it lies.
+    let pin_low = hall_pins
+        .iter()
+        .flatten()
+        .map(|h| h.floor)
+        .chain(joint_low)
+        .min();
     let straight = straight_cells(
         &cells,
         ends[0].beyond.first().copied(),
@@ -1553,7 +1608,9 @@ fn generate_rail_tunnel_shell(
         |i| {
             pins[i].map_or(
                 (
-                    (deep[i] - RAIL_BED_REACH).max(lowest),
+                    (deep[i] - RAIL_BED_REACH)
+                        .min(pin_low.unwrap_or(i32::MAX))
+                        .max(lowest),
                     ground[i].max(lowest),
                 ),
                 |p| (p, p),
@@ -1583,6 +1640,11 @@ fn generate_rail_tunnel_shell(
         let ceil_y = floor_y + INTERIOR_HEIGHT + 1;
         // Lanterns are counted along the way, not the shared list, so they don't move with
         // how many tiles recorded the tunnel or in which order they merged.
+        // A hall hollows, lights and walls the track itself: carving its bore too would eat
+        // the shell of the next cell where that ramps out of the hall.
+        if hall_pins[i].is_some_and(|h| h.in_hall) {
+            continue;
+        }
         rail_tunnel_points.push((bx, bz, floor_y, i.is_multiple_of(LIGHT_INTERVAL)));
 
         // Safety: skip if the tunnel would go below world minimum.
@@ -1638,7 +1700,53 @@ fn generate_rail_tunnel_shell(
         if lays_cell(&ends, n, i) {
             editor.set_block_absolute(shapes[i], bx, floor_y + 1, bz, Some(over), None);
         }
-        editor.register_rail(element.id, bx, bz, floor_y + 1);
+        editor.register_buried_rail(element.id, bx, bz, floor_y + 1);
+    }
+}
+
+/// Leaves a crown hangs over a track with.
+const GAUGE_LEAVES: &[Block] = &[
+    OAK_LEAVES,
+    BIRCH_LEAVES,
+    SPRUCE_LEAVES,
+    DARK_OAK_LEAVES,
+    JUNGLE_LEAVES,
+    ACACIA_LEAVES,
+    CHERRY_LEAVES,
+    MANGROVE_LEAVES,
+    AZALEA_LEAVES,
+    FLOWERING_AZALEA_LEAVES,
+];
+/// Cells either side of a rail a train fills: three wide, as the widest coach.
+const GAUGE_HALF_WIDTH: i32 = 1;
+/// Blocks over the rail a train fills, up to the contact wire.
+const GAUGE_HEIGHT: i32 = CATENARY_WIRE_HEIGHT - 1;
+
+/// Takes the crowns out of the space over every rail laid here, once the trees stand.
+/// Trunks keep off the track (`StationIndex::keeps_trees_off`), so wood there is a branch;
+/// the rail's own level is left alone, where a bridge deck next along has its sleepers.
+pub fn clear_rail_gauge(editor: &mut WorldEditor, building_footprints: &CoordinateBitmap) {
+    let leaves_and_wood: Vec<Block> = GAUGE_LEAVES
+        .iter()
+        .chain(crate::ground_decoration::WOOD)
+        .copied()
+        .collect();
+    for (x, z, y) in editor.take_laid_rails() {
+        for dx in -GAUGE_HALF_WIDTH..=GAUGE_HALF_WIDTH {
+            for dz in -GAUGE_HALF_WIDTH..=GAUGE_HALF_WIDTH {
+                if building_footprints.contains(x + dx, z + dz) {
+                    continue;
+                }
+                for dy in 0..=GAUGE_HEIGHT {
+                    let clears = if dy == 0 {
+                        GAUGE_LEAVES
+                    } else {
+                        &leaves_and_wood[..]
+                    };
+                    editor.set_block_absolute(AIR, x + dx, y + dy, z + dz, Some(clears), None);
+                }
+            }
+        }
     }
 }
 
@@ -1860,6 +1968,39 @@ mod tests {
             editor.block_exists_absolute(24, light + 1, 40),
             "the light at y={light} hangs in the air"
         );
+    }
+
+    #[test]
+    fn crowns_over_a_track_are_cut_back_to_its_gauge() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 40, 40).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        editor.set_block_absolute(RAIL_EAST_WEST, 20, 1, 20, None, None);
+        editor.register_rail(1, 20, 20, 1);
+        for y in 1..=GAUGE_HEIGHT + 2 {
+            for dz in -2..=2 {
+                editor.set_block_absolute(OAK_LEAVES, 20, y, 20 + dz, None, None);
+                editor.set_block_absolute(OAK_LEAVES, 21, y, 20 + dz, None, None);
+            }
+        }
+        // A branch over the track, and a deck's sleeper beside the rail.
+        editor.set_block_absolute(OAK_LOG, 20, 3, 21, None, Some(&[]));
+        editor.set_block_absolute(OAK_LOG, 20, 1, 19, None, Some(&[]));
+        let mut houses = CoordinateBitmap::new(&xzbbox);
+        houses.set(21, 21);
+        clear_rail_gauge(&mut editor, &houses);
+
+        let open = |e: &WorldEditor, x: i32, y: i32, z: i32| {
+            e.get_block_absolute(x, y, z).is_none_or(|b| b == AIR)
+        };
+        assert_eq!(editor.get_block_absolute(20, 1, 20), Some(RAIL_EAST_WEST));
+        for dz in -1..=1 {
+            assert!((2..=1 + GAUGE_HEIGHT).all(|y| open(&editor, 20, y, 20 + dz)));
+        }
+        assert!(!open(&editor, 20, 2 + GAUGE_HEIGHT, 20));
+        assert!(!open(&editor, 20, 3, 22));
+        assert!(open(&editor, 20, 1, 21) && !open(&editor, 20, 1, 19));
+        assert!(!open(&editor, 21, 3, 21) && open(&editor, 21, 3, 20));
+        assert!(editor.take_laid_rails().is_empty());
     }
 
     // A straight east-west rail from x=20 to x=60 at z=50 (so cell index == x - 20).

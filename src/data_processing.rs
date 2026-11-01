@@ -1224,6 +1224,25 @@ pub fn generate_world_with_options(
         args.scale,
     );
 
+    // Platforms and halls, laid out before any track so the tracks can keep level with them.
+    let stations = Arc::new(stations::StationIndex::build(
+        &elements,
+        &stations::StationInputs {
+            editor: &editor,
+            xzbbox: &xzbbox,
+            bridges: &bridge_structures,
+            tunnel_footprint: &tunnel_footprint,
+            building_footprints: &building_footprints,
+            road_mask: &road_mask,
+            rail_joins: &rail_joins,
+            scale: args.scale,
+            timeout: args.timeout.as_ref(),
+            underground: args.mode != GenerationMode::Blueprint,
+        },
+    ));
+    editor.set_stations(Arc::clone(&stations));
+    let mut station_voids: Vec<stations::StationVoid> = Vec::new();
+
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
 
@@ -1562,6 +1581,8 @@ pub fn generate_world_with_options(
                 tile_bounds.max_x - 1,
                 tile_bounds.max_z - 1,
             );
+            tile_editor.set_stations(Arc::clone(&stations));
+            stations.register_levels(&mut tile_editor);
 
             let mut tile_rail_tunnel_points: Vec<railways::RailTunnelPoint> = Vec::new();
             let mut tile_tunnel_cells: Vec<highways::HighwayTunnelCell> = Vec::new();
@@ -1610,6 +1631,8 @@ pub fn generate_world_with_options(
             }
 
             release_tile_fills(&tile_fill_ids[tile_idx], &fill_readers, &flood_fill_cache);
+            let mut tile_station_voids: Vec<stations::StationVoid> = Vec::new();
+            stations.render(&mut tile_editor, &mut tile_station_voids);
 
             // Per-tile ground + ore + ESA-water over strict bounds (parallel);
             // neighbour reads use the editor halo from intersection assignment.
@@ -1631,9 +1654,14 @@ pub fn generate_world_with_options(
                 g_max_z,
                 false,
             );
+            railways::clear_rail_gauge(&mut tile_editor, &building_footprints);
             // Caves bring their own vanilla ore table, placed after the carve so no
             // vein hangs in a cave; the plain veins only fill caveless ground.
             if args.caves {
+                let dug = |x: i32, z: i32| {
+                    (!tunnel_footprint.is_empty() && tunnel_footprint.contains(x, z))
+                        || stations.digs(x, z)
+                };
                 crate::caves::carve_region(
                     &mut tile_editor,
                     args,
@@ -1642,6 +1670,7 @@ pub fn generate_world_with_options(
                     g_max_x,
                     g_min_z,
                     g_max_z,
+                    &dug,
                 );
             } else if args.fillground {
                 crate::ore_generation::generate_ores_region(
@@ -1680,6 +1709,7 @@ pub fn generate_world_with_options(
                     &tile_tunnel_cells,
                 ));
                 highways::hang_tunnel_lights(&mut tile_editor, &lights);
+                stations::carve_voids(&mut tile_editor, &tile_station_voids);
             }
             // Seal floating water/lava last: the water-depth carve and the tunnel carves
             // above can each undercut a water body over a cave. Under eviction this tile
@@ -1710,6 +1740,7 @@ pub fn generate_world_with_options(
                 tile_rail_tunnel_points,
                 tile_tunnel_cells,
                 tile_road_overrides,
+                tile_station_voids,
             )
         };
 
@@ -1769,6 +1800,7 @@ pub fn generate_world_with_options(
                         tile_rail_tunnel_points,
                         tile_tunnel_cells,
                         tile_road_overrides,
+                        tile_station_voids,
                     )) = pending.remove(&next_merge)
                     {
                         let merge_start = std::time::Instant::now();
@@ -1871,6 +1903,11 @@ pub fn generate_world_with_options(
                                     .filter(|p| tiles[tile_idx].contains(p.0, p.1)),
                             );
                             tunnel_cells.extend(tile_tunnel_cells);
+                            station_voids.extend(
+                                tile_station_voids
+                                    .into_iter()
+                                    .filter(|v| tiles[tile_idx].contains(v.0, v.1)),
+                            );
                         }
 
                         // Step 20%->70% per merged tile, throttled to whole-percent steps.
@@ -1919,6 +1956,7 @@ pub fn generate_world_with_options(
         drop(elements);
     } else {
         // Small area: sequential processing along the original code path.
+        stations.register_levels(&mut editor);
         let elements_count: usize = elements.len();
         // A way's flood fill is read by the way itself and by every relation
         // listing it as a member, and sort_ground_fill_areas interleaves both
@@ -2040,6 +2078,7 @@ pub fn generate_world_with_options(
 
         process_pb.inc(element_counter % pb_batch_size);
         process_pb.finish();
+        stations.render(&mut editor, &mut station_voids);
         bench.mark("elements_sequential");
     }
 
@@ -2063,6 +2102,7 @@ pub fn generate_world_with_options(
             &tunnel_footprint,
             &bridge_surface,
         )?;
+        railways::clear_rail_gauge(&mut editor, &building_footprints);
     }
     bench.mark("ground_gen");
 
@@ -2070,7 +2110,11 @@ pub fn generate_world_with_options(
         if args.caves {
             println!("{} Carving caves...", "[6b/7]".bold());
             emit_gui_progress_update(89.0, "Carving caves...");
-            crate::caves::carve(&mut editor, args, &xzbbox);
+            let dug = |x: i32, z: i32| {
+                (!tunnel_footprint.is_empty() && tunnel_footprint.contains(x, z))
+                    || stations.digs(x, z)
+            };
+            crate::caves::carve(&mut editor, args, &xzbbox, &dug);
         } else if args.fillground {
             crate::ore_generation::generate_ores(&mut editor, &xzbbox);
         }
@@ -2138,7 +2182,9 @@ pub fn generate_world_with_options(
             ));
         }
         highways::hang_tunnel_lights(&mut editor, &lights);
+        stations::carve_voids(&mut editor, &station_voids);
     }
+    drop(station_voids);
     // Seal floating water/lava as the final underground pass; eviction tiles did it in-tile.
     if args.caves && !eviction_active {
         crate::caves::seal_floating_fluid_region(

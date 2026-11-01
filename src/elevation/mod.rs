@@ -378,6 +378,36 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
     compute_grid_dims_for_world(world_width, world_height)
 }
 
+/// A `BoreCrossing` per platform point a hall is dug under: room for the hall's depth over
+/// the floor, on the terrain there.
+fn station_crossings(
+    stations: &[peaks::StationHint],
+    bbox: &LLBBox,
+    height_grid: &[Vec<f64>],
+) -> Vec<crate::water_depth::BoreCrossing> {
+    let gh = height_grid.len();
+    let gw = height_grid.first().map_or(0, Vec::len);
+    if gw < 2 || gh < 2 {
+        return Vec::new();
+    }
+    let (min_lat, max_lat) = (bbox.min().lat(), bbox.max().lat());
+    let (min_lon, max_lon) = (bbox.min().lng(), bbox.max().lng());
+    stations
+        .iter()
+        .filter(|s| peaks::inside(bbox, s.lat, s.lon))
+        .filter_map(|s| {
+            let x = ((s.lon - min_lon) / (max_lon - min_lon) * (gw - 1) as f64).round() as usize;
+            let y = ((max_lat - s.lat) / (max_lat - min_lat) * (gh - 1) as f64).round() as usize;
+            let h = *height_grid.get(y)?.get(x)?;
+            // The room asked is depth + 2 + BORE_ROOM over the floor; a hall wants depth + 1.
+            h.is_finite().then(|| crate::water_depth::BoreCrossing {
+                depth: s.depth - 1 - crate::water_depth::BORE_ROOM,
+                lowest_m: h,
+            })
+        })
+        .collect()
+}
+
 /// `compute_grid_dims` for a world whose block size is already known.
 pub fn compute_grid_dims_for_world(
     world_width: usize,
@@ -559,7 +589,7 @@ pub fn fetch_elevation_data(
     );
     // A tunnel under the water has to get under its carved bed, and the floor the carve
     // was given may leave no room for one.
-    let crossings = land_cover.as_deref().map_or_else(Vec::new, |lc| {
+    let mut crossings = land_cover.as_deref().map_or_else(Vec::new, |lc| {
         let cells = peaks::bore_water_cells(lc, bbox, &hints.bores);
         // The repair skips a land cover of another size than the heights; so do these.
         crate::water_depth::bore_crossings(&lc.grid, world_width, world_height, &cells, |x, y| {
@@ -570,6 +600,8 @@ pub fn fetch_elevation_data(
                 .unwrap_or(f64::NAN)
         })
     });
+    // A station hall needs its depth over the floor too, on the ground over its platform.
+    crossings.extend(station_crossings(&hints.stations, bbox, &height_grid));
     let (band, taller) = if crossings.is_empty() {
         (band, taller)
     } else {

@@ -913,6 +913,42 @@ fn keys_for_element(
         }
         ProcessedElement::Relation(_) => {}
     }
+    // Only a surface platform standing clear of the ground shows its board.
+    if !matches!(element, ProcessedElement::Node(_))
+        && crate::element_processing::stations::is_rail_platform(tags)
+        && !crate::element_processing::stations::tagged_underground(tags)
+        && !crate::element_processing::stations::is_low(tags)
+    {
+        if let Some(NameSign::Decal(k)) = platform_name_sign(tags.get("name")) {
+            keys.insert(k);
+        }
+    }
+}
+
+fn platform_name_sign(name: Option<&String>) -> Option<NameSign> {
+    let mut tags = HashMap::new();
+    tags.insert("name".to_string(), name?.clone());
+    name_sign(&tags, TextStyle::StationBoard, |_| 3)
+}
+
+/// A platform's name board, on the face of the block at (x, y, z) facing `facing`.
+pub(crate) fn place_platform_name(
+    editor: &mut WorldEditor,
+    x: i32,
+    y: i32,
+    z: i32,
+    facing: i8,
+    name: &str,
+) -> bool {
+    let Some(sign) = platform_name_sign(Some(&name.to_string())) else {
+        return false;
+    };
+    if let NameSign::Decal(key) = &sign {
+        if editor.signage().is_none_or(|ctx| !ctx.has(key)) {
+            return false;
+        }
+    }
+    place_name_sign(editor, x, y, z, facing, &sign)
 }
 
 /// Tile budget for one world. Each tile is two map files on disk, so a whole city's worth

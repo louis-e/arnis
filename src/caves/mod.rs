@@ -130,7 +130,12 @@ fn biome_amounts(args: &Args) -> BiomeAmounts {
 }
 
 /// Carve caves into the solid fillground across the whole bbox.
-pub fn carve(editor: &mut WorldEditor, args: &Args, xzbbox: &XZBBox) {
+pub fn carve(
+    editor: &mut WorldEditor,
+    args: &Args,
+    xzbbox: &XZBBox,
+    keep_out: &dyn Fn(i32, i32) -> bool,
+) {
     carve_region(
         editor,
         args,
@@ -139,6 +144,7 @@ pub fn carve(editor: &mut WorldEditor, args: &Args, xzbbox: &XZBBox) {
         xzbbox.max_x(),
         xzbbox.min_z(),
         xzbbox.max_z(),
+        keep_out,
     );
 }
 
@@ -146,6 +152,8 @@ pub fn carve(editor: &mut WorldEditor, args: &Args, xzbbox: &XZBBox) {
 /// world `world`. Noise is a pure position-fn, so per-tile carving is seamless (same coords → same
 /// density), and the features that cross tile edges are planned against the pure [`CaveShape`].
 /// Nothing is written outside the rect: a tile editor's halo merges into its neighbour's caves.
+/// `keep_out` marks columns dug by tunnels and stations, which geodes keep out of.
+#[allow(clippy::too_many_arguments)]
 pub fn carve_region(
     editor: &mut WorldEditor,
     args: &Args,
@@ -154,6 +162,7 @@ pub fn carve_region(
     max_x: i32,
     min_z: i32,
     max_z: i32,
+    keep_out: &dyn Fn(i32, i32) -> bool,
 ) {
     // The ore variants and the lava rims match the host rock, so the deepslate line goes first.
     deepslate::apply_region(editor, min_x, max_x, min_z, max_z);
@@ -428,6 +437,7 @@ pub fn carve_region(
         &shape,
         &plan,
         region,
+        keep_out,
     );
 }
 
@@ -801,7 +811,7 @@ mod tests {
         let plan_for = |region: Rect| {
             let shape = CaveShape::new(&gen, SEED, world, region, rolling_surface);
             let water = water::plan(&shape, &decor, SEED, region);
-            let geodes = decoration::plan_geodes(decor.seed, &shape, &water, region);
+            let geodes = decoration::plan_geodes(decor.seed, &shape, &water, region, &|_, _| false);
             (water, geodes)
         };
         let within = |cells: &HashSet<i64>, part: Rect| -> BTreeSet<i64> {
@@ -899,7 +909,16 @@ mod tests {
             }
         }
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4", "--caves"]);
-        carve_region(&mut editor, &args, xzbbox, 0, SIDE - 1, 0, SIDE - 1);
+        carve_region(
+            &mut editor,
+            &args,
+            xzbbox,
+            0,
+            SIDE - 1,
+            0,
+            SIDE - 1,
+            &|_, _| false,
+        );
         editor
     }
 
