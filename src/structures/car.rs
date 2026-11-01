@@ -37,16 +37,7 @@ fn cars() -> &'static [(StructureSchematic, u8)] {
             SEDAN,
         ]
         .iter()
-        .filter_map(|bytes| match load_structure(bytes) {
-            Ok(s) => {
-                let align = if s.width > s.length { 1 } else { 0 };
-                Some((s.centered(), align))
-            }
-            Err(e) => {
-                eprintln!("car load failed: {e}");
-                None
-            }
-        })
+        .filter_map(|bytes| load(bytes))
         .collect()
     })
 }
@@ -79,6 +70,30 @@ pub fn maybe_place_car_on_deck(
     park(editor, cx, cz, base_y, rot_base, h, max_height);
 }
 
+/// The camper, pickup, SUV and sedan, at fixed places even if one fails to load.
+fn vehicles() -> &'static [Option<(StructureSchematic, u8)>] {
+    static CELL: OnceLock<Vec<Option<(StructureSchematic, u8)>>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        [CAMPER, PICKUP, SUV, SEDAN]
+            .iter()
+            .map(|b| load(b))
+            .collect()
+    })
+}
+
+fn load(bytes: &[u8]) -> Option<(StructureSchematic, u8)> {
+    match load_structure(bytes) {
+        Ok(s) => {
+            let align = if s.width > s.length { 1 } else { 0 };
+            Some((s.centered(), align))
+        }
+        Err(e) => {
+            eprintln!("car load failed: {e}");
+            None
+        }
+    }
+}
+
 /// The camper van, or one of the private cars, at (cx, cz) with its length turned by `rot_base`.
 pub fn place_vehicle(
     editor: &mut WorldEditor,
@@ -91,13 +106,8 @@ pub fn place_vehicle(
     if !editor.place_prop(super::Prop::Car) {
         return;
     }
-    // Indices into `cars()`: the camper, then pickup, SUV and sedan.
-    let i = if camper {
-        6
-    } else {
-        [7, 8, 9][(h % 3) as usize]
-    };
-    let Some((schem, align)) = cars().get(i) else {
+    let i = if camper { 0 } else { 1 + (h % 3) as usize };
+    let Some((schem, align)) = vehicles().get(i).and_then(Option::as_ref) else {
         return;
     };
     let flip = if (h >> 16) & 1 == 0 { 0 } else { 2 };

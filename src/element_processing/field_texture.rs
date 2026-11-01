@@ -1,5 +1,6 @@
 //! Farmland plots: one crop per field, laid out inside its OSM outline; sizes in metres.
 
+use super::area_layout::{cell_hash, mix};
 use crate::block_definitions::*;
 use crate::ground_generation::value_noise_01;
 use crate::land_cover::coord_hash;
@@ -108,18 +109,6 @@ impl Params {
             rows_along_x,
         }
     }
-}
-
-fn mix(mut h: u64) -> u64 {
-    h ^= h >> 30;
-    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h ^= h >> 27;
-    h = h.wrapping_mul(0x94D0_49BB_1331_11EB);
-    h ^ (h >> 31)
-}
-
-fn plot_key(a: u64, i: i64, j: i64) -> u64 {
-    mix(a ^ mix((i as u64) ^ mix(j as u64 ^ 0x51ED)))
 }
 
 fn sane_scale(scale: f64) -> f64 {
@@ -358,7 +347,9 @@ impl FieldLayout {
                 return plot;
             }
         }
-        let plot = self.params.plot(plot_key(self.id, i, j), self.rows_along_x);
+        let plot = self
+            .params
+            .plot(cell_hash(self.id, i, j), self.rows_along_x);
         self.last_plot.set(Some(((i, j), plot)));
         plot
     }
@@ -402,7 +393,7 @@ impl CroplandGrid {
         let b = match self.last_block.get() {
             Some(b) if b.key == key => b,
             _ => {
-                let hash = plot_key(0xC0FF_EE11, i64::from(key.0), i64::from(key.1));
+                let hash = cell_hash(0xC0FF_EE11, i64::from(key.0), i64::from(key.1));
                 let width = self.params.strip_blocks(self.scale, hash >> 8).round() as i32;
                 let b = StripBlock {
                     key,
@@ -424,7 +415,7 @@ impl CroplandGrid {
         }
         let plot = self
             .params
-            .plot(plot_key(b.hash, i64::from(strip), 0), b.rows_along_x);
+            .plot(cell_hash(b.hash, i64::from(strip), 0), b.rows_along_x);
         self.last_plot.set(Some(((b.hash, strip), plot)));
         plot
     }

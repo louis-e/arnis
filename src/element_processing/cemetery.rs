@@ -5,7 +5,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::decals::region::SignRegion;
 use crate::element_processing::area_layout::{
-    cell_hash, centroid, point_in_rings, AreaMask, Frame,
+    bounds, cell_hash, centroid, inside, point_in_rings, AreaMask, Frame,
 };
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
@@ -110,9 +110,12 @@ pub fn prepare(elements: &mut [ProcessedElement], region: SignRegion) {
                 ),
                 _ => continue,
             };
+            let boxes: Vec<_> = rings.iter().filter_map(|r| bounds(r)).collect();
             let inside: Vec<usize> = sectors
                 .iter()
-                .filter(|&&(j, c)| j != i && point_in_rings(&rings, c))
+                .filter(|&&(j, c)| {
+                    j != i && boxes.iter().any(|&b| inside(b, c)) && point_in_rings(&rings, c)
+                })
                 .map(|&(j, _)| j)
                 .collect();
             if !inside.is_empty() {
@@ -259,7 +262,7 @@ pub fn cemetery_area(
     }
 
     if is_cemetery(&way.tags) {
-        generate_wall(editor, way);
+        generate_wall(editor, way, road_mask, building_footprints);
     }
 }
 
@@ -271,10 +274,19 @@ fn clear_around(editor: &WorldEditor, x: i32, z: i32) -> bool {
     })
 }
 
-/// A stone-brick wall with a slab cap along the outline.
-fn generate_wall(editor: &mut WorldEditor, way: &ProcessedWay) {
+/// A stone-brick wall with a slab cap along the outline, open where a road or path enters and
+/// stopping at a church or other building on the line.
+fn generate_wall(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    road_mask: &RoadMaskBitmap,
+    footprints: &BuildingFootprintBitmap,
+) {
     for w in way.nodes.windows(2) {
         for (bx, _, bz) in bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z) {
+            if road_mask.contains(bx, bz) || footprints.contains(bx, bz) {
+                continue;
+            }
             editor.set_block(STONE_BRICK_WALL, bx, 1, bz, None, None);
             editor.set_block(STONE_BRICK_SLAB, bx, 2, bz, None, None);
         }

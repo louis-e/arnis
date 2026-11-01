@@ -55,6 +55,12 @@ pub fn generate_ice_rink(
         corner,
     };
     let (l, w) = (rink.frame.length(), rink.frame.width());
+    // A mapped surface wins: roller rinks and rinks mapped out of season.
+    let surface = way
+        .tags
+        .get("surface")
+        .and_then(|s| super::surfaces::get_blocks_for_surface(s))
+        .map_or(PACKED_ICE, |b| b[0]);
     // Lines only on a rink-shaped outline; a free-form one is a public skating rink.
     let cells = fill.iter().filter(|&&(x, z)| !in_hole(holes, x, z)).count() as f64;
     let rectangular = cells >= 0.85 * l * w;
@@ -73,14 +79,7 @@ pub fn generate_ice_rink(
         } else {
             None
         };
-        editor.set_block(
-            line.unwrap_or(PACKED_ICE),
-            x,
-            0,
-            z,
-            Some(&[GRASS_BLOCK]),
-            None,
-        );
+        editor.set_block(line.unwrap_or(surface), x, 0, z, Some(&[GRASS_BLOCK]), None);
         if !editor.owns(x, z) {
             continue;
         }
