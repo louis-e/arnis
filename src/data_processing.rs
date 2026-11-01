@@ -608,6 +608,8 @@ fn process_element(
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
+            } else if cemetery::is_mapped_grave(&node.tags) {
+                cemetery::generate_mapped_grave(editor, node, building_footprints);
             } else if camp_sites::is_pitch(&node.tags) {
                 camp_sites::generate_pitch_node(editor, node);
             } else if node.tags.contains_key("tourism") {
@@ -616,8 +618,6 @@ fn process_element(
                 man_made::generate_man_made_nodes(editor, node, args, building_footprints);
             } else if node.tags.contains_key("power") {
                 power::generate_power_nodes(editor, node);
-            } else if cemetery::is_mapped_grave(&node.tags) {
-                cemetery::generate_mapped_grave(editor, node, building_footprints);
             } else if node.tags.contains_key("historic") {
                 historic::generate_historic(editor, node);
             } else if node.tags.contains_key("emergency") {

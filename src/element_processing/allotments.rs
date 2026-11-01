@@ -17,7 +17,7 @@ const CROPS: [Block; 8] = [
     WHEAT_YOUNG,
     CARROTS_YOUNG,
     POTATOES_YOUNG,
-    BEETROOTS,
+    BEETROOTS_YOUNG,
 ];
 
 /// The colony's plot grid in the frame of its outline.
@@ -265,19 +265,10 @@ pub fn allotments_area(
         // The fruit trees of this plot and its neighbours can reach this column.
         if matches!(part, Part::Lawn | Part::Flowers | Part::Walk) {
             if let Some(p) = colony.plot_at(x, z) {
-                let mut column = [None::<Block>; 16];
-                let mut any = false;
                 // Trees stand far enough inside their plot that only its own reaches here.
                 if let Some(t) = colony.tree(p.key) {
                     if colony.mask.contains(t.0, t.1) && !footprints.contains(t.0, t.1) {
-                        any |= tree.paint(&mut column, x - t.0, z - t.1, x, z);
-                    }
-                }
-                if any {
-                    for (y, block) in column.iter().enumerate().skip(1) {
-                        if let Some(b) = block {
-                            editor.set_block(*b, x, y as i32, z, None, None);
-                        }
+                        tree.grow(editor, t, x, z);
                     }
                 }
             }

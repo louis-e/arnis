@@ -200,6 +200,27 @@ pub(crate) fn point_in_rings(rings: &[&[ProcessedNode]], (px, pz): (f64, f64)) -
     inside
 }
 
+/// Bounds of a ring as (min x, min z, max x, max z).
+pub(crate) fn bounds(nodes: &[ProcessedNode]) -> Option<(f64, f64, f64, f64)> {
+    let first = nodes.first()?;
+    Some(nodes.iter().fold(
+        (
+            first.x as f64,
+            first.z as f64,
+            first.x as f64,
+            first.z as f64,
+        ),
+        |(a, b, c, d), n| {
+            let (x, z) = (n.x as f64, n.z as f64);
+            (a.min(x), b.min(z), c.max(x), d.max(z))
+        },
+    ))
+}
+
+pub(crate) fn inside((x0, z0, x1, z1): (f64, f64, f64, f64), (x, z): (f64, f64)) -> bool {
+    x >= x0 && x <= x1 && z >= z0 && z <= z1
+}
+
 pub(crate) fn mix(mut h: u64) -> u64 {
     h ^= h >> 30;
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -210,7 +231,7 @@ pub(crate) fn mix(mut h: u64) -> u64 {
 
 /// A hash of an element and a lattice point, for per-plot choices every tile agrees on.
 pub(crate) fn cell_hash(id: u64, i: i64, j: i64) -> u64 {
-    mix(id ^ mix((i as u64) ^ mix(j as u64 ^ 0x51ED_270B)))
+    mix(id ^ mix((i as u64) ^ mix(j as u64 ^ 0x51ED)))
 }
 
 #[cfg(test)]

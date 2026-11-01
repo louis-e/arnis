@@ -2,7 +2,7 @@
 
 use crate::block_definitions::*;
 use crate::element_processing::area_layout::{
-    cell_hash, centroid, point_in_rings, AreaMask, Frame,
+    bounds, cell_hash, centroid, inside, point_in_rings, AreaMask, Frame,
 };
 use crate::element_processing::landuse::ground_is_protected;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache, RoadMaskBitmap};
@@ -43,10 +43,12 @@ pub fn prepare(elements: &mut [ProcessedElement]) {
     }
     for e in elements.iter_mut() {
         if let ProcessedElement::Way(w) = e {
-            if claims(&w.tags)
-                && pitches
-                    .iter()
-                    .any(|&p| point_in_rings(&[w.nodes.as_slice()], p))
+            let Some(bb) = claims(&w.tags).then(|| bounds(&w.nodes)).flatten() else {
+                continue;
+            };
+            if pitches
+                .iter()
+                .any(|&p| inside(bb, p) && point_in_rings(&[w.nodes.as_slice()], p))
             {
                 w.tags.insert(PITCHES_TAG.to_string(), "yes".to_string());
             }
@@ -79,11 +81,12 @@ impl Stay {
             63..=79 => Stay::Motorhome,
             _ => return None,
         };
-        let tents = matches!(stay, Stay::Dome | Stay::Ridge);
-        if tents && no("tents") || !tents && no("caravans") && no("motorhome") {
-            return None;
-        }
-        Some(stay)
+        let opted_out = match stay {
+            Stay::Dome | Stay::Ridge => no("tents"),
+            Stay::Caravan => no("caravans"),
+            Stay::Motorhome => no("motorhome"),
+        };
+        (!opted_out).then_some(stay)
     }
 
     /// Footprint as (across the pitch, back from the lane) offsets from its centre, inclusive.
@@ -342,6 +345,18 @@ pub fn generate_pitch_node(editor: &mut WorldEditor, node: &ProcessedNode) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_kind_of_stay_has_its_own_opt_out() {
+        let tags: HashMap<String, String> = [
+            ("tourism".to_string(), "camp_site".to_string()),
+            ("caravans".to_string(), "no".to_string()),
+        ]
+        .into();
+        let stays: Vec<Stay> = (0..400).filter_map(|h| Stay::pick(h, &tags)).collect();
+        assert!(!stays.contains(&Stay::Caravan));
+        assert!(stays.contains(&Stay::Motorhome) && stays.contains(&Stay::Dome));
+    }
 
     #[test]
     fn a_caravan_site_takes_no_tents() {

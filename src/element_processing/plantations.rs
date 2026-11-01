@@ -275,28 +275,18 @@ pub fn orchard_area(
             ((c - reach) / ctx.orchard.across).floor() as i64,
             ((c + reach) / ctx.orchard.across).floor() as i64,
         );
-        let mut column = [None::<Block>; 16];
+        let mut trunks: Vec<(i32, i32)> = (r0..=r1)
+            .flat_map(|r| (s0..=s1).map(move |s| (s, r)))
+            .filter_map(|(s, r)| ctx.tree(editor, road_mask, footprints, s, r))
+            .collect();
+        // This column's own trunk before any neighbour's crown.
+        trunks.sort_by_key(|&t| t != (x, z));
         let mut any = false;
-        for r in r0..=r1 {
-            for s in s0..=s1 {
-                if let Some(trunk) = ctx.tree(editor, road_mask, footprints, s, r) {
-                    any |= ctx
-                        .orchard
-                        .fruit
-                        .paint(&mut column, x - trunk.0, z - trunk.1, x, z);
-                }
-            }
+        for t in trunks {
+            any |= ctx.orchard.fruit.grow(editor, t, x, z);
         }
-        if !any {
-            if ground == GRASS_BLOCK && coord_hash(x ^ 0x0C, z).is_multiple_of(6) {
-                editor.set_block(GRASS, x, 1, z, None, None);
-            }
-            continue;
-        }
-        for (y, block) in column.iter().enumerate() {
-            if let Some(b) = block {
-                editor.set_block(*b, x, y as i32, z, None, None);
-            }
+        if !any && ground == GRASS_BLOCK && coord_hash(x ^ 0x0C, z).is_multiple_of(6) {
+            editor.set_block(GRASS, x, 1, z, None, None);
         }
     }
 }
@@ -345,44 +335,43 @@ impl Ctx {
 }
 
 impl Fruit {
-    /// Adds this tree's blocks at offset (dx, dz) from its trunk to `column` (index = height).
-    pub fn paint(
-        &self,
-        column: &mut [Option<Block>; 16],
-        dx: i32,
-        dz: i32,
-        x: i32,
-        z: i32,
-    ) -> bool {
+    /// Calls `put` with the height above the trunk's base and the block of every part of this
+    /// tree in the column (dx, dz) from its trunk; false when the tree does not reach it.
+    pub fn parts(&self, dx: i32, dz: i32, x: i32, z: i32, mut put: impl FnMut(i32, Block)) -> bool {
         let horiz = ((dx * dx + dz * dz) as f64).sqrt();
         if horiz > self.radius + 0.5 {
             return false;
         }
         let mut any = false;
         if dx == 0 && dz == 0 {
-            for y in 1..=self.trunk.min(15) {
-                column[y as usize] = Some(self.log);
+            for y in 1..=self.trunk {
+                put(y, self.log);
                 any = true;
             }
         }
         // A crown a little flatter than a ball, sitting on the trunk.
         let cy = self.trunk as f64 + self.radius * 0.8;
         let top = (cy + self.radius * 0.8).ceil() as i32;
-        for y in (self.trunk + 1).max(1)..=top.min(15) {
+        for y in (self.trunk + 1).max(1)..=top {
             let dy = (y as f64 - cy) / 0.8;
             let rough = (coord_hash(x * 7 + y, z) % 100) as f64 / 250.0;
             if horiz * horiz + dy * dy <= (self.radius + 0.3 - rough).powi(2) {
-                let slot = &mut column[y as usize];
-                if slot.is_none() {
-                    let accent = self
-                        .accent
-                        .filter(|_| coord_hash(x ^ y, z ^ 0x0A99) % 100 < 12);
-                    *slot = Some(accent.unwrap_or(self.leaves));
-                }
+                let accent = self
+                    .accent
+                    .filter(|_| coord_hash(x ^ y, z ^ 0x0A99) % 100 < 12);
+                put(y, accent.unwrap_or(self.leaves));
                 any = true;
             }
         }
         any
+    }
+
+    /// This tree's blocks in column (x, z), level with its trunk's base on sloping ground.
+    pub fn grow(&self, editor: &mut WorldEditor, trunk: (i32, i32), x: i32, z: i32) -> bool {
+        let base = editor.get_absolute_y(trunk.0, 0, trunk.1);
+        self.parts(x - trunk.0, z - trunk.1, x, z, |y, block| {
+            editor.set_block_absolute(block, x, base + y, z, None, None);
+        })
     }
 }
 
@@ -399,18 +388,33 @@ mod tests {
             leaves: OAK_LEAVES,
             accent: None,
         };
-        let mut c = [None; 16];
-        assert!(f.paint(&mut c, 0, 0, 10, 10));
-        assert_eq!(c[1], Some(OAK_LOG));
-        assert_eq!(c[2], Some(OAK_LEAVES));
-        let mut side = [None; 16];
-        assert!(
-            f.paint(&mut side, 1, 0, 11, 10),
-            "the crown reaches the next column"
-        );
-        assert!(side[1].is_none(), "nothing at trunk height beside it");
-        let mut far = [None; 16];
-        assert!(!f.paint(&mut far, 3, 0, 13, 10));
+        let column = |dx: i32| {
+            let mut c = std::collections::BTreeMap::new();
+            let reached = f.parts(dx, 0, 10 + dx, 10, |y, b| {
+                c.entry(y).or_insert(b);
+            });
+            (reached, c)
+        };
+        let (_, c) = column(0);
+        assert_eq!(c.get(&1), Some(&OAK_LOG));
+        assert_eq!(c.get(&2), Some(&OAK_LEAVES));
+        let (reached, side) = column(1);
+        assert!(reached, "the crown reaches the next column");
+        assert!(!side.contains_key(&1), "nothing at trunk height beside it");
+        assert!(!column(3).0);
+        // A palm at four times the scale still carries its crown.
+        let palm = Fruit {
+            trunk: 16,
+            radius: 12.8,
+            ..f
+        };
+        let mut top = 0;
+        palm.parts(0, 0, 0, 0, |y, b| {
+            if b == OAK_LEAVES {
+                top = top.max(y);
+            }
+        });
+        assert!(top > 30, "crown up to {top}");
     }
 }
 
