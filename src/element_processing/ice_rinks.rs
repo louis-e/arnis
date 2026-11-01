@@ -100,7 +100,7 @@ fn marking(a: f64, c: f64, l: f64, w: f64, s: f64) -> Option<Block> {
     let near = |v: f64, at: f64| (v - at).abs() < 0.5;
     let goal_line = 0.055 * l;
     let (mid_a, mid_c) = (l / 2.0, w / 2.0);
-    let radius = (4.57 * s).min(w * 0.2);
+    let radius = (4.57 * s).min(w * 0.2).min(0.08 * l);
     let ring = |ca: f64, cc: f64| {
         let d = (a - ca).hypot(c - cc);
         (d - radius).abs() < 0.5 || d < 0.6
