@@ -797,7 +797,7 @@ pub fn prescan(elements: &[ProcessedElement], args: &Args, already: &HashSet<Key
             continue;
         }
         // Rooftop seats over the road from a ballpark stay on their building.
-        if on_a_building(s, &others) {
+        if !is_building(s.tags()) && on_a_building(s, &others) {
             continue;
         }
         let (sx, sz) = s.shape.centroid;
