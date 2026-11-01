@@ -297,7 +297,7 @@ impl SparseCells {
     }
 
     /// Sets every cell of the square of half-side `r` round (x, z), a row at a time.
-    fn set_square(&mut self, x: i32, z: i32, r: i32) {
+    pub(crate) fn set_square(&mut self, x: i32, z: i32, r: i32) {
         for zz in z - r..=z + r {
             let mut x0 = x - r;
             while x0 <= x + r {
@@ -323,6 +323,14 @@ impl SparseCells {
 
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
+        self.blocks.iter().flat_map(|(&(bx, bz), words)| {
+            (0..256usize)
+                .filter(move |&bit| words[bit >> 6] & (1 << (bit & 63)) != 0)
+                .map(move |bit| ((bx << 4) | (bit & 15) as i32, (bz << 4) | (bit >> 4) as i32))
+        })
     }
 }
 

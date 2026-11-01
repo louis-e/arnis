@@ -11,6 +11,7 @@ use crate::element_processing::connected_blocks::{
     connected_iron_bars, four_connected_line, place_connected, stair_steps,
 };
 use crate::element_processing::get_nearest_non_road_block;
+use crate::element_processing::raceways;
 use crate::element_processing::road_markings::{self, CrossMark, CrossingPaint, RoadMarkingIndex};
 use crate::element_processing::surfaces::{
     cycleway_palette, get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
@@ -236,10 +237,10 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     RED_CONCRETE,
 ];
 
-/// What a red bicycle path must not overwrite: the road list without the
-/// asphalt mix, so the path shows where a road's width runs over it whichever
-/// of the two is built first. Lane stripes and zebras still win.
-const CYCLEWAY_PROTECTED_SURFACES: &[Block] = &[
+/// What a red bicycle path or race track paint must not overwrite: the road list
+/// without the asphalt mix, so they show where a road's width runs over them
+/// whichever of the two is built first. Lane stripes and zebras still win.
+const OVER_ASPHALT_PROTECTED_SURFACES: &[Block] = &[
     BLACK_CONCRETE,
     WHITE_CONCRETE,
     YELLOW_CONCRETE,
@@ -284,6 +285,7 @@ pub(crate) fn surface_palette(
         "path" => &[DIRT_PATH],
         // Sand trap for runaway vehicles.
         "escape" => &[SAND],
+        "raceway" => raceways::unsurfaced_palette(tags).unwrap_or(DEFAULT_ROAD_MIX),
         _ => DEFAULT_ROAD_MIX,
     }
 }
@@ -1647,7 +1649,12 @@ fn generate_highways_internal(
 
             // Handle areas like pedestrian plazas. Unified surface handling
             // via the shared surfaces module.
-            let surface_block: Block = get_blocks_for_surface_way(way, &[STONE])[0];
+            let fallback: &[Block] = if highway_type == "raceway" {
+                surface_palette(highway_type, &way.tags)
+            } else {
+                &[STONE]
+            };
+            let surface_block: Block = get_blocks_for_surface_way(way, fallback)[0];
 
             // Fill the area using flood fill cache
             let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
@@ -1699,13 +1706,15 @@ fn generate_highways_internal(
             let block_types = surface_palette(highway_type, &way.tags);
             let surface_protect =
                 if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
-                    CYCLEWAY_PROTECTED_SURFACES
+                    OVER_ASPHALT_PROTECTED_SURFACES
                 } else {
                     ROAD_PROTECTED_SURFACES
                 };
 
             // Canonical width (shared with prescan/bridge consumers).
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
+            let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
+            let race_deck = raceways::deck(&way.tags);
 
             // At-grade lit ways get periodic street lamps alongside, but a blueprint has no furniture.
             if way.tags.get("lit").map(String::as_str) == Some("yes")
@@ -2134,8 +2143,17 @@ fn generate_highways_internal(
                                     // defined in ROAD_PROTECTED_SURFACES — see
                                     // its doc comment for the overlap-handling
                                     // rationale.
-                                    let effective_block =
-                                        semirandom_surface(set_x, set_z, block_types);
+                                    // Track paint goes over asphalt whichever was laid first.
+                                    let race =
+                                        race_paint.and_then(|p| p.at(race_deck, set_x, set_z));
+                                    let effective_block = race.unwrap_or_else(|| {
+                                        semirandom_surface(set_x, set_z, block_types)
+                                    });
+                                    let protect = if race.is_some() {
+                                        OVER_ASPHALT_PROTECTED_SURFACES
+                                    } else {
+                                        surface_protect
+                                    };
                                     if use_absolute_y {
                                         editor.set_block_absolute(
                                             effective_block,
@@ -2143,7 +2161,7 @@ fn generate_highways_internal(
                                             cell_y,
                                             set_z,
                                             None,
-                                            Some(surface_protect),
+                                            Some(protect),
                                         );
                                     } else {
                                         editor.set_block(
@@ -2152,7 +2170,7 @@ fn generate_highways_internal(
                                             cell_y,
                                             set_z,
                                             None,
-                                            Some(surface_protect),
+                                            Some(protect),
                                         );
                                     }
                                 }
@@ -3148,7 +3166,7 @@ pub(crate) fn lane_marking_count(highway_type: &str, tags: &HashMap<String, Stri
         return 1;
     }
     let painted = tags.get("lane_markings").map(String::as_str);
-    if painted == Some("no") {
+    if painted == Some("no") || (highway_type == "raceway" && painted != Some("yes")) {
         return 1;
     }
     let lanes = tags
@@ -3328,6 +3346,7 @@ pub(crate) fn highway_block_range(
         "secondary_link" | "tertiary_link" => (1, true),
         "escape" => (1, false),
         "steps" => (1, false),
+        "raceway" => (raceways::default_half_width(tags), false),
         _ => (2, true),
     };
 
@@ -4017,6 +4036,93 @@ mod tests {
                 &RoadMarkingIndex::default(),
             );
         }
+    }
+
+    #[test]
+    fn a_raceway_is_circuit_wide_with_its_paint_on_the_surface() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let mut way = way_along(1, (10, 50), (390, 50), &[]);
+        way.tags = [("highway", "raceway"), ("sport", "motor")]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let elements = [ProcessedElement::Way(way.clone())];
+        let markings =
+            RoadMarkingIndex::build(&elements, 1.0, crate::decals::region::SignRegion::Germanic);
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        generate_highways(
+            &mut editor,
+            &elements[0],
+            &args,
+            &HighwayConnectivityMap::new(),
+            &FloodFillCache::new(),
+            &empty,
+            &structures,
+            &surface,
+            &TunnelInternalEndpoints::default(),
+            &TunnelPortalMap::default(),
+            &empty,
+            &mut Vec::new(),
+            &markings,
+        );
+        for z in [44, 56] {
+            assert!(
+                editor.check_for_block(200, 0, z, Some(&[WHITE_CONCRETE])),
+                "z={z}"
+            );
+        }
+        for z in 45..=55 {
+            assert!(
+                editor.check_for_block(200, 0, z, Some(DEFAULT_ROAD_MIX)),
+                "asphalt at z={z}"
+            );
+        }
+        assert!(!editor.check_for_block(200, 0, 43, Some(&[WHITE_CONCRETE])));
+    }
+
+    #[test]
+    fn raceway_paint_goes_over_a_road_laid_first() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let street = way_along(2, (150, 56), (250, 56), &[("highway", "residential")]);
+        build_ways(&mut editor, &[street]);
+        assert!(editor.check_for_block(200, 0, 56, Some(DEFAULT_ROAD_MIX)));
+        let mut way = way_along(1, (10, 50), (390, 50), &[]);
+        way.tags = [("highway", "raceway"), ("sport", "motor")]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let elements = [ProcessedElement::Way(way)];
+        let markings =
+            RoadMarkingIndex::build(&elements, 1.0, crate::decals::region::SignRegion::Germanic);
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        generate_highways(
+            &mut editor,
+            &elements[0],
+            &args,
+            &HighwayConnectivityMap::new(),
+            &FloodFillCache::new(),
+            &empty,
+            &structures,
+            &surface,
+            &TunnelInternalEndpoints::default(),
+            &TunnelPortalMap::default(),
+            &empty,
+            &mut Vec::new(),
+            &markings,
+        );
+        assert!(editor.check_for_block(200, 0, 56, Some(&[WHITE_CONCRETE])));
     }
 
     /// Street lamp nodes at (id, x, z), tagged with `layer`.
