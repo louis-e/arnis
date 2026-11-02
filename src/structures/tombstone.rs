@@ -82,10 +82,21 @@ pub fn maybe_place_crypt(editor: &mut WorldEditor, x: i32, z: i32, road_mask: &R
 
 /// A grave model from `head` along the unit step `dir`; false when schematics are off.
 pub fn place_grave(editor: &mut WorldEditor, head: (i32, i32), dir: (i32, i32), h: u64) -> bool {
+    place_model(editor, false, (head.0 + dir.0, head.1 + dir.1), dir, h)
+}
+
+/// A model at its centre `anchor`, its length along `dir`: a 3x1 grave, or a 4x3 cross grave.
+pub fn place_model(
+    editor: &mut WorldEditor,
+    cross: bool,
+    anchor: (i32, i32),
+    dir: (i32, i32),
+    h: u64,
+) -> bool {
     if !editor.place_schematics() {
         return false;
     }
-    let Some(schem) = pick(graves(), h) else {
+    let Some(schem) = pick(if cross { crosses() } else { graves() }, h) else {
         return false;
     };
     // Quarter turns take the model's +x to east, south, west and north.
@@ -95,16 +106,8 @@ pub fn place_grave(editor: &mut WorldEditor, head: (i32, i32), dir: (i32, i32), 
         (-1, _) => 2,
         _ => 3,
     };
-    let base_y = editor.get_absolute_y(head.0, 0, head.1);
-    place_structure(
-        editor,
-        schem,
-        head.0 + dir.0,
-        head.1 + dir.1,
-        base_y,
-        rot,
-        None,
-    );
+    let base_y = editor.get_absolute_y(anchor.0, 0, anchor.1);
+    place_structure(editor, schem, anchor.0, anchor.1, base_y, rot, None);
     true
 }
 

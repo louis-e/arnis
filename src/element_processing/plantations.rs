@@ -2,6 +2,7 @@
 
 use crate::block_definitions::*;
 use crate::element_processing::area_layout::{cell_hash, mix, AreaMask, Frame};
+use crate::element_processing::connected_blocks::connected_fence;
 use crate::element_processing::landuse::ground_is_protected;
 use crate::floodfill_cache::{in_hole, BuildingFootprintBitmap, Holes, RoadMaskBitmap};
 use crate::ground_generation::value_noise_01;
@@ -37,6 +38,18 @@ pub fn vineyard_area(
     } else {
         OAK_LEAVES
     };
+    let mask = AreaMask::new(fill, |x, z| !in_hole(holes, x, z));
+    // A vine stands here, by position alone, so a wire knows its neighbours in any tile.
+    let vine = |editor: &WorldEditor, x: i32, z: i32| {
+        let (along, across) = if dx != 0 { (x, z) } else { (z, x) };
+        mask.contains(x, z)
+            && (across + phase).rem_euclid(VINE_PITCH) == 0
+            && (along + lane_phase).rem_euclid(VINE_RUN) >= 2
+            && !footprints.contains(x, z)
+            && !near_road(road_mask, x, z)
+            && !editor.surface_is_sealed(x, z)
+            && !editor.is_lc_water(x, z)
+    };
 
     for &(x, z) in fill {
         if in_hole(holes, x, z) || !editor.in_bounds(x, z) || ground_is_protected(editor, x, z) {
@@ -54,15 +67,30 @@ pub fn vineyard_area(
         if !editor.owns(x, z) || editor.is_lc_water(x, z) {
             continue;
         }
-        let lane = (along + lane_phase).rem_euclid(VINE_RUN) < 2;
-        if !on_row || lane || footprints.contains(x, z) || near_road(road_mask, x, z) {
+        if !vine(editor, x, z) {
             if ground == GRASS_BLOCK && coord_hash(x, z ^ 0x51).is_multiple_of(5) {
                 editor.set_block(GRASS, x, 1, z, None, None);
             }
             continue;
         }
         // Wire between the posts and the canopy trained along it; a bare post every few vines.
-        editor.set_block(OAK_FENCE, x, 1, z, None, None);
+        let ground_y = editor.get_ground_level(x, z);
+        let wired =
+            |nx: i32, nz: i32| vine(editor, nx, nz) && editor.get_ground_level(nx, nz) == ground_y;
+        let (fwd, back) = if dx != 0 {
+            (wired(x + 1, z), wired(x - 1, z))
+        } else {
+            (wired(x, z + 1), wired(x, z - 1))
+        };
+        let wire = if dx != 0 {
+            connected_fence(OAK_FENCE, false, false, fwd, back)
+        } else {
+            connected_fence(OAK_FENCE, back, fwd, false, false)
+        };
+        let y = editor.get_absolute_y(x, 1, z);
+        if !editor.block_exists_absolute(x, y, z) {
+            editor.set_block_with_properties_absolute(wire, x, y, z, None, None);
+        }
         let post = (along + lane_phase).rem_euclid(8) == 4;
         let top = if post { OAK_FENCE } else { canopy };
         editor.set_block(top, x, 2, z, None, None);
@@ -262,7 +290,8 @@ pub fn orchard_area(
         };
         let ground = if in_strip { COARSE_DIRT } else { GRASS_BLOCK };
         editor.set_block(ground, x, 0, z, None, None);
-        if !editor.owns(x, z) || editor.is_lc_water(x, z) {
+        // Crowns stay out of buildings, which the old forest trees were clipped against too.
+        if !editor.owns(x, z) || editor.is_lc_water(x, z) || footprints.contains(x, z) {
             continue;
         }
 

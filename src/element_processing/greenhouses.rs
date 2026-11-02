@@ -18,7 +18,12 @@ pub fn is_greenhouse(tags: &HashMap<String, String>) -> bool {
             .or_else(|| tags.get("building:part"))
             .map(String::as_str),
         Some("greenhouse" | "glasshouse")
-    ) && !tags.contains_key("roof:shape")
+    )
+}
+
+/// A greenhouse whose roof the map leaves open, which gets glass ridges.
+pub fn wants_venlo_roof(tags: &HashMap<String, String>) -> bool {
+    is_greenhouse(tags) && !tags.contains_key("roof:shape")
 }
 
 /// Position across the ridges; world-anchored, so neighbouring houses and tiles line up.
@@ -58,8 +63,13 @@ impl Crop {
         }
     }
 
-    /// Plants of one column of a row, from the floor up.
+    /// Plants of one column of a row on a bed of soil, from the floor up.
     fn plant(self, editor: &mut WorldEditor, x: i32, floor_y: i32, z: i32, row: u64) {
+        let soil = match self {
+            Crop::Tomatoes => DIRT,
+            Crop::Flowers | Crop::Seedlings => GRASS_BLOCK,
+        };
+        editor.set_block_absolute(soil, x, floor_y, z, None, Some(&[]));
         let put = |editor: &mut WorldEditor, y: i32, b: Block| {
             if !editor.block_exists_absolute(x, y, z) {
                 editor.set_block_absolute(b, x, y, z, None, None);
@@ -205,6 +215,28 @@ mod tests {
                 _ => assert_eq!(low, Some(GLASS), "pane at z={z}"),
             }
         }
+    }
+
+    #[test]
+    fn plants_grow_on_soil_not_on_the_floor() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(20.0, 20.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let area: Vec<(i32, i32)> = (2..16).flat_map(|x| (2..16).map(move |z| (x, z))).collect();
+        for &(x, z) in &area {
+            editor.set_block_absolute(LIGHT_GRAY_CONCRETE, x, 0, z, None, None);
+        }
+        plant_rows(&mut editor, &area, true, 0, 3);
+        let (mut planted, mut on_soil) = (0, 0);
+        for &(x, z) in &area {
+            if editor.block_exists_absolute(x, 1, z) {
+                planted += 1;
+                on_soil +=
+                    editor.check_for_block_absolute(x, 0, z, Some(&[DIRT, GRASS_BLOCK]), None)
+                        as usize;
+            }
+        }
+        assert!(planted > 20, "{planted} planted");
+        assert_eq!(on_soil, planted, "every plant on soil");
     }
 
     #[test]

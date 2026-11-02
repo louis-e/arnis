@@ -17902,12 +17902,10 @@ fn generate_roof(
     match roof_type {
         // The cover already ranks OSM tags over the preset over the membrane.
         RoofType::Flat
-            if osm_roof_block.is_none() && super::greenhouses::is_greenhouse(&element.tags) =>
+            if osm_roof_block.is_none() && super::greenhouses::wants_venlo_roof(&element.tags) =>
         {
             let roof_y = config.base_height + abs_terrain_offset;
             super::greenhouses::venlo_roof(editor, roof_area, ridge.along_x, roof_y);
-            let floor_y = start_y_offset + abs_terrain_offset;
-            super::greenhouses::plant_rows(editor, roof_area, ridge.along_x, floor_y, element.id);
         }
         RoofType::Flat => {
             generate_flat_roof(
@@ -17996,6 +17994,11 @@ fn generate_roof(
         RoofType::Onion => {
             generate_onion_roof(editor, roof_area, &config);
         }
+    }
+    // Rows of plants under whatever roof a greenhouse carries.
+    if super::greenhouses::is_greenhouse(&element.tags) {
+        let floor_y = start_y_offset + abs_terrain_offset;
+        super::greenhouses::plant_rows(editor, roof_area, ridge.along_x, floor_y, element.id);
     }
     surface
 }

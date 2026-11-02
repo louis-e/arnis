@@ -1,13 +1,17 @@
 //! Allotment gardens: hedged plots in pairs between paths, with beds, a fruit tree and a shed.
 
 use crate::block_definitions::*;
-use crate::element_processing::area_layout::{cell_hash, AreaMask, Frame};
+use crate::element_processing::area_layout::{
+    bounds, cell_hash, centroid, inside, point_in_rings, AreaMask, Frame,
+};
+use crate::element_processing::connected_blocks::connected_fence;
 use crate::element_processing::landuse::ground_is_protected;
 use crate::element_processing::plantations::Fruit;
 use crate::floodfill_cache::{in_hole, BuildingFootprintBitmap, Holes, RoadMaskBitmap};
 use crate::land_cover::coord_hash;
-use crate::osm_parser::ProcessedWay;
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use std::collections::HashMap;
 
 const CROPS: [Block; 8] = [
     WHEAT,
@@ -181,6 +185,108 @@ impl Colony {
     }
 }
 
+/// Garden houses: small buildings in a colony get wood walls, a pitched roof and one storey
+/// wherever the map leaves those open, instead of a town building's palette.
+pub fn prepare(elements: &mut [ProcessedElement], scale: f64) {
+    const CELL: i32 = 128;
+    let mut colonies: Vec<(Bounds, Vec<ProcessedNode>)> = Vec::new();
+    for e in elements.iter() {
+        let tags = e.tags();
+        if tags.get("landuse").map(String::as_str) != Some("allotments") {
+            continue;
+        }
+        let rings: Vec<&[ProcessedNode]> = match e {
+            ProcessedElement::Way(w) => vec![w.nodes.as_slice()],
+            ProcessedElement::Relation(r) => r
+                .members
+                .iter()
+                .filter(|m| m.role == ProcessedMemberRole::Outer)
+                .map(|m| m.way.nodes.as_slice())
+                .collect(),
+            ProcessedElement::Node(_) => continue,
+        };
+        for ring in rings {
+            if let Some(b) = bounds(ring) {
+                colonies.push((b, ring.to_vec()));
+            }
+        }
+    }
+    if colonies.is_empty() {
+        return;
+    }
+    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    for (i, &(b, _)) in colonies.iter().enumerate() {
+        let (x0, z0) = ((b.0 as i32).div_euclid(CELL), (b.1 as i32).div_euclid(CELL));
+        let (x1, z1) = ((b.2 as i32).div_euclid(CELL), (b.3 as i32).div_euclid(CELL));
+        for gx in x0..=x1 {
+            for gz in z0..=z1 {
+                grid.entry((gx, gz)).or_default().push(i);
+            }
+        }
+    }
+    let max_area = 100.0 * scale * scale;
+    for e in elements.iter_mut() {
+        let ProcessedElement::Way(w) = e else {
+            continue;
+        };
+        let small_house = matches!(
+            w.tags.get("building").map(String::as_str),
+            Some(
+                "yes"
+                    | "allotment_house"
+                    | "garden_house"
+                    | "shed"
+                    | "hut"
+                    | "cabin"
+                    | "summer_house"
+            )
+        );
+        if !small_house || w.nodes.len() < 4 || ring_area(&w.nodes) > max_area {
+            continue;
+        }
+        let c = centroid(&w.nodes);
+        let key = ((c.0 as i32).div_euclid(CELL), (c.1 as i32).div_euclid(CELL));
+        let in_colony = grid.get(&key).is_some_and(|ids| {
+            ids.iter().any(|&i| {
+                let (b, ring) = &colonies[i];
+                inside(*b, c) && point_in_rings(&[ring.as_slice()], c)
+            })
+        });
+        if !in_colony {
+            continue;
+        }
+        let h = cell_hash(w.id, 7, 11);
+        let roof = ["gabled", "gabled", "gabled", "hipped", "skillion"][(h % 5) as usize];
+        let cover = if (h >> 8).is_multiple_of(3) {
+            "roof_tiles"
+        } else {
+            "roofing_felt"
+        };
+        for (k, v) in [
+            ("building:material", "wood"),
+            ("roof:shape", roof),
+            ("roof:material", cover),
+        ] {
+            w.tags.entry(k.to_string()).or_insert_with(|| v.to_string());
+        }
+        if !w.tags.contains_key("height") {
+            w.tags
+                .entry("building:levels".to_string())
+                .or_insert_with(|| "1".to_string());
+        }
+    }
+}
+
+fn ring_area(nodes: &[ProcessedNode]) -> f64 {
+    let twice: f64 = nodes
+        .windows(2)
+        .map(|w| w[0].x as f64 * w[1].z as f64 - w[1].x as f64 * w[0].z as f64)
+        .sum();
+    twice.abs() / 2.0
+}
+
+type Bounds = (f64, f64, f64, f64);
+
 pub fn allotments_area(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
@@ -233,10 +339,42 @@ pub fn allotments_area(
         if !editor.owns(x, z) || editor.is_lc_water(x, z) || footprints.contains(x, z) {
             continue;
         }
+        // The plot's fruit tree first, so no undergrowth takes its trunk's place.
+        if matches!(part, Part::Lawn | Part::Flowers | Part::Walk) {
+            if let Some(p) = colony.plot_at(x, z) {
+                // Trees stand far enough inside their plot that only its own reaches here.
+                if let Some(t) = colony.tree(p.key) {
+                    if colony.mask.contains(t.0, t.1) && !footprints.contains(t.0, t.1) {
+                        tree.grow(editor, t, x, z);
+                    }
+                }
+            }
+        }
         let ch = coord_hash(x ^ 0x0A11, z);
         match part {
             Part::Hedge => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
-            Part::Fence => editor.set_block(SPRUCE_FENCE, x, 1, z, None, None),
+            Part::Fence => {
+                let ground_y = editor.get_ground_level(x, z);
+                let joins = |dx: i32, dz: i32| {
+                    let (nx, nz) = (x + dx, z + dz);
+                    colony.part(nx, nz) == Part::Fence
+                        && colony.mask.contains(nx, nz)
+                        && !footprints.contains(nx, nz)
+                        && !road_mask.contains(nx, nz)
+                        && editor.get_ground_level(nx, nz) == ground_y
+                };
+                let fence = connected_fence(
+                    SPRUCE_FENCE,
+                    joins(0, -1),
+                    joins(0, 1),
+                    joins(1, 0),
+                    joins(-1, 0),
+                );
+                let y = editor.get_absolute_y(x, 1, z);
+                if !editor.block_exists_absolute(x, y, z) {
+                    editor.set_block_with_properties_absolute(fence, x, y, z, None, None);
+                }
+            }
             Part::Bed(crop) => editor.set_block(crop, x, 1, z, None, None),
             Part::Flowers if ch.is_multiple_of(2) => {
                 editor.set_block(super::cemetery::flower(ch >> 1), x, 1, z, None, None);
@@ -260,18 +398,6 @@ pub fn allotments_area(
             }
             Part::Lawn if ch.is_multiple_of(7) => editor.set_block(GRASS, x, 1, z, None, None),
             _ => {}
-        }
-
-        // The fruit trees of this plot and its neighbours can reach this column.
-        if matches!(part, Part::Lawn | Part::Flowers | Part::Walk) {
-            if let Some(p) = colony.plot_at(x, z) {
-                // Trees stand far enough inside their plot that only its own reaches here.
-                if let Some(t) = colony.tree(p.key) {
-                    if colony.mask.contains(t.0, t.1) && !footprints.contains(t.0, t.1) {
-                        tree.grow(editor, t, x, z);
-                    }
-                }
-            }
         }
     }
 }
@@ -312,6 +438,45 @@ mod tests {
         assert!(edges > 400, "{edges} hedge and fence columns");
         assert!(beds > 100, "{beds} bed columns");
         assert!(sheds > 30, "{sheds} shed roof columns");
+    }
+
+    #[test]
+    fn small_houses_in_a_colony_become_wooden_garden_houses() {
+        let mut elements = vec![
+            ProcessedElement::Way(rect_way(1, 0, 0, 100, 100, &[("landuse", "allotments")])),
+            ProcessedElement::Way(rect_way(
+                2,
+                10,
+                10,
+                15,
+                14,
+                &[("building", "allotment_house")],
+            )),
+            ProcessedElement::Way(rect_way(3, 30, 30, 50, 50, &[("building", "yes")])),
+            ProcessedElement::Way(rect_way(4, 150, 10, 155, 14, &[("building", "yes")])),
+            ProcessedElement::Way(rect_way(
+                5,
+                60,
+                60,
+                65,
+                64,
+                &[("building", "shed"), ("roof:shape", "flat")],
+            )),
+        ];
+        prepare(&mut elements, 1.0);
+        let tag = |i: usize, k: &str| elements[i].tags().get(k).cloned();
+        assert_eq!(tag(1, "building:material").as_deref(), Some("wood"));
+        assert_eq!(tag(1, "building:levels").as_deref(), Some("1"));
+        assert!(
+            tag(2, "building:material").is_none(),
+            "a clubhouse is too big"
+        );
+        assert!(tag(3, "building:material").is_none(), "outside the colony");
+        assert_eq!(
+            tag(4, "roof:shape").as_deref(),
+            Some("flat"),
+            "mapped tags stay"
+        );
     }
 
     #[test]
