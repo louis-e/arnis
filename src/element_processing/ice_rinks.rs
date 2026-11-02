@@ -2,6 +2,7 @@
 
 use crate::block_definitions::*;
 use crate::element_processing::area_layout::{AreaMask, Frame};
+use crate::element_processing::connected_blocks::connected_fence;
 use crate::floodfill_cache::{in_hole, Holes};
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
@@ -86,7 +87,21 @@ pub fn generate_ice_rink(
         if board {
             editor.set_block(WHITE_CONCRETE, x, 1, z, None, None);
             if hockey {
-                editor.set_block(GLASS_PANE, x, 2, z, None, None);
+                let board_at = |nx: i32, nz: i32| {
+                    rink.contains(nx, nz)
+                        && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                            .iter()
+                            .any(|(dx, dz)| !rink.contains(nx + dx, nz + dz))
+                };
+                let pane = connected_fence(
+                    GLASS_PANE,
+                    board_at(x, z - 1),
+                    board_at(x, z + 1),
+                    board_at(x + 1, z),
+                    board_at(x - 1, z),
+                );
+                let y = editor.get_absolute_y(x, 2, z);
+                editor.set_block_with_properties_absolute(pane, x, y, z, None, None);
             }
         } else if hockey {
             goal(editor, x, z, a, c, l, w, s);

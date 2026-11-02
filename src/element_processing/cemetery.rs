@@ -5,10 +5,11 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::decals::region::SignRegion;
 use crate::element_processing::area_layout::{
-    bounds, cell_hash, centroid, inside, point_in_rings, AreaMask, Frame,
+    bounds, cell_hash, inside, interior_point, point_in_rings, AreaMask, Frame,
 };
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
+use crate::element_processing::connected_blocks::{connected_wall, four_connected_line};
 use crate::element_processing::landuse::ground_is_protected;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{
@@ -16,9 +17,9 @@ use crate::floodfill_cache::{
 };
 use crate::land_cover::coord_hash;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
-use crate::structures::tombstone;
+use crate::structures::{tombstone, Prop};
 use crate::world_editor::WorldEditor;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const STYLE_TAG: &str = "arnis:cemetery";
 const SECTORS_TAG: &str = "arnis:sectors";
@@ -70,7 +71,7 @@ impl Style {
         match self {
             Style::War => (2.0, 3.0, 1, 94),
             Style::Lawn => (3.0, 4.0, 2, 72),
-            Style::Beds => (3.0, 4.0, 3, 85),
+            Style::Beds => unreachable!("bed graves are laid out by `Beds`"),
         }
     }
 }
@@ -88,7 +89,9 @@ pub fn prepare(elements: &mut [ProcessedElement], region: SignRegion) {
     for (i, e) in elements.iter().enumerate() {
         if let ProcessedElement::Way(w) = e {
             if is_sector(&w.tags) && !is_cemetery(&w.tags) && w.nodes.len() >= 3 {
-                sectors.push((i, centroid(&w.nodes)));
+                if let Some(p) = interior_point(&w.nodes) {
+                    sectors.push((i, p));
+                }
             }
         }
     }
@@ -199,28 +202,26 @@ pub fn cemetery_area(
             paths |= road_mask.contains(x, z);
             !in_hole(holes, x, z)
         });
-        Rows::new(way.id, style, frame, mask, !paths)
+        if style == Style::Beds {
+            Plan::Beds(Beds::new(way.id, &frame, mask, !paths))
+        } else {
+            Plan::Rows(Rows::new(way.id, style, frame, mask))
+        }
     });
 
     for &(x, z) in fill.iter() {
         if in_hole(holes, x, z) || !editor.in_bounds(x, z) || ground_is_protected(editor, x, z) {
             continue;
         }
-        let path = plan.as_ref().is_some_and(|p| p.on_path(x, z));
+        let path = matches!(&plan, Some(Plan::Beds(b)) if b.on_path(x, z));
         let ground = if path { GRAVEL } else { GRASS_BLOCK };
         editor.set_block(ground, x, 0, z, None, None);
     }
 
-    if let Some(rows) = &plan {
-        if style == Style::Beds {
-            for &(x, z) in fill.iter() {
-                if !in_hole(holes, x, z) && editor.owns(x, z) {
-                    rows.bed_column(editor, road_mask, building_footprints, x, z);
-                }
-            }
-        } else {
-            rows.place(editor, road_mask, building_footprints);
-        }
+    match &plan {
+        Some(Plan::Rows(rows)) => rows.place(editor, road_mask, building_footprints),
+        Some(Plan::Beds(beds)) => beds.place(editor, road_mask, building_footprints),
+        None => {}
     }
 
     // Trees, shrubs and flowers between the graves; positional, so every tile agrees.
@@ -282,13 +283,235 @@ fn generate_wall(
     road_mask: &RoadMaskBitmap,
     footprints: &BuildingFootprintBitmap,
 ) {
-    for w in way.nodes.windows(2) {
-        for (bx, _, bz) in bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z) {
-            if road_mask.contains(bx, bz) || footprints.contains(bx, bz) {
+    let line: Vec<(i32, i32)> = way
+        .nodes
+        .windows(2)
+        .flat_map(|w| bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z))
+        .map(|(x, _, z)| (x, z))
+        .collect();
+    let wall: HashSet<(i32, i32)> = four_connected_line(&line)
+        .into_iter()
+        .filter(|&(x, z)| !road_mask.contains(x, z) && !footprints.contains(x, z))
+        .collect();
+    for &(x, z) in &wall {
+        if !editor.in_bounds(x, z) {
+            continue;
+        }
+        let ground = editor.get_ground_level(x, z);
+        let joins = |dx: i32, dz: i32| {
+            wall.contains(&(x + dx, z + dz)) && editor.get_ground_level(x + dx, z + dz) == ground
+        };
+        let block = connected_wall(
+            STONE_BRICK_WALL,
+            joins(0, -1),
+            joins(0, 1),
+            joins(1, 0),
+            joins(-1, 0),
+        );
+        let y = editor.get_absolute_y(x, 1, z);
+        if !editor.block_exists_absolute(x, y, z) {
+            editor.set_block_with_properties_absolute(block, x, y, z, None, None);
+        }
+        editor.set_block(STONE_BRICK_SLAB, x, 2, z, None, None);
+    }
+}
+
+enum Plan {
+    Rows(Rows),
+    Beds(Beds),
+}
+
+/// Whether a grave may take column (x, z).
+fn free(
+    editor: &WorldEditor,
+    mask: &AreaMask,
+    road_mask: &RoadMaskBitmap,
+    footprints: &BuildingFootprintBitmap,
+    (x, z): (i32, i32),
+    crypts: bool,
+) -> bool {
+    mask.contains(x, z)
+        && !road_mask.contains(x, z)
+        && !footprints.contains(x, z)
+        && !editor.surface_is_sealed(x, z)
+        && !editor.is_lc_water(x, z)
+        && !(crypts && editor.place_prop(Prop::Tombstone) && tombstone::near_crypt(x, z))
+}
+
+/// Grave models in straight rows on the world axes, each field keeping its own row phase.
+/// A row is pairs of 3-long graves, or one 4x3 cross grave in place of a pair.
+struct Beds {
+    id: u64,
+    mask: AreaMask,
+    origin: (i32, i32),
+    /// Unit steps along a row and from a grave's head to its foot.
+    along: (i32, i32),
+    dir: (i32, i32),
+    /// Gravel paths cut through bigger fields where none are mapped.
+    sections: bool,
+}
+
+/// Width of a pair of graves, and the distance between rows.
+const PAIR: i32 = 4;
+const ROW: i32 = 5;
+/// Rows between paths, and pairs between cross paths.
+const ROWS_PER_SECTION: i32 = 8;
+const PAIRS_PER_SECTION: i32 = 7;
+
+impl Beds {
+    fn new(id: u64, frame: &Frame, mask: AreaMask, unmapped: bool) -> Self {
+        let a = frame.along_axis();
+        let along = (a.0.abs(), a.1.abs());
+        let dir = (along.1, along.0);
+        Self {
+            id,
+            origin: mask.min(),
+            sections: unmapped && frame.length().min(frame.width()) >= 48.0,
+            mask,
+            along,
+            dir,
+        }
+    }
+
+    fn at(&self, u: i32, v: i32) -> (i32, i32) {
+        (
+            self.origin.0 + u * self.along.0 + v * self.dir.0,
+            self.origin.1 + u * self.along.1 + v * self.dir.1,
+        )
+    }
+
+    fn uv(&self, x: i32, z: i32) -> (i32, i32) {
+        let (dx, dz) = (x - self.origin.0, z - self.origin.1);
+        (
+            dx * self.along.0 + dz * self.along.1,
+            dx * self.dir.0 + dz * self.dir.1,
+        )
+    }
+
+    fn path_row(&self, r: i32) -> bool {
+        self.sections && (r + 1).rem_euclid(ROWS_PER_SECTION) == 0
+    }
+
+    fn path_pair(&self, k: i32) -> bool {
+        self.sections && (k + 1).rem_euclid(PAIRS_PER_SECTION) == 0
+    }
+
+    fn on_path(&self, x: i32, z: i32) -> bool {
+        let (u, v) = self.uv(x, z);
+        let (k, r) = (u.div_euclid(PAIR), v.div_euclid(ROW));
+        (self.path_row(r) && (1..4).contains(&v.rem_euclid(ROW)))
+            || (self.path_pair(k) && (1..3).contains(&u.rem_euclid(PAIR)))
+    }
+
+    /// Whether the cells u0..=u1 by v0..=v1 are all free and on one level.
+    fn fits(
+        &self,
+        editor: &WorldEditor,
+        road_mask: &RoadMaskBitmap,
+        footprints: &BuildingFootprintBitmap,
+        (u0, u1): (i32, i32),
+        (v0, v1): (i32, i32),
+    ) -> Option<bool> {
+        let ground = editor.get_ground_level(self.at(u0, v0).0, self.at(u0, v0).1);
+        let mut level = true;
+        for u in u0..=u1 {
+            for v in v0..=v1 {
+                let c = self.at(u, v);
+                if !free(editor, &self.mask, road_mask, footprints, c, true) {
+                    return None;
+                }
+                level &= editor.get_ground_level(c.0, c.1) == ground;
+            }
+        }
+        // Room to stand at the head.
+        let front = self.at(u0, v0 - 1);
+        (self.mask.contains(front.0, front.1) && !road_mask.contains(front.0, front.1))
+            .then_some(level)
+    }
+
+    fn place(
+        &self,
+        editor: &mut WorldEditor,
+        road_mask: &RoadMaskBitmap,
+        footprints: &BuildingFootprintBitmap,
+    ) {
+        let (bx0, bz0, bx1, bz1) = editor.bounds();
+        let (u_a, v_a) = self.uv(bx0, bz0);
+        let (u_b, v_b) = self.uv(bx1, bz1);
+        let (k0, k1) = (
+            u_a.min(u_b).div_euclid(PAIR) - 1,
+            u_a.max(u_b).div_euclid(PAIR) + 1,
+        );
+        let (r0, r1) = (
+            v_a.min(v_b).div_euclid(ROW) - 1,
+            v_a.max(v_b).div_euclid(ROW) + 1,
+        );
+        let (mu, mv) = self.uv(self.mask.max().0, self.mask.max().1);
+        for r in r0.max(0)..=r1.min(mv.div_euclid(ROW) + 1) {
+            if self.path_row(r) {
                 continue;
             }
-            editor.set_block(STONE_BRICK_WALL, bx, 1, bz, None, None);
-            editor.set_block(STONE_BRICK_SLAB, bx, 2, bz, None, None);
+            let v0 = r * ROW;
+            for k in k0.max(0)..=k1.min(mu.div_euclid(PAIR) + 1) {
+                if self.path_pair(k) {
+                    continue;
+                }
+                let u0 = k * PAIR;
+                let h = cell_hash(self.id, k as i64, r as i64);
+                // A cross grave over the whole pair, its anchor at the model's centre.
+                if h % 100 < 16 {
+                    if let Some(true) =
+                        self.fits(editor, road_mask, footprints, (u0, u0 + 2), (v0, v0 + 3))
+                    {
+                        let anchor = self.at(u0 + 1, v0 + 2);
+                        if editor.owns(anchor.0, anchor.1)
+                            && tombstone::place_model(editor, true, anchor, self.dir, h >> 8)
+                        {
+                            continue;
+                        }
+                        if editor.place_prop(Prop::Tombstone) {
+                            continue;
+                        }
+                    }
+                }
+                for (i, u) in [u0, u0 + 2].into_iter().enumerate() {
+                    let g = cell_hash(self.id ^ 0x6E4E, (2 * k + i as i32) as i64, r as i64);
+                    if g % 100 >= 86 {
+                        continue;
+                    }
+                    let Some(level) =
+                        self.fits(editor, road_mask, footprints, (u, u), (v0, v0 + 2))
+                    else {
+                        continue;
+                    };
+                    let anchor = self.at(u, v0 + 1);
+                    if level && editor.place_prop(Prop::Tombstone) {
+                        if editor.owns(anchor.0, anchor.1) {
+                            tombstone::place_model(editor, false, anchor, self.dir, g >> 8);
+                        }
+                    } else {
+                        self.bed(editor, self.at(u, v0), g >> 8);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A drawn grave where no model fits: a headstone and a planted or gravelled bed.
+    fn bed(&self, editor: &mut WorldEditor, head: (i32, i32), h: u64) {
+        headstone(editor, head, self.dir, h, false);
+        for k in 1..3 {
+            let (x, z) = (head.0 + k * self.dir.0, head.1 + k * self.dir.1);
+            if !editor.owns(x, z) {
+                continue;
+            }
+            let over = Some(&[GRASS_BLOCK][..]);
+            if (h >> 12).is_multiple_of(2) {
+                editor.set_block(GRAVEL, x, 0, z, over, None);
+            } else {
+                editor.set_block(PODZOL, x, 0, z, over, None);
+                editor.set_block(flower(h >> (k * 4)), x, 1, z, None, None);
+            }
         }
     }
 }
@@ -303,16 +526,8 @@ struct Rows {
     row: f64,
     len: i32,
     occupancy: u64,
-    /// Gravel paths cut through bigger fields where none are mapped.
-    sections: bool,
     dir: (i32, i32),
 }
-
-/// Rows between paths, and graves between cross paths.
-const ROWS_PER_SECTION: i64 = 8;
-const SLOTS_PER_SECTION: i64 = 14;
-/// Columns a bed grave takes along its row; the rest of a slot is the gap to the next one.
-const BED_WIDTH: f64 = 2.0;
 
 #[derive(Clone, Copy)]
 struct Grave {
@@ -321,11 +536,8 @@ struct Grave {
 }
 
 impl Rows {
-    fn new(id: u64, style: Style, frame: Frame, mask: AreaMask, unmapped: bool) -> Self {
+    fn new(id: u64, style: Style, frame: Frame, mask: AreaMask) -> Self {
         let (slot, row, len, occupancy) = style.lattice();
-        let sections = style == Style::Beds
-            && unmapped
-            && frame.length().min(frame.width()) >= 3.0 * row * 2.0;
         Self {
             id,
             style,
@@ -336,25 +548,7 @@ impl Rows {
             row,
             len,
             occupancy,
-            sections,
         }
-    }
-
-    fn path_at(&self, s: i64, r: i64) -> bool {
-        self.sections
-            && ((r + 1).rem_euclid(ROWS_PER_SECTION) == 0
-                || (s + 1).rem_euclid(SLOTS_PER_SECTION) == 0)
-    }
-
-    fn on_path(&self, x: i32, z: i32) -> bool {
-        if !self.sections {
-            return false;
-        }
-        let (a, c) = self.frame.local(x, z);
-        self.path_at(
-            (a / self.slot).floor() as i64,
-            (c / self.row).floor() as i64,
-        )
     }
 
     fn cells(&self, g: Grave) -> impl Iterator<Item = (i32, i32)> + '_ {
@@ -371,7 +565,7 @@ impl Rows {
         r: i64,
     ) -> Option<Grave> {
         let hash = cell_hash(self.id, s, r);
-        if hash % 100 >= self.occupancy || self.path_at(s, r) {
+        if hash % 100 >= self.occupancy {
             return None;
         }
         let head = self
@@ -444,7 +638,6 @@ impl Rows {
                     editor.set_block(flower(h >> 4), fx, 1, fz, None, None);
                 }
             }
-            // Bed graves are drawn column by column, in `bed_column`.
             Style::Beds => {}
         }
     }
@@ -457,145 +650,70 @@ impl Rows {
         footprints: &BuildingFootprintBitmap,
         (x, z): (i32, i32),
     ) -> bool {
-        self.mask.contains(x, z)
-            && !road_mask.contains(x, z)
-            && !footprints.contains(x, z)
-            && !editor.surface_is_sealed(x, z)
-            && !editor.is_lc_water(x, z)
-            && !(self.style != Style::War
-                && editor.place_prop(crate::structures::Prop::Tombstone)
-                && tombstone::near_crypt(x, z))
+        free(
+            editor,
+            &self.mask,
+            road_mask,
+            footprints,
+            (x, z),
+            self.style != Style::War,
+        )
     }
 
-    /// One column of a bed grave; rows are bands (headstones, beds, aisle) that stay straight when turned.
-    fn bed_column(
-        &self,
-        editor: &mut WorldEditor,
-        road_mask: &RoadMaskBitmap,
-        footprints: &BuildingFootprintBitmap,
-        x: i32,
-        z: i32,
-    ) {
-        let (a, c) = self.frame.local(x, z);
-        let (s, r) = (
-            (a / self.slot).floor() as i64,
-            (c / self.row).floor() as i64,
-        );
-        let (da, dc) = (a - s as f64 * self.slot, c - r as f64 * self.row);
-        let len = self.len as f64;
-        if da >= BED_WIDTH || dc >= len || self.path_at(s, r) {
-            return;
-        }
-        let hash = cell_hash(self.id, s, r);
-        if hash % 100 >= self.occupancy || !self.free(editor, road_mask, footprints, (x, z)) {
-            return;
-        }
-        // The whole grave fits, with room to stand at its head.
-        let (a0, c0) = (s as f64 * self.slot, r as f64 * self.row);
-        let corners = [
-            (0.5, -0.5),
-            (BED_WIDTH - 0.5, -0.5),
-            (0.5, len - 0.5),
-            (BED_WIDTH - 0.5, len - 0.5),
-        ];
-        if !corners.iter().all(|&(ea, ec)| {
-            self.free(
-                editor,
-                road_mask,
-                footprints,
-                self.frame.column(a0 + ea, c0 + ec),
-            )
-        }) {
-            return;
-        }
-        let h = hash >> 8;
-        if dc < 1.0 {
-            self.headstone(editor, (x, z), h, false);
-            return;
-        }
-        let ch = coord_hash(x, z ^ 0x9E37);
-        let over = Some(&[GRASS_BLOCK][..]);
-        match (h >> 12) % 20 {
-            0..=8 => {
-                editor.set_block(PODZOL, x, 0, z, over, None);
-                if dc < 2.0 && ch.is_multiple_of(4) {
-                    editor.set_block(SPRUCE_LEAVES, x, 1, z, None, None);
-                } else if ch.is_multiple_of(3) {
-                    editor.set_block(flower(ch >> 3), x, 1, z, None, None);
-                } else if ch % 3 == 1 {
-                    editor.set_block(FERN, x, 1, z, None, None);
-                }
-            }
-            9..=12 => {
-                editor.set_block(GRAVEL, x, 0, z, over, None);
-                if dc >= len - 1.0 && da < 1.0 && ch.is_multiple_of(3) {
-                    editor.set_block(LANTERN, x, 1, z, None, None);
-                }
-            }
-            13..=17 => {
-                let slab = if h.is_multiple_of(2) {
-                    POLISHED_ANDESITE_SLAB
-                } else {
-                    SMOOTH_STONE_SLAB
-                };
-                editor.set_block(slab, x, 1, z, None, None);
-            }
-            _ => {
-                editor.set_block(MOSS_BLOCK, x, 0, z, over, None);
-            }
-        }
+    fn headstone(&self, editor: &mut WorldEditor, head: (i32, i32), h: u64, low: bool) {
+        headstone(editor, head, self.dir, h, low);
     }
+}
 
-    /// An upright stone facing along its grave, or a low marker on a lawn.
-    fn headstone(&self, editor: &mut WorldEditor, (x, z): (i32, i32), h: u64, low: bool) {
-        if !editor.owns(x, z) {
-            return;
+/// An upright stone facing along its grave, or a low marker on a lawn.
+fn headstone(editor: &mut WorldEditor, (x, z): (i32, i32), dir: (i32, i32), h: u64, low: bool) {
+    if !editor.owns(x, z) {
+        return;
+    }
+    let facing = match dir {
+        (1, _) => StairFacing::East,
+        (-1, _) => StairFacing::West,
+        (0, 1) => StairFacing::South,
+        _ => StairFacing::North,
+    };
+    let y = editor.get_absolute_y(x, 1, z);
+    match h % 20 {
+        0..=8 => {
+            const TABLETS: [Block; 5] = [
+                STONE_BRICK_STAIRS,
+                POLISHED_ANDESITE_STAIRS,
+                DIORITE_STAIRS,
+                GRANITE_STAIRS,
+                MOSSY_COBBLESTONE_STAIRS,
+            ];
+            let stair = TABLETS[(h >> 5) as usize % TABLETS.len()];
+            let block = create_stair_with_properties(stair, facing, StairShape::Straight);
+            if !editor.block_exists_absolute(x, y, z) {
+                editor.set_block_with_properties_absolute(block, x, y, z, None, None);
+            }
         }
-        let facing = match self.dir {
-            (1, _) => StairFacing::East,
-            (-1, _) => StairFacing::West,
-            (0, 1) => StairFacing::South,
-            _ => StairFacing::North,
-        };
-        let y = editor.get_absolute_y(x, 1, z);
-        match h % 20 {
-            0..=8 => {
-                const TABLETS: [Block; 5] = [
-                    STONE_BRICK_STAIRS,
-                    POLISHED_ANDESITE_STAIRS,
-                    DIORITE_STAIRS,
-                    GRANITE_STAIRS,
-                    MOSSY_COBBLESTONE_STAIRS,
-                ];
-                let stair = TABLETS[(h >> 5) as usize % TABLETS.len()];
-                let block = create_stair_with_properties(stair, facing, StairShape::Straight);
-                if !editor.block_exists_absolute(x, y, z) {
-                    editor.set_block_with_properties_absolute(block, x, y, z, None, None);
-                }
-            }
-            9..=14 => {
-                const STONES: [Block; 4] = [
-                    POLISHED_ANDESITE,
-                    POLISHED_GRANITE,
-                    POLISHED_DIORITE,
-                    STONE_BRICKS,
-                ];
-                editor.set_block(
-                    STONES[(h >> 5) as usize % STONES.len()],
-                    x,
-                    1,
-                    z,
-                    None,
-                    None,
-                );
-            }
-            15..=16 => {
-                editor.set_block(POLISHED_ANDESITE, x, 1, z, None, None);
-                editor.set_block(ANDESITE_WALL, x, 2, z, None, None);
-            }
-            _ if low => editor.set_block(SMOOTH_STONE_SLAB, x, 1, z, None, None),
-            _ => editor.set_block(POLISHED_DIORITE, x, 1, z, None, None),
+        9..=14 => {
+            const STONES: [Block; 4] = [
+                POLISHED_ANDESITE,
+                POLISHED_GRANITE,
+                POLISHED_DIORITE,
+                STONE_BRICKS,
+            ];
+            editor.set_block(
+                STONES[(h >> 5) as usize % STONES.len()],
+                x,
+                1,
+                z,
+                None,
+                None,
+            );
         }
+        15..=16 => {
+            editor.set_block(POLISHED_ANDESITE, x, 1, z, None, None);
+            editor.set_block(ANDESITE_WALL, x, 2, z, None, None);
+        }
+        _ if low => editor.set_block(SMOOTH_STONE_SLAB, x, 1, z, None, None),
+        _ => editor.set_block(POLISHED_DIORITE, x, 1, z, None, None),
     }
 }
 
@@ -739,6 +857,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn bed_graves_stand_in_straight_rows() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(90.0, 60.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let bridges = no_bridges(&editor);
+        let way = rect_way(12, 5, 5, 84, 54, &[("landuse", "cemetery")]);
+        generate_cemetery(
+            &mut editor,
+            &way,
+            &flat_ground_args(),
+            &FloodFillCache::new(),
+            &BuildingFootprintBitmap::new_empty(),
+            &RoadMaskBitmap::new_empty(),
+            &bridges,
+        );
+        // The field runs along x, so every headstone row sits on one z, five apart.
+        let mut rows = std::collections::BTreeSet::new();
+        for x in 6..84 {
+            for z in 6..54 {
+                let y = editor.get_absolute_y(x, 1, z);
+                if editor
+                    .get_block_absolute(x, y, z)
+                    .is_some_and(|b| b.name().ends_with("_stairs"))
+                {
+                    rows.insert(z);
+                }
+            }
+        }
+        let rows: Vec<i32> = rows.into_iter().collect();
+        assert!(rows.len() >= 6, "{rows:?}");
+        assert!(rows.windows(2).all(|w| (w[1] - w[0]) % 5 == 0), "{rows:?}");
     }
 
     #[test]

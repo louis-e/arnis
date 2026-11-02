@@ -166,6 +166,18 @@ impl AreaMask {
         }
     }
 
+    /// Low and high corners of the bounds.
+    pub fn min(&self) -> (i32, i32) {
+        (self.min_x, self.min_z)
+    }
+
+    pub fn max(&self) -> (i32, i32) {
+        (
+            self.min_x + self.w as i32 - 1,
+            self.min_z + self.h as i32 - 1,
+        )
+    }
+
     #[inline]
     pub fn contains(&self, x: i32, z: i32) -> bool {
         let (dx, dz) = (x - self.min_x, z - self.min_z);
@@ -198,6 +210,28 @@ pub(crate) fn point_in_rings(rings: &[&[ProcessedNode]], (px, pz): (f64, f64)) -
         }
     }
     inside
+}
+
+/// A point surely inside a ring, unlike its vertex average on a concave outline: the middle
+/// of the widest span on a line across the ring's middle.
+pub(crate) fn interior_point(nodes: &[ProcessedNode]) -> Option<(f64, f64)> {
+    let (_, z0, _, z1) = bounds(nodes)?;
+    // Off the integer rows the vertices sit on.
+    let z = (z0 + z1) / 2.0 + 0.37 * (z1 - z0).min(1.0);
+    let mut xs: Vec<f64> = nodes
+        .windows(2)
+        .filter_map(|w| {
+            let (ax, az) = (w[0].x as f64, w[0].z as f64);
+            let (bx, bz) = (w[1].x as f64, w[1].z as f64);
+            ((az > z) != (bz > z)).then(|| ax + (z - az) * (bx - ax) / (bz - az))
+        })
+        .collect();
+    xs.sort_by(f64::total_cmp);
+    xs.as_chunks::<2>()
+        .0
+        .iter()
+        .max_by(|a, b| (a[1] - a[0]).total_cmp(&(b[1] - b[0])))
+        .map(|p| ((p[0] + p[1]) / 2.0, z))
 }
 
 /// Bounds of a ring as (min x, min z, max x, max z).
@@ -261,6 +295,24 @@ mod tests {
         assert!((a - 50.0).abs() < 2.0 && (c - 10.0).abs() < 2.0, "{a},{c}");
         assert_eq!(f.column(a, c), (40, 31));
         assert_eq!(f.along_axis(), (1, 0));
+    }
+
+    #[test]
+    fn an_l_shape_has_its_interior_point_inside() {
+        // An L whose vertex average falls in the missing corner.
+        let l = nodes(&[
+            (0, 0),
+            (100, 0),
+            (100, 10),
+            (10, 10),
+            (10, 100),
+            (0, 100),
+            (0, 0),
+        ]);
+        let avg = centroid(&l);
+        assert!(!point_in_rings(&[l.as_slice()], avg), "{avg:?}");
+        let p = interior_point(&l).unwrap();
+        assert!(point_in_rings(&[l.as_slice()], p), "{p:?}");
     }
 
     #[test]

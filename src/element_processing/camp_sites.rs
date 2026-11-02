@@ -2,12 +2,14 @@
 
 use crate::block_definitions::*;
 use crate::element_processing::area_layout::{
-    bounds, cell_hash, centroid, inside, point_in_rings, AreaMask, Frame,
+    bounds, cell_hash, inside, interior_point, point_in_rings, AreaMask, Frame,
 };
 use crate::element_processing::landuse::ground_is_protected;
-use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache, RoadMaskBitmap};
+use crate::floodfill_cache::{
+    in_hole, BuildingFootprintBitmap, FloodFillCache, Holes, RoadMaskBitmap,
+};
 use crate::land_cover::coord_hash;
-use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::structures::car::place_vehicle;
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -32,9 +34,7 @@ pub fn prepare(elements: &mut [ProcessedElement]) {
         .iter()
         .filter_map(|e| match e {
             ProcessedElement::Node(n) if is_pitch(&n.tags) => Some((n.x as f64, n.z as f64)),
-            ProcessedElement::Way(w) if is_pitch(&w.tags) && !w.nodes.is_empty() => {
-                Some(centroid(&w.nodes))
-            }
+            ProcessedElement::Way(w) if is_pitch(&w.tags) => interior_point(&w.nodes),
             _ => None,
         })
         .collect();
@@ -42,16 +42,27 @@ pub fn prepare(elements: &mut [ProcessedElement]) {
         return;
     }
     for e in elements.iter_mut() {
-        if let ProcessedElement::Way(w) = e {
-            let Some(bb) = claims(&w.tags).then(|| bounds(&w.nodes)).flatten() else {
-                continue;
-            };
-            if pitches
-                .iter()
-                .any(|&p| inside(bb, p) && point_in_rings(&[w.nodes.as_slice()], p))
-            {
-                w.tags.insert(PITCHES_TAG.to_string(), "yes".to_string());
-            }
+        let (tags, rings): (_, Vec<&[ProcessedNode]>) = match e {
+            ProcessedElement::Way(w) => (&mut w.tags, vec![w.nodes.as_slice()]),
+            ProcessedElement::Relation(r) => (
+                &mut r.tags,
+                r.members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer)
+                    .map(|m| m.way.nodes.as_slice())
+                    .collect(),
+            ),
+            ProcessedElement::Node(_) => continue,
+        };
+        if !claims(tags) {
+            continue;
+        }
+        let boxes: Vec<_> = rings.iter().filter_map(|r| bounds(r)).collect();
+        if pitches
+            .iter()
+            .any(|&p| boxes.iter().any(|&b| inside(b, p)) && point_in_rings(&rings, p))
+        {
+            tags.insert(PITCHES_TAG.to_string(), "yes".to_string());
         }
     }
 }
@@ -109,6 +120,27 @@ pub fn generate_camp_site(
     road_mask: &RoadMaskBitmap,
     timeout: Option<&Duration>,
 ) {
+    camp_area(
+        editor,
+        way,
+        flood_fill_cache,
+        footprints,
+        road_mask,
+        timeout,
+        None,
+    );
+}
+
+/// One site, or one outer ring of a site's multipolygon less its holes.
+pub fn camp_area(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    flood_fill_cache: &FloodFillCache,
+    footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
+    timeout: Option<&Duration>,
+    holes: Option<&Holes>,
+) {
     let fill = flood_fill_cache.get_or_compute(way, timeout);
     let Some(frame) = Frame::of(&way.nodes) else {
         return;
@@ -117,7 +149,7 @@ pub fn generate_camp_site(
     let mask = AreaMask::new(&fill, |x, z| {
         paths |= road_mask.contains(x, z);
         built += footprints.contains(x, z) as usize;
-        true
+        !in_hole(holes, x, z)
     });
     // A site mapped with its pitches or mobile homes needs none of its own.
     let laid_out = !way.tags.contains_key(PITCHES_TAG) && built * 12 < fill.len();
@@ -133,7 +165,7 @@ pub fn generate_camp_site(
     };
 
     for &(x, z) in fill.iter() {
-        if !editor.in_bounds(x, z) || ground_is_protected(editor, x, z) {
+        if in_hole(holes, x, z) || !editor.in_bounds(x, z) || ground_is_protected(editor, x, z) {
             continue;
         }
         let lane = site.lanes && site.on_lane(x, z);
@@ -157,6 +189,19 @@ struct Site {
 impl Site {
     fn period(&self) -> f64 {
         self.lane + 2.0 * self.depth
+    }
+
+    /// The pitch a column lies on as (band, index, side), or None on a lane.
+    fn pitch_of(&self, x: i32, z: i32) -> Option<(i64, i64, i64)> {
+        let (a, c) = self.frame.local(x, z);
+        let p = self.period();
+        let band = (c / p).floor();
+        let cc = c - band * p;
+        if cc < self.lane {
+            return None;
+        }
+        let side = if cc < self.lane + self.depth { 0 } else { 1 };
+        Some((band as i64, (a / self.width).floor() as i64, side))
     }
 
     fn on_lane(&self, x: i32, z: i32) -> bool {
@@ -225,22 +270,31 @@ impl Site {
                     let Some(stay) = Stay::pick(h >> 8, &way.tags) else {
                         continue;
                     };
+                    let side_dir = (-dir.1, dir.0);
+                    // The caravan and its car side by side, the pair centred on the pitch.
+                    let centre = if stay == Stay::Caravan {
+                        (centre.0 - 2 * side_dir.0, centre.1 - 2 * side_dir.1)
+                    } else {
+                        centre
+                    };
                     if !editor.owns(centre.0, centre.1) {
                         continue;
                     }
-                    let side_dir = (-dir.1, dir.0);
                     let at = |u: i32, t: i32| {
                         (
                             centre.0 + u * side_dir.0 + t * dir.0,
                             centre.1 + u * side_dir.1 + t * dir.1,
                         )
                     };
-                    // The whole stay and a step around it on open ground.
+                    // The whole stay on its own pitch, and a step around it on open ground.
                     let (u0, u1, t0, t1) = stay.extent();
+                    let own = Some((band, i, side));
                     let fits = (u0 - 1..=u1 + 1).all(|u| {
                         (t0 - 1..=t1 + 1).all(|t| {
                             let (x, z) = at(u, t);
+                            let inner = (u0..=u1).contains(&u) && (t0..=t1).contains(&t);
                             self.free(editor, road_mask, footprints, x, z)
+                                && (!inner || self.pitch_of(x, z) == own)
                         })
                     });
                     if fits {
@@ -334,12 +388,17 @@ pub fn generate_pitch_node(editor: &mut WorldEditor, node: &ProcessedNode) {
             node.z + u * side.1 + t * dir.1,
         )
     };
-    let stay = match (h >> 8) % 3 {
-        0 => Stay::Dome,
-        1 => Stay::Ridge,
-        _ => Stay::Motorhome,
-    };
-    draw(editor, stay, h >> 12, &at, dir);
+    let no = |k: &str| node.tags.get(k).map(String::as_str) == Some("no");
+    let mut stays = Vec::new();
+    if !no("tents") {
+        stays.extend([Stay::Dome, Stay::Ridge]);
+    }
+    if !no("motorhome") {
+        stays.push(Stay::Motorhome);
+    }
+    if let Some(&stay) = stays.get(((h >> 8) % 3) as usize % stays.len().max(1)) {
+        draw(editor, stay, h >> 12, &at, dir);
+    }
 }
 
 #[cfg(test)]

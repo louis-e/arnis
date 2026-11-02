@@ -80,6 +80,8 @@ pub enum RelationArea {
     Leisure,
     /// Fairways, greens and the rest of a golf course's turf.
     Golf,
+    /// Camp sites, churchyards and grave fields, laid out ring by ring.
+    Grounds,
     ManMade,
     Pool,
 }
@@ -98,6 +100,10 @@ impl RelationArea {
             Some(Self::Water)
         } else if golf::claims(tags) {
             Some(Self::Golf)
+        } else if camp_sites::claims(tags)
+            || (cemetery::claims(tags) && !tags.contains_key("landuse"))
+        {
+            Some(Self::Grounds)
         } else if natural.is_some() {
             Some(Self::Natural)
         } else if tags.contains_key("landuse") {
@@ -116,7 +122,7 @@ impl RelationArea {
     /// groynes are areas.
     pub fn fills_members(self, tags: &HashMap<String, String>) -> bool {
         match self {
-            Self::Natural | Self::Leisure | Self::Golf | Self::Pool => true,
+            Self::Natural | Self::Leisure | Self::Golf | Self::Grounds | Self::Pool => true,
             Self::Landuse => landuse_paints_ground(tags),
             Self::ManMade => matches!(
                 tags.get("man_made").map(String::as_str),

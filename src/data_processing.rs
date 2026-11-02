@@ -4,7 +4,7 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::building_facade::BuildingContext;
 use crate::element_processing::subprocessor::interior::InteriorUseIndex;
 use crate::element_processing::*;
-use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, InnerRings};
 use crate::ground::Ground;
 use crate::ground_generation;
 use crate::map_preview;
@@ -98,7 +98,11 @@ fn relation_ground_fill_area(rel: &ProcessedRelation) -> Option<f64> {
     let tags = &rel.tags;
     match RelationArea::of(tags) {
         Some(
-            RelationArea::Natural | RelationArea::Leisure | RelationArea::Golf | RelationArea::Pool,
+            RelationArea::Natural
+            | RelationArea::Leisure
+            | RelationArea::Golf
+            | RelationArea::Grounds
+            | RelationArea::Pool,
         ) => {}
         Some(RelationArea::Landuse) if landuse_paints_ground(tags) => {}
         _ => return None,
@@ -700,6 +704,45 @@ fn process_element(
             Some(RelationArea::Golf) => {
                 golf::generate_golf_from_relation(editor, rel, args, flood_fill_cache);
             }
+            Some(RelationArea::Grounds) => {
+                // Each outer ring with the relation's tags, less the holes its inner rings cut.
+                let inners = InnerRings::of(rel);
+                for member in rel
+                    .members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer)
+                {
+                    let holes =
+                        flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
+                    let way = ProcessedWay {
+                        id: member.way.id,
+                        nodes: member.way.nodes.clone(),
+                        tags: rel.tags.clone(),
+                    };
+                    if camp_sites::claims(&rel.tags) {
+                        camp_sites::camp_area(
+                            editor,
+                            &way,
+                            flood_fill_cache,
+                            building_footprints,
+                            road_mask,
+                            args.timeout.as_ref(),
+                            holes.as_ref(),
+                        );
+                    } else {
+                        cemetery::cemetery_area(
+                            editor,
+                            &way,
+                            args,
+                            flood_fill_cache,
+                            building_footprints,
+                            road_mask,
+                            bridge_surface,
+                            holes.as_ref(),
+                        );
+                    }
+                }
+            }
             Some(RelationArea::Pool) => {
                 let ctx = swimming_pools::PoolContext {
                     flood_fill_cache,
@@ -1252,6 +1295,7 @@ pub fn generate_world_with_options(
 
     cemetery::prepare(&mut elements, sign_region);
     camp_sites::prepare(&mut elements);
+    allotments::prepare(&mut elements, args.scale);
     // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 
