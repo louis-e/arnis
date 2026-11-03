@@ -208,6 +208,21 @@ a:hover {
   margin-top: 8px;
 }
 
+.world-storage-estimate {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  font-size: 0.85em;
+  line-height: 1.3em;
+  color: #d6d6d6;
+}
+
+.world-storage-estimate.is-over-limit,
+.world-storage-estimate.is-unavailable {
+  color: #fa7878;
+}
+
 .secret-parrot {
   height: 100px;
   width: auto;
@@ -800,6 +815,17 @@ input[type="range"] {
   cursor: pointer;
   margin-top: 0;
   box-shadow: none;
+}
+
+.start-button:disabled {
+  color: #777;
+  cursor: not-allowed;
+}
+
+.start-button-wrap.is-disabled,
+.start-button-wrap.is-disabled:hover {
+  background-color: #777;
+  cursor: not-allowed;
 }
 
 .settings-button {
