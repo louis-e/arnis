@@ -2308,6 +2308,7 @@ mod locale_tests {
         ("sl", include_str!("gui/locales/sl.json")),
         ("sv", include_str!("gui/locales/sv.json")),
         ("ua", include_str!("gui/locales/ua.json")),
+        ("vi", include_str!("gui/locales/vi.json")),
         ("zh-CN", include_str!("gui/locales/zh-CN.json")),
     ];
 
