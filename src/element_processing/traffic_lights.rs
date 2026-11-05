@@ -272,7 +272,11 @@ impl Junctions {
     /// and one with no other signal at the junction is a crossing of its own.
     pub(crate) fn passed(&self, nodes: &[ProcessedNode], i: usize, step: isize) -> bool {
         let node = &nodes[i];
-        if self.is_junction(node.id) || node.tags.contains_key("traffic_signals:direction") {
+        // People cross on their own green there, whichever way cars came.
+        if self.is_junction(node.id)
+            || node.tags.contains_key("traffic_signals:direction")
+            || is_crossing(&node.tags)
+        {
             return false;
         }
         let Some((junction, behind)) = self.nearest(nodes, i, step) else {

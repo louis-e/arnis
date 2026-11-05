@@ -361,6 +361,10 @@ impl WorldEditor<'_> {
         let Some(region) = self.world.regions.get_mut(&(rx, rz)) else {
             return;
         };
+        let tops = style
+            .footprints
+            .filter(|_| style.ruins)
+            .map(|f| RegionTops::build((rx << 9, rz << 9), region.chunks.iter(), f));
         for ((cx, cz), chunk) in region.chunks.iter_mut() {
             let base = (((rx << 5) + cx) << 4, ((rz << 5) + cz) << 4);
             let columns: Vec<(Column, i32)> = (0..16u8)
@@ -374,7 +378,10 @@ impl WorldEditor<'_> {
                 let in_building =
                     |col: &Column| style.footprints.is_some_and(|f| f.contains(col.x, col.z));
                 let mut fires = Vec::new();
-                let plans = style.footprints.map(|f| plan_ruins(chunk, &columns, f));
+                let plans = style
+                    .footprints
+                    .zip(tops.as_ref())
+                    .map(|(f, tops)| plan_ruins(&columns, f, tops));
                 for &(col, ground_y) in &columns {
                     let plan = plans
                         .as_ref()
@@ -533,20 +540,82 @@ struct RuinPlan {
     top: i32,
 }
 
-/// The building's far corner, reached from (x, z) by going as far towards lower x, then
-/// lower z, as the footprint allows. It names the building for every column of it.
+/// How far up or down the next column over a corner walk looks, so it follows a slanted
+/// edge to the end.
+const CORNER_SLIDE: [i32; 17] = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
+
+/// One step of the walk to a building's corner: over to lower x by the nearest cell of the
+/// next column, or else down to lower z. None at the corner.
+fn corner_step(footprints: &CoordinateBitmap, x: i32, z: i32) -> Option<(i32, i32)> {
+    CORNER_SLIDE
+        .iter()
+        .map(|&dz| (x - 1, z + dz))
+        .find(|&(nx, nz)| footprints.contains(nx, nz))
+        .or_else(|| footprints.contains(x, z - 1).then_some((x, z - 1)))
+}
+
+/// The building's far corner, reached from (x, z) by stepping to lower x, or lower z where
+/// x can go no lower. It names the building for every column of it, square to the grid or
+/// not, so long as it has no notch the walk can end in.
 fn building_corner(footprints: &CoordinateBitmap, x: i32, z: i32) -> (i32, i32) {
-    let (mut cx, mut cz) = (x, z);
+    let mut at = (x, z);
     for _ in 0..CORNER_WALK {
-        if footprints.contains(cx - 1, cz) {
-            cx -= 1;
-        } else if footprints.contains(cx, cz - 1) {
-            cz -= 1;
-        } else {
-            break;
+        match corner_step(footprints, at.0, at.1) {
+            Some(next) => at = next,
+            None => break,
         }
     }
-    (cx, cz)
+    at
+}
+
+/// The heights of a region's building columns before the ruins, so a building's walls and
+/// eaves read alike from each of its chunks.
+struct RegionTops {
+    min: (i32, i32),
+    tops: Vec<i16>,
+}
+
+const NO_TOP: i16 = i16::MIN;
+/// How far inside a building its eaves are looked for.
+const EAVE_REACH: i32 = 48;
+
+impl RegionTops {
+    fn build<'c>(
+        min: (i32, i32),
+        chunks: impl Iterator<Item = ((i32, i32), &'c ChunkToModify)>,
+        footprints: &CoordinateBitmap,
+    ) -> Self {
+        let mut tops = vec![NO_TOP; 512 * 512];
+        for ((cx, cz), chunk) in chunks {
+            for lz in 0..16u8 {
+                for lx in 0..16u8 {
+                    let (x, z) = (
+                        min.0 + cx * 16 + i32::from(lx),
+                        min.1 + cz * 16 + i32::from(lz),
+                    );
+                    if !footprints.contains(x, z) {
+                        continue;
+                    }
+                    if let Some((y, _)) = (Column { lx, lz, x, z }).top(chunk) {
+                        let at = ((z - min.1) * 512 + (x - min.0)) as usize;
+                        if let Some(slot) = tops.get_mut(at) {
+                            *slot = y.clamp(i32::from(NO_TOP) + 1, i32::from(i16::MAX)) as i16;
+                        }
+                    }
+                }
+            }
+        }
+        Self { min, tops }
+    }
+
+    fn get(&self, x: i32, z: i32) -> Option<i32> {
+        let (dx, dz) = (x - self.min.0, z - self.min.1);
+        if !(0..512).contains(&dx) || !(0..512).contains(&dz) {
+            return None;
+        }
+        let top = self.tops[(dz * 512 + dx) as usize];
+        (top != NO_TOP).then_some(i32::from(top))
+    }
 }
 
 /// Mostly the building's own, with a slow drift for terraces, whose footprints join up.
@@ -561,58 +630,69 @@ fn decay_of(corner: (i32, i32), x: i32, z: i32) -> Decay {
     }
 }
 
-/// What the ruins do to each building column of a chunk, indexed by z then x. Read before
-/// any block moves, so no column's plan depends on the order they are broken in.
+/// What the ruins do to each building column of a chunk, indexed by z then x. Read from
+/// the heights before any block moves, so no column's plan depends on the order they are
+/// broken in.
 fn plan_ruins(
-    chunk: &ChunkToModify,
     columns: &[(Column, i32)],
     footprints: &CoordinateBitmap,
+    tops: &RegionTops,
 ) -> [[Option<RuinPlan>; 16]; 16] {
     let mut plans = [[None; 16]; 16];
-    let mut corners = [[(0, 0); 16]; 16];
-    let mut tops = [[None; 16]; 16];
-    let mut walls = [[false; 16]; 16];
-    // In this order a column's corner is that of the one before it, where it joins on.
+    let Some(&(first, _)) = columns.first() else {
+        return plans;
+    };
+    let base = (first.x - i32::from(first.lx), first.z - i32::from(first.lz));
+    let is_wall = |x: i32, z: i32| {
+        footprints.contains(x, z)
+            && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dz)| !footprints.contains(x + dx, z + dz))
+    };
+    // Corners met on the way, so the chunk's columns share their walks.
+    let mut corners: [[Option<(i32, i32)>; 16]; 16] = [[None; 16]; 16];
+    let mut corner_of = |x: i32, z: i32| {
+        let mut path = Vec::new();
+        let mut at = (x, z);
+        let corner = loop {
+            let (lx, lz) = (at.0 - base.0, at.1 - base.1);
+            if !(0..16).contains(&lx) || !(0..16).contains(&lz) {
+                break building_corner(footprints, at.0, at.1);
+            }
+            if let Some(corner) = corners[lz as usize][lx as usize] {
+                break corner;
+            }
+            path.push((lx as usize, lz as usize));
+            match corner_step(footprints, at.0, at.1) {
+                Some(next) => at = next,
+                None => break at,
+            }
+        };
+        for (lx, lz) in path {
+            corners[lz][lx] = Some(corner);
+        }
+        corner
+    };
     for &(col, _) in columns {
         let (x, z) = (col.x, col.z);
         if !footprints.contains(x, z) {
             continue;
         }
-        let (lx, lz) = (usize::from(col.lx), usize::from(col.lz));
-        corners[lz][lx] = if lx > 0 && footprints.contains(x - 1, z) {
-            corners[lz][lx - 1]
-        } else if lz > 0 && footprints.contains(x, z - 1) {
-            corners[lz - 1][lx]
-        } else {
-            building_corner(footprints, x, z)
-        };
-        walls[lz][lx] = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-            .iter()
-            .any(|&(dx, dz)| !footprints.contains(x + dx, z + dz));
-        tops[lz][lx] = col.top(chunk).map(|(y, _)| y);
-    }
-    for &(col, _) in columns {
-        let (lx, lz) = (usize::from(col.lx), usize::from(col.lz));
-        let Some(top) = tops[lz][lx] else {
+        let Some(top) = tops.get(x, z) else {
             continue;
         };
-        if !footprints.contains(col.x, col.z) {
-            continue;
-        }
-        // The lowest wall top in sight along the chunk's axes.
+        let wall = is_wall(x, z);
+        // The lowest wall top in sight along the axes, inside this building.
         let mut eave = top;
-        if !walls[lz][lx] {
+        if !wall {
             for (dx, dz) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
-                let (mut wx, mut wz) = (lx as i32, lz as i32);
-                loop {
-                    wx += dx;
-                    wz += dz;
-                    if !(0..16).contains(&wx) || !(0..16).contains(&wz) {
+                for i in 1..=EAVE_REACH {
+                    let (wx, wz) = (x + dx * i, z + dz * i);
+                    if !footprints.contains(wx, wz) {
                         break;
                     }
-                    let (ax, az) = (wx as usize, wz as usize);
-                    if walls[az][ax] {
-                        if let Some(y) = tops[az][ax] {
+                    if is_wall(wx, wz) {
+                        if let Some(y) = tops.get(wx, wz) {
                             eave = eave.min(y);
                         }
                         break;
@@ -620,9 +700,9 @@ fn plan_ruins(
                 }
             }
         }
-        plans[lz][lx] = Some(RuinPlan {
-            decay: decay_of(corners[lz][lx], col.x, col.z),
-            wall: walls[lz][lx],
+        plans[usize::from(col.lz)][usize::from(col.lx)] = Some(RuinPlan {
+            decay: decay_of(corner_of(x, z), x, z),
+            wall,
             eave,
             top,
         });
@@ -829,7 +909,7 @@ fn grow_tree(chunk: &mut ChunkToModify, col: Column, surface: i32, h: u64) {
     if !(2..=13).contains(&col.lx) || !(2..=13).contains(&col.lz) {
         return;
     }
-    let trunk = 3 + (h >> 4) as i32 % 3;
+    let trunk = 3 + ((h >> 4) % 3) as i32;
     let crown = surface + trunk;
     if crown + 2 > world_max_y() {
         return;
@@ -1139,7 +1219,7 @@ fn wreck_a_car(
     if !h.is_multiple_of(WRECK_ODDS) {
         return;
     }
-    let (lx, lz) = (4 + (h >> 8) as i32 % 8, 4 + (h >> 16) as i32 % 8);
+    let (lx, lz) = (4 + ((h >> 8) % 8) as i32, 4 + ((h >> 16) % 8) as i32);
     let Some(&(centre, ground_y)) = columns
         .iter()
         .find(|(c, _)| i32::from(c.lx) == lx && i32::from(c.lz) == lz)
@@ -1535,10 +1615,34 @@ mod tests {
         (chunk, columns, footprints)
     }
 
+    fn tops_of(chunk: &ChunkToModify, footprints: &CoordinateBitmap) -> RegionTops {
+        RegionTops::build((0, 0), std::iter::once(((0, 0), chunk)), footprints)
+    }
+
+    #[test]
+    fn a_building_askew_to_the_grid_has_one_corner() {
+        let bbox = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(-64, -64, 64, 64)
+            .unwrap();
+        let mut footprints = CoordinateBitmap::new(&bbox);
+        // A square turned 45 degrees: every cell on its lower left edge is a corner of its own
+        // to a walk that only steps straight.
+        let cells: Vec<(i32, i32)> = (-12i32..=12)
+            .flat_map(|x| (-12i32..=12).map(move |z| (x, z)))
+            .filter(|(x, z)| x.abs() + z.abs() <= 12)
+            .collect();
+        for &(x, z) in &cells {
+            footprints.set(x, z);
+        }
+        let corner = building_corner(&footprints, 0, 0);
+        for &(x, z) in &cells {
+            assert_eq!(building_corner(&footprints, x, z), corner, "from {x},{z}");
+        }
+    }
+
     #[test]
     fn a_building_has_one_corner_and_one_plan_all_across() {
         let (chunk, columns, footprints) = square_building(10, 20);
-        let plans = plan_ruins(&chunk, &columns, &footprints);
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
         assert!(plans[0][0].is_none());
         for z in 2..12 {
             for x in 2..12 {
@@ -1641,7 +1745,7 @@ mod tests {
         };
         // The wall stood to 12 and has come down to 6: the slab hanging off it goes.
         let mut chunk = standing(12);
-        let plans = plan_ruins(&chunk, &columns, &footprints);
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
         for y in 7..=12 {
             wall.set(&mut chunk, y, AIR);
         }
@@ -1651,7 +1755,7 @@ mod tests {
 
         // Beside a wall still standing that high it stays.
         let mut chunk = standing(12);
-        let plans = plan_ruins(&chunk, &columns, &footprints);
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
         drop_overhangs(&mut chunk, eave, 0, &plans);
         assert_eq!(eave.get(&chunk, 12), Some(STONE_BRICK_SLAB));
 
@@ -1660,7 +1764,7 @@ mod tests {
         for y in 1..=12 {
             eave.set(&mut chunk, y, OAK_LOG);
         }
-        let plans = plan_ruins(&chunk, &columns, &footprints);
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
         for y in 7..=12 {
             wall.set(&mut chunk, y, AIR);
         }

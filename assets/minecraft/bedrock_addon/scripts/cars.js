@@ -145,6 +145,16 @@ export class Cars {
       cars.set(id, car);
       this.index(car);
     }
+    // A car that drove got out of sight between two looks, as when a player moves away
+    // fast: take it away, as it would have been on leaving reach.
+    for (const [id, car] of this.cars) {
+      if (cars.has(id) || !car.live) continue;
+      try {
+        if (car.e.isValid) car.e.remove();
+      } catch (e) {
+        warn("taking away a car", e);
+      }
+    }
     this.cars = cars;
   }
 
@@ -166,6 +176,7 @@ export class Cars {
       i,
       p,
       j: e.getDynamicProperty("arnis:j") === true,
+      long: this.isLong(e),
       x: at.x,
       y: at.y,
       z: at.z,
@@ -215,10 +226,21 @@ export class Cars {
   /** How close the car ahead is: 3 stop a couple of metres behind it, 2 and 1 ease off. */
   look(car) {
     const same = (o) => turnBetween(o.yaw, car.yaw) <= this.rules.same_way;
+    const long = (o) => o.long && same(o);
+    const extra = this.rules.long_extra * this.k;
+    const own = car.long ? extra : 0;
     for (const [at, reach, close] of this.rules.look) {
-      if (this.any(ahead(car, car.yaw, at * this.k), reach * this.k, car, same)) return close;
+      const from = at * this.k + own;
+      if (this.any(ahead(car, car.yaw, from), reach * this.k, car, same)) return close;
+      if (this.any(ahead(car, car.yaw, from + extra), reach * this.k, car, long)) return close;
     }
     return 0;
+  }
+
+  /** Whether an entity is a bus or a truck. */
+  isLong(e) {
+    const type = e.typeId ?? "";
+    return this.rules.long_kinds.some((kind) => type.includes(`car_${kind}_`));
   }
 
   drive(car, players) {
@@ -378,6 +400,7 @@ export class Cars {
       i,
       p: pace,
       j: false,
+      long: this.isLong(e),
       x: at.x,
       y: at.y,
       z: at.z,
