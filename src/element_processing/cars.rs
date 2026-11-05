@@ -12,26 +12,32 @@ use crate::bedrock_addon::{self, Body, Fleet, Lamp, Shape};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::datapack::macro_coord;
-use crate::element_processing::highways::highway_block_range;
-use crate::element_processing::road_markings::oneway_sign;
+use crate::element_processing::highways::{highway_block_range, highway_default_lanes};
+use crate::element_processing::road_markings::{is_roundabout, oneway_sign};
 use crate::element_processing::traffic_lights::{
-    group_of, is_signal, is_vehicular, signal_upstream, UPSTREAM_M,
+    group_of, is_signal, is_vehicular, signal_upstream, Junctions, UPSTREAM_M,
 };
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
 /// Longest stretch between two waypoints; shorter where the ground bends.
 const MAX_SPAN: f64 = 24.0;
-/// The world's cars, spread over all of its lanes. Only those near a player move, so the
-/// cap is about what the world files hold, not what a tick costs.
-const MAX_CARS: usize = 1500;
+/// The cars placed in a world, spread over all of its lanes. Only those near a player move,
+/// so the cap is about what the world files hold, not what a tick costs.
+const MAX_CARS: usize = 3000;
+/// Most cars the roads around one player are filled up to, which is what a tick costs.
+const MAX_NEAR: usize = 120;
+/// Side of the map cells the spots new cars start from are stored by, in blocks.
+const SPOT_CELL: f64 = 64.0;
 /// Lanes the pack stores per command.
 const LANES_PER_LINE: usize = 256;
+/// Spot cells the pack stores per command.
+const SPOT_CELLS_PER_LINE: usize = 256;
 /// How far back from a mid-road signal the car stops.
 const STOP_BACK: f64 = 1.5;
 /// Speed across a junction, and over the last stretch of a lane into one.
@@ -72,6 +78,16 @@ const LOOK: [(f64, f64, u8); 4] = [(3.0, 1.7, 3), (6.0, 1.7, 3), (10.0, 2.0, 2),
 const SAME_WAY_DEG: f64 = 67.5;
 /// Where crossing traffic right in front is looked for: how far ahead and how far round.
 const CROSSING_AT: (f64, f64) = (3.0, 1.7);
+/// How far over the block a player rides on their eyes are, at any scale.
+const RIDER_EYE_OVER_SEAT: f64 = 1.02;
+/// From a car's middle to its side, in blocks.
+const CAR_HALF_WIDTH: f64 = 0.9;
+/// The narrowest a lane is laid out, in blocks: cars side by side must not touch.
+const MIN_LANE_WIDTH: i32 = 3;
+/// The most lanes laid out each way.
+const MAX_LANES: usize = 4;
+/// The closest to the middle of a two-way road a lane comes where buildings crowd it.
+const NARROW_LANE_OFFSET: f64 = 0.5;
 /// A player this close to either of two spots ahead stops the car: the spots, and how close.
 const PLAYER_AT: (f64, f64, f64) = (3.0, 6.0, 2.0);
 /// Steps a car gives way at a junction before it goes anyway, and up to 31 more by its number.
@@ -79,7 +95,14 @@ const GIVE_WAY_STEPS: i32 = 30;
 /// A driver's pace, in thousandths of the lane speed, both ends included.
 const PACE: (i32, i32) = (880, 1120);
 /// How often each kind of car turns up.
-const KINDS: [(Kind, u32); 3] = [(Kind::Sedan, 60), (Kind::Hatchback, 26), (Kind::Van, 14)];
+const KINDS: [(Kind, u32); 6] = [
+    (Kind::Sedan, 52),
+    (Kind::Hatchback, 24),
+    (Kind::Van, 10),
+    (Kind::Pickup, 6),
+    (Kind::Truck, 5),
+    (Kind::Bus, 3),
+];
 
 /// Thousandths of a block per two-tick step at `kmh` on a world of `scale` blocks per metre.
 fn step_speed(kmh: f64, scale: f64) -> i32 {
@@ -132,22 +155,22 @@ fn parse_maxspeed(raw: &str) -> Option<f64> {
 }
 
 /// Cars per metre of lane in daytime traffic: flow over speed, so a main road at
-/// 800 vehicles an hour and 30 km/h holds about 25 per kilometre and direction, and a
-/// side street at 100 an hour about 5.
+/// 1200 vehicles an hour and 30 km/h holds 40 per kilometre and direction, and a side
+/// street at 200 an hour and 20 km/h 10.
 fn density(highway: &str) -> f64 {
     match highway {
         // One simulated lane, kept about two seconds apart at speed.
-        "motorway" | "trunk" | "motorway_link" | "trunk_link" => 1.0 / 60.0,
-        "primary" | "secondary" | "primary_link" | "secondary_link" => 1.0 / 40.0,
-        "tertiary" | "tertiary_link" => 1.0 / 60.0,
-        "unclassified" | "road" => 1.0 / 150.0,
-        "residential" => 1.0 / 200.0,
-        "service" => 1.0 / 400.0,
-        _ => 1.0 / 500.0,
+        "motorway" | "trunk" | "motorway_link" | "trunk_link" => 1.0 / 40.0,
+        "primary" | "secondary" | "primary_link" | "secondary_link" => 1.0 / 25.0,
+        "tertiary" | "tertiary_link" => 1.0 / 40.0,
+        "unclassified" | "road" => 1.0 / 80.0,
+        "residential" => 1.0 / 100.0,
+        "service" => 1.0 / 250.0,
+        _ => 1.0 / 300.0,
     }
 }
 
-fn drivable(tags: &HashMap<String, String>) -> bool {
+pub(crate) fn drivable(tags: &HashMap<String, String>) -> bool {
     let get = |k: &str| tags.get(k).map(String::as_str);
     let Some(highway) = get("highway") else {
         return false;
@@ -228,6 +251,59 @@ impl Path {
 
 /// Shortest step between nodes that gives a lane its heading, in blocks.
 const MIN_LEG: f64 = 2.0;
+
+/// The line a car follows: `offset` from the middle, or nearer to it where a building
+/// stands on the road, as it does in narrow old streets. A lane with others beside it moves
+/// in only so far that cars side by side still pass.
+fn fitted_lane_line(
+    nodes: &[&ProcessedNode],
+    offset: f64,
+    alone: bool,
+    drives_on_left: bool,
+    built: &impl Fn(i32, i32) -> bool,
+) -> Vec<(f64, f64)> {
+    let floor = if alone {
+        NARROW_LANE_OFFSET
+    } else {
+        (offset.abs() - f64::from(MIN_LANE_WIDTH) + 2.0 * CAR_HALF_WIDTH).max(NARROW_LANE_OFFSET)
+    };
+    if offset.abs() <= floor {
+        return lane_line(nodes, offset, drives_on_left);
+    }
+    let sign = offset.signum();
+    let mut offsets = vec![offset.abs()];
+    while offsets[offsets.len() - 1] > floor {
+        offsets.push((offsets[offsets.len() - 1] - 0.5).max(floor));
+    }
+    let lines: Vec<_> = offsets
+        .iter()
+        .map(|&o| lane_line(nodes, sign * o, drives_on_left))
+        .collect();
+    let edges: Vec<_> = offsets
+        .iter()
+        .map(|&o| lane_line(nodes, sign * (o + CAR_HALF_WIDTH), drives_on_left))
+        .collect();
+    let leg_is_clear = |a: (f64, f64), b: (f64, f64)| {
+        let steps = (b.0 - a.0).hypot(b.1 - a.1).ceil().max(1.0) as usize;
+        (0..=steps).all(|i| {
+            let t = i as f64 / steps as f64;
+            !built(
+                (a.0 + (b.0 - a.0) * t).floor() as i32,
+                (a.1 + (b.1 - a.1) * t).floor() as i32,
+            )
+        })
+    };
+    (0..nodes.len())
+        .map(|k| {
+            let legs = k.saturating_sub(1)..(k + 1).min(nodes.len() - 1);
+            let fit = edges
+                .iter()
+                .position(|edge| legs.clone().all(|j| leg_is_clear(edge[j], edge[j + 1])))
+                .unwrap_or(offsets.len() - 1);
+            lines[fit][k]
+        })
+        .collect()
+}
 
 /// The lane's centre line: the node path pushed `offset` to the driving side.
 fn lane_line(nodes: &[&ProcessedNode], offset: f64, drives_on_left: bool) -> Vec<(f64, f64)> {
@@ -327,6 +403,9 @@ enum Kind {
     Sedan,
     Hatchback,
     Van,
+    Pickup,
+    Truck,
+    Bus,
 }
 
 struct Car {
@@ -346,6 +425,8 @@ pub struct CarNetwork {
     cars: Vec<Car>,
     /// Cars by the way their lane comes from, so each is placed when that way is built.
     by_way: FnvHashMap<u64, Vec<usize>>,
+    /// Where new cars can join the traffic, as (lane, point) by map cell.
+    spots: BTreeMap<(i32, i32), Vec<(usize, usize)>>,
     /// Blocks per metre the cars are built and spaced at.
     size: f64,
     scale: f64,
@@ -359,12 +440,62 @@ struct Piece<'a> {
     oneway: i8,
 }
 
-/// One direction of travel along a piece.
+/// One lane of travel along a piece.
 struct Lane<'a> {
     piece: usize,
     nodes: Vec<&'a ProcessedNode>,
     reverse: Option<usize>,
     two_way: bool,
+    /// Against the way's own direction.
+    backward: bool,
+    /// From the way's middle, towards the driver's side.
+    offset: f64,
+    /// How many lanes go this way along the piece.
+    count: usize,
+}
+
+/// How many lanes a way carries along it and against it, as far as its width has room.
+fn lanes_each_way(way: &ProcessedWay, half: i32, oneway: i8) -> (usize, usize) {
+    let tag = |k: &str| {
+        way.tags
+            .get(k)
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+    };
+    let highway = way.tags.get("highway").map_or("", String::as_str);
+    let total = tag("lanes").unwrap_or_else(|| {
+        if is_roundabout(&way.tags) {
+            1
+        } else {
+            highway_default_lanes(highway).max(1) as usize
+        }
+    });
+    if oneway != 0 {
+        let room = ((2 * half + 1) / MIN_LANE_WIDTH).max(1) as usize;
+        let n = total.min(room).min(MAX_LANES);
+        return if oneway > 0 { (n, 0) } else { (0, n) };
+    }
+    let room = (half / MIN_LANE_WIDTH).max(1) as usize;
+    let fit = |n: usize| n.min(room).clamp(1, MAX_LANES);
+    (
+        fit(tag("lanes:forward").unwrap_or(total.div_ceil(2))),
+        fit(tag("lanes:backward").unwrap_or(total / 2)),
+    )
+}
+
+/// How far from a road's middle the `k`th of `count` lanes one way along it runs, counted
+/// from the middle of a two-way road or the far kerb of a one-way one.
+fn lane_offset(half: i32, count: usize, k: usize, two_way: bool) -> f64 {
+    let half = f64::from(half);
+    let share = (k as f64 + 0.5) / count.max(1) as f64;
+    if !two_way {
+        let width = 2.0 * half + 1.0;
+        -width / 2.0 + width * share
+    } else if count <= 1 {
+        ((half + 1.0) / 2.0).max(1.0)
+    } else {
+        0.5 + half * share
+    }
 }
 
 /// Deterministic noise for picking colours, kinds and paces.
@@ -403,16 +534,35 @@ const VAN_COLOURS: [(&str, u32); 3] = [
     ("minecraft:light_gray_concrete", 20),
     ("minecraft:gray_concrete", 10),
 ];
+const PICKUP_COLOURS: [(&str, u32); 5] = [
+    ("minecraft:white_concrete", 30),
+    ("minecraft:black_concrete", 25),
+    ("minecraft:gray_concrete", 20),
+    ("minecraft:red_concrete", 15),
+    ("minecraft:blue_concrete", 10),
+];
+const TRUCK_COLOURS: [(&str, u32); 3] = [
+    ("minecraft:white_concrete", 50),
+    ("minecraft:blue_concrete", 25),
+    ("minecraft:red_concrete", 25),
+];
+const BUS_COLOURS: [(&str, u32); 4] = [
+    ("minecraft:white_concrete", 35),
+    ("minecraft:red_concrete", 25),
+    ("minecraft:blue_concrete", 20),
+    ("minecraft:yellow_concrete", 20),
+];
 
 impl CarNetwork {
-    /// `surface_y` is the height of the road surface block at a column.
+    /// `surface_y` is the height of a way's road surface block at a column.
     pub fn build(
         elements: &[ProcessedElement],
         scale: f64,
         drives_on_left: bool,
         stop_at_signals: bool,
         world: &XZBBox,
-        surface_y: impl Fn(i32, i32) -> i32,
+        surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
+        built: impl Fn(i32, i32) -> bool,
     ) -> Self {
         let roads: Vec<(&ProcessedWay, i32, i8)> = elements
             .iter()
@@ -428,27 +578,9 @@ impl CarNetwork {
                 _ => None,
             })
             .collect();
-        // How many ways lead out of each node: three or more make a junction, two are just
-        // a road that goes on, one is a dead end.
-        let mut arms: FnvHashMap<u64, u32> = FnvHashMap::default();
-        let mut widest: FnvHashMap<u64, i32> = FnvHashMap::default();
-        for (way, half, _) in &roads {
-            let closed =
-                way.nodes.len() > 2 && way.nodes[0].id == way.nodes[way.nodes.len() - 1].id;
-            let nodes = if closed {
-                &way.nodes[1..]
-            } else {
-                &way.nodes[..]
-            };
-            for (k, n) in nodes.iter().enumerate() {
-                let end = !closed && (k == 0 || k == nodes.len() - 1);
-                *arms.entry(n.id).or_default() += if end { 1 } else { 2 };
-                let w = widest.entry(n.id).or_default();
-                *w = (*w).max(*half);
-            }
-        }
-        let arms = |id: u64| arms.get(&id).copied().unwrap_or(0);
-        let junction = |id: u64| arms(id) >= 3;
+        let junctions = Junctions::build(roads.iter().map(|&(w, half, _)| (w, half)), scale);
+        let arms = |id: u64| junctions.arms(id);
+        let junction = |id: u64| junctions.is_junction(id);
 
         let mut pieces: Vec<Piece> = Vec::new();
         for (way, half, oneway) in &roads {
@@ -468,26 +600,35 @@ impl CarNetwork {
 
         let mut lanes: Vec<Lane> = Vec::new();
         for (p, piece) in pieces.iter().enumerate() {
-            let mut directions: Vec<Vec<&ProcessedNode>> = Vec::new();
-            if piece.oneway >= 0 {
-                directions.push(piece.nodes.iter().collect());
-            }
-            if piece.oneway <= 0 {
-                directions.push(piece.nodes.iter().rev().collect());
-            }
+            let two_way = piece.oneway == 0;
+            let (along, against) = lanes_each_way(piece.way, piece.half, piece.oneway);
             let first = lanes.len();
-            let both = directions.len() == 2;
-            for nodes in directions {
-                lanes.push(Lane {
-                    piece: p,
-                    nodes,
-                    reverse: None,
-                    two_way: piece.oneway == 0,
-                });
+            for (count, backward) in [(along, false), (against, true)] {
+                let nodes: Vec<&ProcessedNode> = if backward {
+                    piece.nodes.iter().rev().collect()
+                } else {
+                    piece.nodes.iter().collect()
+                };
+                for k in 0..count {
+                    lanes.push(Lane {
+                        piece: p,
+                        nodes: nodes.clone(),
+                        reverse: None,
+                        two_way,
+                        backward,
+                        offset: lane_offset(piece.half, count, k, two_way),
+                        count,
+                    });
+                }
             }
-            if both {
-                lanes[first].reverse = Some(first + 1);
-                lanes[first + 1].reverse = Some(first);
+            // A dead end turns each lane round into its opposite number.
+            if two_way {
+                for k in 0..along {
+                    lanes[first + k].reverse = Some(first + along + k.min(against - 1));
+                }
+                for k in 0..against {
+                    lanes[first + along + k].reverse = Some(first + k.min(along - 1));
+                }
             }
         }
 
@@ -502,12 +643,13 @@ impl CarNetwork {
                     let cap = step_speed(kmh, scale);
                     (cap < speed).then_some(cap)
                 };
-                let offset = if lane.two_way {
-                    ((piece.half as f64 + 1.0) / 2.0).max(1.0)
-                } else {
-                    0.0
-                };
-                let path = Path::new(lane_line(&lane.nodes, offset, drives_on_left));
+                let path = Path::new(fitted_lane_line(
+                    &lane.nodes,
+                    lane.offset,
+                    lane.count <= 1,
+                    drives_on_left,
+                    &built,
+                ));
                 let first = lane.nodes[0].id;
                 let end = lane.nodes[lane.nodes.len() - 1];
                 let last = end.id;
@@ -521,7 +663,7 @@ impl CarNetwork {
                 // Lanes stop short of a junction, so turning cars cut across it.
                 let trim = |id: u64| {
                     if junction(id) {
-                        widest.get(&id).copied().unwrap_or(1) as f64 + 1.0
+                        junctions.widest(id) as f64 + 1.0
                     } else {
                         0.0
                     }
@@ -589,6 +731,9 @@ impl CarNetwork {
                         if !held || signal_upstream(&along, k, -1, upstream) {
                             continue;
                         }
+                        if lane.two_way && junctions.passed(&along, k, -1) {
+                            continue;
+                        }
                         let dir = unit(
                             node.x as f64 - lane.nodes[k - 1].x as f64,
                             node.z as f64 - lane.nodes[k - 1].z as f64,
@@ -618,7 +763,7 @@ impl CarNetwork {
 
                 let y_at = |s: f64| {
                     let (x, z) = path.point_at(s);
-                    (surface_y(x.floor() as i32, z.floor() as i32) + 1) as f64
+                    (surface_y(piece.way, x.floor() as i32, z.floor() as i32) + 1) as f64
                 };
                 let mut stations: Vec<(f64, Option<u8>, Option<i32>)> = Vec::new();
                 for &(s, stop, cap) in &merged {
@@ -656,7 +801,8 @@ impl CarNetwork {
                     turns_back,
                     stub: false,
                     speed,
-                    density: density(highway),
+                    // A road's lanes do not all fill up alike.
+                    density: density(highway) * 2.0 / (lane.count as f64 + 1.0),
                 }
             })
             .collect();
@@ -678,6 +824,7 @@ impl CarNetwork {
         );
         segments.iter_mut().for_each(pace);
         let cars = place_cars(&segments, scale);
+        let spots = spots(&segments, scale);
         let mut by_way: FnvHashMap<u64, Vec<usize>> = FnvHashMap::default();
         for (c, car) in cars.iter().enumerate() {
             by_way.entry(segments[car.segment].way).or_default().push(c);
@@ -686,6 +833,7 @@ impl CarNetwork {
             segments,
             cars,
             by_way,
+            spots,
             size,
             scale,
         }
@@ -705,21 +853,24 @@ impl CarNetwork {
     /// the constants that depend on the world's scale.
     pub fn storage_function(&self) -> String {
         let mut out = format!(
-            "scoreboard players set #accel arnis {}\ndata modify storage arnis:cars seg set value []\n",
-            self.accel()
+            "scoreboard players set #accel arnis {}\nscoreboard players set #near_cap arnis.car {MAX_NEAR}\nscoreboard players set #spot_cell arnis.car {}\ndata modify storage arnis:cars seg set value []\n",
+            self.accel(),
+            SPOT_CELL as i32,
         );
-        let list = |colours: &[(&'static str, u32)]| {
-            respawn_colours(colours)
-                .iter()
-                .map(|c| format!("\"{c}\""))
-                .collect::<Vec<_>>()
-                .join(",")
-        };
+        let colours: Vec<String> = KINDS
+            .iter()
+            .map(|&(kind, _)| {
+                let list: Vec<String> = respawn_colours(kind.colours())
+                    .iter()
+                    .map(|c| format!("\"{c}\""))
+                    .collect();
+                format!("{}:[{}]", kind.name(), list.join(","))
+            })
+            .collect();
         let _ = writeln!(
             out,
-            "data modify storage arnis:cars colours set value {{car:[{}],van:[{}]}}",
-            list(&CAR_COLOURS),
-            list(&VAN_COLOURS)
+            "data modify storage arnis:cars colours set value {{{}}}",
+            colours.join(",")
         );
         // Batched, as one load runs at most maxCommandChainLength commands.
         for batch in self.segments.chunks(LANES_PER_LINE) {
@@ -756,15 +907,32 @@ impl CarNetwork {
                         format!("{{s:{},i:{}{crossing}}}", t.lane, t.entry)
                     })
                     .collect();
-                // A lane no car starts on is skipped by the respawn too.
-                let off = if seg.carries_cars() { "" } else { ",o:1b" };
-                let _ = write!(out, "],n:[{}],v:{}{off}}}", next.join(","), seg.speed);
+                let _ = write!(out, "],n:[{}],v:{}}}", next.join(","), seg.speed);
             }
             out.push_str(
                 "]\ndata modify storage arnis:cars seg append from storage arnis:cars batch[]\n",
             );
         }
         out.push_str("data remove storage arnis:cars batch\n");
+        out.push_str("data modify storage arnis:cars grid set value {}\n");
+        let cells: Vec<_> = self.spots.iter().collect();
+        for batch in cells.chunks(SPOT_CELLS_PER_LINE) {
+            let cells: Vec<String> = batch
+                .iter()
+                .map(|((x, z), spots)| {
+                    let spots: Vec<String> = spots
+                        .iter()
+                        .map(|(lane, point)| format!("[I;{lane},{point}]"))
+                        .collect();
+                    format!("\"{x}_{z}\":[{}]", spots.join(","))
+                })
+                .collect();
+            let _ = writeln!(
+                out,
+                "data modify storage arnis:cars grid merge value {{{}}}",
+                cells.join(",")
+            );
+        }
         out
     }
 
@@ -838,8 +1006,8 @@ impl CarNetwork {
              scoreboard players add #lim arnis.car {GIVE_WAY_STEPS}\n\
              execute if score #yield arnis.car matches 1 if score #w arnis.car <= #lim arnis.car run scoreboard players set #t arnis.car 0\n\
              # Never through a player.\n\
-             execute rotated as @s positioned ^ ^ ^{near} if entity @a[gamemode=!spectator,distance=..{pr}] run scoreboard players set #t arnis.car 0\n\
-             execute rotated as @s positioned ^ ^ ^{far} if entity @a[gamemode=!spectator,distance=..{pr}] run scoreboard players set #t arnis.car 0\n",
+             execute rotated as @s positioned ^ ^ ^{near} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n\
+             execute rotated as @s positioned ^ ^ ^{far} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n",
             crossing = d(CROSSING_AT.0),
             r = d(CROSSING_AT.1),
             near = d(PLAYER_AT.0),
@@ -869,13 +1037,15 @@ impl CarNetwork {
     pub fn body_functions(&self) -> Vec<(String, String)> {
         let k = self.size as f32;
         let mut out = Vec::new();
-        for (kind, name) in [
-            (Kind::Sedan, "sedan"),
-            (Kind::Hatchback, "hatchback"),
-            (Kind::Van, "van"),
-        ] {
+        for (kind, _) in KINDS {
+            let name = kind.name();
             for (prefix, bare) in [("", false), ("ov121/", true)] {
-                let mut text = String::new();
+                let (width, height) = kind.hitbox();
+                let mut text = format!(
+                    "$summon interaction $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.k_{name}\"],width:{:.2}f,height:{:.2}f}}\n",
+                    width * k,
+                    height * k,
+                );
                 for p in parts(kind, "$(colour)") {
                     let block = if bare {
                         format!("\"{}\"", p.block)
@@ -895,7 +1065,7 @@ impl CarNetwork {
                     };
                     let _ = writeln!(
                         text,
-                        "$summon block_display $(x) $(y) $(z) {{Tags:[{tags}],teleport_duration:2,block_state:{block},transformation:{{left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f],translation:{},scale:{}}}{glow}}}",
+                        "$summon block_display $(x) $(y) $(z) {{Tags:[{tags}],teleport_duration:2,view_range:{VIEW_RANGE}f,block_state:{block},transformation:{{left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f],translation:{},scale:{}}}{glow}}}",
                         v3(p.corner),
                         v3(p.size),
                     );
@@ -907,6 +1077,48 @@ impl CarNetwork {
             }
         }
         out
+    }
+
+    /// The function that picks a new car's kind, each as often as its weight.
+    pub fn kind_function(&self) -> (String, String) {
+        let total: u32 = KINDS.iter().map(|&(_, weight)| weight).sum();
+        let mut text = format!(
+            "execute store result score #r arnis.car run random value 0..{}\n",
+            total - 1
+        );
+        let mut from = 0;
+        for (kind, weight) in KINDS {
+            let _ = writeln!(
+                text,
+                "execute if score #r arnis.car matches {from}..{} run data modify storage arnis:cars spawn.kind set value \"{}\"",
+                from + weight - 1,
+                kind.name()
+            );
+            from += weight;
+        }
+        (
+            "data/arnis/function/cars/respawn_kind.mcfunction".to_string(),
+            text,
+        )
+    }
+
+    /// The function that says where a rider sits in the car of the box it runs as.
+    pub fn seat_function(&self) -> (String, String) {
+        let mut text = String::new();
+        for (kind, _) in KINDS {
+            let (ahead, eye) = kind.seat();
+            let _ = writeln!(
+                text,
+                "execute if entity @s[tag=arnis.k_{}] run data modify storage arnis:cars seat set value {{f:{:.2}d,u:{:.2}d}}",
+                kind.name(),
+                ahead * self.size,
+                (eye * self.size - RIDER_EYE_OVER_SEAT).max(0.0),
+            );
+        }
+        (
+            "data/arnis/function/cars/seat_kind.mcfunction".to_string(),
+            text,
+        )
     }
 
     /// What the Bedrock script drives the cars by: every lane, the cars placed at the start
@@ -945,10 +1157,6 @@ impl CarNetwork {
                 if !caps.is_empty() {
                     lane["m"] = json!(bedrock_addon::list(caps));
                 }
-                // A lane no car starts on is skipped by the respawn too.
-                if !seg.carries_cars() {
-                    lane["o"] = json!(1);
-                }
                 lane
             })
             .collect();
@@ -984,6 +1192,14 @@ impl CarNetwork {
             "accel": self.accel(),
             "lanes": lanes,
             "start": start,
+            "spots": self
+                .spots
+                .iter()
+                .map(|((x, z), spots)| {
+                    let flat = spots.iter().flat_map(|&(lane, point)| [lane, point]);
+                    (format!("{x}_{z}"), json!(bedrock_addon::list(flat)))
+                })
+                .collect::<serde_json::Map<_, _>>(),
             "bodies": bodies.iter().map(|&(k, c)| body_name(k, c)).collect::<Vec<_>>(),
             "colours": KINDS
                 .iter()
@@ -996,6 +1212,8 @@ impl CarNetwork {
                 "player": [PLAYER_AT.0, PLAYER_AT.1, PLAYER_AT.2],
                 "give_way": GIVE_WAY_STEPS,
                 "pace": [PACE.0, PACE.1],
+                "near": MAX_NEAR,
+                "spot_cell": SPOT_CELL,
                 "kinds": KINDS.map(|(kind, weight)| json!([kind.name(), weight])),
             },
         })
@@ -1068,8 +1286,25 @@ impl CarNetwork {
                 ),
                 ("Rotation".to_string(), rotation.clone()),
             ]);
-            let seed = c as i64 * 16;
+            let seed = c as i64 * 32;
             editor.add_entity_exact("minecraft:marker", x, y, z, seed, marker);
+            let (width, height) = car.kind.hitbox();
+            let hitbox = HashMap::from([
+                ("width".to_string(), Value::Float(width * self.size as f32)),
+                (
+                    "height".to_string(),
+                    Value::Float(height * self.size as f32),
+                ),
+                (
+                    "Tags".to_string(),
+                    Value::List(vec![
+                        Value::String("arnis.car.part".to_string()),
+                        Value::String(format!("arnis.k_{}", car.kind.name())),
+                    ]),
+                ),
+                ("Rotation".to_string(), rotation.clone()),
+            ]);
+            editor.add_entity_exact("minecraft:interaction", x, y, z, seed + 31, hitbox);
             for (k, mut nbt) in body(car.kind, car.colour, self.size)
                 .into_iter()
                 .enumerate()
@@ -1102,15 +1337,46 @@ impl Kind {
             Kind::Sedan => "sedan",
             Kind::Hatchback => "hatchback",
             Kind::Van => "van",
+            Kind::Pickup => "pickup",
+            Kind::Truck => "truck",
+            Kind::Bus => "bus",
         }
     }
 
     /// The colours this kind comes in, weighted.
     fn colours(self) -> &'static [(&'static str, u32)] {
-        if self == Kind::Van {
-            &VAN_COLOURS
-        } else {
-            &CAR_COLOURS
+        match self {
+            Kind::Sedan | Kind::Hatchback => &CAR_COLOURS,
+            Kind::Van => &VAN_COLOURS,
+            Kind::Pickup => &PICKUP_COLOURS,
+            Kind::Truck => &TRUCK_COLOURS,
+            Kind::Bus => &BUS_COLOURS,
+        }
+    }
+
+    /// Width and height at 1:1 of the box a player can click. A spectator sees from the
+    /// middle of the car at 85% of the height, about where the driver sits.
+    /// Where a rider sits, in metres: ahead of the car's middle, and how high their eyes
+    /// are over the road, to look out of the windows of this kind.
+    fn seat(self) -> (f64, f64) {
+        match self {
+            Kind::Sedan => (0.4, 1.15),
+            Kind::Hatchback => (0.1, 1.2),
+            Kind::Van => (1.25, 1.42),
+            Kind::Pickup => (0.95, 1.28),
+            Kind::Truck => (2.7, 1.95),
+            Kind::Bus => (3.9, 2.0),
+        }
+    }
+
+    fn hitbox(self) -> (f32, f32) {
+        match self {
+            Kind::Sedan => (2.4, 1.45),
+            Kind::Hatchback => (2.4, 1.5),
+            Kind::Van => (2.6, 1.8),
+            Kind::Pickup => (2.6, 1.6),
+            Kind::Truck => (3.0, 2.7),
+            Kind::Bus => (3.0, 2.6),
         }
     }
 }
@@ -1345,18 +1611,45 @@ fn link(
             starting.entry(lane.nodes[0].id).or_default().push(i);
         }
     }
+    // Any lane of the same piece going the other way.
+    let goes_back = |i: usize, j: usize| {
+        lanes[i].piece == lanes[j].piece && lanes[i].backward != lanes[j].backward
+    };
+    // A road's lanes all start at the same node, and a car keeps to the nearest one of each.
+    let keep_to_nearest = |i: usize, mut next: Vec<usize>| {
+        let from = segments[i].points.last().map_or((0.0, 0.0), |p| (p.x, p.z));
+        let gap = |j: usize| {
+            segments[j]
+                .points
+                .first()
+                .map_or(f64::MAX, |p| (p.x - from.0).hypot(p.z - from.1))
+        };
+        next.sort_by(|&a, &b| gap(a).total_cmp(&gap(b)));
+        let mut seen: Vec<(usize, bool)> = Vec::new();
+        next.retain(|&j| {
+            let road = (lanes[j].piece, lanes[j].backward);
+            !seen.contains(&road) && {
+                seen.push(road);
+                true
+            }
+        });
+        next
+    };
     let ways_on: Vec<Vec<usize>> = lanes
         .iter()
         .enumerate()
         .map(|(i, lane)| {
             let end = lane.nodes[lane.nodes.len() - 1].id;
-            let mut next: Vec<usize> = starting
-                .get(&end)
-                .into_iter()
-                .flatten()
-                .copied()
-                .filter(|&j| Some(j) != lane.reverse)
-                .collect();
+            let mut next: Vec<usize> = keep_to_nearest(
+                i,
+                starting
+                    .get(&end)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|&j| !goes_back(i, j))
+                    .collect(),
+            );
             if next.is_empty() && segments[i].turns_back {
                 next.extend(lane.reverse.filter(|&r| usable(&segments[r])));
             }
@@ -1370,7 +1663,7 @@ fn link(
         s.stub = s.turns_back && length(s) < reach.stub;
     }
     let stub: Vec<bool> = segments.iter().map(|s| s.stub).collect();
-    for (i, lane) in lanes.iter().enumerate() {
+    for i in 0..lanes.len() {
         // A lane too short to drive is part of its junction: cars cross it onto the ones after.
         let mut next = Vec::new();
         let mut through_short = false;
@@ -1381,7 +1674,7 @@ fn link(
                 todo.extend(
                     ways_on[j]
                         .iter()
-                        .filter(|&&k| k != i && Some(k) != lane.reverse)
+                        .filter(|&&k| k != i && !goes_back(i, k))
                         .map(|&k| (k, depth + 1)),
                 );
             } else if !next.contains(&j) {
@@ -1811,6 +2104,47 @@ fn place_cars(segments: &[Segment], scale: f64) -> Vec<Car> {
     cars
 }
 
+/// Where new cars can join the traffic: every lane's spots as far apart as its cars are in
+/// full traffic, each at a point of the lane, so the count around a player is what the roads
+/// there should hold however thin the placed cars had to be spread.
+fn spots(segments: &[Segment], scale: f64) -> BTreeMap<(i32, i32), Vec<(usize, usize)>> {
+    let mut grid: BTreeMap<(i32, i32), Vec<(usize, usize)>> = BTreeMap::new();
+    let mut owed = 0.5;
+    for (i, seg) in segments.iter().enumerate() {
+        if !seg.carries_cars() {
+            continue;
+        }
+        let (first, last) = (seg.arcs[0], seg.arcs[seg.arcs.len() - 1]);
+        let len = last - first;
+        owed += len / scale * seg.density;
+        let n = owed.floor() as usize;
+        owed -= n as f64;
+        let mut was = None;
+        for j in 0..n {
+            let s = first + len * (j as f64 + 0.5) / n as f64;
+            let point = seg
+                .arcs
+                .partition_point(|&a| a <= s)
+                .clamp(1, seg.points.len() - 1)
+                - 1;
+            if was == Some(point) {
+                continue;
+            }
+            was = Some(point);
+            let p = seg.points[point];
+            let cell = (
+                (p.x / SPOT_CELL).floor() as i32,
+                (p.z / SPOT_CELL).floor() as i32,
+            );
+            grid.entry(cell).or_default().push((i, point));
+        }
+    }
+    grid
+}
+
+/// Display entities are drawn out to 64 blocks times this, and sent out to 160 blocks.
+const VIEW_RANGE: f32 = 3.0;
+
 /// One block of a vehicle: its block, size and lowest corner in the vehicle's frame, and
 /// how it is lit.
 struct Part {
@@ -1844,6 +2178,9 @@ fn parts(kind: Kind, colour: &'static str) -> Vec<Part> {
         Kind::Sedan => (4.6, 1.82, 0.95, 0.64, 0.66),
         Kind::Hatchback => (4.0, 1.76, 0.75, 0.62, 0.68),
         Kind::Van => (4.9, 1.95, 0.85, 0.68, 0.75),
+        Kind::Pickup => (5.3, 1.95, 1.0, 0.74, 0.78),
+        Kind::Truck => (7.6, 2.4, 1.25, 0.95, 0.8),
+        Kind::Bus => (10.0, 2.5, 2.2, 0.98, 0.8),
     };
     let wheels = |z: f32| {
         part(
@@ -1861,11 +2198,21 @@ fn parts(kind: Kind, colour: &'static str) -> Vec<Part> {
             light,
         )
     };
+    let plate = |z: f32| {
+        part(
+            "minecraft:white_concrete",
+            [0.52, 0.11, 0.02],
+            [-0.26, lights - 0.2, z],
+            Light::None,
+        )
+    };
     let mut out = vec![
         wheels(l / 2.0 - axle),
         wheels(-l / 2.0 + axle),
         lamp("minecraft:white_concrete", l / 2.0, Light::Head),
         lamp("minecraft:red_concrete", -l / 2.0 - 0.04, Light::Tail),
+        plate(l / 2.0),
+        plate(-l / 2.0 - 0.02),
     ];
     match kind {
         Kind::Sedan => out.extend([
@@ -1918,6 +2265,63 @@ fn parts(kind: Kind, colour: &'static str) -> Vec<Part> {
                 Light::None,
             ),
         ]),
+        // A cab up front and an open bed behind it.
+        Kind::Pickup => out.extend([
+            part(
+                colour,
+                [w, 0.62, l],
+                [-w / 2.0, 0.36, -l / 2.0],
+                Light::None,
+            ),
+            part(
+                "minecraft:tinted_glass",
+                [w - 0.2, 0.56, 2.1],
+                [-(w - 0.2) / 2.0, 0.98, -0.4],
+                Light::None,
+            ),
+            part(
+                colour,
+                [w - 0.18, 0.07, 1.9],
+                [-(w - 0.18) / 2.0, 1.54, -0.3],
+                Light::None,
+            ),
+        ]),
+        // A coloured cab and a plain box behind it.
+        Kind::Truck => out.extend([
+            part(
+                colour,
+                [w, 1.95, 1.95],
+                [-w / 2.0, 0.55, l / 2.0 - 1.95],
+                Light::None,
+            ),
+            part(
+                "minecraft:tinted_glass",
+                [w + 0.04, 0.62, 0.95],
+                [-(w + 0.04) / 2.0, 1.65, l / 2.0 - 0.93],
+                Light::None,
+            ),
+            part(
+                "minecraft:light_gray_concrete",
+                [w + 0.06, 2.4, 5.5],
+                [-(w + 0.06) / 2.0, 0.85, -l / 2.0],
+                Light::None,
+            ),
+        ]),
+        // One long box with a band of windows round it.
+        Kind::Bus => out.extend([
+            part(
+                colour,
+                [w, 2.55, l],
+                [-w / 2.0, 0.35, -l / 2.0],
+                Light::None,
+            ),
+            part(
+                "minecraft:tinted_glass",
+                [w + 0.04, 0.95, l - 0.28],
+                [-(w + 0.04) / 2.0, 1.5, -l / 2.0 + 0.3],
+                Light::None,
+            ),
+        ]),
     }
     out
 }
@@ -1960,6 +2364,7 @@ fn body(kind: Kind, colour: &'static str, size: f64) -> Vec<HashMap<String, Valu
                 ("Tags".to_string(), Value::List(tags)),
                 // Steps come every second tick; the client glides between them.
                 ("teleport_duration".to_string(), Value::Int(2)),
+                ("view_range".to_string(), Value::Float(VIEW_RANGE)),
             ]);
             match p.light {
                 Light::Head => {
@@ -2004,8 +2409,168 @@ mod tests {
         XZBBox::rect_from_min_max(-2000, -2000, 2000, 2000).unwrap()
     }
 
-    fn flat(_: i32, _: i32) -> i32 {
+    fn flat(_: &ProcessedWay, _: i32, _: i32) -> i32 {
         64
+    }
+
+    fn open(_: i32, _: i32) -> bool {
+        false
+    }
+
+    #[test]
+    fn a_wide_road_gets_a_lane_for_each_of_its_lanes() {
+        let tagged = |tags: &[(&str, &str)], half: i32, oneway: i8| {
+            let way = road(
+                5,
+                vec![node(1, 0, 0, &[]), node(2, 100, 0, &[])],
+                &[&[("highway", "primary")], tags].concat(),
+            );
+            let ProcessedElement::Way(way) = &way else {
+                unreachable!()
+            };
+            lanes_each_way(way, half, oneway)
+        };
+        // A wide one-way avenue, a two-way road with lanes each way, and the plain cases.
+        assert_eq!(tagged(&[("lanes", "4")], 7, 1), (4, 0));
+        assert_eq!(tagged(&[("lanes", "4")], 7, -1), (0, 4));
+        assert_eq!(tagged(&[("lanes", "4")], 7, 0), (2, 2));
+        assert_eq!(tagged(&[("lanes", "3")], 7, 0), (2, 1));
+        assert_eq!(tagged(&[("lanes", "2")], 5, 0), (1, 1));
+        assert_eq!(tagged(&[("lanes", "1")], 5, 1), (1, 0));
+        // Tags that ask for more than the road has room for get what fits.
+        assert_eq!(tagged(&[("lanes", "6")], 2, 1), (1, 0));
+        assert_eq!(tagged(&[("lanes", "8")], 16, 1), (MAX_LANES, 0));
+        assert_eq!(
+            tagged(
+                &[
+                    ("lanes", "5"),
+                    ("lanes:forward", "3"),
+                    ("lanes:backward", "2")
+                ],
+                9,
+                0
+            ),
+            (3, 2)
+        );
+
+        // A one-way road's lanes spread across it, with none on the kerb.
+        let offsets: Vec<f64> = (0..3).map(|k| lane_offset(5, 3, k, false)).collect();
+        assert!(offsets[0] < 0.0 && offsets[1].abs() < 0.01 && offsets[2] > 0.0);
+        assert!(offsets[2] + CAR_HALF_WIDTH < 5.5);
+        for pair in offsets.windows(2) {
+            assert!(pair[1] - pair[0] >= f64::from(MIN_LANE_WIDTH));
+        }
+        // A single lane on a two-way road keeps its place, and one on a one-way road the middle.
+        assert_eq!(lane_offset(5, 1, 0, true), 3.0);
+        assert_eq!(lane_offset(5, 1, 0, false), 0.0);
+    }
+
+    #[test]
+    fn cars_keep_to_their_lane_and_never_turn_back_from_one() {
+        let way = |id, from: i32, to: i32| {
+            road(
+                id,
+                vec![node(id * 10, from, 0, &[]), node(id * 10 + 1, to, 0, &[])],
+                &[("lanes", "4")],
+            )
+        };
+        // The second way goes on from where the first ends; the two share a node.
+        let mut second = way(2, 200, 400);
+        if let ProcessedElement::Way(w) = &mut second {
+            w.nodes[0].id = 11;
+        }
+        let net = CarNetwork::build(
+            &[way(1, 0, 200), second],
+            1.0,
+            false,
+            false,
+            &world(),
+            flat,
+            open,
+        );
+        assert_eq!(net.segments.len(), 8, "two lanes each way on each way");
+        let side = |s: &Segment| s.points[0].z;
+        for (i, seg) in net.segments.iter().enumerate() {
+            for j in seg.next.iter().map(|t| t.lane) {
+                let next = &net.segments[j];
+                if next.way != seg.way {
+                    assert!(
+                        (side(seg) - side(next)).abs() < 0.6,
+                        "lane {i} jumps across the road"
+                    );
+                }
+                // Same way, going the other way, only as a turn round at a dead end.
+                let heading = |s: &Segment| s.points[s.points.len() - 1].x - s.points[0].x;
+                if next.way == seg.way && !seg.turns_back {
+                    assert!(heading(seg) * heading(next) > 0.0, "lane {i} turns back");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_rider_sits_towards_the_front_at_window_height() {
+        for (kind, _) in KINDS {
+            let (ahead, eye) = kind.seat();
+            assert!(ahead >= 0.0, "{}", kind.name());
+            assert!((1.0..2.2).contains(&eye), "{}", kind.name());
+        }
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
+        let (path, text) = net.seat_function();
+        assert!(path.ends_with("cars/seat_kind.mcfunction"));
+        assert_eq!(text.lines().count(), KINDS.len());
+        assert!(text.contains("arnis.k_bus"));
+    }
+
+    #[test]
+    fn a_lane_keeps_out_of_a_building_standing_on_the_road() {
+        // Traffic drives on the right, here towards +z along x = 0, so a car's right is -x
+        // going one way and +x the other. A wall along part of the road's +x side.
+        let way = road(
+            5,
+            (0..=10)
+                .map(|i| node(i + 1, 0, i as i32 * 20, &[]))
+                .collect(),
+            &[],
+        );
+        let wall = |x: i32, z: i32| x >= 2 && (40..=100).contains(&z);
+        let net = CarNetwork::build(
+            std::slice::from_ref(&way),
+            1.0,
+            false,
+            false,
+            &world(),
+            flat,
+            wall,
+        );
+        let plain = CarNetwork::build(&[way], 1.0, false, false, &world(), flat, open);
+        // The side away from the wall stays where it was, and the side beside it moved in.
+        let side = |net: &CarNetwork, sign: f64| -> Vec<(f64, f64)> {
+            net.segments
+                .iter()
+                .flat_map(|s| s.points.iter().map(|p| (p.x, p.z)))
+                .filter(|p| p.0 * sign > 0.5)
+                .collect()
+        };
+        let wall_side = side(&net, 1.0);
+        assert!(!wall_side.is_empty());
+        for &(x, z) in &wall_side {
+            if (40.0..=100.0).contains(&z) {
+                assert!(x + CAR_HALF_WIDTH < 2.0, "still in the wall at {x},{z}");
+            }
+        }
+        let beside_the_wall = |net: &CarNetwork| -> Vec<(f64, f64)> {
+            side(net, -1.0)
+                .into_iter()
+                .filter(|p| (40.0..=100.0).contains(&p.1))
+                .collect()
+        };
+        assert_eq!(beside_the_wall(&net), beside_the_wall(&plain));
+        // Away from the wall the lane keeps its usual place.
+        let usual = 2.0;
+        assert!(wall_side
+            .iter()
+            .any(|&(x, z)| (130.0..=180.0).contains(&z) && (x - usual).abs() < 0.01));
     }
 
     fn crossroads(signal: bool) -> Vec<ProcessedElement> {
@@ -2038,7 +2603,7 @@ mod tests {
 
     #[test]
     fn a_crossroads_gives_eight_lanes_that_turn_into_each_other_but_never_straight_back() {
-        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         assert_eq!(net.segments.len(), 8);
         for (i, seg) in net.segments.iter().enumerate() {
             assert!(!seg.next.is_empty(), "lane {i} leads nowhere");
@@ -2054,7 +2619,7 @@ mod tests {
     #[test]
     fn eastbound_traffic_keeps_right_which_is_south_and_left_where_they_drive_on_the_left() {
         let east = |left: bool| {
-            let net = CarNetwork::build(&crossroads(false), 1.0, left, false, &world(), flat);
+            let net = CarNetwork::build(&crossroads(false), 1.0, left, false, &world(), flat, open);
             net.segments
                 .iter()
                 .find(|s| s.points[1].x > s.points[0].x && s.points[0].z.abs() < 3.0)
@@ -2067,7 +2632,7 @@ mod tests {
 
     #[test]
     fn lanes_into_a_signal_end_on_a_stop_line_for_their_group() {
-        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat);
+        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat, open);
         let ends: Vec<&Waypoint> = net
             .segments
             .iter()
@@ -2075,7 +2640,7 @@ mod tests {
             .collect();
         assert_eq!(ends.len(), 4);
         assert_eq!(ends.iter().filter(|p| p.stop == Some(1)).count(), 2);
-        let free = CarNetwork::build(&crossroads(true), 1.0, false, false, &world(), flat);
+        let free = CarNetwork::build(&crossroads(true), 1.0, false, false, &world(), flat, open);
         assert!(free
             .segments
             .iter()
@@ -2097,7 +2662,7 @@ mod tests {
             vec![node(1, 0, 0, &[]), node(2, 200, 0, &[])],
             &[("highway", "primary")],
         );
-        let net = CarNetwork::build(&[primary], 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&[primary], 1.0, false, false, &world(), flat, open);
         assert_eq!(net.segments[0].speed, step_speed(50.0 * LIMIT_SHARE, 1.0));
         for junk in ["inf", "NaN", "100000", "-5 mph", "zone0"] {
             let tags = HashMap::from([("maxspeed".to_string(), junk.to_string())]);
@@ -2116,7 +2681,7 @@ mod tests {
             ],
             &[("highway", "primary")],
         );
-        let net = CarNetwork::build(&[bend], 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&[bend], 1.0, false, false, &world(), flat, open);
         let cap = net.segments[0]
             .points
             .iter()
@@ -2136,6 +2701,7 @@ mod tests {
             false,
             &world(),
             flat,
+            open,
         );
         // Leaving out the turn at the dead end.
         let turning = Some(step_speed(U_TURN_KMH, 1.0));
@@ -2148,8 +2714,8 @@ mod tests {
         };
         let flat_points = on_road(&net);
         assert!(flat_points <= 11, "{flat_points}");
-        let hill = |x: i32, _: i32| 64 + ((x as f64 / 15.0).sin() * 6.0) as i32;
-        let net = CarNetwork::build(&[straight], 1.0, false, false, &world(), hill);
+        let hill = |_: &ProcessedWay, x: i32, _: i32| 64 + ((x as f64 / 15.0).sin() * 6.0) as i32;
+        let net = CarNetwork::build(&[straight], 1.0, false, false, &world(), hill, open);
         assert!(on_road(&net) > flat_points);
     }
 
@@ -2168,7 +2734,7 @@ mod tests {
                 &[("highway", "primary")],
             ));
         }
-        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat, open);
         assert!(net.car_count() <= MAX_CARS);
         assert!(net.car_count() > MAX_CARS * 9 / 10);
         let first_lane = net.cars.iter().map(|c| c.segment).min().unwrap();
@@ -2184,16 +2750,16 @@ mod tests {
             [("highway", "busway"), ("name", "x")],
         ] {
             let way = road(7, vec![node(1, -100, 0, &[]), node(2, 100, 0, &[])], &extra);
-            let net = CarNetwork::build(&[way], 1.0, false, false, &world(), flat);
+            let net = CarNetwork::build(&[way], 1.0, false, false, &world(), flat, open);
             assert_eq!(net.car_count(), 0, "{extra:?}");
         }
     }
 
     #[test]
     fn the_storage_function_writes_every_lane_with_its_speed() {
-        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat);
+        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat, open);
         let text = net.storage_function();
-        assert_eq!(text.lines().count(), 3 + 2 + 1);
+        assert_eq!(text.lines().count(), 5 + 2 + 1 + 2);
         assert_eq!(text.matches("{p:[").count(), net.segments.len());
         assert!(text.contains(",g:1b"));
         assert!(text.contains(&format!(",v:{}}}", net.segments[0].speed)));
@@ -2225,11 +2791,15 @@ mod tests {
                 .collect(),
             cars: Vec::new(),
             by_way: FnvHashMap::default(),
+            spots: BTreeMap::new(),
             size: 1.0,
             scale: 1.0,
         };
         let text = net.storage_function();
-        assert_eq!(text.lines().count(), 3 + 2 * n.div_ceil(LANES_PER_LINE) + 1);
+        assert_eq!(
+            text.lines().count(),
+            5 + 2 * n.div_ceil(LANES_PER_LINE) + 1 + 1
+        );
         let speeds: Vec<i32> = text
             .split(",v:")
             .skip(1)
@@ -2242,7 +2812,7 @@ mod tests {
     #[test]
     fn no_waypoint_lies_on_a_whole_x_or_z_for_the_pack_to_shift() {
         // A crossroads on whole blocks puts many lane points on whole coordinates.
-        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat);
+        let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat, open);
         let text = net.storage_function();
         let mut seen = 0;
         for key in ["x:", "z:"] {
@@ -2264,13 +2834,13 @@ mod tests {
 
     #[test]
     fn cars_stand_on_the_road_facing_their_lane_with_a_tail_light_the_pack_can_find() {
-        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         assert!(net.car_count() > 0);
         for car in &net.cars {
             assert_eq!(car.pos.1, 65.0);
             assert!((880..=1120).contains(&car.pace));
         }
-        for kind in [Kind::Sedan, Kind::Hatchback, Kind::Van] {
+        for (kind, _) in KINDS {
             let tails = parts(kind, "minecraft:red_concrete")
                 .iter()
                 .filter(|p| p.light == Light::Tail)
@@ -2281,9 +2851,9 @@ mod tests {
 
     #[test]
     fn respawned_bodies_match_the_placed_ones_in_both_block_formats() {
-        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         let bodies = net.body_functions();
-        assert_eq!(bodies.len(), 6);
+        assert_eq!(bodies.len(), KINDS.len() * 2);
         let sedan = |prefix: &str| {
             &bodies
                 .iter()
@@ -2293,18 +2863,20 @@ mod tests {
                 .unwrap()
                 .1
         };
-        assert_eq!(sedan("").lines().count(), parts(Kind::Sedan, "x").len());
+        // Every part, and the box that can be clicked.
+        assert_eq!(sedan("").lines().count(), parts(Kind::Sedan, "x").len() + 1);
+        assert!(sedan("").starts_with("$summon interaction $(x) $(y) $(z) {Tags:[\"arnis.car.part\",\"arnis.k_sedan\"],width:2.40f,height:1.45f}"));
         assert!(sedan("").contains("block_state:{Name:\"$(colour)\"}"));
         assert!(sedan("ov121/").contains("block_state:\"$(colour)\""));
-        assert!(sedan("").contains("\"arnis.car.tail\"],teleport_duration:2"));
+        assert!(sedan("").contains("\"arnis.car.tail\"],teleport_duration:2,view_range:3f"));
         assert!(net
             .storage_function()
-            .contains("colours set value {car:[\"minecraft:white_concrete\""));
+            .contains("colours set value {sedan:[\"minecraft:white_concrete\""));
     }
 
     #[test]
     fn the_look_functions_scale_with_the_cars() {
-        let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat, open);
         let looks = net.look_functions();
         assert_eq!(looks.len(), 11);
         let h0 = &looks
@@ -2315,6 +2887,246 @@ mod tests {
         assert!(h0.contains("^ ^ ^6.00"), "{h0}");
         // Bucket 0 points north, so its range wraps round the half turn.
         assert!(h0.contains("y_rotation=112.5..-112.5"), "{h0}");
+    }
+
+    #[test]
+    fn a_new_car_is_of_every_kind_as_often_as_its_weight() {
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
+        let (path, text) = net.kind_function();
+        assert_eq!(path, "data/arnis/function/cars/respawn_kind.mcfunction");
+        assert!(
+            text.starts_with("execute store result score #r arnis.car run random value 0..99\n")
+        );
+        assert!(text.contains(
+            "matches 0..51 run data modify storage arnis:cars spawn.kind set value \"sedan\""
+        ));
+        assert!(text.contains(
+            "matches 97..99 run data modify storage arnis:cars spawn.kind set value \"bus\""
+        ));
+    }
+
+    #[test]
+    fn long_vehicles_keep_to_the_room_drivers_leave() {
+        // A driver stops with the car ahead within 7.7 m, centre to centre, so a queue
+        // behind any of these leaves a gap.
+        for (kind, _) in KINDS {
+            let length = parts(kind, "minecraft:white_concrete")
+                .iter()
+                .map(|p| p.size[2])
+                .fold(0.0f32, f32::max);
+            assert!(length / 2.0 + 2.3 < 7.7 + 0.1, "{kind:?} is {length} long");
+        }
+    }
+
+    #[test]
+    fn every_car_can_be_clicked_and_is_seen_as_far_as_it_is_sent() {
+        let k = 2.0;
+        let net = CarNetwork::build(&crossroads(false), k, false, false, &world(), flat, open);
+        for (kind, _) in KINDS {
+            let (width, height) = kind.hitbox();
+            assert!(width >= 2.4 && height >= 1.4, "{kind:?}");
+            let body = body(kind, "minecraft:white_concrete", net.size);
+            assert!(body
+                .iter()
+                .all(|nbt| nbt["view_range"] == Value::Float(VIEW_RANGE)));
+        }
+        const { assert!(VIEW_RANGE * 64.0 >= 160.0) };
+    }
+
+    /// A crossroads whose every approach has its signal 8 blocks out, on two-way roads, with
+    /// no signal in the middle and the direction of none tagged.
+    fn approach_signals(tags: &[(&str, &str)]) -> Vec<ProcessedElement> {
+        let mut signal = vec![("highway", "traffic_signals")];
+        signal.extend_from_slice(tags);
+        vec![
+            road(
+                1,
+                vec![
+                    node(1, -100, 0, &[]),
+                    node(11, -8, 0, &signal),
+                    node(9, 0, 0, &[]),
+                    node(12, 8, 0, &signal),
+                    node(2, 100, 0, &[]),
+                ],
+                &[],
+            ),
+            road(
+                2,
+                vec![
+                    node(3, 0, -100, &[]),
+                    node(13, 0, -8, &signal),
+                    node(9, 0, 0, &[]),
+                    node(14, 0, 8, &signal),
+                    node(4, 0, 100, &[]),
+                ],
+                &[],
+            ),
+        ]
+    }
+
+    /// (lanes that hold a stop line, those that head into the junction among them).
+    fn stops(net: &CarNetwork) -> (usize, usize) {
+        let held: Vec<&Segment> = net
+            .segments
+            .iter()
+            .filter(|s| s.points.iter().any(|p| p.stop.is_some()))
+            .collect();
+        (held.len(), held.iter().filter(|s| s.into_junction).count())
+    }
+
+    #[test]
+    fn a_car_leaving_a_junction_ignores_the_signal_for_those_coming_the_other_way() {
+        let net = CarNetwork::build(
+            &approach_signals(&[]),
+            1.0,
+            false,
+            true,
+            &world(),
+            flat,
+            open,
+        );
+        assert_eq!(stops(&net), (4, 4));
+    }
+
+    #[test]
+    fn a_signal_tagged_for_a_direction_is_taken_at_its_word() {
+        let tagged = [("traffic_signals:direction", "both")];
+        let net = CarNetwork::build(
+            &approach_signals(&tagged),
+            1.0,
+            false,
+            true,
+            &world(),
+            flat,
+            open,
+        );
+        assert_eq!(stops(&net).0, 8);
+    }
+
+    #[test]
+    fn a_signal_on_a_one_way_road_holds_its_only_traffic_however_close_to_the_junction() {
+        let mut roads = approach_signals(&[]);
+        if let ProcessedElement::Way(w) = &mut roads[0] {
+            w.tags.insert("oneway".to_string(), "yes".to_string());
+        }
+        let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat, open);
+        // Eastbound, the one past the junction still holds it; north-south as before.
+        let east: Vec<&Segment> = net
+            .segments
+            .iter()
+            .filter(|s| s.way == 1 && s.points.iter().any(|p| p.stop.is_some()))
+            .collect();
+        assert_eq!(east.len(), 2);
+    }
+
+    #[test]
+    fn a_lone_signal_near_a_junction_is_a_crossing_that_holds_both_ways() {
+        let signal = [("highway", "traffic_signals")];
+        let roads = vec![
+            road(
+                1,
+                vec![
+                    node(1, -100, 0, &[]),
+                    node(11, -8, 0, &signal),
+                    node(9, 0, 0, &[]),
+                    node(2, 100, 0, &[]),
+                ],
+                &[],
+            ),
+            road(2, vec![node(9, 0, 0, &[]), node(4, 0, 100, &[])], &[]),
+        ];
+        let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat, open);
+        assert_eq!(stops(&net).0, 2);
+    }
+
+    #[test]
+    fn a_signal_is_counted_for_the_nearer_of_two_junctions() {
+        let signal = [("highway", "traffic_signals")];
+        // A short block: 8 past one junction but only 6 before the next, whose own lane it holds.
+        let roads = vec![
+            road(
+                1,
+                vec![
+                    node(1, -100, 0, &[]),
+                    node(21, -8, 0, &signal),
+                    node(9, 0, 0, &[]),
+                    node(22, 8, 0, &signal),
+                    node(10, 14, 0, &[]),
+                    node(2, 100, 0, &[]),
+                ],
+                &[],
+            ),
+            road(2, vec![node(3, 0, -100, &[]), node(9, 0, 0, &[])], &[]),
+            road(3, vec![node(10, 14, 0, &[]), node(5, 14, 100, &[])], &[]),
+        ];
+        let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat, open);
+        let eastbound_held = net
+            .segments
+            .iter()
+            .filter(|s| {
+                s.points.iter().any(|p| p.stop.is_some())
+                    && s.points[s.points.len() - 1].x > s.points[0].x
+                    && s.points[0].x > -1.0
+            })
+            .count();
+        assert_eq!(eastbound_held, 1);
+    }
+
+    #[test]
+    fn every_way_is_driven_at_its_own_level_where_two_cross() {
+        // A bridge at 80 over a road at 64, in the same columns.
+        let roads = vec![
+            road(1, vec![node(1, -100, 0, &[]), node(2, 100, 0, &[])], &[]),
+            road(
+                2,
+                vec![node(3, 0, -100, &[]), node(4, 0, 100, &[])],
+                &[("bridge", "yes")],
+            ),
+        ];
+        let levels = |way: &ProcessedWay, _: i32, _: i32| if way.id == 2 { 80 } else { 64 };
+        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), levels, open);
+        for seg in &net.segments {
+            let want = if seg.way == 2 { 81.0 } else { 65.0 };
+            assert!(seg.points.iter().all(|p| p.y == want), "way {}", seg.way);
+        }
+    }
+
+    #[test]
+    fn spots_lie_on_lanes_cars_can_start_on_in_the_cell_they_are_listed_by() {
+        let net = CarNetwork::build(&awkward_roads(), 1.0, false, false, &world(), flat, open);
+        assert!(!net.spots.is_empty());
+        for (&(cx, cz), spots) in &net.spots {
+            for &(lane, point) in spots {
+                let seg = &net.segments[lane];
+                assert!(seg.carries_cars());
+                assert!(point + 1 < seg.points.len());
+                let p = seg.points[point];
+                assert_eq!((p.x / SPOT_CELL).floor() as i32, cx);
+                assert_eq!((p.z / SPOT_CELL).floor() as i32, cz);
+            }
+        }
+        let text = net.storage_function();
+        assert!(text.contains("data modify storage arnis:cars grid set value {}"));
+        let (&(cx, cz), spots) = net.spots.iter().next().unwrap();
+        let (lane, point) = spots[0];
+        assert!(text.contains(&format!("\"{cx}_{cz}\":[[I;{lane},{point}]")));
+        let data = net.bedrock_data();
+        assert_eq!(data["spots"].as_object().unwrap().len(), net.spots.len());
+    }
+
+    #[test]
+    fn spots_follow_how_busy_a_road_is_not_how_thin_the_placed_cars_are() {
+        let lane_spots = |highway: &str| {
+            let way = road(
+                5,
+                vec![node(1, 0, 0, &[]), node(2, 1000, 0, &[])],
+                &[("highway", highway)],
+            );
+            let net = CarNetwork::build(&[way], 1.0, false, false, &world(), flat, open);
+            net.spots.values().map(Vec::len).sum::<usize>()
+        };
+        assert!(lane_spots("primary") > lane_spots("residential"));
+        assert!(lane_spots("residential") > lane_spots("service"));
     }
 
     /// Drives every turn of the network as the pack does, `step` blocks a move and slower
@@ -2423,7 +3235,7 @@ mod tests {
     #[test]
     fn no_turn_makes_a_car_swing_round_on_the_spot() {
         for left in [false, true] {
-            let net = CarNetwork::build(&awkward_roads(), 1.0, left, false, &world(), flat);
+            let net = CarNetwork::build(&awkward_roads(), 1.0, left, false, &world(), flat, open);
             for step in [0.1, 0.3, 0.6, 1.0] {
                 let swing = sharpest_swing(&net, step);
                 assert!(swing <= 100.0, "{swing} at {step} a move, left {left}");
@@ -2505,7 +3317,7 @@ mod tests {
 
     #[test]
     fn no_one_turns_into_a_short_stub_while_there_is_anywhere_else_to_go() {
-        let net = CarNetwork::build(&stub_roads(), 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&stub_roads(), 1.0, false, false, &world(), flat, open);
         let into_stub = |j: usize| {
             let p = &net.segments[j].points;
             p[0].z > 0.5 && p.last().unwrap().z > p[0].z
@@ -2554,7 +3366,7 @@ mod tests {
                     &[("highway", "primary")],
                 ),
             ];
-            let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat);
+            let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat, open);
             for seg in &net.segments {
                 let pts: Vec<&Waypoint> = seg
                     .points
@@ -2590,7 +3402,7 @@ mod tests {
             &[],
         )];
         for left in [false, true] {
-            let net = CarNetwork::build(&roads, 1.0, left, false, &world(), flat);
+            let net = CarNetwork::build(&roads, 1.0, left, false, &world(), flat, open);
             let far = net
                 .segments
                 .iter()
@@ -2613,7 +3425,7 @@ mod tests {
             vec![node(1, 2000, 0, &[]), node(2, 1930, 0, &[])],
             &[("highway", "primary")],
         )];
-        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat, open);
         assert!(net.segments.iter().any(|s| !s.next.is_empty()));
         assert!(net.car_count() > 0);
     }
@@ -2635,7 +3447,7 @@ mod tests {
             road(2, vec![node(2, 100, 0, &[]), node(3, 0, 8, &[])], main),
             road(3, vec![node(2, 100, 0, &[]), node(4, 0, -8, &[])], main),
         ];
-        let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat);
+        let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat, open);
         let lane = net
             .segments
             .iter()
@@ -2650,25 +3462,9 @@ mod tests {
 
     // Respawned cars draw any lane, so the ones no car starts on are marked for them.
     #[test]
-    fn lanes_no_car_starts_on_are_marked_off_for_the_respawn() {
-        let net = CarNetwork::build(&stub_roads(), 1.0, false, false, &world(), flat);
-        let text = net.storage_function();
-        let lanes: Vec<&str> = text
-            .lines()
-            .filter(|l| l.contains("batch set value"))
-            .flat_map(|l| l.split("{p:[").skip(1))
-            .collect();
-        assert_eq!(lanes.len(), net.segments.len());
-        for (seg, lane) in net.segments.iter().zip(&lanes) {
-            assert_eq!(lane.contains(",o:1b"), !seg.carries_cars(), "{lane}");
-        }
-        assert!(net.segments.iter().any(|s| s.stub));
-    }
-
-    #[test]
     fn a_scrap_of_road_with_a_dead_end_at_each_end_sends_no_one_round_it() {
         let scrap = road(30, vec![node(1, 0, 0, &[]), node(2, 8, 0, &[])], &[]);
-        let net = CarNetwork::build(&[scrap], 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&[scrap], 1.0, false, false, &world(), flat, open);
         assert!(net.segments.iter().all(|s| s.next.is_empty()));
         assert_eq!(net.car_count(), 0);
     }
@@ -2677,7 +3473,7 @@ mod tests {
     fn a_car_turning_round_never_spins_on_the_spot() {
         for left in [false, true] {
             for roads in [stub_roads(), awkward_roads()] {
-                let net = CarNetwork::build(&roads, 1.0, left, false, &world(), flat);
+                let net = CarNetwork::build(&roads, 1.0, left, false, &world(), flat, open);
                 // Half a turn inside a car length and a bit is spinning on the spot.
                 let turn = tightest_turn(&net, 5.0);
                 assert!(turn <= 170.0, "{turn} degrees in 5 blocks, left {left}");
@@ -2688,7 +3484,7 @@ mod tests {
     #[test]
     fn a_dead_end_is_turned_round_in_a_curve_onto_the_way_back() {
         let way = road(5, vec![node(1, 0, 0, &[]), node(2, 100, 0, &[])], &[]);
-        let net = CarNetwork::build(&[way], 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&[way], 1.0, false, false, &world(), flat, open);
         let east = net
             .segments
             .iter()
@@ -2710,7 +3506,7 @@ mod tests {
             road(5, vec![node(1, 0, 0, &[]), node(2, 100, 0, &[])], &[]),
             road(6, vec![node(2, 100, 0, &[]), node(3, 200, 0, &[])], &[]),
         ];
-        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&roads, 1.0, false, false, &world(), flat, open);
         let east: Vec<usize> = (0..net.segments.len())
             .filter(|&i| net.segments[i].points[1].x > net.segments[i].points[0].x)
             .collect();
@@ -2732,7 +3528,7 @@ mod tests {
     fn cars_leave_where_the_area_cuts_a_road_off() {
         let world = XZBBox::rect_from_min_max(0, 0, 400, 400).unwrap();
         let way = road(5, vec![node(1, 0, 200, &[]), node(2, 200, 200, &[])], &[]);
-        let net = CarNetwork::build(&[way], 1.0, false, false, &world, flat);
+        let net = CarNetwork::build(&[way], 1.0, false, false, &world, flat, open);
         let (out, back): (Vec<&Segment>, Vec<&Segment>) = net
             .segments
             .iter()
@@ -2743,7 +3539,7 @@ mod tests {
 
     #[test]
     fn bedrock_data_holds_every_lane_point_and_names_a_body_for_every_car() {
-        let net = CarNetwork::build(&awkward_roads(), 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&awkward_roads(), 1.0, false, false, &world(), flat, open);
         let data = net.bedrock_data();
         let lanes = data["lanes"].as_array().unwrap();
         assert_eq!(lanes.len(), net.segments.len());
@@ -2779,7 +3575,6 @@ mod tests {
                     [turn.lane as i64, turn.entry as i64, turn.crossing as i64]
                 );
             }
-            assert_eq!(lane["o"].is_null(), seg.carries_cars());
             let caps: Vec<i64> = seg
                 .points
                 .iter()
@@ -2821,7 +3616,7 @@ mod tests {
 
     #[test]
     fn every_bedrock_car_body_has_one_brake_light_and_known_colours() {
-        let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat, open);
         let bodies = net.bedrock_bodies();
         assert_eq!(bodies.len(), all_bodies().len());
         let names: FnvHashSet<&str> = bodies.iter().map(|b| b.name.as_str()).collect();
@@ -2850,7 +3645,7 @@ mod tests {
 
     #[test]
     fn lanes_too_short_to_drive_are_crossed_as_part_of_the_junction() {
-        let net = CarNetwork::build(&awkward_roads(), 1.0, false, false, &world(), flat);
+        let net = CarNetwork::build(&awkward_roads(), 1.0, false, false, &world(), flat, open);
         let short = |j: usize| {
             let a = &net.segments[j].arcs;
             a.last().unwrap_or(&0.0) - a.first().unwrap_or(&0.0) < SHORT_LANE

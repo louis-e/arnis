@@ -1,8 +1,7 @@
 // Cars on the lanes Arnis planned, driven as the Java pack's cars functions drive them:
 // speeds are thousandths of a block per step and a step is every second tick. The rules
 // Arnis writes into the Java pack come in the data; the rest are the pack's own numbers.
-import { world } from "@minecraft/server";
-import { Bits, ahead, distance, number, numbers, randInt, turnBetween, warn, yawOf } from "./util.js";
+import { Bits, ahead, distance, numbers, randInt, turnBetween, warn, yawOf } from "./util.js";
 
 const FAMILY = "arnis_car";
 const BRAKE = "arnis:brake";
@@ -12,9 +11,14 @@ const DRIVE_REACH = 96;
 const PLACE_REACH = 104;
 /** Standing this many steps with nothing to wait for is stuck. */
 const STUCK = 600;
-/** A respawned car starts no closer to a player than this, and this far from other cars. */
-const RESPAWN_CLEAR = 40;
+/** A new car starts no closer to a player than this, and this far from other cars. */
+const RESPAWN_CLEAR = 64;
 const RESPAWN_GAP = 12;
+/** Tries at a new car each second per player, in map cells this far round them. */
+const RESPAWN_TRIES = 32;
+const RESPAWN_CELLS = 2;
+/** A cell this full always gets its car, an emptier one in proportion. */
+const RESPAWN_FULL_CELL = 8;
 const CELL = 16;
 
 function cellKey(x, z) {
@@ -44,10 +48,11 @@ export class Cars {
     // least as far as a car is placed or brought back with room around it.
     const sight = Math.max(...this.rules.look.map(([at, reach]) => at + reach)) * this.k;
     this.seeReach = Math.max(DRIVE_REACH + sight, PLACE_REACH + 3 * this.k, DRIVE_REACH + RESPAWN_GAP);
+    this.spots = data.spots;
+    this.spotCells = new Map();
     this.cars = new Map();
     this.grid = new Map();
     this.placed = new Bits("arnis:cars_placed", this.start.length);
-    this.pending = number(world.getDynamicProperty("arnis:cars_pending"));
     this.steps = 0;
   }
 
@@ -104,6 +109,7 @@ export class Cars {
       }
     }
     if (this.steps % 10 === 0) {
+      this.leave();
       this.place(players);
       this.respawn(players);
     }
@@ -150,7 +156,6 @@ export class Cars {
       Number.isInteger(s) && s >= 0 && s < this.raw.length && Number.isInteger(i) && typeof p === "number";
     if (!valid || i < 0 || i >= this.lane(s).n) {
       e.remove();
-      this.lost();
       return undefined;
     }
     const at = e.location;
@@ -217,6 +222,7 @@ export class Cars {
   }
 
   drive(car, players) {
+    car.live = true;
     const k = this.k;
     let t = car.v;
     const half = Math.floor(car.v / 2);
@@ -351,16 +357,13 @@ export class Cars {
     } catch (e) {
       warn("removing a car", e);
     }
-    this.lost();
   }
 
-  lost() {
-    this.pending += 1;
-    this.savePending();
-  }
-
-  savePending() {
-    world.setDynamicProperty("arnis:cars_pending", this.pending);
+  /** A car that has driven out of everyone's reach is gone, and a new one joins nearer. */
+  leave() {
+    for (const car of [...this.cars.values()]) {
+      if (car.live && !car.drives) this.despawn(car);
+    }
   }
 
   spawn(name, at, s, i, pace) {
@@ -403,24 +406,17 @@ export class Cars {
       if (!players.some((p) => distance(p.location, at) <= PLACE_REACH) || !this.loaded(at)) continue;
       this.placed.add(idx);
       changed = true;
-      // Another car got there first; this one comes back elsewhere instead.
-      if (this.any(at, 3 * this.k)) {
-        this.pending += 1;
-        continue;
-      }
+      // Another car got there first.
+      if (this.any(at, 3 * this.k)) continue;
       try {
         const car = this.spawn(this.bodies[body], at, s, i, pace);
         // Already on its way, as the Java pack places it.
         car.c = car.m >= 0 ? Math.min(car.v, car.m) : car.v;
       } catch (e) {
         warn("placing a car", e);
-        this.pending += 1;
       }
     }
-    if (changed) {
-      this.placed.save();
-      this.savePending();
-    }
+    if (changed) this.placed.save();
   }
 
   /** A kind of car, each as often as its weight. */
@@ -434,30 +430,50 @@ export class Cars {
     return kinds[0][0];
   }
 
-  /** Once a second, a few tries at bringing back a car that left. */
+  /** The (lane, point) pairs new cars can start from in a map cell. */
+  spotsIn(cx, cz) {
+    const key = `${cx}_${cz}`;
+    let list = this.spotCells.get(key);
+    if (!list) {
+      list = numbers(this.spots[key]);
+      this.spotCells.set(key, list);
+    }
+    return list;
+  }
+
+  /** Once a second, new cars on the roads around each player, so the traffic never runs dry. */
   respawn(players) {
-    for (let tries = 0; tries < 3 && this.pending > 0 && this.raw.length > 0; tries++) {
-      const s = randInt(0, 999999) % this.raw.length;
-      // Not on a lane no car starts on, as a stub or a scrap of road with nowhere to go.
-      if (this.raw[s].o === 1) continue;
-      const lane = this.lane(s);
-      const at = { x: lane.x[0], y: lane.y[0], z: lane.z[0] };
-      // At the start of a lane, out of sight of anyone close but near enough to someone to be worth it.
-      if (!this.loaded(at)) continue;
-      if (players.some((p) => distance(p.location, at) <= RESPAWN_CLEAR)) continue;
-      if (!players.some((p) => distance(p.location, at) <= DRIVE_REACH)) continue;
-      if (this.any(at, RESPAWN_GAP)) continue;
-      const kind = this.pickKind();
-      const colours = this.colours[kind];
-      const colour = colours[randInt(0, 9999) % colours.length];
-      try {
-        this.spawn(`car_${kind}_${colour}`, at, s, 1, randInt(...this.rules.pace));
-      } catch (e) {
-        warn("bringing back a car", e);
-        continue;
+    const size = this.rules.spot_cell;
+    for (const player of players) {
+      const at = player.location;
+      let near = 0;
+      for (const car of this.cars.values()) {
+        if (distance(at, car) <= DRIVE_REACH) near++;
       }
-      this.pending -= 1;
-      this.savePending();
+      for (let tries = 0; tries < RESPAWN_TRIES && near < this.rules.near; tries++) {
+        const cx = Math.floor(at.x / size) + randInt(-RESPAWN_CELLS, RESPAWN_CELLS);
+        const cz = Math.floor(at.z / size) + randInt(-RESPAWN_CELLS, RESPAWN_CELLS);
+        const spots = this.spotsIn(cx, cz);
+        if (randInt(0, RESPAWN_FULL_CELL - 1) >= spots.length / 2) continue;
+        const k = randInt(0, spots.length / 2 - 1);
+        const s = spots[2 * k];
+        const i = spots[2 * k + 1];
+        const lane = this.lane(s);
+        const spot = { x: lane.x[i], y: lane.y[i], z: lane.z[i] };
+        if (!this.loaded(spot)) continue;
+        if (players.some((p) => distance(p.location, spot) <= RESPAWN_CLEAR)) continue;
+        if (!players.some((p) => distance(p.location, spot) <= DRIVE_REACH)) continue;
+        if (this.any(spot, RESPAWN_GAP)) continue;
+        const kind = this.pickKind();
+        const colours = this.colours[kind];
+        const colour = colours[randInt(0, 9999) % colours.length];
+        try {
+          this.spawn(`car_${kind}_${colour}`, spot, s, i + 1, randInt(...this.rules.pace));
+          near++;
+        } catch (e) {
+          warn("bringing in a car", e);
+        }
+      }
     }
   }
 }

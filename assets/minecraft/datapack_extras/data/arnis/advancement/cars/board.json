@@ -1,0 +1,10 @@
+{
+  "criteria": {
+    "clicked": {
+      "trigger": "minecraft:player_interacted_with_entity"
+    }
+  },
+  "rewards": {
+    "function": "arnis:cars/board"
+  }
+}

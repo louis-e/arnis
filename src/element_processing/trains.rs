@@ -17,7 +17,7 @@ use crate::element_processing::train_bodies::{self, Coach, Livery};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use fnv::FnvHashMap;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
 /// Moves a second: the pack moves trains every second tick.
@@ -358,6 +358,8 @@ impl TrainNetwork {
         let mut network = String::from("data modify storage arnis:trains tmp set value []\n");
         let mut all = String::new();
         let mut bodies: FnvHashMap<String, Vec<train_bodies::Part>> = FnvHashMap::default();
+        let mut doors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+        doors.insert(train_bodies::NO_DOORS.to_string(), Vec::new());
         let mut carriage = 0usize;
         for (t, service) in self.services.iter().enumerate() {
             let route = &self.routes[service.route];
@@ -405,11 +407,15 @@ impl TrainNetwork {
                     let parts = train_bodies::parts(coach, livery);
                     let key = train_bodies::key(coach, livery);
                     bodies.entry(key.clone()).or_insert(parts);
+                    let door_key = train_bodies::door_key(coach);
+                    doors
+                        .entry(door_key.clone())
+                        .or_insert_with(|| train_bodies::doors(coach));
                     let _ = write!(
                         text,
                         "scoreboard players operation #sk arnis.train = #s arnis.train\n\
                          scoreboard players remove #sk arnis.train {}\n\
-                         data modify storage arnis:trains c set value {{r:{r},c:{},b:\"{key}\"}}\n\
+                         data modify storage arnis:trains c set value {{r:{r},c:{},b:\"{key}\",d:\"{door_key}\"}}\n\
                          function arnis:trains/car\n",
                         (offset * 1000.0).round() as i64,
                         carriage + c,
@@ -429,6 +435,17 @@ impl TrainNetwork {
             network,
         ));
         out.push(("data/arnis/function/trains/all.mcfunction".to_string(), all));
+        for (key, spots) in &doors {
+            let (keep, make) = train_bodies::door_functions(key, spots, self.size);
+            out.push((
+                format!("data/arnis/function/trains/door/{key}.mcfunction"),
+                keep,
+            ));
+            out.push((
+                format!("data/arnis/function/trains/door_new/{key}.mcfunction"),
+                make,
+            ));
+        }
         let mut keys: Vec<&String> = bodies.keys().collect();
         keys.sort();
         for key in keys {
@@ -2167,6 +2184,12 @@ mod tests {
         for (path, text) in &files {
             if path.contains("/trains/t/") {
                 assert!(text.contains("function arnis:trains/car"));
+                // Every carriage names door functions the pack has.
+                for part in text.split(",d:\"").skip(1) {
+                    let key = part.split('"').next().unwrap();
+                    let door = format!("data/arnis/function/trains/door/{key}.mcfunction");
+                    assert!(paths.contains(&door.as_str()), "{door}");
+                }
             }
         }
         // No rails laid, no route.

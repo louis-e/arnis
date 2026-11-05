@@ -101,12 +101,24 @@ const CARS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/cars/brake_switch.mcfunction",
     "data/arnis/function/cars/enter.mcfunction",
     "data/arnis/function/cars/respawn.mcfunction",
+    "data/arnis/function/cars/respawn_near.mcfunction",
     "data/arnis/function/cars/respawn_try.mcfunction",
+    "data/arnis/function/cars/respawn_cell.mcfunction",
+    "data/arnis/function/cars/respawn_spot.mcfunction",
     "data/arnis/function/cars/respawn_lane.mcfunction",
     "data/arnis/function/cars/respawn_at.mcfunction",
+    "data/arnis/function/cars/respawn_count.mcfunction",
     "data/arnis/function/cars/respawn_colour.mcfunction",
     "data/arnis/function/cars/respawn_body.mcfunction",
     "data/arnis/function/cars/respawn_settle.mcfunction",
+    "data/arnis/function/cars/board.mcfunction",
+    "data/arnis/function/cars/board_car.mcfunction",
+    "data/arnis/function/cars/seat_take.mcfunction",
+    "data/arnis/function/cars/seat_new.mcfunction",
+    "data/arnis/function/cars/seat_move.mcfunction",
+    "data/arnis/function/cars/seat_free.mcfunction",
+    "data/arnis/function/cars/seat_check.mcfunction",
+    "data/arnis/advancement/cars/board.json",
 ];
 
 const TRAINS: &[(&str, &[u8])] = static_files![
@@ -127,6 +139,7 @@ const TRAINS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/trains/gone.mcfunction",
     "data/arnis/function/trains/gone_at.mcfunction",
     "data/arnis/function/trains/sweep.mcfunction",
+    "data/arnis/function/trains/board.mcfunction",
 ];
 
 const OUTBREAK: &[(&str, &[u8])] = static_files![
@@ -1094,12 +1107,21 @@ mod tests {
                     let name = name.split([' ', '{', ']']).next().unwrap();
                     // Built by a macro at run time, or written from a road or rail
                     // network, which the test has none of.
-                    let networked = ["clear", "ease", "look", "network", "body/", "all"]
-                        .iter()
-                        .any(|f| {
-                            name.starts_with(&format!("arnis:cars/{f}"))
-                                || name.starts_with(&format!("arnis:trains/{f}"))
-                        });
+                    let networked = [
+                        "clear",
+                        "ease",
+                        "look",
+                        "network",
+                        "body/",
+                        "all",
+                        "respawn_kind",
+                        "seat_kind",
+                    ]
+                    .iter()
+                    .any(|f| {
+                        name.starts_with(&format!("arnis:cars/{f}"))
+                            || name.starts_with(&format!("arnis:trains/{f}"))
+                    });
                     if name.contains("$(") || networked {
                         continue;
                     }

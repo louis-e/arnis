@@ -78,6 +78,8 @@ pub struct BridgeMemberInfo {
     pub module_idx: Option<usize>,
     // True when a wider parallel member's module deck covers this way; skip it.
     pub covered_by_wider: bool,
+    // A covered way's traffic runs on the deck over it: that deck's Y per own cell.
+    carried_ys: Vec<i32>,
     // Cable spans: pylon positions from the main span; None stands on piers.
     pub cable_pylons: Option<Vec<(i32, i32)>>,
     // Cables hung from towers mapped in OSM; where set, piers stand only outside it.
@@ -92,6 +94,15 @@ impl BridgeMemberInfo {
             .or(self.ys.last())
             .copied()
             .unwrap_or_default()
+    }
+
+    /// The Y of the deck traffic runs on at centerline cell `tds`.
+    pub fn drive_y_at(&self, tds: usize) -> i32 {
+        self.carried_ys
+            .get(tds)
+            .or(self.carried_ys.last())
+            .copied()
+            .unwrap_or_else(|| self.y_at(tds))
     }
 }
 
@@ -1197,6 +1208,24 @@ impl BridgeStructureMap {
                 }
             }
 
+            let carried: Vec<Vec<i32>> = group_indices
+                .iter()
+                .enumerate()
+                .map(|(m, idx)| {
+                    let Some(c) = cover_of.get(idx).and_then(|&j| slot(j)) else {
+                        return Vec::new();
+                    };
+                    cells[m]
+                        .iter()
+                        .filter_map(|&cell| {
+                            (0..cells[c].len())
+                                .min_by_key(|&k| dist2(cells[c][k], cell))
+                                .and_then(|k| member_ys[c].get(k).copied())
+                        })
+                        .collect()
+                })
+                .collect();
+
             // Populate per-member info.
             for (m, &idx) in group_indices.iter().enumerate() {
                 let way = bridge_ways[idx];
@@ -1251,6 +1280,7 @@ impl BridgeStructureMap {
                         end_is_group_boundary: is_edge(end_xz),
                         module_idx,
                         covered_by_wider,
+                        carried_ys: carried[m].clone(),
                         cable_pylons: cable_carriers.contains(&idx).then(|| pylon_points.clone()),
                         cable_span: cable_span
                             .as_ref()
@@ -3255,10 +3285,15 @@ mod tests {
         let road = way_with(3, &[("highway", "primary")], &[(0, 42), (30, 42)]);
         let under = way_with(4, &[("highway", "residential")], &[(50, 0), (50, 30)]);
         let (structures, _) = structures_over(&[wide, narrow, road, under], |_| 0.0);
-        assert!(structures.lookup_member(2).unwrap().covered_by_wider);
+        let narrow = structures.lookup_member(2).unwrap();
+        assert!(narrow.covered_by_wider);
         let profile = ys(&structures, 1);
         assert!(profile[..=20].iter().all(|&y| y == 0), "{profile:?}");
         assert_no_jumps(&profile);
+        // Traffic on the covered way runs on that deck: from (30, 42) on, its cell 20.
+        for t in 0..=30 {
+            assert_eq!(narrow.drive_y_at(t), profile[20 + t], "cell {t}");
+        }
     }
 
     #[test]

@@ -6,7 +6,9 @@ use crate::element_processing::bridge_styles::{
     decorate_bridge_above_deck, place_arch_below_deck, place_pier_bent, place_pillar,
     BridgePathSample, BridgeStyle,
 };
-use crate::element_processing::bridges::{is_bridge_way, BridgeStructureMap, BridgeSurfaceMap};
+use crate::element_processing::bridges::{
+    is_bridge_way, way_cells, BridgeStructureMap, BridgeSurfaceMap,
+};
 use crate::element_processing::connected_blocks::{
     connected_iron_bars, four_connected_line, place_connected, stair_steps,
 };
@@ -21,7 +23,10 @@ use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use fnv::FnvHashMap;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 /// Widest road half-width in blocks.
 const MAX_BLOCK_RANGE: usize = 8;
@@ -146,6 +151,146 @@ pub(crate) fn road_profile(
         }
     }
     level_profile(&smooth, &pins)
+}
+
+/// The profile an at-grade road is laid on. A tunnel portal keeps the ground at its mouth,
+/// which the bore starts from.
+fn at_grade_profile(
+    editor: &WorldEditor,
+    way: &ProcessedWay,
+    block_range: i32,
+    connectivity: &HighwayConnectivityMap,
+    tunnel_portals: &TunnelPortalMap,
+) -> Vec<i32> {
+    road_profile(editor, way, block_range, connectivity, |x, z| {
+        connectivity.is_shared(x, z).then(|| {
+            if tunnel_portals.is_open_end((x, z)) {
+                editor
+                    .terrain_level(x, z)
+                    .unwrap_or_else(|| editor.get_ground_level(x, z))
+            } else {
+                junction_level(editor, x, z)
+            }
+        })
+    })
+}
+
+/// The level each road is laid at, for what drives on it: a deck, a ramp or the way's own
+/// profile. Asking the column instead would lift a road passing under a bridge onto the deck.
+pub(crate) struct RoadSurfaces<'a> {
+    editor: &'a WorldEditor<'a>,
+    bridges: &'a BridgeStructureMap,
+    connectivity: &'a HighwayConnectivityMap,
+    tunnel_portals: &'a TunnelPortalMap,
+    scale: f64,
+    /// Centerline cells and their levels, by way.
+    ways: RefCell<FnvHashMap<u64, Rc<WaySurface>>>,
+}
+
+struct WaySurface {
+    cells: Vec<(i32, i32)>,
+    ys: Vec<i32>,
+    /// The cells by tile of `SURFACE_TILE` blocks, so a lookup reads only those nearby.
+    tiles: FnvHashMap<(i32, i32), Vec<u32>>,
+}
+
+/// Tile size of the way surface index: lanes keep well within a tile of their way.
+const SURFACE_TILE: i32 = 16;
+
+impl WaySurface {
+    fn new(cells: Vec<(i32, i32)>, ys: Vec<i32>) -> Self {
+        let mut tiles: FnvHashMap<(i32, i32), Vec<u32>> = FnvHashMap::default();
+        for (k, &(x, z)) in cells.iter().enumerate() {
+            tiles
+                .entry((x.div_euclid(SURFACE_TILE), z.div_euclid(SURFACE_TILE)))
+                .or_default()
+                .push(k as u32);
+        }
+        Self { cells, ys, tiles }
+    }
+
+    /// The index of the cell nearest (x, z): from the tiles around it, or else all of them.
+    fn nearest(&self, x: i32, z: i32) -> Option<usize> {
+        let d2 = |k: usize| {
+            let (cx, cz) = self.cells[k];
+            i64::from(cx - x).pow(2) + i64::from(cz - z).pow(2)
+        };
+        let (tx, tz) = (x.div_euclid(SURFACE_TILE), z.div_euclid(SURFACE_TILE));
+        let near = (-1..=1)
+            .flat_map(|dz| (-1..=1).map(move |dx| (tx + dx, tz + dz)))
+            .filter_map(|t| self.tiles.get(&t))
+            .flatten()
+            .map(|&k| k as usize)
+            .min_by_key(|&k| d2(k));
+        // Within a tile, nothing outside the ring can be nearer.
+        near.filter(|&k| d2(k) <= i64::from(SURFACE_TILE).pow(2))
+            .or_else(|| (0..self.cells.len()).min_by_key(|&k| d2(k)))
+    }
+}
+
+impl<'a> RoadSurfaces<'a> {
+    pub(crate) fn new(
+        editor: &'a WorldEditor<'a>,
+        bridges: &'a BridgeStructureMap,
+        connectivity: &'a HighwayConnectivityMap,
+        tunnel_portals: &'a TunnelPortalMap,
+        scale: f64,
+    ) -> Self {
+        Self {
+            editor,
+            bridges,
+            connectivity,
+            tunnel_portals,
+            scale,
+            ways: RefCell::default(),
+        }
+    }
+
+    /// The surface block's height of `way` at the centerline cell nearest (x, z).
+    pub(crate) fn y_at(&self, way: &ProcessedWay, x: i32, z: i32) -> i32 {
+        let surface = {
+            let mut ways = self.ways.borrow_mut();
+            Rc::clone(
+                ways.entry(way.id)
+                    .or_insert_with(|| Rc::new(self.surface_of(way))),
+            )
+        };
+        let nearest = surface.nearest(x, z).unwrap_or(0);
+        surface
+            .ys
+            .get(nearest)
+            .copied()
+            .unwrap_or_else(|| self.editor.get_ground_level(x, z))
+    }
+
+    fn surface_of(&self, way: &ProcessedWay) -> WaySurface {
+        let cells = way_cells(way);
+        let ys = if let Some(member) = self.bridges.lookup_member(way.id) {
+            (0..cells.len()).map(|t| member.drive_y_at(t)).collect()
+        } else if let Some(ramp) = self.bridges.lookup_ramp(way.id) {
+            (0..cells.len()).map(|t| ramp.y_at(t)).collect()
+        } else {
+            let half = way
+                .tags
+                .get("highway")
+                .map_or(1, |h| highway_block_range(h, &way.tags, self.scale));
+            let mut ys = at_grade_profile(
+                self.editor,
+                way,
+                half,
+                self.connectivity,
+                self.tunnel_portals,
+            );
+            // The road dips into a tunnel portal it leads to.
+            if let Some(approach) = self.tunnel_portals.approach(way.id) {
+                for (t, y) in ys.iter_mut().enumerate() {
+                    *y += tunnel_approach_offset(approach, t as i32).min(0);
+                }
+            }
+            ys
+        };
+        WaySurface::new(cells, ys)
+    }
 }
 
 /// Whole-block heights for a smoothed profile: the sequence paying least in squared
@@ -1832,18 +1977,13 @@ fn generate_highways_internal(
             let own_profile: Vec<i32> = if is_bridge_member || is_bridge_ramp {
                 Vec::new()
             } else {
-                // A tunnel portal keeps the ground at its mouth, which the bore starts from.
-                road_profile(editor, way, block_range, highway_connectivity, |x, z| {
-                    highway_connectivity.is_shared(x, z).then(|| {
-                        if tunnel_portals.is_open_end((x, z)) {
-                            editor
-                                .terrain_level(x, z)
-                                .unwrap_or_else(|| editor.get_ground_level(x, z))
-                        } else {
-                            junction_level(editor, x, z)
-                        }
-                    })
-                })
+                at_grade_profile(
+                    editor,
+                    way,
+                    block_range,
+                    highway_connectivity,
+                    tunnel_portals,
+                )
             };
             let road_ys: &[i32] = bridge_ramp.map_or(&own_profile, |ramp| ramp.ys());
             let road_y_at = |tds: usize, along: i32| {
