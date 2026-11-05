@@ -466,9 +466,12 @@ impl Column {
 
     /// Highest block of the column and its height.
     fn top(self, chunk: &ChunkToModify) -> Option<(i32, Block)> {
-        let mut sections: Vec<i8> = chunk.sections.keys().collect();
-        sections.sort_unstable_by(|a, b| b.cmp(a));
-        for sy in sections {
+        self.top_in(chunk, &sections_down(chunk))
+    }
+
+    /// The same, given the chunk's sections from the top down.
+    fn top_in(self, chunk: &ChunkToModify, sections: &[i8]) -> Option<(i32, Block)> {
+        for &sy in sections {
             let Some(section) = chunk.sections.get(sy) else {
                 continue;
             };
@@ -482,6 +485,13 @@ impl Column {
         }
         None
     }
+}
+
+/// A chunk's sections, highest first.
+fn sections_down(chunk: &ChunkToModify) -> Vec<i8> {
+    let mut sections: Vec<i8> = chunk.sections.keys().collect();
+    sections.sort_unstable_by(|a, b| b.cmp(a));
+    sections
 }
 
 /// How far gone a building is. It is much the same all across one, so it still reads as a
@@ -545,12 +555,17 @@ struct RuinPlan {
 const CORNER_SLIDE: [i32; 17] = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
 
 /// One step of the walk to a building's corner: over to lower x by the nearest cell of the
-/// next column, or else down to lower z. None at the corner.
+/// next column, or else down to lower z. None at the corner. The walk slides only along the
+/// building's own column, so it never jumps a street into the next one.
 fn corner_step(footprints: &CoordinateBitmap, x: i32, z: i32) -> Option<(i32, i32)> {
+    let inside = |dz: i32| {
+        let (lo, hi) = (z.min(z + dz), z.max(z + dz));
+        (lo..=hi).all(|t| footprints.contains(x, t))
+    };
     CORNER_SLIDE
         .iter()
+        .find(|&&dz| footprints.contains(x - 1, z + dz) && inside(dz))
         .map(|&dz| (x - 1, z + dz))
-        .find(|&(nx, nz)| footprints.contains(nx, nz))
         .or_else(|| footprints.contains(x, z - 1).then_some((x, z - 1)))
 }
 
@@ -587,6 +602,7 @@ impl RegionTops {
     ) -> Self {
         let mut tops = vec![NO_TOP; 512 * 512];
         for ((cx, cz), chunk) in chunks {
+            let sections = sections_down(chunk);
             for lz in 0..16u8 {
                 for lx in 0..16u8 {
                     let (x, z) = (
@@ -596,7 +612,7 @@ impl RegionTops {
                     if !footprints.contains(x, z) {
                         continue;
                     }
-                    if let Some((y, _)) = (Column { lx, lz, x, z }).top(chunk) {
+                    if let Some((y, _)) = (Column { lx, lz, x, z }).top_in(chunk, &sections) {
                         let at = ((z - min.1) * 512 + (x - min.0)) as usize;
                         if let Some(slot) = tops.get_mut(at) {
                             *slot = y.clamp(i32::from(NO_TOP) + 1, i32::from(i16::MAX)) as i16;
@@ -1637,6 +1653,30 @@ mod tests {
         for &(x, z) in &cells {
             assert_eq!(building_corner(&footprints, x, z), corner, "from {x},{z}");
         }
+    }
+
+    #[test]
+    fn a_corner_walk_keeps_to_its_own_side_of_a_street() {
+        let bbox = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(-64, -64, 64, 64)
+            .unwrap();
+        let mut footprints = CoordinateBitmap::new(&bbox);
+        // One building, and another across a five-block street off its corner.
+        for x in 10..=20 {
+            for z in 10..=20 {
+                footprints.set(x, z);
+            }
+        }
+        for x in 0..=9 {
+            for z in 0..=4 {
+                footprints.set(x, z);
+            }
+        }
+        for x in 10..=20 {
+            for z in 10..=20 {
+                assert_eq!(building_corner(&footprints, x, z), (10, 10), "from {x},{z}");
+            }
+        }
+        assert_eq!(building_corner(&footprints, 9, 4), (0, 0));
     }
 
     #[test]

@@ -46,7 +46,9 @@ export class Cars {
     this.rules = data.rules;
     // Cars this far out count as traffic: as far as a car that moves looks ahead, and at
     // least as far as a car is placed or brought back with room around it.
-    const sight = Math.max(...this.rules.look.map(([at, reach]) => at + reach)) * this.k;
+    // A bus or truck looking for another looks two body lengths' worth further.
+    const longest = Math.max(...this.rules.look.map(([at, reach]) => at + reach)) + 2 * this.rules.long_extra;
+    const sight = longest * this.k;
     this.seeReach = Math.max(DRIVE_REACH + sight, PLACE_REACH + 3 * this.k, DRIVE_REACH + RESPAWN_GAP);
     this.spots = data.spots;
     this.spotCells = new Map();
@@ -225,6 +227,17 @@ export class Cars {
 
   /** How close the car ahead is: 3 stop a couple of metres behind it, 2 and 1 ease off. */
   look(car) {
+    // Right in front, closer than the look ahead below starts: wait. Two on one spot, as
+    // where two lanes merge into one, do not see each other there: one of them waits.
+    const [closeAt, closeRound] = this.rules.close_ahead.map((m) => m * this.k);
+    if (this.any(ahead(car, car.yaw, closeAt), closeRound, car)) return 3;
+    if (car.long) {
+      const [longAt, longRound] = this.rules.long_close_ahead.map((m) => m * this.k);
+      if (this.any(ahead(car, car.yaw, longAt), longRound, car)) return 3;
+    }
+    const behind = ahead(car, car.yaw, -closeAt);
+    const older = (o) => o.id < car.id && distance(o, behind) > closeRound;
+    if (this.any(car, this.rules.stacked * this.k, car, older)) return 3;
     const same = (o) => turnBetween(o.yaw, car.yaw) <= this.rules.same_way;
     const long = (o) => o.long && same(o);
     const extra = this.rules.long_extra * this.k;
@@ -263,14 +276,16 @@ export class Cars {
     // Crossing traffic right in front: give way, but not for ever, since cars can block
     // each other in a circle there. Which goes first is down to its number.
     let give = jam;
+    // A bus or truck looks from its longer front.
+    const front = car.long ? this.rules.long_extra * k : 0;
     const [crossAt, crossReach] = this.rules.crossing;
-    if (t >= 1 && this.any(ahead(car, car.yaw, crossAt * k), crossReach * k, car)) give = true;
+    if (t >= 1 && this.any(ahead(car, car.yaw, crossAt * k + front), crossReach * k, car)) give = true;
     car.w = give ? car.w + 1 : 0;
     if (give && car.w <= car.n + this.rules.give_way) t = 0;
     // Never through a player.
     const [nearAt, farAt, reach] = this.rules.player;
-    const near = ahead(car, car.yaw, nearAt * k);
-    const far = ahead(car, car.yaw, farAt * k);
+    const near = ahead(car, car.yaw, nearAt * k + front);
+    const far = ahead(car, car.yaw, farAt * k + front);
     const blocks = (p) => distance(p.location, near) <= reach * k || distance(p.location, far) <= reach * k;
     if (players.some((p) => p.walks && blocks(p))) {
       t = 0;

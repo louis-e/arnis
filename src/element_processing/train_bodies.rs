@@ -1246,6 +1246,27 @@ mod tests {
     }
 
     #[test]
+    fn a_seat_is_in_reach_of_its_door_at_every_scale() {
+        let board = include_str!(
+            "../../assets/minecraft/datapack_extras/data/arnis/function/trains/board.mcfunction"
+        );
+        let reach: f64 = board
+            .split("tag=arnis.seat,distance=..")
+            .nth(1)
+            .and_then(|r| r.split(',').next())
+            .and_then(|n| n.parse().ok())
+            .expect("board looks for a seat");
+        // Trains are drawn at up to three times their size.
+        for size in [0.4, 1.0, 2.0, 3.0] {
+            let seat = RIDER_EYE * size - RIDER_EYE_OVER_SEAT;
+            assert!(seat < reach, "a seat {seat:.2} up at size {size}");
+            // The next door's seat is further off than this one's.
+            let spacing = f64::from(DOOR_SPACING) * size * 0.5;
+            assert!(seat < spacing.hypot(seat), "size {size}");
+        }
+    }
+
+    #[test]
     fn door_functions_give_each_door_a_box_and_a_seat_that_move_with_the_carriage() {
         let spots = doors(Coach::MetroMid);
         let (keep, make) = door_functions("m160", &spots, 1.0);

@@ -76,6 +76,14 @@ const ACCEL_MPS2: f64 = 2.5;
 const LOOK: [(f64, f64, u8); 4] = [(3.0, 1.7, 3), (6.0, 1.7, 3), (10.0, 2.0, 2), (14.5, 2.5, 1)];
 /// How much further than a car's a bus or truck reaches ahead of and behind its middle.
 const LONG_EXTRA: f64 = 2.7;
+/// Right in front of a car, closer than the look ahead starts: how far ahead and how far
+/// round. The car's own middle is outside it.
+const CLOSE_AHEAD: (f64, f64) = (0.7, 0.65);
+/// The same for a bus or truck, from there on to where its longer look ahead starts.
+const LONG_CLOSE_AHEAD: (f64, f64) = (2.7, 1.4);
+/// Cars whose middles are this close stand on one spot, and the newer one waits, unless the
+/// older one is right behind it and so waits itself.
+const STACKED: f64 = 1.2;
 /// Cars heading within this many degrees of one are in its lane or turning into it.
 const SAME_WAY_DEG: f64 = 67.5;
 /// Where crossing traffic right in front is looked for: how far ahead and how far round.
@@ -484,11 +492,16 @@ fn lanes_each_way(way: &ProcessedWay, half: i32, oneway: i8) -> (usize, usize) {
 
 /// The nearest to the road's middle a lane moves in where a building stands on the road.
 /// Cars side by side, or meeting on a two-way road, still pass each other.
-fn lane_floor(offset: f64, count: usize, two_way: bool) -> f64 {
-    let beside = if count > 1 {
+fn lane_floor(half: i32, offset: f64, count: usize, two_way: bool) -> f64 {
+    let beside = if count <= 1 {
+        0.0
+    } else if two_way {
         offset.abs() - f64::from(MIN_LANE_WIDTH) + 2.0 * CAR_HALF_WIDTH
     } else {
-        0.0
+        // Clear of where the next lane in runs. The two either side of a one-way road's
+        // middle both move towards it, so each keeps half a car's room from it.
+        let spacing = f64::from(2 * half + 1) / count as f64;
+        (offset.abs() - spacing + 2.0 * CAR_HALF_WIDTH).max(CAR_HALF_WIDTH)
     };
     let oncoming = if two_way { ONCOMING_OFFSET } else { 0.0 };
     beside.max(oncoming).max(NARROW_LANE_OFFSET)
@@ -657,7 +670,7 @@ impl CarNetwork {
                 let path = Path::new(fitted_lane_line(
                     &lane.nodes,
                     lane.offset,
-                    lane_floor(lane.offset, lane.count, lane.two_way),
+                    lane_floor(piece.half, lane.offset, lane.count, lane.two_way),
                     drives_on_left,
                     &built,
                 ));
@@ -952,12 +965,22 @@ impl CarNetwork {
         let k = self.size;
         let d = |m: f64| format!("{:.2}", m * k);
         let mut out = Vec::new();
-        let mut dispatch = String::from(
-            "# Which way the car points, in eighths of a turn, picks who counts as the traffic ahead.\n\
+        let mut dispatch = format!(
+            "# Right in front, closer than the look ahead below starts: wait. Two on one spot, as\n\
+             # where two lanes merge into one, do not see each other there: the newer one waits.\n\
+             execute rotated as @s positioned ^ ^ ^{close} if entity @e[type=marker,tag=arnis.car,distance=..{round}] run return run scoreboard players set #ahead arnis.car 3\n\
+             execute if entity @s[tag=arnis.car.long] rotated as @s positioned ^ ^ ^{long_close} if entity @e[type=marker,tag=arnis.car,distance=..{long_round}] run return run scoreboard players set #ahead arnis.car 3\n\
+             execute rotated as @s as @e[type=marker,tag=arnis.car,distance=..{stacked}] if score @s arnis.car < #id arnis.car positioned ^ ^ ^-{close} unless entity @s[distance=..{round}] run return run scoreboard players set #ahead arnis.car 3\n\
+             # Which way the car points, in eighths of a turn, picks who counts as the traffic ahead.\n\
              execute store result score #h arnis.car run data get entity @s Rotation[0]\n\
              scoreboard players add #h arnis.car 202\n\
              scoreboard players operation #h arnis.car /= #45 arnis\n\
              scoreboard players operation #h arnis.car %= #8 arnis\n",
+            close = d(CLOSE_AHEAD.0),
+            round = d(CLOSE_AHEAD.1),
+            long_close = d(LONG_CLOSE_AHEAD.0),
+            long_round = d(LONG_CLOSE_AHEAD.1),
+            stacked = d(STACKED),
         );
         for b in 0..8 {
             let _ = writeln!(
@@ -981,8 +1004,16 @@ impl CarNetwork {
             };
             // A bus or truck ahead is further off for the same gap, and one looking is too.
             for (name, own) in [("h", 0.0), ("l", LONG_EXTRA)] {
-                let mut body = String::from(
-                    "# How close the car ahead is: 3 stop a couple of metres behind it, 2 and 1 ease off.\n",
+                let reach = LOOK
+                    .iter()
+                    .map(|&(at, r, _)| at + own + LONG_EXTRA + r)
+                    .fold(0.0, f64::max);
+                let mut body = format!(
+                    "# How close the car ahead is: 3 stop a couple of metres behind it, 2 and 1 ease off.\n\
+                     # Buses and trucks are few, so they are looked for only with one about.\n\
+                     scoreboard players set #longs arnis.car 0\n\
+                     execute if entity @e[type=marker,tag=arnis.car.long,distance=..{}] run scoreboard players set #longs arnis.car 1\n",
+                    d(reach)
                 );
                 for (n, &(at, r, close)) in LOOK.iter().enumerate() {
                     let then = if n + 1 < LOOK.len() {
@@ -990,11 +1021,22 @@ impl CarNetwork {
                     } else {
                         ""
                     };
-                    for (extra, tag) in [(0.0, "arnis.car"), (LONG_EXTRA, "arnis.car.long")] {
+                    for (extra, tag, only) in [
+                        (0.0, "arnis.car", ""),
+                        (
+                            LONG_EXTRA,
+                            "arnis.car.long",
+                            "if score #longs arnis.car matches 1 ",
+                        ),
+                    ] {
                         let _ = writeln!(
                             body,
                             "{} run {then}scoreboard players set #ahead arnis.car {close}",
-                            ahead(at + own + extra, r, tag)
+                            ahead(at + own + extra, r, tag).replacen(
+                                "execute ",
+                                &format!("execute {only}"),
+                                1
+                            )
                         );
                     }
                 }
@@ -1015,20 +1057,26 @@ impl CarNetwork {
              # is down to its number. Cars standing at a red line are no one's business.\n\
              scoreboard players set #yield arnis.car 0\n\
              execute if score #jam arnis.car matches 1 run scoreboard players set #yield arnis.car 1\n\
-             execute if score #t arnis.car matches 1.. rotated as @s positioned ^ ^ ^{crossing} if entity @e[type=marker,tag=arnis.car,tag=!arnis.car.held,distance=..{r}] run scoreboard players set #yield arnis.car 1\n\
+             execute if score #t arnis.car matches 1.. if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^{crossing} if entity @e[type=marker,tag=arnis.car,tag=!arnis.car.held,distance=..{r}] run scoreboard players set #yield arnis.car 1\n\
+             execute if score #t arnis.car matches 1.. if entity @s[tag=arnis.car.long] rotated as @s positioned ^ ^ ^{crossing_l} if entity @e[type=marker,tag=arnis.car,tag=!arnis.car.held,distance=..{r}] run scoreboard players set #yield arnis.car 1\n\
              execute if score #yield arnis.car matches 0 run scoreboard players set #w arnis.car 0\n\
              execute if score #yield arnis.car matches 1 run scoreboard players add #w arnis.car 1\n\
              scoreboard players operation #lim arnis.car = #id arnis.car\n\
              scoreboard players operation #lim arnis.car %= #32 arnis\n\
              scoreboard players add #lim arnis.car {GIVE_WAY_STEPS}\n\
              execute if score #yield arnis.car matches 1 if score #w arnis.car <= #lim arnis.car run scoreboard players set #t arnis.car 0\n\
-             # Never through a player.\n\
-             execute rotated as @s positioned ^ ^ ^{near} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n\
-             execute rotated as @s positioned ^ ^ ^{far} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n",
+             # Never through a player. A bus or truck looks from its longer front.\n\
+             execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^{near} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n\
+             execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^{far} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n\
+             execute if entity @s[tag=arnis.car.long] rotated as @s positioned ^ ^ ^{near_l} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n\
+             execute if entity @s[tag=arnis.car.long] rotated as @s positioned ^ ^ ^{far_l} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{pr}] run scoreboard players set #t arnis.car 0\n",
             crossing = d(CROSSING_AT.0),
+            crossing_l = d(CROSSING_AT.0 + LONG_EXTRA),
             r = d(CROSSING_AT.1),
             near = d(PLAYER_AT.0),
             far = d(PLAYER_AT.1),
+            near_l = d(PLAYER_AT.0 + LONG_EXTRA),
+            far_l = d(PLAYER_AT.1 + LONG_EXTRA),
             pr = d(PLAYER_AT.2),
         );
         out.push((
@@ -1227,6 +1275,9 @@ impl CarNetwork {
                 "look": LOOK.map(|(at, r, close)| json!([at, r, close])),
                 "same_way": SAME_WAY_DEG,
                 "long_extra": LONG_EXTRA,
+                "stacked": STACKED,
+                "close_ahead": [CLOSE_AHEAD.0, CLOSE_AHEAD.1],
+                "long_close_ahead": [LONG_CLOSE_AHEAD.0, LONG_CLOSE_AHEAD.1],
                 "long_kinds": KINDS
                     .iter()
                     .filter(|(kind, _)| kind.is_long())
@@ -2642,6 +2693,461 @@ mod tests {
             .any(|&(x, z)| (130.0..=180.0).contains(&z) && (x - usual).abs() < 0.01));
     }
 
+    /// A kind's body: its length and width, in blocks at 1:1.
+    fn footprint(kind: Kind) -> (f64, f64) {
+        let parts = parts(kind, "minecraft:white_concrete");
+        let extent = |axis: usize| {
+            let lo = parts
+                .iter()
+                .map(|p| p.corner[axis])
+                .fold(f32::MAX, f32::min);
+            let hi = parts
+                .iter()
+                .map(|p| p.corner[axis] + p.size[axis])
+                .fold(f32::MIN, f32::max);
+            f64::from(hi - lo)
+        };
+        (extent(2), extent(0))
+    }
+
+    /// What a driver makes of the car ahead `gap` blocks off, middle to middle, as the
+    /// pack's `look/h` and `look/l` functions lay it out: 3 stop, 2 and 1 ease off.
+    fn sees_ahead(follower: Kind, leader: Kind, gap: f64) -> u8 {
+        let own = if follower.is_long() { LONG_EXTRA } else { 0.0 };
+        for &(at, r, close) in &LOOK {
+            for (extra, applies) in [(0.0, true), (LONG_EXTRA, leader.is_long())] {
+                if applies && (gap - (at + own + extra)).abs() <= r {
+                    return close;
+                }
+            }
+        }
+        0
+    }
+
+    /// Drives a queue along one straight lane towards a car standing at a red light, a step
+    /// at a time as `step.mcfunction` does, and returns the closest any two bodies came.
+    fn drive_a_queue(kinds: &[Kind], kmh: f64) -> (f64, Vec<f64>) {
+        let accel = ((ACCEL_MPS2 * 0.1 * 0.1 * 1000.0).round() as i32).max(1);
+        // The fastest drivers, so they catch up with whatever is ahead.
+        let lane = step_speed(kmh * LIMIT_SHARE, 1.0) * PACE.1 / 1000;
+        // Middles along the lane, the one standing at the line first, 40 blocks apart.
+        let mut at: Vec<f64> = (0..kinds.len()).map(|i| -40.0 * i as f64).collect();
+        let mut speed: Vec<i32> = (0..kinds.len())
+            .map(|i| if i == 0 { 0 } else { lane })
+            .collect();
+        let mut closest = f64::MAX;
+        for _ in 0..3000 {
+            for i in 1..kinds.len() {
+                let gap = at[i - 1] - at[i];
+                let mut t = lane;
+                match sees_ahead(kinds[i], kinds[i - 1], gap) {
+                    3 => t = 0,
+                    2 => t = t.min(lane / 4),
+                    1 => t = t.min(lane / 2),
+                    _ => {}
+                }
+                speed[i] = (speed[i] + accel).min(t);
+                at[i] += f64::from(speed[i].max(0)) / 1000.0;
+            }
+            for i in 1..kinds.len() {
+                let room = (footprint(kinds[i]).0 + footprint(kinds[i - 1]).0) / 2.0;
+                closest = closest.min(at[i - 1] - at[i] - room);
+            }
+        }
+        let gaps = (1..kinds.len())
+            .map(|i| at[i - 1] - at[i] - (footprint(kinds[i]).0 + footprint(kinds[i - 1]).0) / 2.0)
+            .collect();
+        (closest, gaps)
+    }
+
+    /// Drives cars along one lane from where they stand, in order of their ids, with the
+    /// stacked rule and the look ahead, and returns where each one got to.
+    fn drive_from(cars: &[(Kind, f64)], kmh: f64, steps: usize) -> Vec<f64> {
+        let accel = ((ACCEL_MPS2 * 0.1 * 0.1 * 1000.0).round() as i32).max(1);
+        let lane = step_speed(kmh * LIMIT_SHARE, 1.0);
+        let mut at: Vec<f64> = cars.iter().map(|c| c.1).collect();
+        let mut speed = vec![lane; cars.len()];
+        for _ in 0..steps {
+            for i in 0..cars.len() {
+                let (c, r) = CLOSE_AHEAD;
+                let (lc, lr) = LONG_CLOSE_AHEAD;
+                let in_front = |j: usize| {
+                    let d = at[j] - at[i];
+                    j != i && ((d - c).abs() <= r || cars[i].0.is_long() && (d - lc).abs() <= lr)
+                };
+                let older_beside = |j: usize| {
+                    let d = at[j] - at[i];
+                    d.abs() <= STACKED && (d + c).abs() > r
+                };
+                let close = if (0..cars.len()).any(in_front) || (0..i).any(older_beside) {
+                    3
+                } else {
+                    (0..cars.len())
+                        .filter(|&j| j != i && at[j] > at[i])
+                        .map(|j| sees_ahead(cars[i].0, cars[j].0, at[j] - at[i]))
+                        .max()
+                        .unwrap_or(0)
+                };
+                let t = match close {
+                    3 => 0,
+                    2 => lane / 4,
+                    1 => lane / 2,
+                    _ => lane,
+                };
+                speed[i] = (speed[i] + accel).min(t);
+                at[i] += f64::from(speed[i].max(0)) / 1000.0;
+            }
+        }
+        at
+    }
+
+    #[test]
+    fn cars_on_one_spot_come_apart_and_none_is_left_waiting() {
+        let mixes: [&[(Kind, f64)]; 4] = [
+            &[(Kind::Sedan, 0.0), (Kind::Sedan, 0.0)],
+            // The older one a little behind, as two lanes merge.
+            &[
+                (Kind::Van, -0.6),
+                (Kind::Hatchback, 0.0),
+                (Kind::Sedan, 0.3),
+            ],
+            &[(Kind::Bus, 0.0), (Kind::Sedan, 0.1), (Kind::Truck, -0.2)],
+            &[
+                (Kind::Sedan, 0.5),
+                (Kind::Pickup, 0.0),
+                (Kind::Bus, 0.2),
+                (Kind::Sedan, -0.4),
+            ],
+        ];
+        for cars in mixes {
+            for kmh in [30.0, 50.0, 100.0] {
+                let at = drive_from(cars, kmh, 1500);
+                assert!(at.iter().all(|&a| a > 100.0), "{cars:?} at {kmh}: {at:?}");
+                let mut order: Vec<usize> = (0..cars.len()).collect();
+                order.sort_by(|&a, &b| at[b].total_cmp(&at[a]));
+                for w in order.windows(2) {
+                    let room = (footprint(cars[w[0]].0).0 + footprint(cars[w[1]].0).0) / 2.0;
+                    let gap = at[w[0]] - at[w[1]] - room;
+                    assert!(gap >= 0.3, "{cars:?} at {kmh}: {gap:.2} between {w:?}");
+                }
+            }
+        }
+        // Right in front reaches on to where the look ahead starts, leaves out the car's own
+        // middle, and with the spot it shares takes in every gap from nothing up.
+        let nearest_look = LOOK
+            .iter()
+            .map(|&(at, r, _)| at - r)
+            .fold(f64::MAX, f64::min);
+        let (c, r) = CLOSE_AHEAD;
+        assert!(c + r >= nearest_look && c - r > 0.0);
+        assert!(STACKED >= c - r);
+        // A bus or truck's own window goes on to where its longer look ahead starts, and stays
+        // beyond the spot it shares, so neither of two there waits for the other.
+        let (lc, lr) = LONG_CLOSE_AHEAD;
+        assert!(lc - lr <= c + r && lc + lr >= nearest_look + LONG_EXTRA);
+        assert!(lc - lr > STACKED);
+        // Lanes side by side and oncoming ones are neither right in front nor one spot.
+        for reach in [STACKED, r, lr] {
+            assert!(reach < 2.0 * CAR_HALF_WIDTH);
+        }
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
+        let look = net
+            .look_functions()
+            .into_iter()
+            .find(|(p, _)| p.ends_with("cars/look.mcfunction"))
+            .unwrap()
+            .1;
+        assert!(look.lines().next().is_some_and(|l| l.starts_with('#')));
+        assert!(look.contains(&format!(
+            "execute rotated as @s positioned ^ ^ ^{c:.2} if entity @e[type=marker,tag=arnis.car,distance=..{r:.2}] run return run"
+        )));
+        assert!(look.contains(&format!(
+            "execute rotated as @s as @e[type=marker,tag=arnis.car,distance=..{STACKED:.2}] if score @s arnis.car < #id arnis.car positioned ^ ^ ^-{c:.2} unless entity @s[distance=..{r:.2}] run return run"
+        )));
+        let bedrock = include_str!("../../assets/minecraft/bedrock_addon/scripts/cars.js");
+        assert!(bedrock
+            .contains("const older = (o) => o.id < car.id && distance(o, behind) > closeRound;"));
+        let rules = &net.bedrock_data()["rules"];
+        assert_eq!(rules["stacked"], STACKED);
+        assert_eq!(rules["close_ahead"][1], CLOSE_AHEAD.1);
+    }
+
+    #[test]
+    fn a_queue_never_runs_into_what_is_ahead_whatever_the_kinds_and_speed() {
+        for (leader, _) in KINDS {
+            for (follower, _) in KINDS {
+                for kmh in [30.0, 50.0, 70.0, 100.0, 130.0] {
+                    let (closest, gaps) = drive_a_queue(&[leader, follower], kmh);
+                    assert!(
+                        closest >= 0.3,
+                        "{follower:?} behind {leader:?} at {kmh} km/h came within {closest:.2}"
+                    );
+                    // And it does close up, rather than stop a street short.
+                    assert!(
+                        gaps[0] <= 6.0,
+                        "{follower:?} behind {leader:?}: {:.1}",
+                        gaps[0]
+                    );
+                }
+            }
+        }
+        // A long queue of every kind, each braking for the one braking ahead of it.
+        let mixed = [
+            Kind::Sedan,
+            Kind::Bus,
+            Kind::Hatchback,
+            Kind::Truck,
+            Kind::Van,
+            Kind::Bus,
+            Kind::Pickup,
+            Kind::Truck,
+            Kind::Sedan,
+        ];
+        for kmh in [50.0, 100.0] {
+            let (closest, gaps) = drive_a_queue(&mixed, kmh);
+            assert!(closest >= 0.3, "{closest:.2} at {kmh} km/h");
+            assert!(gaps.iter().all(|&g| g <= 6.0), "{gaps:?}");
+        }
+    }
+
+    /// Points every block along a lane's line, between `from` and `to` in z.
+    fn along(seg: &Segment, from: f64, to: f64) -> Vec<(f64, f64)> {
+        seg.points
+            .windows(2)
+            .flat_map(|w| {
+                let n = (w[1].x - w[0].x).hypot(w[1].z - w[0].z).ceil().max(1.0) as usize;
+                (0..n).map(move |i| {
+                    let t = i as f64 / n as f64;
+                    (
+                        w[0].x + (w[1].x - w[0].x) * t,
+                        w[0].z + (w[1].z - w[0].z) * t,
+                    )
+                })
+            })
+            .filter(|p| (from..=to).contains(&p.1))
+            .collect()
+    }
+
+    #[test]
+    fn lanes_side_by_side_or_oncoming_never_touch() {
+        let mut cases: Vec<Vec<(&str, &str)>> = vec![vec![]];
+        for highway in ["residential", "tertiary", "secondary", "primary"] {
+            for lanes in ["2", "3", "4", "6"] {
+                cases.push(vec![("highway", highway), ("lanes", lanes)]);
+                cases.push(vec![
+                    ("highway", highway),
+                    ("lanes", lanes),
+                    ("oneway", "yes"),
+                ]);
+            }
+        }
+        cases.push(vec![
+            ("highway", "primary"),
+            ("lanes:forward", "2"),
+            ("lanes:backward", "1"),
+        ]);
+        for tags in cases {
+            let way = road(
+                5,
+                (0..=10)
+                    .map(|i| node(i + 1, 0, i as i32 * 20, &[]))
+                    .collect(),
+                &tags,
+            );
+            // Open, and then with buildings standing on the road closer and closer in.
+            for kerb in [
+                None,
+                Some(8),
+                Some(6),
+                Some(5),
+                Some(4),
+                Some(3),
+                Some(2),
+                Some(1),
+            ] {
+                let wall =
+                    |x: i32, z: i32| kerb.is_some_and(|k| x.abs() >= k) && (40..=140).contains(&z);
+                let net = CarNetwork::build(
+                    std::slice::from_ref(&way),
+                    1.0,
+                    false,
+                    false,
+                    &world(),
+                    flat,
+                    wall,
+                );
+                for (i, a) in net.segments.iter().enumerate() {
+                    for b in net.segments.iter().skip(i + 1) {
+                        let theirs = along(b, 0.0, 200.0);
+                        for (x, z) in along(a, 30.0, 170.0) {
+                            let apart = theirs
+                                .iter()
+                                .map(|q| (q.0 - x).hypot(q.1 - z))
+                                .fold(f64::MAX, f64::min);
+                            assert!(
+                                apart >= 2.0 * CAR_HALF_WIDTH - 1e-9,
+                                "{tags:?}, walls from {kerb:?}: lanes {apart:.2} apart at {x:.1},{z:.1}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A placed car: its middle, its heading and its kind.
+    type Placed = ((f64, f64), (f64, f64), Kind);
+
+    /// Whether two cars' bodies, each a rectangle about its middle along its heading, meet.
+    fn bodies_meet(a: Placed, b: Placed) -> bool {
+        let corners = |((x, z), (dx, dz), kind): Placed| {
+            let (l, w) = footprint(kind);
+            let (sx, sz) = (-dz, dx);
+            [(1.0, 1.0), (1.0, -1.0), (-1.0, -1.0), (-1.0, 1.0)].map(|(f, s)| {
+                (
+                    x + dx * f * l / 2.0 + sx * s * w / 2.0,
+                    z + dz * f * l / 2.0 + sz * s * w / 2.0,
+                )
+            })
+        };
+        let (ca, cb) = (corners(a), corners(b));
+        let axes = [a.1, (-a.1 .1, a.1 .0), b.1, (-b.1 .1, b.1 .0)];
+        axes.iter().all(|&(ax, az)| {
+            let span = |c: &[(f64, f64); 4]| {
+                c.iter()
+                    .map(|p| p.0 * ax + p.1 * az)
+                    .fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)))
+            };
+            let ((alo, ahi), (blo, bhi)) = (span(&ca), span(&cb));
+            ahi > blo && bhi > alo
+        })
+    }
+
+    #[test]
+    fn cars_placed_at_the_start_stand_clear_of_each_other() {
+        let wide = vec![road(
+            90,
+            vec![node(900, -300, 0, &[]), node(901, 300, 0, &[])],
+            &[("highway", "primary"), ("lanes", "6")],
+        )];
+        for roads in [awkward_roads(), crossroads(true), wide] {
+            let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat, open);
+            assert!(net.car_count() > 5, "{}", net.car_count());
+            let placed: Vec<Placed> = net
+                .cars
+                .iter()
+                .map(|c| {
+                    let seg = &net.segments[c.segment];
+                    let (a, b) = (seg.points[c.target - 1], seg.points[c.target]);
+                    let heading = unit(b.x - a.x, b.z - a.z).unwrap_or((1.0, 0.0));
+                    ((c.pos.0, c.pos.2), heading, c.kind)
+                })
+                .collect();
+            for (i, &a) in placed.iter().enumerate() {
+                for &b in &placed[i + 1..] {
+                    assert!(!bodies_meet(a, b), "{a:?} and {b:?} stand in each other");
+                }
+            }
+        }
+        // The check itself: two buses nose to tail a block apart meet, and side by side in
+        // lanes 3.5 apart do not.
+        let bus = |x: f64, z: f64| ((x, z), (1.0, 0.0), Kind::Bus);
+        assert!(bodies_meet(bus(0.0, 0.0), bus(9.0, 0.0)));
+        assert!(!bodies_meet(bus(0.0, 0.0), bus(0.0, 3.5)));
+    }
+
+    #[test]
+    fn new_cars_start_clear_of_every_kind() {
+        let longest = KINDS
+            .iter()
+            .map(|&(kind, _)| footprint(kind).0)
+            .fold(0.0, f64::max);
+        let java = include_str!(
+            "../../assets/minecraft/datapack_extras/data/arnis/function/cars/respawn_at.mcfunction"
+        );
+        let gap: f64 = java
+            .split("tag=arnis.car,distance=..")
+            .nth(1)
+            .and_then(|r| r.split(']').next())
+            .and_then(|n| n.parse().ok())
+            .expect("respawn_at keeps new cars apart");
+        let bedrock = include_str!("../../assets/minecraft/bedrock_addon/scripts/cars.js");
+        let bedrock_gap: f64 = bedrock
+            .split("const RESPAWN_GAP = ")
+            .nth(1)
+            .and_then(|r| r.split(';').next())
+            .and_then(|n| n.parse().ok())
+            .expect("cars.js keeps new cars apart");
+        // Middle to middle, two of the longest end to end.
+        for g in [gap, bedrock_gap] {
+            assert!(g >= longest + 1.0, "{g} for bodies {longest} long");
+        }
+    }
+
+    #[test]
+    fn a_rider_is_not_in_the_way_of_their_own_car() {
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
+        let clear = net
+            .look_functions()
+            .into_iter()
+            .find(|(p, _)| p.ends_with("cars/clear.mcfunction"))
+            .unwrap()
+            .1;
+        let players: Vec<&str> = clear.lines().filter(|l| l.contains("@a[")).collect();
+        assert_eq!(players.len(), 4);
+        assert!(players.iter().all(|l| l.contains("tag=!arnis.riding")));
+        // Who rides is known from the start of a ride and every second after.
+        let seat = include_str!(
+            "../../assets/minecraft/datapack_extras/data/arnis/function/cars/seat_new.mcfunction"
+        );
+        let respawn = include_str!(
+            "../../assets/minecraft/datapack_extras/data/arnis/function/cars/respawn.mcfunction"
+        );
+        for text in [seat, respawn] {
+            assert!(text.contains("on passengers run tag @s add arnis.riding"));
+        }
+        // Without the tag the seat of the longer kinds would stand in the car's own way.
+        let (near, _, reach) = PLAYER_AT;
+        let own = |kind: Kind| if kind.is_long() { LONG_EXTRA } else { 0.0 };
+        assert!(KINDS
+            .iter()
+            .any(|&(kind, _)| (kind.seat().0 - near - own(kind)).abs() <= reach));
+    }
+
+    #[test]
+    fn every_kind_looks_out_for_people_and_crossing_traffic_from_its_own_front() {
+        let own = |kind: Kind| if kind.is_long() { LONG_EXTRA } else { 0.0 };
+        for (kind, _) in KINDS {
+            let front = footprint(kind).0 / 2.0;
+            // From its bumper on, with no gap, to a few metres out.
+            let (near, far, r) = PLAYER_AT;
+            assert!(near + own(kind) - r <= front, "{kind:?}");
+            assert!(far - near <= 2.0 * r);
+            assert!(far + own(kind) + r - front >= 4.0, "{kind:?}");
+            let (at, r) = CROSSING_AT;
+            assert!(at + own(kind) + r - front >= 1.5, "{kind:?}");
+        }
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
+        let clear = net
+            .look_functions()
+            .into_iter()
+            .find(|(p, _)| p.ends_with("cars/clear.mcfunction"))
+            .unwrap()
+            .1;
+        for at in [CROSSING_AT.0, PLAYER_AT.0, PLAYER_AT.1] {
+            assert!(clear.contains(&format!(
+                "[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^{at:.2} "
+            )));
+            assert!(clear.contains(&format!(
+                "[tag=arnis.car.long] rotated as @s positioned ^ ^ ^{:.2} ",
+                at + LONG_EXTRA
+            )));
+        }
+        let bedrock = include_str!("../../assets/minecraft/bedrock_addon/scripts/cars.js");
+        assert!(bedrock.contains("const front = car.long ? this.rules.long_extra * k : 0;"));
+        assert_eq!(bedrock.matches("* k + front)").count(), 3);
+    }
+
     fn crossroads(signal: bool) -> Vec<ProcessedElement> {
         let mid: &[(&str, &str)] = if signal {
             &[("highway", "traffic_signals")]
@@ -2975,19 +3481,6 @@ mod tests {
     }
 
     #[test]
-    fn long_vehicles_keep_to_the_room_drivers_leave() {
-        // A driver stops with the car ahead within 7.7 m, centre to centre, so a queue
-        // behind any of these leaves a gap.
-        for (kind, _) in KINDS {
-            let length = parts(kind, "minecraft:white_concrete")
-                .iter()
-                .map(|p| p.size[2])
-                .fold(0.0f32, f32::max);
-            assert!(length / 2.0 + 2.3 < 7.7 + 0.1, "{kind:?} is {length} long");
-        }
-    }
-
-    #[test]
     fn every_car_can_be_clicked_and_is_seen_as_far_as_it_is_sent() {
         let k = 2.0;
         let net = CarNetwork::build(&crossroads(false), k, false, false, &world(), flat, open);
@@ -3086,6 +3579,40 @@ mod tests {
             .filter(|s| s.way == 1 && s.points.iter().any(|p| p.stop.is_some()))
             .collect();
         assert_eq!(east.len(), 2);
+    }
+
+    #[test]
+    fn crosswalk_signals_round_a_junction_hold_only_those_coming_in() {
+        // Mapped on each crosswalk rather than on the stop lines: leaving, cars go on.
+        let net = CarNetwork::build(
+            &approach_signals(&[("crossing", "traffic_signals")]),
+            1.0,
+            false,
+            true,
+            &world(),
+            flat,
+            open,
+        );
+        assert_eq!(stops(&net), (4, 4));
+        // A crossing further down the road holds both ways, even with signals at the junction.
+        let mut roads = approach_signals(&[]);
+        if let ProcessedElement::Way(w) = &mut roads[0] {
+            let mut far = node(15, 25, 0, &[("highway", "traffic_signals")]);
+            far.tags
+                .insert("crossing".to_string(), "traffic_signals".to_string());
+            w.nodes.insert(4, far);
+        }
+        let net = CarNetwork::build(&roads, 1.0, false, true, &world(), flat, open);
+        let at_the_crossing = net
+            .segments
+            .iter()
+            .filter(|s| {
+                s.points
+                    .iter()
+                    .any(|p| p.stop.is_some() && p.x > 18.0 && p.x < 32.0)
+            })
+            .count();
+        assert_eq!(at_the_crossing, 2);
     }
 
     #[test]
