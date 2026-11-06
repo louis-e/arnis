@@ -1,9 +1,4 @@
-//! Sports venues: raked stands that rise away from the field, with tiers, a facade, a
-//! roof or floodlight masts, and a field laid out for the sport when none is mapped.
-//!
-//! Venues are planned before the tile loop, which then skips the stand buildings they
-//! claim, and placed once the regions they cover have merged. Everything is sized in
-//! metres times the world scale, so a goal stays a goal and a stand stays a stand.
+//! Sports venues: raked stands, planned before the tile loop and placed post-merge, sized in metres.
 
 use crate::args::{Args, GenerationMode};
 use crate::block_definitions::*;
@@ -89,8 +84,7 @@ impl Sport {
         }
     }
 
-    /// Length and width of a field drawn where none is mapped. Baseball diamonds need
-    /// their mapped fan to orient home plate, so they are never invented.
+    /// Field size where none is mapped; baseball needs its mapped fan, so it is never invented.
     fn field_m(self) -> Option<(f64, f64)> {
         match self {
             Sport::Soccer | Sport::Athletics => Some((105.0, 68.0)),
@@ -200,9 +194,7 @@ impl Bbox {
     }
 }
 
-/// The rings of an area, outer and inner alike; filled even-odd. Each ring is a polyline:
-/// a way is closed onto its first node, while the members of a multipolygon stay the open
-/// pieces they were mapped as and only close the ring together.
+/// An area's rings, filled even-odd; multipolygon members stay open pieces that close together.
 #[derive(Clone, Debug)]
 struct Shape {
     rings: Vec<Vec<(i32, i32)>>,
@@ -283,8 +275,7 @@ fn shape_of(element: &ProcessedElement) -> Option<Shape> {
 }
 
 impl Shape {
-    /// The outline with its holes filled: a venue whose pitch is mapped as its inner ring
-    /// still holds that pitch.
+    /// The outline with its holes filled, so a pitch mapped as an inner ring stays inside.
     fn filled(&self) -> Shape {
         let keep = |i: &usize| self.outer[*i];
         Shape {
@@ -466,8 +457,7 @@ fn frame_of(cells: impl Iterator<Item = (i32, i32)> + Clone) -> Option<Frame> {
     })
 }
 
-/// Minimum-area enclosing rectangle by rotating calipers:
-/// (centre x, centre z, long extent, short extent, long-axis angle from +X).
+/// Minimum-area enclosing rectangle: (centre x, centre z, long, short, long-axis angle).
 fn min_area_rect(points: &[(i32, i32)]) -> Option<(f64, f64, f64, f64, f64)> {
     let hull = sport_pitches::hull_ccw(points);
     if hull.len() < 3 {
@@ -570,8 +560,7 @@ struct Profile {
 }
 
 impl Profile {
-    /// Seat height above the field, and the tier and whether the cell is a walkway,
-    /// at `f` blocks from the front of the stand.
+    /// Seat height, tier and walkway flag at `f` blocks from the front of the stand.
     fn at(&self, f: f32) -> (i32, u8, bool) {
         let mut base = self.lip;
         let mut rest = f;
@@ -610,8 +599,7 @@ struct Venue {
     roof_cover: f32,
     /// Height of the roof above the field, when the outline sets one taller than the seats.
     roof_top: Option<i32>,
-    /// Stands shallower than this, in blocks, stay open: a roof over a few rows of
-    /// bleachers would need a wall as tall as the main stand to hold it.
+    /// Stands shallower than this (blocks) stay open; a roof there would need a tall wall.
     roof_min_depth: f32,
     /// Blocks between the top row and the roof, and from the top row to a mast's lamps.
     roof_clearance: i32,
@@ -651,8 +639,7 @@ impl StadiumPlan {
         self.venues.len()
     }
 
-    /// The regions each venue's grid covers, masts and roofs included, widened by the reach
-    /// of the tree sweep that clears its footprint first.
+    /// Regions each venue covers, widened by the tree sweep's reach.
     pub fn placement_regions(&self) -> Vec<Vec<(i32, i32)>> {
         self.venues
             .iter()
@@ -666,8 +653,7 @@ impl StadiumPlan {
     }
 }
 
-/// A planned venue, the elements it draws in their place, and those it only takes up:
-/// its outline and fields, which still draw themselves but start no second venue.
+/// A planned venue, what it draws instead, and what it only takes (outline, fields).
 struct Planned {
     venue: Venue,
     suppress: Vec<Key>,
@@ -739,8 +725,7 @@ pub fn prescan(elements: &[ProcessedElement], args: &Args, already: &HashSet<Key
         }
     }
 
-    // Pitches and buildings only matter within reach of a venue or a stand, and a
-    // large area has millions of buildings, so the rest are never shaped.
+    // Only pitches and buildings near a venue or stand get shaped; large areas have millions.
     let reach = (GRANDSTAND_REACH_M * args.scale).ceil() as i32 + 8;
     let near: HashSet<(i32, i32)> = venues_in
         .iter()
@@ -786,10 +771,11 @@ pub fn prescan(elements: &[ProcessedElement], args: &Args, already: &HashSet<Key
         }
     }
 
-    // A stadium building outside any venue outline is a venue of its own when it
-    // rings a field; a solid one with nothing inside is an arena and stays a building.
+    // A stadium building ringing a field is a venue; a solid one is an arena building.
+    let tried: HashSet<Key> = venues_in.iter().map(|v| v.key()).collect();
     let outlines: Vec<usize> = (0..stands.len())
         .filter(|&i| tag(stands[i].tags(), "building") == Some("stadium"))
+        .filter(|&i| !tried.contains(&stands[i].key()))
         .collect();
     for i in outlines {
         let s = &stands[i];
@@ -991,8 +977,7 @@ fn plan_venue(
     }
     let mapped_stands = stand.iter().any(|&s| s);
 
-    // Buildings standing in the venue that are not its stands. Without seating of its own
-    // mapped, a venue mostly under one is an indoor arena drawn by that building.
+    // Non-stand buildings; a venue mostly under one without mapped seating is an arena.
     let mut keep_out = vec![false; grid.len()];
     for o in others
         .iter()
@@ -1022,12 +1007,19 @@ fn plan_venue(
             field = hole;
         } else if let Some(sf) = synthesize_field(&grid, &venue_mask, sport, outline.key().1, scale)
         {
-            for &(x, z) in &sf.cells {
-                if let Some(i) = grid.idx(x, z) {
+            let idx: Vec<usize> = sf
+                .cells
+                .iter()
+                .filter_map(|&(x, z)| grid.idx(x, z))
+                .collect();
+            // A building standing where the pitch would go means this is no bowl.
+            let built = idx.iter().filter(|&&i| keep_out[i]).count();
+            if built * 50 <= idx.len() {
+                for i in idx {
                     field[i] = true;
                 }
+                synth_field = Some(sf);
             }
-            synth_field = Some(sf);
         }
     }
     if !field.iter().any(|&f| f) {
@@ -1038,8 +1030,7 @@ fn plan_venue(
     let field_dist = chamfer(&grid, |i| field[i]);
     let apron = (m(scale, sport_or.apron_m()) * UNIT as f64) as u32;
     if !mapped_stands {
-        // No stands mapped: seat the ring between the field and the outline, around
-        // any building standing in it.
+        // No stands mapped: seat the ring between field and outline, around buildings.
         let max_d = (m(scale, MAX_DEPTH_M) * UNIT as f64) as u32 + apron;
         for i in 0..grid.len() {
             let d = field_dist[i] as u32;
@@ -1196,8 +1187,7 @@ fn field_group<'a>(fields: &[&'a Candidate<'a>]) -> Vec<&'a Candidate<'a>> {
         .collect()
 }
 
-/// Morphological closing inside the venue: fills the slivers between mapped stand
-/// sections and the notches ramp towers cut into their backs, up to `r` blocks.
+/// Closes slivers between stand sections and ramp notches, up to `r` blocks.
 fn close_gaps(grid: &Grid, stand: &mut [bool], within: &[bool], r: f64) {
     let r = (r * UNIT as f64) as u16;
     if r == 0 {
@@ -1393,8 +1383,7 @@ fn build_venue(
         .last()
         .map_or(profile.lip, |&d| profile.at(d as f32 / UNIT).0);
 
-    // Roof: mapped roof parts over the stands, a covered tag, an outline taller than its
-    // seats, or a big football stand.
+    // Roof from mapped roof parts, covered=yes, a tall outline, or a big football stand.
     let mut roof_mask = vec![false; grid.len()];
     for o in others
         .iter()
@@ -1470,8 +1459,7 @@ fn build_venue(
     })
 }
 
-/// Front-row and back-wall cells: a stand cell is at the front where its neighbour is
-/// nearer the field, and at the back where its neighbour is further away.
+/// Front-row and back-wall cells, by whether a neighbour is nearer or further from the field.
 fn edges(
     grid: &Grid,
     stand: &[bool],
@@ -1489,8 +1477,10 @@ fn edges(
             match grid.idx(x + dx, z + dz) {
                 None => back[i] = true,
                 Some(n) if stand[n] => {}
-                Some(n) if field[n] || field_dist[n] + 3 <= field_dist[i] => front[i] = true,
-                Some(n) if field_dist[n] >= field_dist[i] + 3 => back[i] = true,
+                Some(n) if field[n] || field_dist[n].saturating_add(3) <= field_dist[i] => {
+                    front[i] = true
+                }
+                Some(n) if field_dist[n] >= field_dist[i].saturating_add(3) => back[i] = true,
                 Some(_) => {}
             }
         }
@@ -1498,8 +1488,7 @@ fn edges(
     (front, back)
 }
 
-/// Buildings the venue draws over: anything standing mostly on its stands or field,
-/// roofs included, since the stands carry their own.
+/// Buildings standing mostly on the venue's stands or field, which it draws over.
 fn covered_buildings(venue: &Venue, others: &[Candidate], claimed: &HashSet<Key>) -> Vec<Key> {
     let area = venue.grid.bbox();
     others
@@ -1561,7 +1550,15 @@ fn place_venue(editor: &mut WorldEditor, v: &Venue) {
     let base = field_level(editor, v);
 
     let top_guess = base + v.profile.cap + 30;
-    crate::models_3d::clear_trees_in_mask(editor, g.x0, g.z0, g.w, g.h, &v.stand, top_guess);
+    // A synthesized field is unsealed ground, so land-cover trees may stand on it.
+    let synth = v.synth_field.is_some();
+    let cleared: Vec<bool> = v
+        .stand
+        .iter()
+        .zip(&v.field)
+        .map(|(&s, &f)| s || (synth && f))
+        .collect();
+    crate::models_3d::clear_trees_in_mask(editor, g.x0, g.z0, g.w, g.h, &cleared, top_guess);
 
     if let Some(sf) = &v.synth_field {
         paint_field(editor, sf);
@@ -1603,8 +1600,7 @@ fn place_venue(editor: &mut WorldEditor, v: &Venue) {
             put(y, AIR);
         }
         if b < 1.0 {
-            // Back wall, up to the roof it carries, a parapet above the last row, or the
-            // hillside it holds back.
+            // Back wall up to the roof, a parapet, or the hillside it holds back.
             let top = if roofed { roof_y } else { seat_y + 1 }.max(ground);
             let along = (angle * dx.hypot(dz)).round() as i64;
             for y in ground.min(seat_y) + 1..=top {
