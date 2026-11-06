@@ -1256,23 +1256,21 @@ pub fn generate_world_with_options(
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
 
     let car_network = extras.cars.then(|| {
-        let rel = |x: i32, z: i32| {
-            crate::coordinate_system::cartesian::XZPoint::new(
-                x - xzbbox.min_x(),
-                z - xzbbox.min_z(),
-            )
-        };
+        let surfaces = highways::RoadSurfaces::new(
+            &editor,
+            &bridge_structures,
+            &highway_connectivity,
+            &tunnel_portals,
+            args.scale,
+        );
         let net = crate::element_processing::cars::CarNetwork::build(
             &elements,
             args.scale,
             sign_region.drives_on_left(),
             extras.traffic_lights,
             &xzbbox,
-            |x, z| {
-                bridge_surface
-                    .nearby_deck_y(x, z, 0)
-                    .unwrap_or_else(|| ground.level(rel(x, z)))
-            },
+            |way, x, z| surfaces.y_at(way, x, z),
+            |x, z| building_footprints.contains(x, z),
         );
         println!(
             "  Moving cars: {} cars on the road network",
@@ -2534,6 +2532,8 @@ pub fn generate_world_with_options(
                 .map(|net| {
                     let mut functions = net.look_functions();
                     functions.extend(net.body_functions());
+                    functions.push(net.kind_function());
+                    functions.push(net.seat_function());
                     functions.push((
                         "data/arnis/function/cars/network.mcfunction".to_string(),
                         net.storage_function(),

@@ -3462,7 +3462,8 @@ async function startGeneration() {
       const coords = mapFrame.contentWindow.getSpawnPointCoords();
       // Convert object format to tuple format if coordinates exist
       if (coords) {
-        spawnPoint = [coords.lat, coords.lng];
+        // The map repeats sideways, and the selection is brought back into range too.
+        spawnPoint = [coords.lat, normalizeLongitude(coords.lng)];
       }
     }
 

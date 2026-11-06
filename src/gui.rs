@@ -503,9 +503,11 @@ fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
 }
 
 /// The map marker, unless it lies outside the area: the map keeps it when the area moves.
+/// The map repeats sideways, so a marker on another copy of it comes with a longitude past
+/// 180 degrees, while the area has been brought back into range.
 fn spawn_marker(spawn_point: Option<(f64, f64)>, bbox: &LLBBox) -> Option<LLPoint> {
     spawn_point
-        .and_then(|(lat, lng)| LLPoint::new(lat, lng).ok())
+        .and_then(|(lat, lng)| LLPoint::new(lat, (lng + 180.0).rem_euclid(360.0) - 180.0).ok())
         .filter(|p| bbox.contains(p))
 }
 
@@ -1505,18 +1507,12 @@ fn gui_start_generation(
             let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale)
                 .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
-            let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
-                let llpoint = LLPoint::new(coords.0, coords.1)
-                    .map_err(|e| format!("Failed to parse spawn point: {e}"))?;
-
-                if llbbox.contains(&llpoint) {
+            let (spawn_x, spawn_z) = match spawn_marker(spawn_point, &llbbox) {
+                Some(llpoint) => {
                     let xzpoint = transformer.transform_point(llpoint);
                     (xzpoint.x, xzpoint.z)
-                } else {
-                    calculate_default_spawn(&xzbbox)
                 }
-            } else {
-                calculate_default_spawn(&xzbbox)
+                None => calculate_default_spawn(&xzbbox),
             };
 
             let (spawn_x, spawn_z) = map_transformation::rotate::rotate_xz_point(
@@ -2370,6 +2366,16 @@ mod tests {
         assert!(spawn_marker(Some((52.51, 13.40)), &bbox).is_some());
         assert!(spawn_marker(Some((48.14, 11.58)), &bbox).is_none());
         assert!(spawn_marker(None, &bbox).is_none());
+    }
+
+    #[test]
+    fn a_spawn_marker_on_another_copy_of_the_map_counts_where_it_really_is() {
+        let bbox = LLBBox::new(52.5, 13.3, 52.6, 13.5).unwrap();
+        for lng in [13.40 + 360.0, 13.40 - 360.0, 13.40 + 720.0] {
+            let marker = spawn_marker(Some((52.51, lng)), &bbox).expect("inside the area");
+            assert!((marker.lng() - 13.40).abs() < 1e-9, "{lng}");
+        }
+        assert!(spawn_marker(Some((48.14, 11.58 + 360.0)), &bbox).is_none());
     }
 
     fn read_level_dat(world: &Path) -> Value {

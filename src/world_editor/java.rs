@@ -227,6 +227,9 @@ impl RegionWriteMode {
     }
 }
 
+/// The location and timestamp tables at the start of a region file. Chunks come after them.
+const REGION_HEADER_BYTES: u64 = 8192;
+
 /// Opens `r.X.Z.mca` for a merge, or creates it empty. Never from the
 /// template: its placeholder chunks carry another region's positions, and
 /// Minecraft refuses to load the ones a merge leaves standing.
@@ -237,7 +240,10 @@ fn open_region_file_for_merge(
 ) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
     let region_dir = overworld_dir.join("region");
     let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
-    if out_path.is_file() {
+    // A save that never finished leaves a file too short to hold a chunk, which starts over.
+    let holds_chunks =
+        std::fs::metadata(&out_path).is_ok_and(|m| m.is_file() && m.len() >= REGION_HEADER_BYTES);
+    if holds_chunks {
         let file = File::options().read(true).write(true).open(&out_path)?;
         // Refused rather than replaced: the file holds chunks of other areas.
         return Region::from_stream(file).map_err(|e| {
@@ -2707,6 +2713,21 @@ mod merge_tests {
         };
         assert!(filler_group_live(&area, &whole, false), "flat merge filler");
         assert!(!filler_group_live(&area, &whole, true), "void merge filler");
+    }
+
+    #[test]
+    fn a_merge_starts_over_on_a_region_file_an_earlier_save_left_unfinished() {
+        for leftover in [0, 100, 4096] {
+            let dir = tempfile::tempdir().unwrap();
+            let regions = dir.path().join("region");
+            std::fs::create_dir_all(&regions).unwrap();
+            std::fs::write(regions.join("r.0.0.mca"), vec![0; leftover]).unwrap();
+            assert!(
+                open_region_file_for_merge(dir.path(), 0, 0).is_ok(),
+                "{leftover}"
+            );
+            assert!(present_chunks(dir.path()).is_empty());
+        }
     }
 
     #[test]

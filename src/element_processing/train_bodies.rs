@@ -322,6 +322,76 @@ const BOXCARS: [&str; 4] = [
     "minecraft:brown_concrete",
 ];
 
+/// The door functions of carriages nobody rides in.
+pub const NO_DOORS: &str = "none";
+/// A place to get on every so many metres of carriage.
+const DOOR_SPACING: f32 = 5.5;
+/// The box that takes a click on the carriage at each door, in metres.
+const DOOR_BOX_WIDTH: f32 = 4.4;
+const DOOR_BOX_HEIGHT: f32 = 3.8;
+/// Height of a seated player's eyes over the track, in metres: in the window band.
+const RIDER_EYE: f64 = 2.12;
+/// How far over the block a player rides on their eyes are, in blocks at any scale.
+const RIDER_EYE_OVER_SEAT: f64 = 1.02;
+
+/// Where along a carriage people get on, in metres from its middle. A click nearly anywhere
+/// on its side finds one. Freight wagons carry nobody.
+pub fn doors(coach: Coach) -> Vec<f32> {
+    if matches!(
+        coach,
+        Coach::Container(_) | Coach::Tank(_) | Coach::Boxcar(_)
+    ) {
+        return Vec::new();
+    }
+    let len = length_m(coach) as f32;
+    let n = (len / DOOR_SPACING).ceil().max(1.0) as usize;
+    let spacing = len / n as f32;
+    (0..n)
+        .map(|i| -len / 2.0 + spacing * (i as f32 + 0.5))
+        .collect()
+}
+
+/// The name of the functions that keep a carriage's doors with it, shared by carriages alike.
+pub fn door_key(coach: Coach) -> String {
+    if doors(coach).is_empty() {
+        NO_DOORS.to_string()
+    } else {
+        format!("m{}", (length_m(coach) * 10.0).round() as u32)
+    }
+}
+
+/// The function that keeps a carriage's doors with it, run at the carriage's middle facing
+/// along it, and the one that makes them. Each door is a box to click and a seat to ride.
+pub fn door_functions(key: &str, spots: &[f32], size: f64) -> (String, String) {
+    if spots.is_empty() {
+        return (String::new(), String::new());
+    }
+    let k = size as f32;
+    let reach = spots.iter().fold(0f32, |a, d| a.max(d.abs())) * k + 12.0;
+    let seat = (RIDER_EYE * size - RIDER_EYE_OVER_SEAT).max(0.0) as f32;
+    let mut keep = format!(
+        "$execute unless entity @e[type=interaction,tag=arnis.ts$(c),distance=..{reach:.1}] run function arnis:trains/door_new/{key} {{c:$(c)}}\n\
+         $scoreboard players operation @e[tag=arnis.ts$(c),distance=..{reach:.1}] arnis.te = #now arnis.train\n"
+    );
+    let mut make = String::new();
+    for (i, d) in spots.iter().enumerate() {
+        let at = d * k;
+        let _ = writeln!(
+            keep,
+            "$tp @e[type=interaction,tag=arnis.ts$(c),tag=arnis.td{i},distance=..{reach:.1}] ^ ^ ^{at:.2}\n\
+             $tp @e[type=block_display,tag=arnis.ts$(c),tag=arnis.td{i},distance=..{reach:.1}] ^ ^{seat:.2} ^{at:.2}"
+        );
+        let _ = writeln!(
+            make,
+            "$summon interaction ^ ^ ^{at:.2} {{Tags:[\"arnis.tp\",\"arnis.ts$(c)\",\"arnis.td{i}\"],width:{:.2}f,height:{:.2}f}}\n\
+             $summon block_display ^ ^{seat:.2} ^{at:.2} {{Tags:[\"arnis.tp\",\"arnis.ts$(c)\",\"arnis.td{i}\",\"arnis.seat\"],teleport_duration:2}}",
+            DOOR_BOX_WIDTH * k,
+            DOOR_BOX_HEIGHT * k,
+        );
+    }
+    (keep, make)
+}
+
 /// Carriage length over its body, in metres.
 pub fn length_m(coach: Coach) -> f64 {
     match coach {
@@ -1151,6 +1221,69 @@ mod tests {
         Kind::Intercity,
         Kind::Freight,
     ];
+
+    #[test]
+    fn passengers_can_get_on_along_a_whole_carriage_but_not_on_a_wagon() {
+        assert!(doors(Coach::Container(0)).is_empty());
+        assert_eq!(door_key(Coach::Tank(3)), NO_DOORS);
+        assert_eq!(doors(Coach::TramShort).len(), 1);
+        for coach in [
+            Coach::MetroMid,
+            Coach::SBahnMid,
+            Coach::RegioMid,
+            Coach::DeckMid,
+            Coach::IceMid,
+            Coach::Loco,
+        ] {
+            let spots = doors(coach);
+            let half = length_m(coach) as f32 / 2.0;
+            assert!(spots.iter().all(|d| d.abs() < half));
+            // Boxes side by side leave little gap to click into.
+            for pair in spots.windows(2) {
+                assert!(pair[1] - pair[0] <= DOOR_BOX_WIDTH + 1.2);
+            }
+        }
+    }
+
+    #[test]
+    fn a_seat_is_in_reach_of_its_door_at_every_scale() {
+        let board = include_str!(
+            "../../assets/minecraft/datapack_extras/data/arnis/function/trains/board.mcfunction"
+        );
+        let reach: f64 = board
+            .split("tag=arnis.seat,distance=..")
+            .nth(1)
+            .and_then(|r| r.split(',').next())
+            .and_then(|n| n.parse().ok())
+            .expect("board looks for a seat");
+        // Trains are drawn at up to three times their size.
+        for size in [0.4, 1.0, 2.0, 3.0] {
+            let seat = RIDER_EYE * size - RIDER_EYE_OVER_SEAT;
+            assert!(seat < reach, "a seat {seat:.2} up at size {size}");
+            // The next door's seat is further off than this one's.
+            let spacing = f64::from(DOOR_SPACING) * size * 0.5;
+            assert!(seat < spacing.hypot(seat), "size {size}");
+        }
+    }
+
+    #[test]
+    fn door_functions_give_each_door_a_box_and_a_seat_that_move_with_the_carriage() {
+        let spots = doors(Coach::MetroMid);
+        let (keep, make) = door_functions("m160", &spots, 1.0);
+        assert_eq!(make.matches("summon interaction").count(), spots.len());
+        assert_eq!(make.matches("arnis.seat").count(), spots.len());
+        assert_eq!(keep.matches("$tp @e[type=interaction").count(), spots.len());
+        assert_eq!(
+            keep.matches("$tp @e[type=block_display").count(),
+            spots.len()
+        );
+        // A macro line must use a macro, or the function will not load.
+        for line in keep.lines().chain(make.lines()) {
+            assert!(line.starts_with('$') && line.contains("$(c)"), "{line}");
+        }
+        let (keep, make) = door_functions(NO_DOORS, &[], 1.0);
+        assert!(keep.is_empty() && make.is_empty());
+    }
 
     #[test]
     fn every_carriage_stays_within_its_length_and_the_loading_gauge() {
