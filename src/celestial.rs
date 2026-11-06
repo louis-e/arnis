@@ -5,8 +5,9 @@
 //! `scale`. No coordinate-system code needs to know about bodies.
 
 use crate::block_definitions::{
-    Block, ANDESITE, BROWN_TERRACOTTA, DIRT, GRANITE, GRASS_BLOCK, GRAVEL,
-    LIGHT_GRAY_CONCRETE_POWDER, ORANGE_TERRACOTTA, RED_TERRACOTTA, SNOW_BLOCK, STONE, TERRACOTTA,
+    Block, ANDESITE, BASALT, BLACKSTONE, BROWN_TERRACOTTA, DIRT, GRANITE, GRASS_BLOCK, GRAVEL,
+    LIGHT_GRAY_CONCRETE_POWDER, ORANGE_TERRACOTTA, PACKED_ICE, RED_TERRACOTTA, SAND,
+    SANDSTONE, SMOOTH_BASALT, SMOOTH_RED_SANDSTONE, SNOW_BLOCK, STONE, TERRACOTTA,
     WHITE_CONCRETE, WHITE_TERRACOTTA,
 };
 use clap::ValueEnum;
@@ -135,32 +136,65 @@ impl CelestialBody {
 pub fn surface_palette(
     body: CelestialBody,
     slope: i32,
-    lat_deg: f64,
     ground_y: i32,
     x: i32,
     z: i32,
+    features: u16,
+    convexity: f64,
 ) -> (Block, Block) {
     match body {
         CelestialBody::Earth => (GRASS_BLOCK, DIRT),
         // Always stone underneath, so gravel and powder never fall.
         CelestialBody::Moon => (
-            moon_surface(slope, crate::land_cover::coord_hash(x, z), x, z),
+            moon_surface(
+                slope,
+                crate::land_cover::coord_hash(x, z),
+                x,
+                z,
+                features,
+                convexity,
+            ),
             STONE,
         ),
         CelestialBody::Mars => mars_palette(
             slope,
-            lat_deg,
             ground_y,
             crate::land_cover::coord_hash(x, z),
             x,
             z,
+            features,
+            convexity,
         ),
     }
 }
 
-/// Grey regolith with gravel fields and bare rock, rockier on crater walls.
-fn moon_surface(slope: i32, h: u64, x: i32, z: i32) -> Block {
+/// Grey highland regolith, mapped basaltic maria, and rocky crater/ridge relief.
+fn moon_surface(slope: i32, h: u64, x: i32, z: i32, features: u16, convexity: f64) -> Block {
     if slope > 6 {
+        return match h % 10 {
+            0..=4 => ANDESITE,
+            5..=7 => STONE,
+            _ => GRAVEL,
+        };
+    }
+
+    if features & crate::planetary_geology::MOON_RILLE != 0 && convexity > 0.05 {
+        return SMOOTH_BASALT;
+    }
+
+    if features & crate::planetary_geology::MOON_MARE != 0 {
+        return match h % 10 {
+            0..=5 => BASALT,
+            6..=8 => SMOOTH_BASALT,
+            _ => ANDESITE,
+        };
+    }
+
+    if features
+        & (crate::planetary_geology::MOON_CRATER_RIM | crate::planetary_geology::MOON_RIDGE)
+        != 0
+        || convexity < -0.25
+    {
         return match h % 10 {
             0..=4 => ANDESITE,
             5..=7 => STONE,
@@ -192,13 +226,23 @@ fn moon_surface(slope: i32, h: u64, x: i32, z: i32) -> Block {
     }
 }
 
-/// Rusty dust over red sub-surface, with banded scarps and polar caps.
-fn mars_palette(slope: i32, lat_deg: f64, ground_y: i32, h: u64, x: i32, z: i32) -> (Block, Block) {
-    if lat_deg.abs() > MARS_POLAR_CAP_LAT && slope <= 4 {
+/// Rusty dust over red sub-surface with mapped volcanic, dune, fluvial, and
+/// polar units. The elevation grid supplies relief; flags tune materials only.
+fn mars_palette(
+    slope: i32,
+    ground_y: i32,
+    h: u64,
+    x: i32,
+    z: i32,
+    features: u16,
+    convexity: f64,
+) -> (Block, Block) {
+    if features & crate::planetary_geology::MARS_POLAR_CAP != 0 && slope <= 4 {
         return match h % 12 {
-            0..=6 => (SNOW_BLOCK, WHITE_TERRACOTTA),
-            7..=9 => (WHITE_CONCRETE, WHITE_TERRACOTTA),
-            _ => (WHITE_TERRACOTTA, WHITE_TERRACOTTA),
+            0..=5 => (SNOW_BLOCK, PACKED_ICE),
+            6..=8 => (PACKED_ICE, WHITE_TERRACOTTA),
+            9..=10 => (WHITE_CONCRETE, PACKED_ICE),
+            _ => (WHITE_TERRACOTTA, PACKED_ICE),
         };
     }
 
@@ -217,6 +261,45 @@ fn mars_palette(slope: i32, lat_deg: f64, ground_y: i32, h: u64, x: i32, z: i32)
             _ => (RED_TERRACOTTA, RED_TERRACOTTA),
         };
     }
+
+    if features & crate::planetary_geology::MARS_DUNE != 0 && slope <= 6 {
+        return match h % 12 {
+            0..=5 => (SMOOTH_RED_SANDSTONE, RED_TERRACOTTA),
+            6..=9 => (SANDSTONE, RED_TERRACOTTA),
+            _ => (SAND, SANDSTONE),
+        };
+    }
+
+    if features & crate::planetary_geology::MARS_VOLCANIC != 0 && slope <= 6 {
+        return match h % 10 {
+            0..=4 => (BASALT, BLACKSTONE),
+            5..=7 => (SMOOTH_BASALT, BASALT),
+            _ => (BLACKSTONE, BASALT),
+        };
+    }
+
+    if features & (crate::planetary_geology::MARS_FLUVIAL | crate::planetary_geology::MARS_RILLE)
+        != 0
+        && slope <= 6
+    {
+        if convexity > 0.05 {
+            return (GRAVEL, SANDSTONE);
+        }
+        return match h % 8 {
+            0..=3 => (SANDSTONE, RED_TERRACOTTA),
+            4..=6 => (SMOOTH_RED_SANDSTONE, RED_TERRACOTTA),
+            _ => (GRAVEL, SANDSTONE),
+        };
+    }
+
+    if features & crate::planetary_geology::MARS_POLAR_LAYER != 0 && slope <= 4 {
+        return match ground_y.rem_euclid(8) {
+            0..=2 => (WHITE_TERRACOTTA, RED_TERRACOTTA),
+            3..=5 => (TERRACOTTA, RED_TERRACOTTA),
+            _ => (WHITE_TERRACOTTA, TERRACOTTA),
+        };
+    }
+
     if slope > 4 {
         return match h % 12 {
             0..=4 => (ORANGE_TERRACOTTA, RED_TERRACOTTA),
@@ -237,20 +320,24 @@ fn mars_palette(slope: i32, lat_deg: f64, ground_y: i32, h: u64, x: i32, z: i32)
     }
 }
 
-/// Beyond this latitude Mars keeps a permanent cap.
-const MARS_POLAR_CAP_LAT: f64 = 74.0;
-
 /// Common planetary ground blocks, kept in sync with `surface_palette` so the
 /// storage regression test covers every branch that can become bulk terrain.
 #[cfg(test)]
 pub const PLANETARY_SURFACE_BLOCKS: &[Block] = &[
     ANDESITE,
+    BASALT,
+    BLACKSTONE,
     BROWN_TERRACOTTA,
     GRANITE,
     GRAVEL,
     LIGHT_GRAY_CONCRETE_POWDER,
     ORANGE_TERRACOTTA,
+    PACKED_ICE,
     RED_TERRACOTTA,
+    SAND,
+    SANDSTONE,
+    SMOOTH_BASALT,
+    SMOOTH_RED_SANDSTONE,
     SNOW_BLOCK,
     STONE,
     TERRACOTTA,
@@ -322,4 +409,89 @@ mod tests {
         assert_eq!(CelestialBody::Earth.vertical_exaggeration(), 1.0);
         assert_eq!(CelestialBody::Earth.terrain_gain(), 1.0);
     }
+
+    #[test]
+    fn mapped_maria_use_basalt_while_highlands_keep_the_regolith_palette() {
+        let mare = surface_palette(
+            CelestialBody::Moon,
+            0,
+            0,
+            0,
+            0,
+            crate::planetary_geology::MOON_MARE,
+            0.0,
+        );
+        assert!([BASALT, SMOOTH_BASALT, ANDESITE].contains(&mare.0));
+        assert_eq!(mare.1, STONE);
+
+        let highland = surface_palette(CelestialBody::Moon, 0, 0, 0, 0, 0, 0.0);
+        assert!(![BASALT, SMOOTH_BASALT].contains(&highland.0));
+    }
+
+    #[test]
+    fn mapped_mars_units_choose_distinct_deterministic_palettes() {
+        let volcanic = surface_palette(
+            CelestialBody::Mars,
+            0,
+            0,
+            0,
+            0,
+            crate::planetary_geology::MARS_VOLCANIC,
+            0.0,
+        );
+        assert!([BASALT, SMOOTH_BASALT, BLACKSTONE].contains(&volcanic.0));
+
+        let dune = surface_palette(
+            CelestialBody::Mars,
+            0,
+            0,
+            0,
+            0,
+            crate::planetary_geology::MARS_DUNE,
+            0.0,
+        );
+        assert!([SAND, SANDSTONE, SMOOTH_RED_SANDSTONE].contains(&dune.0));
+
+        let fluvial = surface_palette(
+            CelestialBody::Mars,
+            0,
+            0,
+            0,
+            0,
+            crate::planetary_geology::MARS_FLUVIAL,
+            0.0,
+        );
+        assert!([SANDSTONE, SMOOTH_RED_SANDSTONE, GRAVEL].contains(&fluvial.0));
+
+        let channel_depression = surface_palette(
+            CelestialBody::Mars,
+            0,
+            0,
+            0,
+            0,
+            crate::planetary_geology::MARS_FLUVIAL,
+            0.2,
+        );
+        assert_eq!(channel_depression, (GRAVEL, SANDSTONE));
+    }
+
+    #[test]
+    fn martian_ice_blocks_require_the_mapped_polar_cap_flag() {
+        let mapped_cap = surface_palette(
+            CelestialBody::Mars,
+            0,
+            0,
+            0,
+            0,
+            crate::planetary_geology::MARS_POLAR_CAP,
+            0.0,
+        );
+        assert!([SNOW_BLOCK, PACKED_ICE, WHITE_CONCRETE, WHITE_TERRACOTTA]
+            .contains(&mapped_cap.0));
+
+        let fallback = surface_palette(CelestialBody::Mars, 0, 0, 0, 0, 0, 0.0);
+        assert!(![SNOW_BLOCK, PACKED_ICE, WHITE_CONCRETE, WHITE_TERRACOTTA]
+            .contains(&fallback.0));
+    }
 }
+

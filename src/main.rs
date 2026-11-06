@@ -50,6 +50,7 @@ mod ore_generation;
 mod osm_parser;
 mod osm_tiles;
 mod overture;
+mod planetary_geology;
 #[cfg(feature = "gui")]
 mod preview_3d;
 #[cfg(feature = "gui")]
@@ -895,3 +896,4 @@ fn main() {
 
     run_cli();
 }
+
