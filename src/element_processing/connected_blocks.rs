@@ -163,7 +163,7 @@ pub(crate) fn connected_fence(
 }
 
 /// A wall joined to the given sides; straight runs hide the post.
-fn connected_wall(
+pub(crate) fn connected_wall(
     block: Block,
     north: bool,
     south: bool,

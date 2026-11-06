@@ -694,6 +694,10 @@ impl FloodFillCache {
             || Self::is_waterfront(&way.tags)
             // Golf turf -> golf::generate_golf
             || crate::element_processing::golf::claims(&way.tags)
+            // Grave fields -> cemetery::generate_cemetery
+            || crate::element_processing::cemetery::claims(&way.tags)
+            // Camp sites -> camp_sites::generate_camp_site
+            || crate::element_processing::camp_sites::claims(&way.tags)
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
                 && way.tags.get("generator:source").map(String::as_str) == Some("solar")))
@@ -723,7 +727,7 @@ impl FloodFillCache {
         tags.get("amenity").is_some_and(|amenity| {
             !matches!(
                 amenity.as_str(),
-                "bicycle_parking" | "shelter" | "fountain" | "parking"
+                "bicycle_parking" | "shelter" | "fountain" | "parking" | "grave_yard"
             )
         })
     }
