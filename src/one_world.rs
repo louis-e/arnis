@@ -26,7 +26,7 @@ pub const MANIFEST_VERSION: u32 = 3;
 
 /// Geometry kept past the area edge, so an element straddling a seam is
 /// built whole on both sides.
-pub const CLIP_PAD_BLOCKS: i32 = 64;
+pub const CLIP_PAD_BLOCKS: i32 = 128;
 
 const MAX_ABS_LAT: f64 = 85.0;
 
@@ -41,7 +41,7 @@ fn stable(v: f64, decimals: i32) -> f64 {
 /// Ground data is fetched this far past the area and cropped again, so the
 /// smoothing passes (widest: built-up Gaussian, ~90 m) agree across seams.
 pub fn ground_pad_blocks(scale: f64) -> i32 {
-    ((100.0 * scale).ceil() as i32).max(96)
+    ((100.0 * scale).ceil() as i32).max(96) + CLIP_PAD_BLOCKS
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
