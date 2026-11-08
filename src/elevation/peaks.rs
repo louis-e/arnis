@@ -1,12 +1,13 @@
 //! Summits from OSM. A 30 m DEM smears a needle peak into its cliffs, which put
 //! Corcovado's summit, statue included, about 170 m too low. A `natural=peak`
 //! with an `ele` is surveyed, so where the terrain falls short of it the summit
-//! is lifted back up with a bump that fades into the DEM around it. The same
+//! is lifted back up, fading into the DEM around it. A node in a crater or
+//! beside a summit the DEM already has is left alone. The same
 //! hand-off carries the tall landmark models, so the height fit leaves them room,
 //! and the tall buildings, so it can tell whether the vanilla build height holds them.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Mutex;
 
 use crate::coordinate_system::geographic::LLBBox;
@@ -519,7 +520,7 @@ impl PeakSource {
         let Some(rx) = slot.take() else {
             return TerrainHints::default();
         };
-        let hints = rx.recv().unwrap_or_default();
+        let hints = recv_saying(&rx, "Waiting for map data...").unwrap_or_default();
         if hints.overture_follows {
             *slot = Some(rx);
         }
@@ -529,9 +530,20 @@ impl PeakSource {
     /// Overture's tall structures, after `take` said they follow. Waits for them, once.
     pub(crate) fn take_overture(&self) -> Vec<TallModel> {
         let rx = self.rx.lock().ok().and_then(|mut r| r.take());
-        rx.and_then(|r| r.recv().ok())
+        rx.and_then(|r| recv_saying(&r, "Waiting for Overture buildings..."))
             .map(|h| h.tall_structures)
             .unwrap_or_default()
+    }
+}
+
+/// Receives from the fetch side, telling the GUI what it waits for when that is not in
+/// yet. The terrain is often done first, and a slow download then left the bar sitting on
+/// the last elevation step as though that had hung.
+fn recv_saying(rx: &Receiver<TerrainHints>, waiting_for: &str) -> Option<TerrainHints> {
+    match rx.try_recv() {
+        Ok(hints) => Some(hints),
+        Err(TryRecvError::Disconnected) => None,
+        Err(TryRecvError::Empty) => crate::progress::while_waiting(waiting_for, || rx.recv().ok()),
     }
 }
 
@@ -816,6 +828,33 @@ const MAX_DEFICIT_M: f64 = 400.0;
 const RELIEF_M: f64 = 500.0;
 /// Samples across that radius, so the check stays cheap on a fine grid.
 const RELIEF_SAMPLES: f64 = 50.0;
+/// Ground this close to a node that reaches its `ele` is the summit, and the node
+/// lies beside it. Fuji's volcano node sits in the crater, 236 m under the tag,
+/// with the rim reaching 3747 m 300 m away.
+const NEARBY_M: f64 = 300.0;
+/// Share of the shortfall the ground counts as level with a height within. It
+/// also covers the noise the steep detail adds around a summit.
+const LEVEL_SHARE: f64 = 0.25;
+/// Directions looked along for ground rising above the node, and how many of
+/// them make it a hollow, such as a crater floor.
+const SIDES: usize = 16;
+const HOLLOW_SIDES: usize = 12;
+/// How far ground near the node may rise over the DEM's top for the DEM to
+/// still count as keeping the summit: the steep detail roughens a summit by a
+/// few metres, and K2's top cell is 4 m under its neighbourhood's.
+const SUMMIT_NOISE_M: f64 = 10.0;
+/// Radius of the stretch over a summit the DEM keeps. It holds nearly full
+/// strength over the summit's dome and is under 1% half as far out again, so
+/// the dome steepens evenly instead of growing a knob.
+const STRETCH_RADIUS_M: f64 = 200.0;
+/// How far out the stretch reaches, where it has faded to nothing.
+const STRETCH_REACH_M: f64 = 1.5 * STRETCH_RADIUS_M;
+/// The stretch steepens the relief from this many shortfalls under the DEM's
+/// top, so K2, 47 m short in GLO-30, comes out half as steep again.
+const STRETCH_DEPTH: f64 = 2.0;
+/// Radius over which a summit's top has to fall away to be a summit and not a plateau.
+/// K2's rounded top in GLO-30 falls 37 m over it, three quarters of its shortfall.
+const PLATEAU_M: f64 = 100.0;
 
 /// Lift each summit the DEM keeps too low. Rows run north to south and columns
 /// west to east across `bbox`, end samples on its edges, as the providers sample.
@@ -835,46 +874,211 @@ pub(crate) fn raise_peaks(
     }
     let (min_lat, max_lat) = (bbox.min().lat(), bbox.max().lat());
     let (min_lon, max_lon) = (bbox.min().lng(), bbox.max().lng());
-    let reach = (3.0 * SIGMA_M / m_per_cell).ceil() as isize;
-    for p in peaks {
-        if p.lat < min_lat || p.lat > max_lat || p.lon < min_lon || p.lon > max_lon {
-            continue;
+    // Each planned on the DEM as it came, so a summit raised first neither hides a
+    // neighbour's shortfall nor lets the order of the nodes decide which gets raised.
+    let mut lifts: Vec<Lift> = peaks
+        .iter()
+        .filter(|p| (min_lat..=max_lat).contains(&p.lat) && (min_lon..=max_lon).contains(&p.lon))
+        .filter_map(|p| {
+            let gx = (p.lon - min_lon) / (max_lon - min_lon) * (w - 1) as f64;
+            let gy = (max_lat - p.lat) / (max_lat - min_lat) * (h - 1) as f64;
+            plan_lift(grid, p.ele_m, gx, gy, m_per_cell, seam_pad)
+        })
+        .collect();
+    // Highest first: a lower summit's lift stops at its own height, so one in a higher
+    // one's reach still lands on its tag, however the nodes came.
+    lifts.sort_by(|a, b| {
+        (b.ele, a.gx, a.gy)
+            .partial_cmp(&(a.ele, b.gx, b.gy))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for lift in &lifts {
+        lift.apply(grid, m_per_cell);
+    }
+}
+
+/// A summit's lift, planned before any is applied.
+struct Lift {
+    gx: f64,
+    gy: f64,
+    ele: f64,
+    reach: isize,
+    shape: Shape,
+}
+
+enum Shape {
+    /// Steepens the relief above `base`, scaled by `gain` so the DEM's top lands on
+    /// the tagged height.
+    Stretch { base: f64, gain: f64 },
+    /// Raises the node by `lift`, fading out over `SIGMA_M`.
+    Bump { lift: f64 },
+}
+
+/// How to lift the summit tagged `ele` at grid point (gx, gy), if it needs it.
+fn plan_lift(
+    grid: &[Vec<f64>],
+    ele: f64,
+    gx: f64,
+    gy: f64,
+    m_per_cell: f64,
+    seam_pad: Option<usize>,
+) -> Option<Lift> {
+    let (h, w) = (grid.len(), grid[0].len());
+    let (cx, cy) = (gx.round() as usize, gy.round() as usize);
+    let at_node = grid.get(cy).and_then(|r| r.get(cx)).copied()?;
+    let search = (SEARCH_M / m_per_cell).ceil() as isize;
+    let (top_x, top_y) = cells_within(cx, cy, search, w, h)
+        .filter(|&(x, y)| grid[y][x].is_finite())
+        .max_by(|&(ax, ay), &(bx, by)| grid[ay][ax].total_cmp(&grid[by][bx]))?;
+    let dem_top = grid[top_y][top_x];
+    let shortfall = ele - dem_top;
+    if !(MIN_DEFICIT_M..=MAX_DEFICIT_M).contains(&shortfall)
+        || !at_node.is_finite()
+        || shortfall > local_relief(grid, cx, cy, m_per_cell)
+    {
+        return None;
+    }
+    let level = (shortfall * LEVEL_SHARE).max(MIN_DEFICIT_M);
+    let near_top = highest_within(grid, gx, gy, NEARBY_M, m_per_cell);
+    // The summit is already there beside the node, or the node lies in a hollow.
+    if near_top >= ele - level
+        || rising_sides(grid, gx, gy, dem_top + level, m_per_cell) >= HOLLOW_SIDES
+    {
+        return None;
+    }
+    // A summit the DEM keeps, only too low and too round, is steepened from
+    // its own relief: a cone on such a dome stood on it as a spire. Where the
+    // DEM rises beside the node instead, it has smeared a needle into its
+    // cliffs, and only a bump on the node brings that back.
+    let keeps_summit = near_top <= dem_top + SUMMIT_NOISE_M;
+    let (tx, ty) = (top_x as f64, top_y as f64);
+    let drop_at = |r_m: f64| ring_mean(grid, tx, ty, r_m, m_per_cell).map(|m| dem_top - m);
+    // A top that stays level is a plateau. A summit tagged over it is a knob the DEM
+    // cannot show, or a wrong tag, and lifting it would raise the whole table.
+    if keeps_summit && drop_at(PLATEAU_M).is_some_and(|d| d < level) {
+        return None;
+    }
+    // The stretch suits a dome that falls past its base within reach. A summit still
+    // above that at the edge of the reach is a needle the DEM has smeared wide, and only
+    // a bump on the node brings that back without lifting its flanks.
+    let keeps_summit =
+        keeps_summit && drop_at(STRETCH_RADIUS_M).is_some_and(|d| d >= STRETCH_DEPTH * shortfall);
+    let reach_m = if keeps_summit {
+        STRETCH_REACH_M
+    } else {
+        3.0 * SIGMA_M
+    };
+    let reach = (reach_m / m_per_cell).ceil() as isize;
+    if let Some(pad) = seam_pad {
+        let m = pad + reach as usize;
+        if cx < m || cy < m || cx + m >= w || cy + m >= h {
+            return None;
         }
-        let gx = (p.lon - min_lon) / (max_lon - min_lon) * (w - 1) as f64;
-        let gy = (max_lat - p.lat) / (max_lat - min_lat) * (h - 1) as f64;
-        let (cx, cy) = (gx.round() as usize, gy.round() as usize);
-        if let Some(pad) = seam_pad {
-            let m = pad + reach as usize;
-            if cx < m || cy < m || cx + m >= w || cy + m >= h {
+    }
+    let shape = if keeps_summit {
+        let d_top = ((tx - gx).powi(2) + (ty - gy).powi(2)).sqrt() * m_per_cell;
+        Shape::Stretch {
+            base: dem_top - STRETCH_DEPTH * shortfall,
+            gain: 1.0 / (STRETCH_DEPTH * stretch_fade(d_top)),
+        }
+    } else {
+        // Relative to the node's own cell, so the summit lands on the tagged height.
+        Shape::Bump {
+            lift: ele - at_node,
+        }
+    };
+    Some(Lift {
+        gx,
+        gy,
+        ele,
+        reach,
+        shape,
+    })
+}
+
+impl Lift {
+    fn apply(&self, grid: &mut [Vec<f64>], m_per_cell: f64) {
+        let (h, w) = (grid.len(), grid[0].len());
+        let (cx, cy) = (self.gx.round() as usize, self.gy.round() as usize);
+        for (x, y) in cells_within(cx, cy, self.reach, w, h) {
+            let d =
+                ((x as f64 - self.gx).powi(2) + (y as f64 - self.gy).powi(2)).sqrt() * m_per_cell;
+            let v = &mut grid[y][x];
+            if !v.is_finite() {
                 continue;
             }
-        }
-        let Some(at_node) = grid.get(cy).and_then(|r| r.get(cx)).copied() else {
-            continue;
-        };
-        let search = (SEARCH_M / m_per_cell).ceil() as isize;
-        let dem_top = cells_within(cx, cy, search, w, h)
-            .map(|(x, y)| grid[y][x])
-            .filter(|v| v.is_finite())
-            .fold(f64::NEG_INFINITY, f64::max);
-        let shortfall = p.ele_m - dem_top;
-        if !(MIN_DEFICIT_M..=MAX_DEFICIT_M).contains(&shortfall)
-            || !at_node.is_finite()
-            || shortfall > local_relief(grid, cx, cy, m_per_cell)
-        {
-            continue;
-        }
-        // Relative to the node's own cell, so the summit lands on the tagged height.
-        let lift = p.ele_m - at_node;
-        for (x, y) in cells_within(cx, cy, reach, w, h) {
-            let d = ((x as f64 - gx).powi(2) + (y as f64 - gy).powi(2)).sqrt() * m_per_cell;
-            let v = &mut grid[y][x];
-            if v.is_finite() {
-                let room = (p.ele_m - CONE_SLOPE * d - *v).max(0.0);
-                *v += (lift * (-(d / SIGMA_M).powi(2)).exp()).min(room);
+            match self.shape {
+                // Up to the tagged height, and never down: a higher summit out by the
+                // corners of the reach keeps its own.
+                Shape::Stretch { base, gain } if *v > base => {
+                    *v = v.max((*v + (*v - base) * gain * stretch_fade(d)).min(self.ele));
+                }
+                Shape::Stretch { .. } => {}
+                Shape::Bump { lift } => {
+                    let room = (self.ele - CONE_SLOPE * d - *v).max(0.0);
+                    *v += (lift * (-(d / SIGMA_M).powi(2)).exp()).min(room);
+                }
             }
         }
     }
+}
+
+/// Strength of the stretch `d_m` from the node: nearly full over the summit's dome,
+/// and down to nothing at the edge of its reach, so the reach leaves no step.
+fn stretch_fade(d_m: f64) -> f64 {
+    let fade = |d: f64| (-(d / STRETCH_RADIUS_M).powi(4)).exp();
+    let edge = fade(STRETCH_REACH_M);
+    ((fade(d_m) - edge) / (1.0 - edge)).max(0.0)
+}
+
+/// Highest DEM height within `radius_m` of a grid point.
+fn highest_within(grid: &[Vec<f64>], gx: f64, gy: f64, radius_m: f64, m_per_cell: f64) -> f64 {
+    let (h, w) = (grid.len(), grid[0].len());
+    let r = radius_m / m_per_cell;
+    let (cx, cy) = (gx.round() as usize, gy.round() as usize);
+    cells_within(cx, cy, r.ceil() as isize, w, h)
+        .filter(|&(x, y)| (x as f64 - gx).powi(2) + (y as f64 - gy).powi(2) <= r * r)
+        .map(|(x, y)| grid[y][x])
+        .filter(|v| v.is_finite())
+        .fold(f64::NEG_INFINITY, f64::max)
+}
+
+/// Mean DEM height `radius_m` out from a grid point, over `SIDES` directions on the grid.
+fn ring_mean(grid: &[Vec<f64>], gx: f64, gy: f64, radius_m: f64, m_per_cell: f64) -> Option<f64> {
+    let (h, w) = (grid.len() as f64, grid[0].len() as f64);
+    let r = radius_m / m_per_cell;
+    let (sum, n) = (0..SIDES)
+        .filter_map(|side| {
+            let (dy, dx) = (side as f64 * std::f64::consts::TAU / SIDES as f64).sin_cos();
+            let (x, y) = ((gx + dx * r).round(), (gy + dy * r).round());
+            ((0.0..w).contains(&x) && (0.0..h).contains(&y))
+                .then(|| grid[y as usize][x as usize])
+                .filter(|v| v.is_finite())
+        })
+        .fold((0.0, 0usize), |(s, n), v| (s + v, n + 1));
+    (n > 0).then(|| sum / n as f64)
+}
+
+/// Of `SIDES` directions out to `RELIEF_M` from a grid point, how many reach
+/// ground above `height`, sampled like `local_relief`.
+fn rising_sides(grid: &[Vec<f64>], gx: f64, gy: f64, height: f64, m_per_cell: f64) -> usize {
+    let (h, w) = (grid.len() as f64, grid[0].len() as f64);
+    let r = RELIEF_M / m_per_cell;
+    let step = (r / RELIEF_SAMPLES).ceil().max(1.0);
+    (0..SIDES)
+        .filter(|&side| {
+            let (dy, dx) = (side as f64 * std::f64::consts::TAU / SIDES as f64).sin_cos();
+            (1..=(r / step) as usize).any(|i| {
+                let (x, y) = (
+                    (gx + dx * step * i as f64).round(),
+                    (gy + dy * step * i as f64).round(),
+                );
+                (0.0..w).contains(&x)
+                    && (0.0..h).contains(&y)
+                    && grid[y as usize][x as usize] > height
+            })
+        })
+        .count()
 }
 
 /// Highest minus lowest DEM height within `RELIEF_M` of a cell, sampled sparsely.
@@ -1353,16 +1557,23 @@ mod tests {
         assert!((top - grid[50][50]).abs() < 1e-6);
         assert!(grid[50][60] < grid[50][50] - 1.0);
         assert!((grid[0][0] - far_before).abs() < 0.5, "corner moved");
+        // A needle: its flanks 150 m out stay where the DEM has them.
+        assert!(
+            grid[50][80] - (530.0 - 150.0 * 0.8) < 1.0,
+            "flank {}",
+            grid[50][80]
+        );
     }
 
     #[test]
     fn a_lift_that_would_cross_a_seam_is_left_out() {
-        // A cone peaking at 530 m 50 cells from every edge; the lift reaches 36 cells.
-        let cone: Vec<Vec<f64>> = (0..101)
+        // A needle's DEM, a cone peaking at 530 m 100 cells from every edge; its bump
+        // reaches 36 cells.
+        let cone: Vec<Vec<f64>> = (0..201)
             .map(|y| {
-                (0..101)
+                (0..201)
                     .map(|x| {
-                        let d = ((x as f64 - 50.0).powi(2) + (y as f64 - 50.0).powi(2)).sqrt();
+                        let d = ((x as f64 - 100.0).powi(2) + (y as f64 - 100.0).powi(2)).sqrt();
                         530.0 - d * 4.0
                     })
                     .collect()
@@ -1377,11 +1588,196 @@ mod tests {
         let summit = |seam_pad| {
             let mut grid = cone.clone();
             raise_peaks(&mut grid, &b, &[peak], 5.0, seam_pad);
-            grid[50][50]
+            grid[100][100]
         };
         assert!(summit(None) > 700.0);
-        assert!(summit(Some(14)) > 700.0);
-        assert_eq!(summit(Some(15)), 530.0);
+        assert!(summit(Some(64)) > 700.0);
+        assert_eq!(summit(Some(65)), 530.0);
+
+        // A dome 120 cells from every edge; its stretch reaches 60 cells.
+        let (dome, mut peak) = dome(8564.0, 0.8);
+        peak.ele_m = 8611.0;
+        let summit = |seam_pad| {
+            let mut grid = dome.clone();
+            raise_peaks(&mut grid, &b, &[peak], 5.0, seam_pad);
+            grid[120][120]
+        };
+        assert!(summit(Some(60)) > 8610.0);
+        assert_eq!(summit(Some(61)), 8564.0);
+    }
+
+    /// A dome of `slope` peaking at `top` m in the middle of a 241 x 241 grid of
+    /// 5 m cells, and the grid point of its middle.
+    fn dome(top: f64, slope: f64) -> (Vec<Vec<f64>>, PeakHint) {
+        let grid = (0..241)
+            .map(|y| {
+                (0..241)
+                    .map(|x| {
+                        let d =
+                            ((x as f64 - 120.0).powi(2) + (y as f64 - 120.0).powi(2)).sqrt() * 5.0;
+                        // Rounded over the top, steepening down the flanks.
+                        top - slope * d * d / (d + 100.0)
+                    })
+                    .collect()
+            })
+            .collect();
+        let b = bbox();
+        let peak = PeakHint {
+            lat: (b.min().lat() + b.max().lat()) / 2.0,
+            lon: (b.min().lng() + b.max().lng()) / 2.0,
+            ele_m: 0.0,
+        };
+        (grid, peak)
+    }
+
+    #[test]
+    fn a_rounded_summit_is_steepened_not_capped_with_a_cone() {
+        // K2 in GLO-30: a rounded top 47 m short of the tag.
+        let (mut grid, mut peak) = dome(8564.0, 0.8);
+        peak.ele_m = 8611.0;
+        let before = grid.clone();
+        raise_peaks(&mut grid, &bbox(), &[peak], 5.0, None);
+        let row = &grid[120];
+        assert!((row[120] - 8611.0).abs() < 0.5, "summit {}", row[120]);
+        let top = grid.iter().flatten().fold(f64::MIN, |a, &v| a.max(v));
+        assert!(top <= 8611.0 + 1e-9);
+        // A 45 degree cone would drop 10 m in the first 10 m; the dome stays round.
+        assert!(row[120] - row[122] < 5.0, "drops {}", row[120] - row[122]);
+        // The lift spreads over the dome rather than standing on it as a knob.
+        let lift = |x: usize| row[x] - before[120][x];
+        assert!(lift(130) > 0.5 * lift(120), "{} at 50 m", lift(130));
+        // Every step down the flank stays within half as steep again as the DEM's own.
+        for x in 120..200 {
+            let (now, was) = (row[x] - row[x + 1], before[120][x] - before[120][x + 1]);
+            assert!(now <= 1.5 * was + 0.5, "{now} against {was} at cell {x}");
+        }
+    }
+
+    #[test]
+    fn neighbouring_summits_both_land_on_their_tags_in_any_order() {
+        // Two rounded tops 200 m apart, each 45 m short; the lower in the higher's reach.
+        let bump = |x: usize, y: usize, cx: f64, top: f64| {
+            let d2 = ((x as f64 - cx).powi(2) + (y as f64 - 120.0).powi(2)) * 25.0;
+            700.0 + (top - 700.0) * (-d2 / (2.0 * 150.0 * 150.0)).exp()
+        };
+        let grid: Vec<Vec<f64>> = (0..241)
+            .map(|y| {
+                (0..241)
+                    .map(|x| bump(x, y, 100.0, 1000.0).max(bump(x, y, 140.0, 985.0)))
+                    .collect()
+            })
+            .collect();
+        let b = bbox();
+        let at = |x: f64, ele_m: f64| PeakHint {
+            lat: (b.min().lat() + b.max().lat()) / 2.0,
+            lon: b.min().lng() + x / 240.0 * (b.max().lng() - b.min().lng()),
+            ele_m,
+        };
+        let (high, low) = (at(100.0, 1045.0), at(140.0, 1030.0));
+        let mut one = grid.clone();
+        raise_peaks(&mut one, &b, &[high, low], 5.0, None);
+        let mut other = grid;
+        raise_peaks(&mut other, &b, &[low, high], 5.0, None);
+        assert_eq!(one, other);
+        assert!(
+            (one[120][100] - 1045.0).abs() < 1.0,
+            "high at {}",
+            one[120][100]
+        );
+        assert!(
+            (one[120][140] - 1030.0).abs() < 1.0,
+            "low at {}",
+            one[120][140]
+        );
+    }
+
+    #[test]
+    fn a_table_top_is_not_raised_whole() {
+        // Level for 120 m round the node, then cliffs, tagged 40 m over the table.
+        let (dome, mut peak) = dome(900.0, 0.0);
+        let mut grid = dome;
+        for (y, row) in grid.iter_mut().enumerate() {
+            for (x, v) in row.iter_mut().enumerate() {
+                let d = ((x as f64 - 120.0).powi(2) + (y as f64 - 120.0).powi(2)).sqrt() * 5.0;
+                *v -= ((d - 120.0) * 2.0).max(0.0);
+            }
+        }
+        peak.ele_m = 940.0;
+        let before = grid.clone();
+        raise_peaks(&mut grid, &bbox(), &[peak], 5.0, None);
+        assert_eq!(grid, before);
+    }
+
+    #[test]
+    fn a_higher_summit_beyond_the_check_keeps_its_height() {
+        // K2's dome, and 350 m out across the corner of the reach a top already above
+        // the tag, past the radius the node is checked against.
+        let (mut grid, mut peak) = dome(8564.0, 0.8);
+        peak.ele_m = 8611.0;
+        for row in &mut grid[168..=172] {
+            row[168..=172].fill(8700.0);
+        }
+        raise_peaks(&mut grid, &bbox(), &[peak], 5.0, None);
+        assert!(
+            (grid[120][120] - 8611.0).abs() < 0.5,
+            "summit {}",
+            grid[120][120]
+        );
+        assert_eq!(grid[170][170], 8700.0);
+    }
+
+    #[test]
+    fn a_volcano_node_in_its_crater_is_left_alone() {
+        // Fuji: the volcano node in the middle of a 240 m deep crater, the rim at
+        // 3750 m 250 m out, tagged with the 3776 m of the highest rim point.
+        let n = 241;
+        let mut grid: Vec<Vec<f64>> = (0..n)
+            .map(|y| {
+                (0..n)
+                    .map(|x| {
+                        let d =
+                            ((x as f64 - 120.0).powi(2) + (y as f64 - 120.0).powi(2)).sqrt() * 5.0;
+                        3750.0 - ((d - 250.0).abs() * 0.95).min(1200.0)
+                    })
+                    .collect()
+            })
+            .collect();
+        let before = grid.clone();
+        let b = bbox();
+        let peak = PeakHint {
+            lat: (b.min().lat() + b.max().lat()) / 2.0,
+            lon: (b.min().lng() + b.max().lng()) / 2.0,
+            ele_m: 3776.0,
+        };
+        raise_peaks(&mut grid, &b, &[peak], 5.0, None);
+        assert_eq!(grid, before);
+        // A rim lower than the tag still rings the node.
+        for row in grid.iter_mut() {
+            for v in row.iter_mut() {
+                *v = (*v).min(3700.0);
+            }
+        }
+        let before = grid.clone();
+        raise_peaks(&mut grid, &b, &[peak], 5.0, None);
+        assert_eq!(grid, before);
+    }
+
+    #[test]
+    fn a_node_mapped_beside_its_summit_is_left_alone() {
+        // The summit stands 100 m east of the node, which lies 37 m down its flank.
+        let (grid, mut peak) = dome(3749.0, 0.8);
+        let mut grid: Vec<Vec<f64>> = grid
+            .into_iter()
+            .map(|row| {
+                let mut row: Vec<f64> = row.clone();
+                row.rotate_right(20);
+                row
+            })
+            .collect();
+        peak.ele_m = 3749.0;
+        let before = grid.clone();
+        raise_peaks(&mut grid, &bbox(), &[peak], 5.0, None);
+        assert_eq!(grid, before);
     }
 
     #[test]
