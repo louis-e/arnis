@@ -44,7 +44,10 @@ const SETTINGS = [
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   // Turning One World off writes its pinned values back, so a reset does it first.
-  { id: 'one-world-toggle', kind: 'checkbox', store: OWN, resetFirst: true },
+  { id: 'one-world-group', kind: 'segmented', store: OWN, valueAttr: 'data-one-world', resetFirst: true },
+  // The version list comes from Mojang after start-up, so the choice keeps a key of its own.
+  { id: 'live-version-select', kind: 'select', store: EXTERNAL },
+  { id: 'live-view-distance-select', kind: 'select', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
 
   // Gameplay
@@ -146,6 +149,13 @@ function readStored() {
 
   const values = parsed.values;
   if (!values || typeof values !== 'object' || Array.isArray(values)) return {};
+  // One World was a switch before it gained Live.
+  if ('one-world-toggle' in values) {
+    if (values['one-world-toggle'] === true && !('one-world-group' in values)) {
+      values['one-world-group'] = 'on';
+    }
+    delete values['one-world-toggle'];
+  }
   return values;
 }
 

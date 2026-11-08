@@ -851,3 +851,24 @@ input[type="range"] {
     opacity: 1;
   }
 }
+
+/* Live mode: the main button stops a running session. */
+.start-button-wrap.is-live:hover {
+  background-color: #d32f2f;
+}
+
+/* While the server saves and stops, the button waits, as it does during a generation. */
+.start-button-wrap.is-stopping,
+.start-button-wrap.is-stopping .start-button {
+  cursor: default;
+}
+
+.start-button-wrap.is-stopping:hover {
+  background-color: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .start-button-wrap.is-stopping:hover {
+    background-color: #0f0f0f98;
+  }
+}
