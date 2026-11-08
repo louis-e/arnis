@@ -1849,6 +1849,7 @@ function refreshGameplayRows(format) {
   setSettingsRowAvailable('discoveries-toggle', pack && earth);
   setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
   setSettingsRowAvailable('moving-cars-toggle', vehicles && earth);
+  setSettingsRowAvailable('pedestrians-toggle', pack && earth);
   setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
   // Last, as it reads whether the outbreak and the disasters are still available.
   refreshMobSpawningRow(current);
@@ -4036,6 +4037,7 @@ async function startGeneration() {
         discoveries: gameplayToggle('discoveries-toggle'),
         trafficLights: gameplayToggle('traffic-lights-toggle'),
         movingVehicles: gameplayToggle('moving-cars-toggle'),
+        pedestrians: gameplayToggle('pedestrians-toggle'),
         zombieOutbreak: gameplayToggle('zombie-outbreak-toggle'),
         disasters: gameplayToggle('disasters-toggle'),
         bodyGravity: gameplayToggle('body-gravity-toggle'),

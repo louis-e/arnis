@@ -55,6 +55,7 @@ const SETTINGS = [
   { id: 'discoveries-toggle', kind: 'checkbox', store: OWN },
   { id: 'traffic-lights-toggle', kind: 'checkbox', store: OWN },
   { id: 'moving-cars-toggle', kind: 'checkbox', store: OWN },
+  { id: 'pedestrians-toggle', kind: 'checkbox', store: OWN },
   { id: 'zombie-outbreak-toggle', kind: 'checkbox', store: OWN },
   { id: 'disasters-toggle', kind: 'checkbox', store: OWN },
   { id: 'body-gravity-toggle', kind: 'checkbox', store: OWN },
