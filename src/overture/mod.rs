@@ -69,6 +69,7 @@ use crate::clipping::clip_way_to_bbox;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
+use crate::mapillary::geometry::parse_length_m;
 use crate::osm_parser::{
     point_in_ring, ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay,
 };
@@ -720,6 +721,10 @@ pub fn drop_footprints_in_water(
     scale: f64,
 ) -> usize {
     use crate::land_cover::{osm_land_override::SHORE_BAND_M, LC_WATER};
+    let overture = |el: &ProcessedElement| el.id() & OVERTURE_ID_HIGH_BIT != 0;
+    if !elements.iter().any(overture) {
+        return 0;
+    }
     // The land cover is laid out from the corner of the area.
     let (min_x, min_z) = (xzbbox.min_x(), xzbbox.min_z());
     let wet = |x: i32, z: i32| ground.cover_class(XZPoint::new(x - min_x, z - min_z)) == LC_WATER;
@@ -766,8 +771,16 @@ impl Decks {
                 ProcessedElement::Way(way)
                     if way.id & OVERTURE_ID_HIGH_BIT == 0 && is_over_water_structure(&way.tags) =>
                 {
-                    if !decks.add_area(&way.nodes) {
-                        let half = over_water_half_width(way, scale).unwrap_or(2) + 1;
+                    let area = way.tags.get("area").map(String::as_str) != Some("no");
+                    if !(area && decks.add_area(&way.nodes)) {
+                        // As wide as its `width`, as the waterfront builds the deck.
+                        let tagged = way
+                            .tags
+                            .get("width")
+                            .and_then(|w| parse_length_m(w))
+                            .filter(|w| (0.0..200.0).contains(w))
+                            .map_or(0, |w| (w * scale / 2.0).ceil() as i32);
+                        let half = over_water_half_width(way, scale).unwrap_or(2).max(tagged) + 1;
                         decks.add_line(&way.nodes, half);
                     }
                 }
@@ -2726,8 +2739,8 @@ mod tests {
     fn footprints_on_the_shore_or_a_pier_stay() {
         // A river from x = 100 to x = 200, flat ground around it. A footprint that ESA
         // half drowned on the quay stays, as do kiosks on a pier mapped as an area and
-        // on one mapped as a line; those out on the river go, the boat moored beside
-        // the line too.
+        // on one mapped as a line, and on a wide one mapped as a line with a width;
+        // those out on the river go, the boat moored beside the narrow line too.
         let ground = crate::ground::test_support::ground_with_water(300, 80, 0.0, |x, _| {
             (100..200).contains(&x)
         });
@@ -2764,7 +2777,12 @@ mod tests {
             square("pier end", 150, 50),
             square("moored", 150, 62),
             way(10, &[(120, 55), (190, 55)], pier),
+            way(11, &[(105, 35), (140, 35)], pier),
+            square("wide pier kiosk", 115, 40),
         ];
+        if let ProcessedElement::Way(wide) = &mut elements[7] {
+            wide.tags.insert("width".to_string(), "20".to_string());
+        }
         assert_eq!(
             drop_footprints_in_water(&mut elements, &ground, &bbox, 1.0),
             2
@@ -2777,7 +2795,9 @@ mod tests {
                 gers_id_to_u64("kiosk"),
                 9,
                 gers_id_to_u64("pier end"),
-                10
+                10,
+                11,
+                gers_id_to_u64("wide pier kiosk")
             ]
         );
     }

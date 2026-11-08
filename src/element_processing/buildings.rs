@@ -9023,10 +9023,10 @@ fn roof_family_for_colour(rgb: (u8, u8, u8), rng: &mut impl Rng) -> Block {
     }
 }
 
-/// A roof in the wall's own tone merges with it into one lump: brick tile
-/// over a brick wall moves to the red clay shade (brick under red tile is the
-/// norm, the same block is not), zinc over a grey wall becomes slate. Red tile
-/// lays its slope in brick stairs too, so over a brick wall both turn orange.
+/// A roof in the wall's own tone merges with it into one lump. Brick tile over
+/// pink granite moves to the red clay shade, and zinc over a grey wall becomes
+/// slate. Red tile lays its slope in brick stairs just as brick tile does, so
+/// over a brick wall either turns to orange tile.
 fn roof_distinct_from_wall(roof: Block, wall: Block, region: MaterialRegion) -> Block {
     const BRICK_TONE: &[Block] = &[BRICK, POLISHED_GRANITE, GRANITE];
     const RED_TONE: &[Block] = &[RED_TERRACOTTA, MANGROVE_PLANKS];

@@ -819,6 +819,10 @@ const CONE_SLOPE: f64 = 1.0;
 /// Radius searched for the DEM's own summit, so a peak node a few metres off
 /// the DEM's highest cell is not lifted on top of it.
 const SEARCH_M: f64 = 15.0;
+/// Radius searched for the top of the dome a stretch lifts. GLO-30 can put it a cell
+/// or so off the surveyed summit, where on a steep dome it stands well over the
+/// ground within `SEARCH_M`: Broad Peak's stands 9 m over it.
+const DOME_SEARCH_M: f64 = 45.0;
 /// Shortfalls below this are DEM noise.
 const MIN_DEFICIT_M: f64 = 3.0;
 /// Shortfalls beyond this are a bad tag, not a smeared summit.
@@ -874,16 +878,29 @@ pub(crate) fn raise_peaks(
     }
     let (min_lat, max_lat) = (bbox.min().lat(), bbox.max().lat());
     let (min_lon, max_lon) = (bbox.min().lng(), bbox.max().lng());
-    // Each planned on the DEM as it came, so a summit raised first neither hides a
-    // neighbour's shortfall nor lets the order of the nodes decide which gets raised.
-    let mut lifts: Vec<Lift> = peaks
+    let summits: Vec<Summit> = peaks
         .iter()
         .filter(|p| (min_lat..=max_lat).contains(&p.lat) && (min_lon..=max_lon).contains(&p.lon))
-        .filter_map(|p| {
-            let gx = (p.lon - min_lon) / (max_lon - min_lon) * (w - 1) as f64;
-            let gy = (max_lat - p.lat) / (max_lat - min_lat) * (h - 1) as f64;
-            plan_lift(grid, p.ele_m, gx, gy, m_per_cell, seam_pad)
+        .map(|p| Summit {
+            gx: (p.lon - min_lon) / (max_lon - min_lon) * (w - 1) as f64,
+            gy: (max_lat - p.lat) / (max_lat - min_lat) * (h - 1) as f64,
+            ele: p.ele_m,
         })
+        .collect();
+    // Tags the DEM does not overshoot, which no lift may raise ground above. A tag far
+    // under the DEM is a wrong one, and would hold down whatever stands near it.
+    let tagged: Vec<Summit> = summits
+        .iter()
+        .filter(|s| {
+            s.ele + SUMMIT_NOISE_M >= highest_within(grid, s.gx, s.gy, SEARCH_M, m_per_cell)
+        })
+        .copied()
+        .collect();
+    // Each planned on the DEM as it came, so a summit raised first neither hides a
+    // neighbour's shortfall nor lets the order of the nodes decide which gets raised.
+    let mut lifts: Vec<Lift> = summits
+        .iter()
+        .filter_map(|s| plan_lift(grid, s.ele, s.gx, s.gy, m_per_cell, seam_pad))
         .collect();
     // Highest first: a lower summit's lift stops at its own height, so one in a higher
     // one's reach still lands on its tag, however the nodes came.
@@ -893,8 +910,31 @@ pub(crate) fn raise_peaks(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     for lift in &lifts {
-        lift.apply(grid, m_per_cell);
+        // A higher summit's stretch may have brought this one up already, or the same
+        // top is mapped twice, as a peak and a volcano; it is not steepened again.
+        if highest_within(grid, lift.gx, lift.gy, SEARCH_M, m_per_cell) >= lift.ele - MIN_DEFICIT_M
+        {
+            continue;
+        }
+        let reach_m = lift.reach as f64 * m_per_cell;
+        let lower: Vec<Summit> = tagged
+            .iter()
+            .filter(|t| {
+                let d = ((t.gx - lift.gx).powi(2) + (t.gy - lift.gy).powi(2)).sqrt() * m_per_cell;
+                t.ele < lift.ele && d < reach_m + (lift.ele - t.ele) / CONE_SLOPE
+            })
+            .copied()
+            .collect();
+        lift.apply(grid, m_per_cell, &lower);
     }
+}
+
+/// A tagged summit at a grid point.
+#[derive(Clone, Copy)]
+struct Summit {
+    gx: f64,
+    gy: f64,
+    ele: f64,
 }
 
 /// A summit's lift, planned before any is applied.
@@ -946,6 +986,19 @@ fn plan_lift(
     {
         return None;
     }
+    // Ground near the node rising over the top within `SEARCH_M` may be the dome's own
+    // top a cell or so off, which a stretch then lifts onto the tag.
+    let (top_x, top_y) = if near_top > dem_top + SUMMIT_NOISE_M {
+        let dome = (DOME_SEARCH_M / m_per_cell).ceil() as isize;
+        cells_within(cx, cy, dome, w, h)
+            .filter(|&(x, y)| grid[y][x].is_finite())
+            .max_by(|&(ax, ay), &(bx, by)| grid[ay][ax].total_cmp(&grid[by][bx]))
+            .unwrap_or((top_x, top_y))
+    } else {
+        (top_x, top_y)
+    };
+    let dem_top = grid[top_y][top_x];
+    let shortfall = ele - dem_top;
     // A summit the DEM keeps, only too low and too round, is steepened from
     // its own relief: a cone on such a dome stood on it as a spire. Where the
     // DEM rises beside the node instead, it has smeared a needle into its
@@ -997,25 +1050,32 @@ fn plan_lift(
 }
 
 impl Lift {
-    fn apply(&self, grid: &mut [Vec<f64>], m_per_cell: f64) {
+    /// Raises the cells in reach, never above the tag nor above a cone as steep as the
+    /// bump's over a `lower` tagged summit, so a fore-summit on the flank keeps its own.
+    fn apply(&self, grid: &mut [Vec<f64>], m_per_cell: f64, lower: &[Summit]) {
         let (h, w) = (grid.len(), grid[0].len());
         let (cx, cy) = (self.gx.round() as usize, self.gy.round() as usize);
         for (x, y) in cells_within(cx, cy, self.reach, w, h) {
-            let d =
-                ((x as f64 - self.gx).powi(2) + (y as f64 - self.gy).powi(2)).sqrt() * m_per_cell;
+            let dist = |gx: f64, gy: f64| {
+                ((x as f64 - gx).powi(2) + (y as f64 - gy).powi(2)).sqrt() * m_per_cell
+            };
+            let d = dist(self.gx, self.gy);
+            let cap = lower
+                .iter()
+                .map(|t| t.ele + CONE_SLOPE * dist(t.gx, t.gy))
+                .fold(self.ele, f64::min);
             let v = &mut grid[y][x];
             if !v.is_finite() {
                 continue;
             }
             match self.shape {
-                // Up to the tagged height, and never down: a higher summit out by the
-                // corners of the reach keeps its own.
+                // Never down: a higher summit out by the corners of the reach keeps its own.
                 Shape::Stretch { base, gain } if *v > base => {
-                    *v = v.max((*v + (*v - base) * gain * stretch_fade(d)).min(self.ele));
+                    *v = v.max((*v + (*v - base) * gain * stretch_fade(d)).min(cap));
                 }
                 Shape::Stretch { .. } => {}
                 Shape::Bump { lift } => {
-                    let room = (self.ele - CONE_SLOPE * d - *v).max(0.0);
+                    let room = ((self.ele - CONE_SLOPE * d).min(cap) - *v).max(0.0);
                     *v += (lift * (-(d / SIGMA_M).powi(2)).exp()).min(room);
                 }
             }
@@ -1689,6 +1749,77 @@ mod tests {
             "low at {}",
             one[120][140]
         );
+    }
+
+    #[test]
+    fn a_fore_summit_in_the_stretch_keeps_its_own_height() {
+        // A top 45 m short, and 150 m out on its flank a fore-summit the DEM has 5 m
+        // short, too close to the main top to be lifted itself.
+        let bump = |x: usize, y: usize, cx: f64, top: f64| {
+            let d2 = ((x as f64 - cx).powi(2) + (y as f64 - 120.0).powi(2)) * 25.0;
+            700.0 + (top - 700.0) * (-d2 / (2.0 * 150.0 * 150.0)).exp()
+        };
+        let mut grid: Vec<Vec<f64>> = (0..241)
+            .map(|y| {
+                (0..241)
+                    .map(|x| bump(x, y, 100.0, 1000.0).max(bump(x, y, 130.0, 985.0)))
+                    .collect()
+            })
+            .collect();
+        let b = bbox();
+        let at = |x: f64, ele_m: f64| PeakHint {
+            lat: (b.min().lat() + b.max().lat()) / 2.0,
+            lon: b.min().lng() + x / 240.0 * (b.max().lng() - b.min().lng()),
+            ele_m,
+        };
+        raise_peaks(
+            &mut grid,
+            &b,
+            &[at(100.0, 1045.0), at(130.0, 990.0)],
+            5.0,
+            None,
+        );
+        assert!(
+            (grid[120][100] - 1045.0).abs() < 1.0,
+            "main at {}",
+            grid[120][100]
+        );
+        assert!(
+            grid[120][130] <= 990.0 + 1e-9,
+            "fore-summit at {}",
+            grid[120][130]
+        );
+    }
+
+    #[test]
+    fn a_summit_mapped_twice_is_steepened_once() {
+        // K2's dome with a peak node and a second node on the same top.
+        let (dome, mut peak) = dome(8564.0, 0.8);
+        peak.ele_m = 8611.0;
+        let mut once = dome.clone();
+        raise_peaks(&mut once, &bbox(), &[peak], 5.0, None);
+        let mut twice = dome;
+        raise_peaks(&mut twice, &bbox(), &[peak, peak], 5.0, None);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn a_node_a_cell_off_a_steep_top_steepens_the_dome() {
+        // A steep rounded top, the node 40 m off it, where a cone stood as a spire.
+        let (mut grid, mut peak) = dome(7974.0, 3.0);
+        let b = bbox();
+        peak.lon += 8.0 / 240.0 * (b.max().lng() - b.min().lng());
+        peak.ele_m = 8051.0;
+        let lift = plan_lift(&grid, 8051.0, 128.0, 120.0, 5.0, None).expect("a lift");
+        assert!(matches!(lift.shape, Shape::Stretch { .. }));
+        raise_peaks(&mut grid, &b, &[peak], 5.0, None);
+        assert!(
+            (grid[120][120] - 8051.0).abs() < 0.5,
+            "top {}",
+            grid[120][120]
+        );
+        // No knob at the node: it stays under the top it is 40 m from.
+        assert!(grid[120][128] < 8051.0 - 5.0, "node {}", grid[120][128]);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::clipping::{clip_way_to_bbox, clip_way_to_bbox_owned, mark_cut_ends};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::mapillary::geometry::parse_length_m;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fnv::{FnvHashMap, FnvHashSet};
@@ -1573,7 +1574,7 @@ fn row_spans(ring: &[(f64, f64)], lat: f64, crossings: &mut Vec<f64>, out: &mut 
         prev = (la, lo);
     }
     crossings.sort_unstable_by(f64::total_cmp);
-    out.extend(crossings.chunks_exact(2).map(|c| (c[0], c[1])));
+    out.extend(crossings.as_chunks::<2>().0.iter().map(|&[a, b]| (a, b)));
 }
 
 /// Sorts stretches west to east and joins those that touch or overlap.
@@ -1769,6 +1770,7 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
     let mut housing_ways: HashSet<u64> = HashSet::new();
     let mut tagged_parts: HashSet<u64> = HashSet::new();
+    let mut way_height: HashMap<u64, f64> = HashMap::new();
     for w in elements(ways).filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
@@ -1778,6 +1780,9 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
                 .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
             {
                 tagged_parts.insert(w.id);
+            }
+            if let Some(h) = t.get("height").and_then(|h| parse_length_m(h)) {
+                way_height.insert(w.id, h);
             }
             way_hint.insert(w.id, building_style_hint(t));
             if let Some(y) = year_for_parts(t) {
@@ -1867,9 +1872,17 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
                 is_outline(m.role.trim()) && m.r#type == "way" && housing_ways.contains(&m.r#ref)
             });
 
+        let group_seed = seed_with_residential_mark(
+            seed_with_year(
+                seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
+                rel_year,
+            ),
+            housing,
+        );
         // Sub-relation parts carry no way geometry here, so they skip the coverage gate.
         let mut has_part = false;
         let mut has_relation_part = false;
+        let mut tallest_part: Option<f64> = None;
         let mut part_rings: Vec<Vec<(f64, f64)>> = Vec::new();
         for m in &rel.members {
             if !m.role.trim().eq_ignore_ascii_case("part") {
@@ -1887,16 +1900,10 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
                     if way_ground.get(&m.r#ref).copied().unwrap_or(true) {
                         part_rings.extend(way_ring(m.r#ref));
                     }
-                    part_group.insert(
-                        m.r#ref,
-                        seed_with_residential_mark(
-                            seed_with_year(
-                                seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
-                                rel_year,
-                            ),
-                            housing,
-                        ),
-                    );
+                    if let Some(&h) = way_height.get(&m.r#ref) {
+                        tallest_part = Some(tallest_part.map_or(h, |t: f64| t.max(h)));
+                    }
+                    part_group.insert(m.r#ref, group_seed);
                 }
                 _ => {}
             }
@@ -1918,9 +1925,17 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
             };
 
             // An outline tagged as a part is one, often the podium the towers stand on,
-            // as the spatial pass takes such a way too.
+            // as the spatial pass takes such a way too, and it takes the towers' style.
+            // One as tall as the tallest part is the whole building, not a podium.
             if kind == "way" && tagged_parts.contains(&m.r#ref) {
-                continue;
+                let podium = match (way_height.get(&m.r#ref), tallest_part) {
+                    (Some(&h), Some(t)) => h < t,
+                    _ => true,
+                };
+                if podium {
+                    part_group.insert(m.r#ref, group_seed);
+                    continue;
+                }
             }
             // Keep the outline when the parts are too sparse to stand in for it.
             if kind == "way" && !has_relation_part {
@@ -3032,11 +3047,39 @@ mod outline_suppression_tests {
         let (outline, outline_nodes) = square_way(100, 1000, 1.0);
         let outline = with_tag(with_tag(outline, "building:part", "yes"), "height", "22");
         let (part, part_nodes) = square_way(200, 2000, 0.8);
+        let part = with_tag(part, "height", "174");
         let rel = building_relation(vec![
             member("way", 100, "outline"),
             member("way", 200, "part"),
         ]);
 
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let mut groups = PartGroups::new();
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline, part],
+            &nodes,
+            &mut groups,
+            &mut HousingRelationParts::new(),
+        );
+
+        assert!(!suppressed.contains(&("way", 100)));
+        // The podium takes the style of the towers on it.
+        assert!(groups.contains_key(&100));
+        assert_eq!(groups.get(&100), groups.get(&200));
+    }
+
+    // An outline tagged as a part with the tallest part's height is the whole building.
+    #[test]
+    fn an_outline_part_as_tall_as_its_towers_is_replaced_by_them() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let outline = with_tag(with_tag(outline, "building:part", "yes"), "height", "120");
+        let (part, part_nodes) = square_way(200, 2000, 0.8);
+        let part = with_tag(part, "height", "120");
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("way", 200, "part"),
+        ]);
         let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
         let suppressed = compute_outline_suppression(
             &[rel],
@@ -3045,8 +3088,7 @@ mod outline_suppression_tests {
             &mut PartGroups::new(),
             &mut HousingRelationParts::new(),
         );
-
-        assert!(!suppressed.contains(&("way", 100)));
+        assert!(suppressed.contains(&("way", 100)));
     }
 
     fn with_tag(mut w: OsmElement, k: &str, v: &str) -> OsmElement {

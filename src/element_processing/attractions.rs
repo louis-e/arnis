@@ -305,7 +305,7 @@ fn ride_colours(tags: &HashMap<String, String>, seed: u64) -> (Block, Block) {
     (main, accent)
 }
 
-/// Wheels this wide are observation wheels like the London Eye or the Singapore Flyer:
+/// Wheels this tall are observation wheels like the London Eye or the Singapore Flyer:
 /// white, with glass capsules outside the rim instead of gondolas hanging under it.
 const OBSERVATION_WHEEL_M: f64 = 90.0;
 /// How far outside the rim a capsule's centre rides.
@@ -786,10 +786,13 @@ fn big_wheel(editor: &mut WorldEditor, p: &Placement) {
         (None, true) => Some(site.long),
         (None, false) => None,
     };
-    // Only a wheel mapped that big, and tall enough in blocks to hold its capsules;
-    // a guessed size says nothing.
-    let observation = mapped.is_some_and(|d| d >= OBSERVATION_WHEEL_M * p.scale)
-        && p.height.is_none_or(|h| h - CAPSULE_RING >= SMALLEST);
+    // Only a wheel mapped that tall, or that long without a height, and tall enough in
+    // blocks to hold its capsules; a guessed size says nothing.
+    let big = OBSERVATION_WHEEL_M * p.scale;
+    let observation = match p.height {
+        Some(h) => h >= big && h - CAPSULE_RING >= SMALLEST,
+        None => site.long >= big,
+    };
     let diameter = match p.height {
         Some(h) if observation => h - CAPSULE_RING,
         _ => mapped.unwrap_or(30.0),
@@ -1425,6 +1428,10 @@ mod tests {
         assert!((130..=140).contains(&top), "top at {top}");
         // A funfair wheel keeps its coloured gondolas.
         assert!(wheel(34.0, 1.0).iter().any(|(_, _, b)| RAINBOW.contains(b)));
+        // The cut is the mapped height, at any scale.
+        assert!(wheel(92.0, 1.0).iter().any(|(_, _, b)| *b == GLASS));
+        assert!(wheel(88.0, 1.0).iter().any(|(_, _, b)| RAINBOW.contains(b)));
+        assert!(wheel(96.0 * 0.5, 0.5).iter().any(|(_, _, b)| *b == GLASS));
         // As does one shrunk with the world, however small, and the London Eye
         // shrunk too far for its capsules to fit its height.
         for (height, scale) in [(34.0 * 0.1, 0.1), (136.5 * 0.15, 0.15)] {
