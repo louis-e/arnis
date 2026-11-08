@@ -36,6 +36,7 @@ const START_ROOM: i32 = 8;
 const MAX_BORDER_HALF: i32 = 64;
 const VANILLA_BORDER: f64 = 59_999_968.0;
 const MAX_TILE_TRIES: u32 = 3;
+const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(180);
 /// Chunks the server loads around one it generates, as far out as structure starts.
 const GENERATION_REACH: i32 = 13;
 
@@ -116,6 +117,8 @@ pub struct PlayerSpot {
     /// Where on Earth, while in the overworld.
     pub lat: Option<f64>,
     pub lon: Option<f64>,
+    /// The player's face as a PNG data URL, once Mojang sent the skin.
+    pub head: Option<String>,
 }
 
 /// What the session is asked to do from outside its thread.
@@ -265,6 +268,9 @@ impl Session {
 /// What a live session left that has to be put right, for when it did not end cleanly.
 #[derive(Serialize, Deserialize, Default)]
 struct Journal {
+    /// The Arnis process running the session.
+    #[serde(default)]
+    owner: Option<u32>,
     rcon_port: Option<u16>,
     rcon_password: Option<String>,
     stubbed: Vec<(i32, i32)>,
@@ -287,7 +293,9 @@ impl Journal {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        crate::world_utils::replace_file_atomically(&path, text.as_bytes())
+        crate::world_utils::replace_file_atomically(&path, text.as_bytes())?;
+        server::keep_private(&path);
+        Ok(())
     }
 }
 
@@ -690,6 +698,13 @@ impl Regions {
     fn waiting(&self, now: Instant, r: (i32, i32)) -> bool {
         self.failures.get(&r).is_some_and(|(_, at)| *at > now)
     }
+
+    /// Failed every quick try; only the slow retry is left.
+    fn gave_up(&self, r: (i32, i32)) -> bool {
+        self.failures
+            .get(&r)
+            .is_some_and(|(tries, _)| *tries >= MAX_TILE_TRIES)
+    }
 }
 
 /// Regions within `radius` chunks of the chunk under `(x, z)`.
@@ -922,24 +937,29 @@ impl Live<'_> {
         match result {
             Ok(()) => {
                 self.done += 1;
+                if self.regions.gave_up(r) {
+                    self.failed = self.failed.saturating_sub(1);
+                }
                 self.regions.failures.remove(&r);
                 println!("[live] Region {},{} ready ({:.1}s)", r.0, r.1, done.secs);
             }
             Err(e) => {
                 let tries = self.regions.failures.get(&r).map_or(0, |f| f.0) + 1;
                 eprintln!("[live] Region {},{} failed (try {tries}): {e}", r.0, r.1);
-                if tries >= MAX_TILE_TRIES {
+                if tries == MAX_TILE_TRIES {
                     self.failed += 1;
-                    let present = self.regions.present(r);
-                    self.regions.map.insert(r, Region::Blocked { present });
                     let msg = format!("Some land could not be generated: {e}");
                     self.reporter.update(|s| s.error = Some(msg));
-                } else {
-                    let wait = Duration::from_secs(5 * 4u64.pow(tries - 1));
-                    self.regions
-                        .failures
-                        .insert(r, (tries, Instant::now() + wait));
                 }
+                // Past the quick tries it is tried again now and then, so an outage ends.
+                let wait = if tries >= MAX_TILE_TRIES {
+                    RETRY_AFTER_FAILURE
+                } else {
+                    Duration::from_secs(5 * 4u64.pow(tries - 1))
+                };
+                self.regions
+                    .failures
+                    .insert(r, (tries, Instant::now() + wait));
             }
         }
     }
@@ -1023,14 +1043,18 @@ impl Live<'_> {
                 } else {
                     let _ = fs::remove_file(&staged.region);
                 }
-                self.regions.map.insert(
-                    r,
+                // What is still missing cannot come this session, so it is not built again.
+                let usable = present.union(&delivered);
+                let next = if usable.is_full() {
                     Region::Partial {
                         present,
                         stubbed: true,
                         delivered,
-                    },
-                );
+                    }
+                } else {
+                    Region::Burned { present: usable }
+                };
+                self.regions.map.insert(r, next);
             }
             Some(Region::Partial { present, .. }) => {
                 self.keep_pending(r, &staged.region)?;
@@ -1083,7 +1107,7 @@ fn build_start_area(
         let remaining: Vec<(i32, i32)> = needed
             .iter()
             .copied()
-            .filter(|r| live.regions.needs_tile(*r))
+            .filter(|r| live.regions.needs_tile(*r) && !live.regions.gave_up(*r))
             .collect();
         let finished = total - remaining.len();
         if total > 0 && finished != shown {
@@ -1104,10 +1128,7 @@ fn build_start_area(
             live.publish(done, false);
         }
     }
-    let failed = needed.iter().any(|r| {
-        matches!(live.regions.map.get(r), Some(Region::Blocked { .. }))
-            && live.regions.failures.contains_key(r)
-    });
+    let failed = needed.iter().any(|r| live.regions.gave_up(*r));
     if failed {
         return Err("The land around the start could not be generated. Check your internet connection and try again.".to_string());
     }
@@ -1205,10 +1226,17 @@ fn random_password() -> String {
 }
 
 /// Stops a server an earlier session left running, through the RCON details it saved.
-fn stop_leftover_server(world_dir: &Path) {
+pub(crate) fn stop_leftover_server(world_dir: &Path) {
     let Some(journal) = Journal::load(world_dir) else {
         return;
     };
+    // A server whose Arnis still runs is that Arnis's to stop.
+    if journal
+        .owner
+        .is_some_and(|pid| pid != std::process::id() && arnis_running(pid))
+    {
+        return;
+    }
     let (Some(port), Some(pw)) = (journal.rcon_port, journal.rcon_password.as_deref()) else {
         return;
     };
@@ -1222,6 +1250,14 @@ fn stop_leftover_server(world_dir: &Path) {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
+}
+
+fn arnis_running(pid: u32) -> bool {
+    let pid = sysinfo::Pid::from_u32(pid);
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+    sys.process(pid)
+        .is_some_and(|p| p.name().to_string_lossy().to_lowercase().contains("arnis"))
 }
 
 /// The world's session.lock, for the parts that write it with the server down.
@@ -1261,15 +1297,6 @@ fn run(cfg: Config, mut args: Args, reporter: &Reporter) -> Result<(), String> {
     let start_xz = cfg
         .start
         .map(|(lat, lon)| (proj.x_for_lon(lon), proj.z_for_lat(lat)));
-    if let Some((x, z)) = start_xz {
-        // The spawn is only where players land the first time; Y is set when one arrives.
-        crate::world_utils::set_spawn_in_level_dat(
-            &world_dir,
-            x.floor() as i32,
-            320,
-            z.floor() as i32,
-        )?;
-    }
     let mut positions: Vec<(f64, f64)> = start_xz.into_iter().collect();
     if let Some((x, z)) = crate::map_item::read_spawn_xz(&world_dir) {
         positions.push((f64::from(x) + 0.5, f64::from(z) + 0.5));
@@ -1277,7 +1304,10 @@ fn run(cfg: Config, mut args: Args, reporter: &Reporter) -> Result<(), String> {
     // The server loads where a player last was before anyone can move them.
     positions.extend(saved_positions(&world_dir));
 
-    let journal = Journal::default();
+    let journal = Journal {
+        owner: Some(std::process::id()),
+        ..Journal::default()
+    };
     journal.save(&world_dir)?;
 
     let view = cfg.view_distance.clamp(4, 32) as i32;
@@ -1345,6 +1375,16 @@ fn run(cfg: Config, mut args: Args, reporter: &Reporter) -> Result<(), String> {
         };
         if controls.stopping() {
             return Err("Cancelled".to_string());
+        }
+        // Only now, so a start that stops early leaves nobody above unbuilt land. The spawn
+        // is only where players land the first time; Y is set when one arrives.
+        if let Some((x, z)) = start_xz {
+            crate::world_utils::set_spawn_in_level_dat(
+                &world_dir,
+                x.floor() as i32,
+                live.top_y,
+                z.floor() as i32,
+            )?;
         }
         play(
             &cfg,
@@ -1491,7 +1531,7 @@ fn play(
         &cfg.messages,
         cheats,
         start_xz,
-        positions.first().copied(),
+        positions,
         &address,
     );
     // `/stop` typed in the game ends the session like the Stop button.
@@ -1602,9 +1642,10 @@ fn session_loop(
     messages: &Messages,
     cheats: bool,
     start_xz: Option<(f64, f64)>,
-    fallback: Option<(f64, f64)>,
+    positions: &[(f64, f64)],
     address: &str,
 ) -> Result<(), String> {
+    let fallback = positions.first().copied();
     let reporter = live.reporter;
     let controls = &*reporter.controls;
     for c in [
@@ -1635,6 +1676,7 @@ fn session_loop(
     let mut players: HashMap<String, Player> = HashMap::new();
     let mut names: Vec<String> = Vec::new();
     let mut joined: HashSet<String> = HashSet::new();
+    let heads: Arc<Mutex<HashMap<String, Option<String>>>> = Arc::default();
     let mut border: Option<plan::Square> = None;
     let mut border_open = false;
     let mut use_function = true;
@@ -1643,6 +1685,20 @@ fn session_loop(
     let mut last_border = Instant::now();
     let mut published_since_border = false;
     let mut bossbar_shown = false;
+    // Until someone is seen in the overworld, the border holds where players appear, so a
+    // portal from the Nether cannot open onto unbuilt land.
+    let starts: Vec<(i32, i32)> = positions
+        .iter()
+        .filter(|&&(x, z)| live.chunk_safe(x, z))
+        .map(|&(x, z)| ((x.floor() as i32) >> 4, (z.floor() as i32) >> 4))
+        .collect();
+    if !starts.is_empty() {
+        let ready = |cx: i32, cz: i32| live.regions.ready(cx, cz);
+        if let Some(sq) = plan::safe_square(&ready, &starts, live.margin, MAX_BORDER_HALF) {
+            set_border(rcon, &mut use_function, sq)?;
+            border = Some(sq);
+        }
+    }
     let mut teleport: Option<Teleport> = None;
     let mut teleport_failed_at: Option<Instant> = None;
     let mut landing: HashMap<String, Instant> = HashMap::new();
@@ -1668,6 +1724,16 @@ fn session_loop(
             names = rcon::parse_list(&rcon.cmd("list")?);
             for name in &names {
                 if joined.insert(name.clone()) {
+                    {
+                        let (heads, name) = (heads.clone(), name.clone());
+                        std::thread::spawn(move || {
+                            let head = mojang::player_head(&name);
+                            heads
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(name, head);
+                        });
+                    }
                     if cheats {
                         let _ = rcon.cmd(&format!("op {name}"));
                     }
@@ -1798,10 +1864,11 @@ fn session_loop(
         }
         if let Some(t) = &teleport {
             let blocked = regions_around(t.x, t.z, live.margin).any(|r| {
-                matches!(
-                    live.regions.map.get(&r),
-                    Some(Region::Blocked { .. } | Region::Burned { .. })
-                )
+                live.regions.gave_up(r)
+                    || matches!(
+                        live.regions.map.get(&r),
+                        Some(Region::Blocked { .. } | Region::Burned { .. })
+                    )
             });
             if live.chunk_safe(t.x, t.z) {
                 // The border goes first, or it would hold everyone where they were.
@@ -1972,6 +2039,12 @@ fn session_loop(
                         name: name.clone(),
                         lat: at.map(|p| live.proj.lat_for_z(p.z)),
                         lon: at.map(|p| live.proj.lon_for_x(p.x)),
+                        head: heads
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .get(name)
+                            .cloned()
+                            .flatten(),
                     }
                 })
                 .collect();

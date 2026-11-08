@@ -1409,21 +1409,38 @@ $(document).ready(function () {
             if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
             seen[p.name] = true;
             var at = [p.lat, p.lon];
-            if (livePlayerMarkers[p.name]) {
-                livePlayerMarkers[p.name].setLatLng(at);
-                return;
+            var marker = livePlayerMarkers[p.name];
+            if (marker) {
+                marker.setLatLng(at);
+            } else {
+                var icon = L.divIcon({
+                    className: 'live-player-marker',
+                    html: '<span class="live-player-dot"></span><span class="live-player-name"></span>',
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9]
+                });
+                marker = L.marker(at, { icon: icon, interactive: false, keyboard: false, zIndexOffset: 3000 });
+                marker.addTo(livePlayerLayer);
+                var label = marker.getElement() && marker.getElement().querySelector('.live-player-name');
+                if (label) label.textContent = p.name;
+                livePlayerMarkers[p.name] = marker;
             }
-            var icon = L.divIcon({
-                className: 'live-player-marker',
-                html: '<span class="live-player-dot"></span><span class="live-player-name"></span>',
-                iconSize: [12, 12],
-                iconAnchor: [6, 6]
-            });
-            var marker = L.marker(at, { icon: icon, interactive: false, keyboard: false, zIndexOffset: 3000 });
-            marker.addTo(livePlayerLayer);
-            var label = marker.getElement() && marker.getElement().querySelector('.live-player-name');
-            if (label) label.textContent = p.name;
-            livePlayerMarkers[p.name] = marker;
+            // The face replaces the dot once Mojang sent the skin.
+            var el = marker.getElement();
+            if (p.head && el && marker._arnisHead !== p.head && /^data:image\/png;base64,/.test(p.head)) {
+                marker._arnisHead = p.head;
+                var dot = el.querySelector('.live-player-dot');
+                if (dot) {
+                    var img = document.createElement('img');
+                    img.className = 'live-player-head';
+                    img.alt = '';
+                    img.src = p.head;
+                    dot.replaceWith(img);
+                } else {
+                    var head = el.querySelector('.live-player-head');
+                    if (head) head.src = p.head;
+                }
+            }
         });
         Object.keys(livePlayerMarkers).forEach(function (name) {
             if (!seen[name]) {

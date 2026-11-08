@@ -857,11 +857,10 @@ input[type="range"] {
   background-color: #d32f2f;
 }
 
-/* While the server saves and stops, the button waits. */
+/* While the server saves and stops, the button waits, as it does during a generation. */
 .start-button-wrap.is-stopping,
 .start-button-wrap.is-stopping .start-button {
   cursor: default;
-  opacity: 0.6;
 }
 
 .start-button-wrap.is-stopping:hover {

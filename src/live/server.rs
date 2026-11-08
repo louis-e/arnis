@@ -122,7 +122,21 @@ fn write_properties(dir: &Path, l: &Launch) -> Result<(), String> {
     for (k, v) in props {
         text.push_str(&format!("{k}={v}\n"));
     }
-    crate::world_utils::replace_file_atomically(&dir.join("server.properties"), text.as_bytes())
+    let path = dir.join("server.properties");
+    crate::world_utils::replace_file_atomically(&path, text.as_bytes())?;
+    keep_private(&path);
+    Ok(())
+}
+
+/// Readable by this user only, for files holding the RCON password.
+pub(crate) fn keep_private(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 fn heap_mb() -> u64 {
@@ -139,6 +153,8 @@ impl Server {
             return Err("The Minecraft EULA has not been accepted.".to_string());
         }
         write_properties(dir, l)?;
+        // Every world shares this folder; ops come from the world's cheats setting each session.
+        fs::write(dir.join("ops.json"), "[]").map_err(|e| e.to_string())?;
         let mut cmd = Command::new(l.java);
         cmd.current_dir(dir)
             .arg(format!("-Xmx{}M", heap_mb()))

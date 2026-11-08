@@ -348,6 +348,10 @@ pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<
         }
     }
     if world_is_locked(world_dir) {
+        // A live server a crashed Arnis left running holds the lock too.
+        crate::live::stop_leftover_server(world_dir);
+    }
+    if world_is_locked(world_dir) {
         return Err(open_in_minecraft(world_dir));
     }
     std::fs::create_dir_all(world_dir)

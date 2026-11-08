@@ -449,6 +449,84 @@ fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(root.join(rel_path))
 }
 
+/// A player's face, with the hat layer over it, as a PNG data URL. None for a name without a
+/// Mojang account or when Mojang cannot be reached.
+pub fn player_head(name: &str) -> Option<String> {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let valid = (1..=16).contains(&name.len())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !valid {
+        return None;
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .ok()?;
+    let json = |url: &str| -> Option<serde_json::Value> {
+        serde_json::from_str(&get_text(&client, url).ok()?).ok()
+    };
+    let id = [
+        format!("https://api.mojang.com/users/profiles/minecraft/{name}"),
+        format!("https://api.minecraftservices.com/minecraft/profile/lookup/name/{name}"),
+    ]
+    .iter()
+    .find_map(|url| Some(json(url)?.get("id")?.as_str()?.to_string()))?;
+    let session = json(&format!(
+        "https://sessionserver.mojang.com/session/minecraft/profile/{id}"
+    ))?;
+    let value = session
+        .get("properties")?
+        .as_array()?
+        .iter()
+        .find(|p| p.get("name").and_then(|n| n.as_str()) == Some("textures"))?
+        .get("value")?
+        .as_str()?;
+    let textures: serde_json::Value = serde_json::from_slice(&b64.decode(value).ok()?).ok()?;
+    let url = textures.pointer("/textures/SKIN/url")?.as_str()?;
+    let path = url
+        .strip_prefix("http://textures.minecraft.net/")
+        .or_else(|| url.strip_prefix("https://textures.minecraft.net/"))?;
+    let png = client
+        .get(format!("https://textures.minecraft.net/{path}"))
+        .send()
+        .and_then(|r| r.error_for_status())
+        .and_then(|r| r.bytes())
+        .ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        b64.encode(skin_head(&png)?)
+    ))
+}
+
+/// The 8×8 face of a skin with its hat layer on top, as PNG bytes.
+fn skin_head(png: &[u8]) -> Option<Vec<u8>> {
+    let skin = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .ok()?
+        .to_rgba8();
+    if skin.width() < 64 || skin.height() < 32 {
+        return None;
+    }
+    let mut face = image::RgbaImage::new(8, 8);
+    for y in 0..8 {
+        for x in 0..8 {
+            let hat = *skin.get_pixel(40 + x, 8 + y);
+            let mut px = if hat[3] >= 128 {
+                hat
+            } else {
+                *skin.get_pixel(8 + x, 8 + y)
+            };
+            px[3] = 255;
+            face.put_pixel(x, y, px);
+        }
+    }
+    let mut out = Vec::new();
+    face.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .ok()?;
+    Some(out)
+}
+
 fn get_text(client: &reqwest::blocking::Client, url: &str) -> Result<String, String> {
     client
         .get(url)
@@ -506,6 +584,27 @@ fn sha1_of(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_head_is_the_face_with_the_hat_over_it() {
+        let mut skin = image::RgbaImage::from_pixel(64, 64, image::Rgba([0, 0, 0, 0]));
+        for y in 8..16 {
+            for x in 8..16 {
+                skin.put_pixel(x, y, image::Rgba([200, 150, 100, 255]));
+            }
+        }
+        skin.put_pixel(41, 9, image::Rgba([10, 20, 30, 255]));
+        let mut png = Vec::new();
+        skin.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let head = image::load_from_memory(&skin_head(&png).unwrap())
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(head.dimensions(), (8, 8));
+        assert_eq!(*head.get_pixel(0, 0), image::Rgba([200, 150, 100, 255]));
+        assert_eq!(*head.get_pixel(1, 1), image::Rgba([10, 20, 30, 255]));
+        assert!(skin_head(b"not a png").is_none());
+    }
 
     fn manifest(json: Value) -> Manifest {
         Manifest { json }

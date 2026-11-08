@@ -3455,6 +3455,7 @@ function refreshLiveRows() {
     const row = document.getElementById(id);
     if (row) row.style.display = live ? '' : 'none';
   }
+  document.getElementById('one-world-stack')?.classList.toggle('is-open', live);
   setSettingsRowAvailable('live-version-select', !liveActive());
   setSettingsRowAvailable('live-view-distance-select', !liveActive());
   // The world the session plays is fixed until it ends.
@@ -3548,19 +3549,17 @@ function renderLiveProgress() {
     fraction = typeof status.download.progress === 'number' ? status.download.progress : fraction;
   }
   const ready = status.stage === 'running' && !status.teleport_pending && !status.teleport_failed;
-  // Names the version so a player on another one knows why joining fails.
-  if (ready) {
-    const parts = [status.version ? `Minecraft ${status.version}` : '', status.address || ''].filter(Boolean);
-    if (parts.length) text += ` (${parts.join(', ')})`;
-  }
   if (['running', 'stopped'].includes(status.phase) || status.stage === 'stopped') fraction = 1;
   if (status.phase === 'failed') fraction = 0;
   info.textContent = text;
   info.style.color = status.phase === 'failed' ? '#fa7878'
     : status.stage === 'running' && status.teleport_failed ? '#fecc44'
       : ready ? '#7bd864' : '#ececec';
-  if (fraction !== null) bar.style.width = `${Math.round(fraction * 100)}%`;
-  detail.textContent = status.phase === 'starting' && fraction !== null ? `${Math.round(fraction * 100)}%` : '';
+  // The percentage stays beside the bar, as in a generation, so the bar keeps its width.
+  if (fraction !== null) {
+    bar.style.width = `${Math.round(fraction * 100)}%`;
+    detail.textContent = `${Math.round(fraction * 100)}%`;
+  }
   resetEta();
 }
 
@@ -3690,6 +3689,8 @@ async function startLive() {
   liveStatus = { phase: 'starting', stage: 'starting' };
   const bar = document.getElementById('progress-bar');
   if (bar) bar.style.width = '0%';
+  const detail = document.getElementById('progress-detail');
+  if (detail) detail.textContent = '0%';
   onLiveStatus();
   setWorldNameLabel(oneWorldFolderName());
   try {

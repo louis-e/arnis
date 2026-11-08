@@ -474,17 +474,29 @@ body,
 
 .live-player-dot {
   position: absolute;
-  inset: 0;
+  inset: 3px;
   border: 2px solid #ffffff;
   border-radius: 50%;
   background: #fecc44;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
+.live-player-head {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 2px solid #ffffff;
+  border-radius: 3px;
+  image-rendering: pixelated;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
 .live-player-name {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: 22px;
   transform: translateX(-50%);
   padding: 1px 6px;
   border-radius: 4px;
