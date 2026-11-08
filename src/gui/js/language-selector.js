@@ -1,3 +1,5 @@
+import { matchLanguage } from './language.js';
+
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function () {
     // Get language selector
@@ -8,15 +10,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const savedLanguage = localStorage.getItem('arnis-language');
         const currentLang = savedLanguage || navigator.language;
         const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
-
-        // Try to match the exact language code first
-        if (availableOptions.includes(currentLang)) {
-            languageSelect.value = currentLang;
-        }
-        // Try to match just the base language code
-        else if (availableOptions.includes(currentLang.split('-')[0])) {
-            languageSelect.value = currentLang.split('-')[0];
-        }
+        languageSelect.value = matchLanguage(currentLang, availableOptions);
 
         // Handle language change
         languageSelect.addEventListener('change', function () {

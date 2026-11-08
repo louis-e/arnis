@@ -96,6 +96,9 @@ mod progress {
     pub fn emit_gui_error(_message: &str) {}
     pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
     pub fn emit_gui_progress_update_ex(_progress: f64, _message: &str, _streaming: bool) {}
+    pub fn while_waiting<T>(_waiting_for: &str, wait: impl FnOnce() -> T) -> T {
+        wait()
+    }
     pub fn emit_map_preview_ready() {}
     pub fn emit_show_in_folder(_path: &str) {}
     pub fn is_running_with_gui() -> bool {
@@ -653,6 +656,15 @@ fn run_cli() {
 
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    // Before the land override, which would give them land to stand on.
+    let wet =
+        overture::drop_footprints_in_water(&mut parsed_elements, &ground, &xzbbox, args.scale);
+    if wet > 0 {
+        println!(
+            "  Left out {} Overture buildings standing in water",
+            wet.to_string().bright_white().bold()
+        );
+    }
     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
