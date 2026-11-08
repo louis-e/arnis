@@ -1190,8 +1190,26 @@ $(document).ready(function () {
                 </svg>
                 <span id="copy-coords-text">Copy coordinates</span>
             </div>
+            <div class="coordinate-context-menu-item" id="live-teleport-item">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path>
+                    <circle cx="12" cy="10" r="3"></circle>
+                </svg>
+                <span id="live-teleport-text">Teleport here</span>
+            </div>
         `;
         document.body.appendChild(contextMenuElement);
+
+        contextMenuElement.querySelector('#live-teleport-item').addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.parent.postMessage({
+                type: 'liveTeleport',
+                lat: parseFloat(contextMenuElement.dataset.lat),
+                lng: parseFloat(contextMenuElement.dataset.lng)
+            }, '*');
+            hideContextMenu();
+        });
 
         // Handle click on the copy coordinates item
         var copyItem = contextMenuElement.querySelector('#copy-coords-item');
@@ -1206,14 +1224,16 @@ $(document).ready(function () {
     }
 
     // Show context menu at position
-    function showContextMenu(x, y, latLng) {
-        if (!worldPreviewAvailable || !worldOverlayData) return;
-
+    function showContextMenu(x, y, latLng, canCopy) {
         var menu = createContextMenu();
+        menu.querySelector('#copy-coords-item').style.display = canCopy ? '' : 'none';
+        menu.querySelector('#live-teleport-item').style.display = liveCanTeleport ? '' : 'none';
+        menu.querySelector('#copy-coords-text').textContent = mapText('map_copy_coordinates', 'Copy coordinates');
+        menu.querySelector('#live-teleport-text').textContent = mapText('live_teleport', 'Teleport here');
 
         // Position the menu, ensuring it stays within viewport
         var menuWidth = 180;
-        var menuHeight = 40;
+        var menuHeight = (canCopy && liveCanTeleport) ? 76 : 40;
         var viewportWidth = window.innerWidth;
         var viewportHeight = window.innerHeight;
 
@@ -1343,9 +1363,9 @@ $(document).ready(function () {
 
     // Handle right-click on the map
     map.on('contextmenu', function(e) {
-        // Only show context menu if world preview is available and has Minecraft coords
+        // Coordinates are offered inside the world; a live session can teleport anywhere.
+        var canCopy = false;
         if (worldPreviewAvailable && worldOverlayData && hasMinecraftCoords()) {
-            // Check if the click is within the world bounds
             var data = worldOverlayData;
             var lat = e.latlng.lat;
             var lng = e.latlng.lng;
@@ -1353,9 +1373,12 @@ $(document).ready(function () {
             var inside = function (b) {
                 return lat >= b.min_lat && lat <= b.max_lat && lng >= b.min_lon && lng <= b.max_lon;
             };
-            if (data.areas ? data.areas.some(inside) : inside(data)) {
-                showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng);
-            }
+            canCopy = data.areas ? data.areas.some(inside) : inside(data);
+        }
+        // During a live session the copied command would jump onto land not built yet.
+        if (liveActive) canCopy = false;
+        if (canCopy || liveCanTeleport) {
+            showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng, canCopy);
         }
     });
 
@@ -1369,6 +1392,46 @@ $(document).ready(function () {
     map.on('movestart', hideContextMenu);
     map.on('zoomstart', hideContextMenu);
     // ========== End Context Menu ==========
+
+    // Live mode: a marker per player in the overworld, and teleporting from the menu.
+    var liveActive = false;
+    // Teleports only work once the server runs.
+    var liveCanTeleport = false;
+    var livePlayerLayer = L.layerGroup().addTo(map);
+    var livePlayerMarkers = {};
+
+    function setLivePlayers(active, canTeleport, players) {
+        liveActive = !!active;
+        if (liveCanTeleport && !canTeleport) hideContextMenu();
+        liveCanTeleport = liveActive && !!canTeleport;
+        var seen = {};
+        (liveActive ? players || [] : []).forEach(function (p) {
+            if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
+            seen[p.name] = true;
+            var at = [p.lat, p.lon];
+            if (livePlayerMarkers[p.name]) {
+                livePlayerMarkers[p.name].setLatLng(at);
+                return;
+            }
+            var icon = L.divIcon({
+                className: 'live-player-marker',
+                html: '<span class="live-player-dot"></span><span class="live-player-name"></span>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+            var marker = L.marker(at, { icon: icon, interactive: false, keyboard: false, zIndexOffset: 3000 });
+            marker.addTo(livePlayerLayer);
+            var label = marker.getElement() && marker.getElement().querySelector('.live-player-name');
+            if (label) label.textContent = p.name;
+            livePlayerMarkers[p.name] = marker;
+        });
+        Object.keys(livePlayerMarkers).forEach(function (name) {
+            if (!seen[name]) {
+                livePlayerLayer.removeLayer(livePlayerMarkers[name]);
+                delete livePlayerMarkers[name];
+            }
+        });
+    }
 
     // Coordinates typed into the parent's bbox field, as [south, west, north,
     // east]. Applied through the same draw:created path the hash restore uses,
@@ -1480,6 +1543,10 @@ $(document).ready(function () {
                 }
             }
             oneWorldFittedPath = areas.length > 0 ? worldPath : null;
+        }
+
+        if (event.data && event.data.type === 'livePlayers') {
+            setLivePlayers(event.data.active, event.data.canTeleport, event.data.players);
         }
 
         // One World keeps rotation at 0.
@@ -2057,6 +2124,8 @@ $(document).ready(function () {
             .on(btn, 'mousedown dblclick', L.DomEvent.stopPropagation)
             .on(btn, 'click', L.DomEvent.stop)
             .on(btn, 'click', function () {
+                // A live session plays Earth until it ends.
+                if (liveActive) return;
                 var i = BODY_CYCLE.indexOf(currentBody);
                 changeBody(BODY_CYCLE[(i + 1) % BODY_CYCLE.length]);
                 // The parent gates Earth-only settings off this.

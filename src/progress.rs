@@ -163,3 +163,12 @@ pub fn emit_show_in_folder(path: &str) {
         }
     }
 }
+
+/// Live mode's state, for the live dialog.
+pub fn emit_live_status(status: &crate::live::Status) {
+    if let Some(window) = MAIN_WINDOW.get() {
+        if let Err(e) = window.emit("live-status", status) {
+            eprintln!("Failed to emit live-status event: {e}");
+        }
+    }
+}

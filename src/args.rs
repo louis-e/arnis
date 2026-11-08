@@ -415,6 +415,54 @@ pub struct Args {
     /// 1.21.120+; Bedrock has no traffic lights to stop at.
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
+
+    #[command(flatten)]
+    pub live: LiveArgs,
+}
+
+/// Live mode: the One World on a local Minecraft server, generated around the players.
+#[derive(clap::Args, Debug, Clone)]
+pub struct LiveArgs {
+    /// Play the One World on a local Minecraft Java server that keeps generating the land
+    /// around you while you play. Needs --one-world; --bbox, if given, is where you start.
+    /// Runs until Ctrl+C.
+    #[arg(long, requires = "one_world")]
+    pub live: bool,
+
+    /// Agree to the Minecraft EULA (https://aka.ms/MinecraftEULA), which a server needs.
+    #[arg(long)]
+    pub accept_eula: bool,
+
+    /// Minecraft version of the live server, which must match the game. Default: the
+    /// version the launcher played last.
+    #[arg(long = "live-version", id = "live_version", value_name = "VERSION")]
+    pub version: Option<String>,
+
+    /// How many chunks around each player the live server loads and sends.
+    #[arg(long = "live-view-distance", default_value_t = crate::live::DEFAULT_VIEW_DISTANCE,
+        value_parser = clap::value_parser!(u32).range(4..=32))]
+    pub view_distance: u32,
+
+    /// Port the live server listens on (default 25565, or a free one).
+    #[arg(long = "live-port")]
+    pub port: Option<u16>,
+
+    /// Internal: one tile of a live session.
+    #[arg(long = "live-tile", hide = true)]
+    pub tile: bool,
+}
+
+impl Default for LiveArgs {
+    fn default() -> Self {
+        Self {
+            live: false,
+            accept_eula: false,
+            version: None,
+            view_distance: crate::live::DEFAULT_VIEW_DISTANCE,
+            port: None,
+            tile: false,
+        }
+    }
 }
 
 /// Accepts the panel resolutions the atlas budget logic can halve cleanly.
@@ -1092,7 +1140,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
 
     // A bounding box is required unless a local --file supplies one to derive it from.
     // A run that loads no OSM data ignores --file, so it always needs --bbox.
-    if args.bbox.is_none() {
+    // Live mode can continue a One World where its players left off.
+    if args.bbox.is_none() && !args.live.live {
         if args.skip_osm() {
             return Err(
                 "--bbox is required: below scale 0.3, or off Earth, no OpenStreetMap data is loaded and --file is ignored."
@@ -1639,6 +1688,27 @@ mod tests {
         let args = Args::parse_from(cmd.iter());
         let result = validate_args(&args);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn live_flags_parse_beside_the_version_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp.path().to_str().unwrap(),
+            "--one-world",
+            "--live",
+            "--live-version",
+            "26.3",
+            "--live-view-distance",
+            "16",
+        ];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(args.live.live);
+        assert_eq!(args.live.version.as_deref(), Some("26.3"));
+        assert_eq!(args.live.view_distance, 16);
+        assert!(validate_args(&args).is_ok());
     }
 
     #[test]
