@@ -474,6 +474,29 @@ label[for].setting-label {
   text-align: right;
 }
 
+/* A setting and the rows that only apply with it, joined into one block */
+.setting-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-page .setting-stack.is-open > .setting-tile:first-child {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* Indented to the parent's text, so they read as its options. */
+.settings-page .setting-stack > .setting-sub {
+  border-top: 0;
+  border-radius: 0;
+  padding-left: 48px;
+}
+
+.settings-page .setting-stack > .setting-sub:last-child {
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
 /* A setting chosen from cards: heading on top, the cards underneath */
 .settings-page .setting-choice {
   display: block;

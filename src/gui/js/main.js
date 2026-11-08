@@ -1,5 +1,5 @@
 import { licenseText } from './license.js';
-import { fetchLanguage, invalidJSON } from './language.js';
+import { fetchLanguage, invalidJSON, matchLanguage } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
 import {
   initSettingsStore,
@@ -96,9 +96,10 @@ async function getLocalization() {
     return await fetchLanguage(savedLanguage);
   }
 
-  // Otherwise use the browser's language
-  const lang = navigator.language;
-  return await fetchLanguage(lang);
+  // Otherwise the offered language closest to the browser's
+  const select = document.getElementById("language-select");
+  const offered = select ? Array.from(select.options).map(opt => opt.value) : [];
+  return await fetchLanguage(detectBrowserLanguage(offered));
 }
 
 /**
@@ -164,6 +165,11 @@ async function applyLocalization(localization) {
   // Update error messages
   window.localization = localization;
   renderOneWorldStatus();
+  refreshStartButton();
+  labelLiveViewDistances();
+  fillLiveVersions();
+  // liveStatus stays "stopped" after a session, which must not take over a normal run's line.
+  if (liveActive()) renderLiveProgress();
   // The map hint lives in the map iframe, which cannot see this assignment.
   document.querySelectorAll('iframe').forEach((frame) => {
     try {
@@ -578,7 +584,8 @@ function getFacadeMode() {
 // back to Java restores it; only what the backend is asked for changes.
 function getEffectiveFacadeMode() {
   const mode = getFacadeMode();
-  if (mode !== 'blocks' && selectedWorldFormat !== 'java') return 'blocks';
+  // One World builds Mapillary facades as blocks.
+  if (mode !== 'blocks' && (selectedWorldFormat !== 'java' || isOneWorldEnabled())) return 'blocks';
   return mode;
 }
 
@@ -599,7 +606,8 @@ function getFacadeSource() {
 function getEffectiveFacadeSource() {
   const source = getFacadeSource();
   if (selectedCelestialBody !== 'earth') return 'off';
-  if (source === 'preset' && selectedWorldFormat !== 'java') return 'off';
+  // The presets are off in One World too.
+  if (source === 'preset' && (selectedWorldFormat !== 'java' || isOneWorldEnabled())) return 'off';
   return source;
 }
 
@@ -630,7 +638,7 @@ function refreshFacadeSourceRows() {
   const sourceRow = group.closest('.settings-row');
   if (sourceRow) sourceRow.classList.toggle('settings-row-unavailable', !earth);
   group.querySelectorAll('.segment').forEach((btn) => {
-    btn.disabled = !earth || (!java && btn.dataset.facadeSource === 'preset');
+    btn.disabled = !earth || ((!java || isOneWorldEnabled()) && btn.dataset.facadeSource === 'preset');
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
   });
 
@@ -678,7 +686,7 @@ function refreshFacadeRows() {
   const effective = getEffectiveFacadeMode();
   group.querySelectorAll('.segment').forEach((btn) => {
     const panels = btn.dataset.facadeMode !== 'blocks';
-    btn.disabled = panels && !java;
+    btn.disabled = panels && (!java || isOneWorldEnabled());
     btn.classList.toggle('active', btn.dataset.facadeMode === effective);
   });
   // Off Earth nothing builds facades at all, so the format gate has nothing
@@ -1152,11 +1160,7 @@ function initEasterEggs() {
 
 // Language implied by the browser, ignoring any stored preference.
 function detectBrowserLanguage(availableOptions) {
-  const currentLang = navigator.language || 'en';
-  if (availableOptions.includes(currentLang)) return currentLang;
-  const base = currentLang.split('-')[0];
-  if (availableOptions.includes(base)) return base;
-  return 'en';
+  return matchLanguage(navigator.language, availableOptions);
 }
 
 // Gives the settings store the save path defaults. Not awaited, since startup
@@ -1361,6 +1365,7 @@ function initSettings() {
 
   // One World: a persistent world every area extends (Java only)
   initOneWorld();
+  initLive();
 
   // Save path setting
   initSavePathSetting();
@@ -1764,7 +1769,7 @@ function initLuantiExperimentalToggle() {
 }
 
 function setWorldFormat(format) {
-  if (!VALID_FORMATS.includes(format)) return;
+  if (!VALID_FORMATS.includes(format) || liveActive()) return;
   if (format === 'luanti' && (!isLuantiEnabled() || isOneWorldToggleOn())) return;
 
   selectedWorldFormat = format;
@@ -1857,7 +1862,8 @@ function mobSpawningAvailable(format) {
   return (current === 'java' || current === 'bedrock')
     && selectedCelestialBody === 'earth'
     && !gameplayToggle('zombie-outbreak-toggle')
-    && !gameplayToggle('disasters-toggle');
+    && !gameplayToggle('disasters-toggle')
+    && !(isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists));
 }
 
 function refreshMobSpawningRow(format) {
@@ -2793,7 +2799,8 @@ function pendingWorldName() {
 function canEditCustomWorldName() {
   // While a generation is in flight the next world's name is already taken
   // from here, so an edit would only look like it applied to the running one.
-  return isCustomWorldNameFeatureEnabled() && generationButtonEnabled;
+  // A live session plays the world under this name.
+  return isCustomWorldNameFeatureEnabled() && generationButtonEnabled && !liveActive();
 }
 
 function updateWorldNamePreviewLabel() {
@@ -2972,9 +2979,14 @@ function isOneWorldAvailable() {
   return selectedWorldFormat === 'java' && selectedCelestialBody === 'earth';
 }
 
+// Off, On (areas join one world) or Live (that world played on a local server).
+function oneWorldMode() {
+  const btn = document.querySelector('#one-world-group .segment.active');
+  return btn ? btn.dataset.oneWorld : 'off';
+}
+
 function isOneWorldToggleOn() {
-  const toggle = document.getElementById('one-world-toggle');
-  return !!(toggle && toggle.checked);
+  return oneWorldMode() !== 'off';
 }
 
 // Luanti cannot hold a One World, so it is off while the toggle is.
@@ -2990,8 +3002,36 @@ function refreshLuantiAvailability() {
 }
 
 function isOneWorldEnabled() {
-  const toggle = document.getElementById('one-world-toggle');
-  return !!(toggle && toggle.checked) && isOneWorldAvailable();
+  return isOneWorldToggleOn() && isOneWorldAvailable();
+}
+
+function isLiveMode() {
+  return oneWorldMode() === 'live' && isOneWorldAvailable();
+}
+
+// Says what the picked mode does.
+function refreshOneWorldDesc() {
+  const desc = document.getElementById('one-world-desc');
+  if (!desc) return;
+  const mode = oneWorldMode();
+  const texts = {
+    off: ['one_world_desc_off', 'Every area becomes a world of its own. Java only.'],
+    on: ['one_world_desc_on', 'Each area joins one growing world at its real position. Java only.'],
+    live: ['one_world_desc_live', 'Play that world in Minecraft while Arnis generates the land around you. Java only.']
+  };
+  const [key, fallback] = texts[mode] || texts.off;
+  desc.dataset.localize = key;
+  desc.textContent = oneWorldText(key, fallback);
+}
+
+// A world keeps the game mode, time, mob spawning and map item of its first area, and a
+// live world gets no map item at all.
+function refreshWorldRulesRows() {
+  const fixed = isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists);
+  setSegmentedRowAvailable('gamemode-group', !fixed);
+  setSettingsRowAvailable('world-time-slider', !fixed);
+  setSettingsRowAvailable('map-item-toggle', !fixed && !isLiveMode());
+  refreshMobSpawningRow();
 }
 
 // The name picks the world; it never renames one on disk.
@@ -3038,12 +3078,22 @@ function renderOneWorldStatus() {
     setOneWorldStatus(oneWorldText('one_world_foreign', 'Folder "{name}" exists but is not a One World', { name }), 'error');
     return;
   }
-  if (!info.exists) {
+  if (!info.exists && !liveActive()) {
     setOneWorldStatus(oneWorldText('one_world_will_create', 'One World "{name}" will be created', { name }));
     return;
   }
-  let text = oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}', { name, count: info.area_count });
+  let text = oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}', { name, count: info.area_count || 0 });
   let tone = '';
+  if (liveActive()) {
+    const players = (liveStatus.players || []).length;
+    text += ' \u00b7 ' + oneWorldText('live_players', 'Players: {count}', { count: players });
+    if (liveStatus.tiles_failed > 0) {
+      text += ' \u00b7 ' + oneWorldText('live_some_failed', 'some land could not be generated');
+      tone = 'warn';
+    }
+    setOneWorldStatus(text, tone);
+    return;
+  }
   if (info.locked) {
     text += ' \u00b7 ' + oneWorldText('one_world_locked', 'open in Minecraft');
     tone = 'warn';
@@ -3186,11 +3236,14 @@ let oneWorldRefreshSeq = 0;
 async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
   refreshLuantiAvailability();
-  setSettingsRowAvailable('one-world-toggle', isOneWorldAvailable());
+  setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  refreshLiveRows();
+  refreshStartButton();
   if (!isOneWorldEnabled()) {
     const wasOn = oneWorldInfo !== null;
     oneWorldInfo = null;
     releaseOneWorldPins();
+    refreshWorldRulesRows();
     setOneWorldStatus('');
     clearOneWorldOverlays();
     if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
@@ -3217,6 +3270,7 @@ async function refreshOneWorldState() {
   if (seq !== oneWorldRefreshSeq) return;
   oneWorldInfo = info;
   applyOneWorldPins(info);
+  refreshWorldRulesRows();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   renderOneWorldStatus();
 
@@ -3321,15 +3375,433 @@ function postToMap(message) {
   }
 }
 
-function initOneWorld() {
-  const toggle = document.getElementById('one-world-toggle');
-  if (!toggle) return;
-  // Also fires when the settings store restores the value.
-  toggle.addEventListener('change', refreshOneWorldState);
-  toggle.addEventListener('change', () => {
-    refreshGameplayRows();
-    refreshWorldTypeRow();
+// ---- Live mode: the One World on a local Minecraft server, generated around the players ----
+
+const LIVE_VERSION_KEY = 'arnis-live-version';
+const LIVE_VIEW_DISTANCES = [8, 12, 16, 24, 32];
+// Last state the backend reported, null before the first session.
+let liveStatus = null;
+// Versions to offer and whether the EULA is accepted, read once Live is picked.
+let liveInfo = null;
+let liveInfoLoading = null;
+// The saves folder and world liveInfo was read for.
+let liveInfoKey = '';
+// The selection and spawn marker the last session started from, per world.
+const LIVE_START_KEY = 'arnis-live-start';
+
+function liveActive() {
+  return !!liveStatus && ['starting', 'running', 'stopping'].includes(liveStatus.phase);
+}
+
+function liveHasSelection() {
+  return !!selectedBBox && selectedBBox !== "0.000000 0.000000 0.000000 0.000000";
+}
+
+function loadLiveInfo() {
+  if (liveInfoLoading) return liveInfoLoading;
+  const key = (savePath || '') + '|' + oneWorldFolderName();
+  liveInfoLoading = invoke('gui_live_info', { savePath: savePath || '', worldName: oneWorldFolderName() })
+    .then((info) => {
+      liveInfo = info;
+      liveInfoKey = key;
+      fillLiveVersions();
+      return info;
+    })
+    .catch((error) => {
+      console.error('Failed to read live mode info:', error);
+      return null;
+    })
+    .finally(() => { liveInfoLoading = null; });
+  return liveInfoLoading;
+}
+
+function fillLiveVersions() {
+  const select = document.getElementById('live-version-select');
+  if (!select || !liveInfo) return;
+  Array.from(select.options).filter((o) => o.value).forEach((o) => o.remove());
+  const auto = select.options[0];
+  if (auto) {
+    auto.textContent = oneWorldText('live_version_auto', 'Automatic') +
+      (liveInfo.default_version ? ` (${liveInfo.default_version})` : '');
+  }
+  const versions = liveInfo.versions || [];
+  for (const v of versions) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v === liveInfo.last_played
+      ? `${v} (${oneWorldText('live_last_played', 'last played')})`
+      : v;
+    select.appendChild(opt);
+  }
+  const saved = localStorage.getItem(LIVE_VERSION_KEY) || '';
+  select.value = versions.includes(saved) ? saved : '';
+}
+
+function labelLiveViewDistances() {
+  const select = document.getElementById('live-view-distance-select');
+  if (!select) return;
+  for (const opt of select.options) {
+    opt.textContent = oneWorldText('live_chunks', '{count} chunks', { count: opt.value });
+  }
+}
+
+// The version and view distance only mean something in Live, and stay put while it runs.
+function refreshLiveRows() {
+  const live = isLiveMode();
+  for (const id of ['live-version-row', 'live-view-distance-row']) {
+    const row = document.getElementById(id);
+    if (row) row.style.display = live ? '' : 'none';
+  }
+  document.getElementById('one-world-stack')?.classList.toggle('is-open', live);
+  setSettingsRowAvailable('live-version-select', !liveActive());
+  setSettingsRowAvailable('live-view-distance-select', !liveActive());
+  // The world the session plays is fixed until it ends.
+  setSettingsRowAvailable('save-path-input', !liveActive());
+  setSettingsRowAvailable('custom-world-name-toggle', !liveActive());
+  if (liveInfo && liveInfoKey !== (savePath || '') + '|' + oneWorldFolderName()) liveInfo = null;
+  if (live && !liveInfo) loadLiveInfo();
+}
+
+// In Live the main button starts and stops the session.
+function refreshStartButton() {
+  const button = document.getElementById('start-button');
+  const label = button && button.querySelector('span');
+  if (!label) return;
+  let key = 'start_generation';
+  let fallback = 'Start Generation';
+  const stopping = liveActive() && liveStatus.phase === 'stopping';
+  if (stopping) {
+    key = 'live_stopping_button';
+    fallback = 'Stopping\u2026';
+  } else if (liveActive()) {
+    key = 'live_stop_button';
+    fallback = 'Stop Live Mode';
+  } else if (isLiveMode()) {
+    key = 'live_play';
+    fallback = 'Play Live';
+  }
+  label.dataset.localize = key;
+  label.textContent = oneWorldText(key, fallback);
+  const wrap = button.closest('.start-button-wrap');
+  if (wrap) {
+    wrap.classList.toggle('is-live', liveActive() && !stopping);
+    wrap.classList.toggle('is-stopping', stopping);
+  }
+}
+
+// The backend names each step; the words are the GUI's, in the user's language.
+function liveStageText(status) {
+  // The server stopped from the game is still saving.
+  if ((status.phase === 'stopping' && !['saving', 'stopping'].includes(status.stage)) ||
+    status.stage === 'stopped_in_game') {
+    return oneWorldText('live_stage_stopping', 'Stopping the server and saving the world');
+  }
+  switch (status.stage) {
+    case 'checking':
+      return oneWorldText('live_stage_checking', 'Checking the world');
+    case 'start_area':
+      return status.step
+        ? oneWorldText('live_stage_start_area', 'Generating the land around the start: {done} of {total}',
+          { done: status.step[0], total: status.step[1] })
+        : oneWorldText('live_stage_starting', 'Starting');
+    case 'server_starting':
+      return oneWorldText('live_stage_server', 'Starting the Minecraft {version} server', { version: status.version || '' });
+    case 'running':
+      if (status.teleport_pending) return oneWorldText('live_stage_teleport', 'Generating the place you picked');
+      if (status.teleport_failed) return oneWorldText('live_teleport_failed', 'The place you picked could not be generated');
+      return oneWorldText('live_ready', 'Ready. Join "Arnis Live" under Multiplayer.');
+    case 'saving':
+      return oneWorldText('live_stage_saving', 'Saving the world');
+    case 'stopping':
+      return oneWorldText('live_stage_stopping', 'Stopping the server and saving the world');
+    case 'stopped':
+      return oneWorldText('live_stage_stopped', 'Stopped. The world is saved.');
+    case 'failed':
+      return status.error || oneWorldText('live_stage_failed', 'Live mode stopped because of an error.');
+    default:
+      return oneWorldText('live_stage_starting', 'Starting');
+  }
+}
+
+function liveDownloadText(download) {
+  const percent = typeof download.progress === 'number' ? Math.round(download.progress * 100) : 0;
+  if (download.what === 'java') {
+    return oneWorldText('live_download_java', 'Downloading Java for the server: {percent}%', { percent });
+  }
+  return oneWorldText('live_download_server', 'Downloading the Minecraft {version} server: {percent}%',
+    { version: (liveStatus && liveStatus.version) || '', percent });
+}
+
+// A session reports in the progress line and bar, where a generation does.
+function renderLiveProgress() {
+  const status = liveStatus;
+  const info = document.getElementById('progress-info');
+  const bar = document.getElementById('progress-bar');
+  const detail = document.getElementById('progress-detail');
+  if (!status || !info || !bar || !detail) return;
+  let text = liveStageText(status);
+  let fraction = typeof status.progress === 'number' ? status.progress : null;
+  if (status.download && status.phase === 'starting') {
+    text = liveDownloadText(status.download);
+    fraction = typeof status.download.progress === 'number' ? status.download.progress : fraction;
+  }
+  const ready = status.stage === 'running' && !status.teleport_pending && !status.teleport_failed;
+  if (['running', 'stopped'].includes(status.phase) || status.stage === 'stopped') fraction = 1;
+  if (status.phase === 'failed') fraction = 0;
+  info.textContent = text;
+  info.style.color = status.phase === 'failed' ? '#fa7878'
+    : status.stage === 'running' && status.teleport_failed ? '#fecc44'
+      : ready ? '#7bd864' : '#ececec';
+  // The percentage stays beside the bar, as in a generation, so the bar keeps its width.
+  if (fraction !== null) {
+    bar.style.width = `${Math.round(fraction * 100)}%`;
+    detail.textContent = `${Math.round(fraction * 100)}%`;
+  }
+  resetEta();
+}
+
+// Resolves to true once the user accepted Mojang's EULA.
+function confirmLiveEula() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('live-modal');
+    const accept = document.getElementById('live-accept');
+    const cancel = document.getElementById('live-cancel');
+    const close = document.getElementById('live-close');
+    if (!modal || !accept || !cancel) {
+      resolve(false);
+      return;
+    }
+    const finish = (answer) => {
+      hideModal(modal);
+      accept.removeEventListener('click', onAccept);
+      cancel.removeEventListener('click', onCancel);
+      if (close) close.removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      resolve(answer);
+    };
+    const onAccept = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (event) => { if (event.key === 'Escape') finish(false); };
+    accept.addEventListener('click', onAccept);
+    cancel.addEventListener('click', onCancel);
+    if (close) close.addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    showModal(modal);
+    accept.focus();
   });
+}
+
+// What players read in the game, in the language set here.
+function liveGameMessages() {
+  return {
+    welcome: oneWorldText('live_game_welcome', 'Arnis keeps generating the land as you explore.'),
+    building: oneWorldText('live_game_building', 'Arnis is generating the land ahead'),
+    wall: oneWorldText('live_game_wall', 'Arnis is still generating this way'),
+    moved_back: oneWorldText('live_game_moved_back', 'That land is not ready yet'),
+    teleport_wait: oneWorldText('live_game_teleport_wait', 'Arnis is generating the place you picked. You will be moved there when it is ready.'),
+    teleport_failed: oneWorldText('live_game_teleport_failed', 'Arnis could not generate the place you picked.')
+  };
+}
+
+function showLiveRefusal(text) {
+  const info = document.getElementById('progress-info');
+  if (!info) return;
+  info.textContent = text;
+  info.style.color = '#fa7878';
+}
+
+async function startLive() {
+  if (liveActive()) return;
+  if (!savePath) {
+    showLiveRefusal(oneWorldText('one_world_no_save_path', 'Set the Minecraft saves folder in Settings first'));
+    return;
+  }
+  // A lock is left to the backend: it may be a server an earlier Arnis left running.
+  const world = oneWorldInfo;
+  if (world && world.foreign) {
+    renderOneWorldStatus();
+    return;
+  }
+  if (!liveHasSelection() && !(world && world.exists)) {
+    setBboxSelectionInfo(document.getElementById('bbox-selection-info'), "select_location_first", "#fa7878");
+    return;
+  }
+  let acceptEula = false;
+  let accepted = false;
+  try {
+    accepted = await invoke('gui_live_eula_accepted');
+  } catch (_) { /* asked below */ }
+  if (!accepted) {
+    if (!(await confirmLiveEula())) return;
+    acceptEula = true;
+  }
+  if (liveActive() || !isLiveMode()) return;
+
+  const settings = readGenerationSettings(true);
+  let spawnPoint = null;
+  const mapFrame = document.querySelector('.map-container');
+  if (liveHasSelection() && mapFrame && mapFrame.contentWindow && mapFrame.contentWindow.getSpawnPointCoords) {
+    const coords = mapFrame.contentWindow.getSpawnPointCoords();
+    if (coords) spawnPoint = [coords.lat, normalizeLongitude(coords.lng)];
+  }
+  // A selection starts play once; played again unchanged, players go on where they left.
+  const startKey = [oneWorldFolderName(), savePath, selectedBBox, JSON.stringify(spawnPoint)].join('|');
+  const useSelection = liveHasSelection() &&
+    !(world && world.exists && localStorage.getItem(LIVE_START_KEY) === startKey);
+  const versionSelect = document.getElementById('live-version-select');
+  const viewSelect = document.getElementById('live-view-distance-select');
+  const options = {
+    savePath: savePath,
+    worldName: oneWorldFolderName(),
+    version: (versionSelect && versionSelect.value) || null,
+    viewDistance: parseInt(viewSelect && viewSelect.value, 10) || 12,
+    acceptEula: acceptEula,
+    bboxText: useSelection ? selectedBBox : null,
+    spawnPoint: useSelection ? spawnPoint : null,
+    worldScale: settings.worldScale,
+    heightMultiplier: settings.heightMultiplier,
+    generationMode: settings.generationMode,
+    winterEnabled: settings.winterEnabled,
+    postApocalypticEnabled: settings.postApocalypticEnabled,
+    interiorEnabled: settings.interiorEnabled,
+    fillgroundEnabled: settings.fillgroundEnabled,
+    cavesEnabled: settings.cavesEnabled,
+    legacyTreesEnabled: settings.legacyTreesEnabled,
+    maxTreeSize: settings.maxTreeSize,
+    fieldPreset: settings.fieldPreset,
+    canopyHeightEnabled: settings.canopyHeightEnabled,
+    overtureEnabled: settings.overtureEnabled,
+    use3dEnabled: settings.use3dEnabled,
+    awsOnlyElevation: settings.awsOnlyElevation,
+    bakeLightingEnabled: settings.bakeLightingEnabled,
+    signage: settings.signage,
+    mapillaryToken: settings.mapillaryToken,
+    facadesEnabled: settings.facadesEnabled,
+    facadeMode: settings.facadeMode,
+    gamemode: settings.gamemode,
+    worldTime: settings.worldTime,
+    mobSpawning: settings.mobSpawning,
+    messages: liveGameMessages()
+  };
+  liveStatus = { phase: 'starting', stage: 'starting' };
+  const bar = document.getElementById('progress-bar');
+  if (bar) bar.style.width = '0%';
+  const detail = document.getElementById('progress-detail');
+  if (detail) detail.textContent = '0%';
+  onLiveStatus();
+  setWorldNameLabel(oneWorldFolderName());
+  try {
+    await invoke('gui_live_start', { options: options });
+    if (liveInfo) liveInfo.eula_accepted = true;
+    if (useSelection) localStorage.setItem(LIVE_START_KEY, startKey);
+  } catch (error) {
+    liveStatus = { phase: 'failed', stage: 'failed', error: String(error) };
+    onLiveStatus();
+  }
+}
+
+async function stopLive() {
+  if (!liveActive() || liveStatus.phase === 'stopping') return;
+  liveStatus.phase = 'stopping';
+  onLiveStatus();
+  try {
+    await invoke('gui_live_stop');
+  } catch (error) {
+    console.error('Failed to stop live mode:', error);
+  }
+}
+
+// Everything that shows the session, after each report.
+function onLiveStatus() {
+  renderLiveProgress();
+  refreshStartButton();
+  if (!isWorldNameEditing()) refreshWorldNameEditUI();
+  refreshLiveRows();
+  setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  const bedrockBtn = document.getElementById('format-bedrock');
+  if (bedrockBtn) bedrockBtn.disabled = liveActive();
+  renderOneWorldStatus();
+  postToMap({
+    type: 'livePlayers',
+    active: liveActive(),
+    canTeleport: !!liveStatus && liveStatus.stage === 'running',
+    players: (liveStatus && liveStatus.players) || []
+  });
+}
+
+function initLive() {
+  document.getElementById('live-eula-link')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    openExternal((liveInfo && liveInfo.eula_url) || 'https://aka.ms/MinecraftEULA');
+  });
+  const modal = document.getElementById('live-modal');
+  if (modal) closeOnBackdrop(modal, () => document.getElementById('live-cancel')?.click());
+  document.getElementById('live-version-select')?.addEventListener('change', (event) => {
+    if (event.target.value) localStorage.setItem(LIVE_VERSION_KEY, event.target.value);
+    else localStorage.removeItem(LIVE_VERSION_KEY);
+  });
+  labelLiveViewDistances();
+  // "Teleport here" in the map's right-click menu.
+  window.addEventListener('message', (event) => {
+    const mapFrame = document.querySelector('.map-container');
+    if (!mapFrame || event.source !== mapFrame.contentWindow) return;
+    if (!event.data || event.data.type !== 'liveTeleport' || !liveActive()) return;
+    invoke('gui_live_teleport', { lat: event.data.lat, lng: normalizeLongitude(event.data.lng) })
+      .catch((error) => console.error('Teleport failed:', error));
+  });
+  // The map shows new areas as they come in, a batch at a time.
+  let overlayTiles = 0;
+  let overlayAt = 0;
+  window.__TAURI__.event.listen('live-status', (event) => {
+    const wasActive = liveActive();
+    const wasPhase = liveStatus && liveStatus.phase;
+    liveStatus = event.payload;
+    // A session may have saved the world with a newer version.
+    if (wasActive && !liveActive()) liveInfo = null;
+    onLiveStatus();
+    const done = liveStatus.tiles_done || 0;
+    const now = Date.now();
+    // The world unlocks when a session ends and exists once it runs, so it is read again.
+    if (wasActive !== liveActive() || (liveStatus.phase === 'running' && wasPhase !== 'running')) {
+      overlayTiles = 0;
+      overlayAt = now;
+      oneWorldOverlayKey = null;
+      refreshOneWorldState();
+    } else if (done - overlayTiles >= 8 && now - overlayAt > 15000) {
+      overlayTiles = done;
+      overlayAt = now;
+      oneWorldOverlayKey = null;
+      refreshOneWorldState();
+    }
+  });
+  invoke('gui_live_status').then((status) => {
+    if (status) {
+      liveStatus = status;
+      onLiveStatus();
+    }
+  }).catch(() => {});
+  refreshLiveRows();
+  refreshStartButton();
+}
+
+function initOneWorld() {
+  const group = document.getElementById('one-world-group');
+  if (!group) return;
+  // The settings store restores the value by clicking too.
+  group.querySelectorAll('.segment').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled || btn.classList.contains('active') || liveActive()) return;
+      group.querySelectorAll('.segment').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      refreshOneWorldDesc();
+      refreshOneWorldState();
+      refreshGameplayRows();
+      refreshWorldTypeRow();
+      refreshWorldRulesRows();
+      refreshFacadeRows();
+    });
+  });
+  refreshOneWorldDesc();
   const mode = document.getElementById('generation-mode-select');
   if (mode) mode.addEventListener('change', renderOneWorldStatus);
   const nameToggle = document.getElementById('custom-world-name-toggle');
@@ -3386,8 +3858,80 @@ function setGenerationButtonEnabled(enabled) {
  * Validates required inputs and sends generation parameters to the backend
  * @returns {Promise<void>}
  */
+// The generation settings as the backend commands name them. A One World that exists
+// fixes its scale, height and ground level, and sends those instead.
+function readGenerationSettings(oneWorld) {
+  const segment = (group, key, fallback) => {
+    const btn = document.querySelector(`#${group} .segment.active`);
+    return btn ? btn.dataset[key] : fallback;
+  };
+  const checked = (id) => document.getElementById(id).checked;
+  const heightLimitToggle = document.getElementById("disable-height-limit-toggle");
+  // Disabled means unsupported for this body or format, so never send a stale tick.
+  let disableHeightLimit = !heightLimitToggle.disabled && heightLimitToggle.checked;
+  let scale = parseFloat(document.getElementById("scale-value-slider").value);
+  let heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
+  if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
+    if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
+    if (typeof oneWorldInfo.height_multiplier === 'number') heightMultiplier = oneWorldInfo.height_multiplier;
+    if (typeof oneWorldInfo.disable_height_limit === 'boolean') disableHeightLimit = oneWorldInfo.disable_height_limit;
+  } else if (oneWorld) {
+    disableHeightLimit = true;
+  }
+  // The ground level input is gone from the UI; a world the CLI made may sit on another level.
+  let groundLevel = -62;
+  if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
+    groundLevel = oneWorldInfo.ground_level;
+  }
+  // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
+  const clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
+  const worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
+  return {
+    worldScale: scale,
+    heightMultiplier: heightMultiplier,
+    groundLevel: groundLevel,
+    generationMode: document.getElementById("generation-mode-select").value,
+    winterEnabled: checked("winter-toggle"),
+    postApocalypticEnabled: checked("post-apocalyptic-toggle"),
+    interiorEnabled: checked("interior-toggle"),
+    fillgroundEnabled: checked("fillground-toggle"),
+    cavesEnabled: checked("caves-toggle"),
+    legacyTreesEnabled: checked("legacy-trees-toggle"),
+    maxTreeSize: segment("max-tree-size-group", "maxTreeSize", "giant"),
+    fieldPreset: segment("field-preset-group", "fieldPreset", "patchwork"),
+    canopyHeightEnabled: checked("canopy-height-toggle"),
+    overtureEnabled: checked("overture-toggle"),
+    use3dEnabled: checked("use-3d-toggle"),
+    disableHeightLimit: disableHeightLimit,
+    awsOnlyElevation: checked("aws-only-elevation-toggle"),
+    bakeLightingEnabled: checked("bake-lighting-toggle"),
+    voxyLodEnabled: checked("voxy-lod-toggle"),
+    dhLodEnabled: checked("dh-lod-toggle"),
+    gamemode: segment("gamemode-group", "gamemode", "creative"),
+    worldTime: worldTime,
+    worldType: segment("world-type-group", "worldType", "void"),
+    mobSpawning: getMobSpawning(),
+    mapItem: checked("map-item-toggle"),
+    signage: segment("signage-group", "signage", "basic"),
+    mapillaryToken: getMapillaryToken(),
+    facadesEnabled: getFacadesEnabled(),
+    facadeMode: getEffectiveFacadeMode(),
+    buildingFacadesEnabled: getBuildingFacadesEnabled(),
+    facadeDetail: getFacadeDetail()
+  };
+}
+
 async function startGeneration() {
+  // In Live the button starts and stops the session instead.
+  if (liveActive()) {
+    stopLive();
+    return;
+  }
   if (generationButtonEnabled === false) {
+    return;
+  }
+  if (isLiveMode()) {
+    startLive();
     return;
   }
   // The backend refuses this too, but only after gui_create_world has already
@@ -3467,48 +4011,7 @@ async function startGeneration() {
       }
     }
 
-    // Get generation mode from dropdown, named as the CLI's --mode
-    var generationMode = document.getElementById("generation-mode-select").value;
-    var winter = document.getElementById("winter-toggle").checked;
-    var postApocalyptic = document.getElementById("post-apocalyptic-toggle").checked;
-
-    var interior = document.getElementById("interior-toggle").checked;
-    var fill_ground = document.getElementById("fillground-toggle").checked;
-    var caves = document.getElementById("caves-toggle").checked;
-    var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
-    var canopy_height = document.getElementById("canopy-height-toggle").checked;
-    var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
-    var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
-    var fieldPresetBtn = document.querySelector("#field-preset-group .segment.active");
-    var fieldPreset = fieldPresetBtn ? fieldPresetBtn.dataset.fieldPreset : "patchwork";
-    var overture = document.getElementById("overture-toggle").checked;
-    var use_3d = document.getElementById("use-3d-toggle").checked;
-    var heightLimitToggle = document.getElementById("disable-height-limit-toggle");
-    // Disabled means unsupported for this body or format, so never send a stale tick.
-    var disable_height_limit = !heightLimitToggle.disabled && heightLimitToggle.checked;
-    var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
-    var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
-    var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
-    var dh_lod = document.getElementById("dh-lod-toggle").checked;
-    var scale = parseFloat(document.getElementById("scale-value-slider").value);
-    var heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
-    if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
-      if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
-      if (typeof oneWorldInfo.height_multiplier === 'number') heightMultiplier = oneWorldInfo.height_multiplier;
-      if (typeof oneWorldInfo.disable_height_limit === 'boolean') disable_height_limit = oneWorldInfo.disable_height_limit;
-    } else if (oneWorld) {
-      disable_height_limit = true;
-    }
-    // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
-    // DEPRECATED: Ground level input removed from UI
-    var ground_level = -62;
-
-    // Validate ground_level
-    ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
-    // A world the CLI made may sit on another level, and the backend refuses any but its own.
-    if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
-      ground_level = oneWorldInfo.ground_level;
-    }
+    const settings = readGenerationSettings(oneWorld);
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
@@ -3516,59 +4019,18 @@ async function startGeneration() {
     // Get rotation angle
     var rotationAngle = oneWorld ? 0 : (parseFloat(document.getElementById("rotation-angle-input").value) || 0);
 
-    var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
-    var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
-    var worldTypeBtn = document.querySelector("#world-type-group .segment.active");
-    var worldType = worldTypeBtn ? worldTypeBtn.dataset.worldType : "void";
-    var mapItem = document.getElementById("map-item-toggle").checked;
-    var signageBtn = document.querySelector("#signage-group .segment.active");
-    var signage = signageBtn ? signageBtn.dataset.signage : "basic";
-    // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
-    var clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
-    var worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
-
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
+        ...settings,
         bboxText: selectedBBox,
         selectedWorld: oneWorld ? savePath : worldPath,
         bedrockSavePath: bedrockSavePath,
         luantiSavePath: luantiSavePath,
-        worldScale: scale,
-        heightMultiplier: heightMultiplier,
-        groundLevel: ground_level,
-        generationMode: generationMode,
-        winterEnabled: winter,
-        postApocalypticEnabled: postApocalyptic,
-        interiorEnabled: interior,
-        fillgroundEnabled: fill_ground,
-        cavesEnabled: caves,
-        legacyTreesEnabled: legacy_trees,
-        maxTreeSize: maxTreeSize,
-        fieldPreset: fieldPreset,
-        canopyHeightEnabled: canopy_height,
-        overtureEnabled: overture,
-        use3dEnabled: use_3d,
-        disableHeightLimit: disable_height_limit,
-        awsOnlyElevation: aws_only_elevation,
-        bakeLightingEnabled: bake_lighting,
-        voxyLodEnabled: voxy_lod,
-        dhLodEnabled: dh_lod,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
         rotationAngle: rotationAngle,
-        gamemode: gamemode,
-        worldTime: worldTime,
-        worldType: worldType,
-        mobSpawning: getMobSpawning(),
-        mapItem: mapItem,
-        signage: signage,
-        mapillaryToken: getMapillaryToken(),
-        facadesEnabled: getFacadesEnabled(),
-        facadeMode: getEffectiveFacadeMode(),
-        buildingFacadesEnabled: getBuildingFacadesEnabled(),
-        facadeDetail: getFacadeDetail(),
         celestialBodyName: selectedCelestialBody,
         pauseMenu: gameplayToggle('pause-menu-toggle'),
         discoveries: gameplayToggle('discoveries-toggle'),
@@ -3582,7 +4044,7 @@ async function startGeneration() {
     });
 
     console.log("Generation process started.");
-    setEtaSignageExpected(signage !== "none" && getEffectiveWorldFormat() === "java");
+    setEtaSignageExpected(settings.signage !== "none" && getEffectiveWorldFormat() === "java");
     resetEta();
     started = true;
     window.arnisPreview3D?.setGenerationRunning(true);

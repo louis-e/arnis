@@ -73,6 +73,11 @@ impl MapStore {
     }
 }
 
+/// Sets the map id counter, so the next map a run or the game makes gets `last_id + 1`.
+pub(crate) fn set_map_counter(world_path: &Path, last_id: i32) -> Result<(), String> {
+    MapStore::open(world_path)?.write_counter(last_id)
+}
+
 /// Reads the world spawn XZ from level.dat so callers can align features with it.
 pub fn read_spawn_xz(world_path: &Path) -> Option<(i32, i32)> {
     if let Ok(Value::Compound(root)) = read_gzip_nbt(&world_path.join("level.dat")) {

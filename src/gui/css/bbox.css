@@ -466,3 +466,43 @@ body,
 .bbox-handle-move {
   cursor: move;
 }
+
+/* Live mode: where each player is */
+.live-player-marker {
+  position: relative;
+}
+
+.live-player-dot {
+  position: absolute;
+  inset: 3px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #fecc44;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.live-player-head {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 2px solid #ffffff;
+  border-radius: 3px;
+  image-rendering: pixelated;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.live-player-name {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(28, 28, 28, 0.85);
+  color: #f2f2f2;
+  font: 600 11px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}

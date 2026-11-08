@@ -14,6 +14,37 @@ static PROGRESS_FLOOR: AtomicU32 = AtomicU32::new(0);
 // overlap, and the first one finishing must not unmute the rest.
 static SUPPRESS_COUNT: AtomicU32 = AtomicU32::new(0);
 
+thread_local! {
+    /// The status this thread last showed, for `while_waiting` to put back.
+    static LAST_STATUS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Shows `waiting_for` on the status line while `wait` runs, in place of the step this
+/// thread showed last, and puts that step back after. A thread that has shown nothing
+/// leaves the line to the others, as it would have nothing to put back.
+pub fn while_waiting<T>(waiting_for: &str, wait: impl FnOnce() -> T) -> T {
+    let before = LAST_STATUS.with(|s| s.borrow().clone());
+    if before.is_empty() {
+        return wait();
+    }
+    emit_gui_progress_update(MESSAGE_ONLY, waiting_for);
+    // Waiting is no step of this thread's for a later wait to put back.
+    LAST_STATUS.with(|s| s.borrow_mut().clone_from(&before));
+    let out = wait();
+    emit_gui_progress_update(MESSAGE_ONLY, &before);
+    out
+}
+
+fn remember_status(message: &str) {
+    if !message.is_empty() && !message.starts_with("Error!") && !message.starts_with("Done!") {
+        LAST_STATUS.with(|s| {
+            let mut s = s.borrow_mut();
+            s.clear();
+            s.push_str(message);
+        });
+    }
+}
+
 /// Mutes/unmutes progress emits; used by the 3D terrain preview fetches.
 pub fn set_progress_suppressed(suppressed: bool) {
     if suppressed {
@@ -94,6 +125,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
     if emits_suppressed(progress, message) {
         return;
     }
+    remember_status(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -114,6 +146,7 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
     if emits_suppressed(progress, message) {
         return;
     }
+    remember_status(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -161,5 +194,38 @@ pub fn emit_show_in_folder(path: &str) {
         if let Err(e) = window.emit("show-in-folder", path) {
             eprintln!("Failed to emit show-in-folder event: {}", e);
         }
+    }
+}
+
+/// Live mode's state, for the GUI.
+pub fn emit_live_status(status: &crate::live::Status) {
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("live-status", status) {
+            eprintln!("Failed to emit live-status event: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn last_status() -> String {
+        LAST_STATUS.with(|s| s.borrow().clone())
+    }
+
+    #[test]
+    fn a_wait_puts_back_the_step_and_not_an_earlier_wait() {
+        // On a thread of its own, so it starts with nothing shown.
+        std::thread::spawn(|| {
+            while_waiting("Waiting for map data...", || ());
+            assert_eq!(last_status(), "");
+            emit_gui_progress_update(MESSAGE_ONLY, "Processing terrain...");
+            while_waiting("Waiting for map data...", || ());
+            while_waiting("Waiting for Overture buildings...", || ());
+            assert_eq!(last_status(), "Processing terrain...");
+        })
+        .join()
+        .unwrap();
     }
 }

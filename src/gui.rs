@@ -140,7 +140,13 @@ pub fn run_gui() -> Result<(), String> {
             gui_one_world_overlap,
             gui_get_one_world_overlays,
             gui_log,
-            gui_set_telemetry_consent
+            gui_set_telemetry_consent,
+            gui_live_info,
+            gui_live_start,
+            gui_live_stop,
+            gui_live_status,
+            gui_live_eula_accepted,
+            gui_live_teleport
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -149,8 +155,280 @@ pub fn run_gui() -> Result<(), String> {
             progress::set_main_window(main_window);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .map_err(|e| format!("Error while starting the application UI (Tauri): {e}"))
+        .build(tauri::generate_context!())
+        .map_err(|e| format!("Error while starting the application UI (Tauri): {e}"))?
+        .run(|_, event| {
+            // The server holds the world; let it save before the process goes.
+            if let tauri::RunEvent::Exit = event {
+                let session = LIVE_SESSION
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take();
+                if let Some(session) = session {
+                    session.stop_and_wait();
+                }
+            }
+        });
+    Ok(())
+}
+
+static LIVE_SESSION: std::sync::Mutex<Option<crate::live::Session>> = std::sync::Mutex::new(None);
+
+/// Whether a live session is running on the world at `world_dir`.
+fn live_plays(world_dir: &Path) -> bool {
+    LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|s| !s.is_finished() && s.world_dir() == world_dir)
+}
+
+#[derive(serde::Serialize)]
+struct LiveInfo {
+    versions: Vec<String>,
+    default_version: Option<String>,
+    last_played: Option<String>,
+    /// The version that last saved the world; older servers cannot load it.
+    world_version: Option<String>,
+    eula_accepted: bool,
+    eula_url: &'static str,
+    status: Option<crate::live::Status>,
+    error: Option<String>,
+}
+
+/// What the live settings offer: versions to pick from, the EULA, and the session if one runs.
+#[tauri::command(async)]
+fn gui_live_info(save_path: String, world_name: String) -> LiveInfo {
+    use crate::live::{mojang, server};
+    let dir = server::server_dir();
+    let world_version = crate::live::world_game_version(&one_world_dir(&save_path, &world_name));
+    let status = LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|s| s.status());
+    let mut info = LiveInfo {
+        versions: Vec::new(),
+        default_version: None,
+        last_played: None,
+        world_version: world_version.clone(),
+        eula_accepted: server::eula_accepted(&dir),
+        eula_url: server::EULA_URL,
+        status,
+        error: None,
+    };
+    match mojang::Manifest::load(&dir) {
+        Ok(manifest) => {
+            info.last_played = mojang::game_dir(Path::new(&save_path))
+                .and_then(|g| mojang::last_played(&g, &manifest))
+                .filter(|v| manifest.is_supported(v));
+            info.versions = manifest.supported_releases();
+            if let Some(v) = &info.last_played {
+                if !info.versions.contains(v) {
+                    info.versions.insert(0, v.clone());
+                }
+            }
+            // Servers older than the world would load it empty.
+            if let Some(w) = world_version
+                .as_ref()
+                .and_then(|w| manifest.release_time(w))
+            {
+                info.versions
+                    .retain(|v| manifest.release_time(v).is_none_or(|t| t >= w));
+            }
+            info.default_version =
+                crate::live::default_version(&manifest, info.last_played.clone(), world_version);
+        }
+        Err(e) => info.error = Some(e),
+    }
+    info
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveStartOptions {
+    save_path: String,
+    world_name: String,
+    version: Option<String>,
+    view_distance: u32,
+    accept_eula: bool,
+    bbox_text: Option<String>,
+    spawn_point: Option<(f64, f64)>,
+    world_scale: f64,
+    height_multiplier: f64,
+    generation_mode: String,
+    winter_enabled: bool,
+    post_apocalyptic_enabled: bool,
+    interior_enabled: bool,
+    fillground_enabled: bool,
+    caves_enabled: bool,
+    legacy_trees_enabled: bool,
+    max_tree_size: String,
+    field_preset: String,
+    canopy_height_enabled: bool,
+    overture_enabled: bool,
+    use_3d_enabled: bool,
+    aws_only_elevation: bool,
+    bake_lighting_enabled: bool,
+    signage: String,
+    mapillary_token: String,
+    facades_enabled: bool,
+    facade_mode: String,
+    gamemode: String,
+    world_time: i64,
+    mob_spawning: String,
+    #[serde(default)]
+    messages: crate::live::Messages,
+}
+
+/// Starts live mode on the One World, from where the user marked or selected, or
+/// where the players left off.
+#[tauri::command(async)]
+fn gui_live_start(options: LiveStartOptions) -> Result<(), String> {
+    use crate::live::server;
+    use clap::Parser;
+    let mut slot = LIVE_SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|s| !s.is_finished()) {
+        return Err("Live mode is already running.".to_string());
+    }
+    let saves = PathBuf::from(&options.save_path);
+    if options.save_path.trim().is_empty() || !saves.is_dir() {
+        return Err("Set the Minecraft saves folder in Settings first.".to_string());
+    }
+    let world_name = crate::world_utils::world_folder_name(&options.world_name)
+        .unwrap_or_else(|| crate::one_world::DEFAULT_WORLD_NAME.to_string());
+    let dir = server::server_dir();
+    if !server::eula_accepted(&dir) {
+        if !options.accept_eula {
+            return Err("Agree to the Minecraft EULA to start live mode.".to_string());
+        }
+        server::accept_eula(&dir)?;
+    }
+    let bbox = options
+        .bbox_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && *t != "0.000000 0.000000 0.000000 0.000000")
+        .map(LLBBox::from_str)
+        .transpose()
+        .map_err(|e| format!("Failed to parse bounding box: {e}"))?;
+    // The spawn marker if there is one, else the middle of the selection.
+    let start = bbox.map(|b| {
+        spawn_marker(options.spawn_point, &b).map_or(
+            (
+                (b.min().lat() + b.max().lat()) / 2.0,
+                (b.min().lng() + b.max().lng()) / 2.0,
+            ),
+            |p| (p.lat(), p.lng()),
+        )
+    });
+
+    let mut argv = vec![
+        "arnis".to_string(),
+        "--one-world".to_string(),
+        "--live".to_string(),
+        format!("--output-dir={}", saves.display()),
+        format!("--world-name={world_name}"),
+        format!("--scale={}", options.world_scale),
+        format!("--height-multiplier={}", options.height_multiplier),
+    ];
+    if let Some(b) = bbox {
+        argv.push(format!(
+            "--bbox={},{},{},{}",
+            b.min().lat(),
+            b.min().lng(),
+            b.max().lat(),
+            b.max().lng()
+        ));
+    }
+    let mut args = Args::try_parse_from(&argv).map_err(|e| e.to_string())?;
+    args.mode = crate::args::GenerationMode::from_name(&options.generation_mode);
+    args.winter = options.winter_enabled;
+    args.post_apocalyptic = options.post_apocalyptic_enabled;
+    args.interior = options.interior_enabled;
+    args.fillground = options.fillground_enabled;
+    args.caves = options.caves_enabled;
+    args.legacy_trees = options.legacy_trees_enabled;
+    args.max_tree_size =
+        crate::trees::tree_library::TreeSize::from_str_lossy(&options.max_tree_size);
+    args.fields = crate::element_processing::field_texture::FieldPreset::from_str_lossy(
+        &options.field_preset,
+    );
+    args.canopy_height = options.canopy_height_enabled;
+    args.overture = options.overture_enabled;
+    args.use_3d = options.use_3d_enabled;
+    args.aws_only_elevation = options.aws_only_elevation;
+    args.bake_lighting = options.bake_lighting_enabled;
+    args.signage = crate::args::SignageLevel::from_str_lossy(&options.signage);
+    args.mapillary_facades = Some(options.facades_enabled);
+    args.mapillary_token =
+        Some(options.mapillary_token.trim().to_string()).filter(|t| !t.is_empty());
+    args.mapillary_facade_mode = crate::args::FacadeMode::from_str_lossy(&options.facade_mode);
+    args.gamemode = crate::args::GameMode::from_str_lossy(&options.gamemode);
+    args.world_time = options.world_time.clamp(0, 23999);
+    args.mob_spawning = crate::args::MobSpawning::from_str_lossy(&options.mob_spawning);
+    args.timeout = Some(std::time::Duration::from_secs(40));
+    crate::args::apply_body_defaults(&mut args);
+    crate::args::apply_feature_needs(&mut args);
+    crate::args::validate_args(&args)?;
+
+    let config = crate::live::Config {
+        saves_dir: saves,
+        world_name,
+        start,
+        version: options.version.filter(|v| !v.trim().is_empty()),
+        view_distance: options.view_distance.clamp(4, 32),
+        port: None,
+        messages: options.messages,
+    };
+    let notify = std::sync::Arc::new(|s: &crate::live::Status| progress::emit_live_status(s));
+    *slot = Some(crate::live::Session::start(config, args, notify));
+    Ok(())
+}
+
+#[tauri::command]
+fn gui_live_stop() {
+    if let Some(s) = LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        s.request_stop();
+    }
+}
+
+/// Moves the players to a place picked on the map, once its land is generated.
+#[tauri::command]
+fn gui_live_teleport(lat: f64, lng: f64) -> Result<(), String> {
+    if !(lat.is_finite() && lng.is_finite()) {
+        return Err("Not a place on the map".to_string());
+    }
+    match LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        Some(s) if !s.is_finished() => {
+            s.teleport(lat, lng);
+            Ok(())
+        }
+        _ => Err("Live mode is not running.".to_string()),
+    }
+}
+
+/// Whether Mojang's EULA is accepted, without the version list's network round trip.
+#[tauri::command]
+fn gui_live_eula_accepted() -> bool {
+    crate::live::server::eula_accepted(&crate::live::server::server_dir())
+}
+
+#[tauri::command]
+fn gui_live_status() -> Option<crate::live::Status> {
+    LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|s| s.status())
 }
 
 /// Detects the default Minecraft Java Edition saves directory for the current OS.
@@ -1453,6 +1731,11 @@ fn gui_start_generation(
         emit_gui_error(&e);
         return Err(e);
     }
+    if one_world && live_plays(&one_world_dir(&selected_world, &one_world_name)) {
+        let e = "Live mode is playing this world. Stop it first.".to_string();
+        emit_gui_error(&e);
+        return Err(e);
+    }
     let is_new_world = is_new_world && !one_world;
 
     // Claim the process before touching any shared state. The frontend disables its button
@@ -1740,6 +2023,7 @@ fn gui_start_generation(
                 zombie_outbreak,
                 disasters,
                 moving_vehicles,
+                live: Default::default(),
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -2097,6 +2381,12 @@ fn gui_start_generation(
 
                     // OSM water override first, then bridge repair.
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    overture::drop_footprints_in_water(
+                        &mut parsed_elements,
+                        &ground,
+                        &xzbbox,
+                        args.scale,
+                    );
                     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
                     ground.finish_land_cover(args.mode);

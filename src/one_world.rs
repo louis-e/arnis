@@ -348,11 +348,19 @@ pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<
         }
     }
     if world_is_locked(world_dir) {
+        // A live server a crashed Arnis left running holds the lock too.
+        crate::live::stop_leftover_server(world_dir);
+    }
+    if world_is_locked(world_dir) {
         return Err(open_in_minecraft(world_dir));
     }
     std::fs::create_dir_all(world_dir)
         .map_err(|e| format!("Failed to create {}: {e}", world_dir.display()))?;
     let lock = SessionLock::acquire(world_dir).map_err(|_| open_in_minecraft(world_dir))?;
+    // Live mode can leave stubs behind if it ended badly; a run must not merge into those.
+    if !fresh_dir {
+        crate::live::recover(world_dir)?;
+    }
     let mut owned = false;
     let resolved = resolve(world_dir, requested, args, lock, &mut owned);
     if resolved.is_err() && fresh_dir {
@@ -634,6 +642,95 @@ pub fn record_area(
         }
     }
     Ok(())
+}
+
+/// A new One World centred on `(origin_lat, origin_lon)` with no areas yet, for live mode,
+/// whose tiles then line up with the world's region grid from the first one on.
+pub fn create_empty(
+    world_dir: &Path,
+    args: &mut Args,
+    origin_lat: f64,
+    origin_lon: f64,
+) -> Result<(), String> {
+    if !(origin_lat.is_finite() && origin_lat.abs() <= MAX_ABS_LAT) {
+        return Err(format!(
+            "One World covers latitudes up to {MAX_ABS_LAT} degrees north and south."
+        ));
+    }
+    // Live mode holds the lock on the folder it creates the world in.
+    let occupied = std::fs::read_dir(world_dir)
+        .map(|d| {
+            d.filter_map(Result::ok)
+                .any(|e| e.file_name() != "session.lock")
+        })
+        .unwrap_or(false);
+    if occupied {
+        return Err(format!(
+            "{} exists but is not a One World (no {}). Choose another world name or delete the folder.",
+            world_dir.display(),
+            MANIFEST_FILE
+        ));
+    }
+    args.disable_height_limit = true;
+    args.vanilla_height = false;
+    let name = world_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or(DEFAULT_WORLD_NAME)
+        .to_string();
+    let made = (|| {
+        crate::world_utils::write_world_skeleton(world_dir, &name, false)?;
+        Manifest::new(args, origin_lat, origin_lon).save(world_dir)?;
+        let (min_y, max_y) = crate::world_utils::TALL_DATAPACK_FULL_RANGE;
+        crate::world_utils::install_tall_datapack(world_dir, min_y, max_y)?;
+        crate::world_utils::apply_java_world_settings(
+            world_dir,
+            args.gamemode,
+            args.world_time,
+            crate::args::WorldType::Void,
+            args.mob_spawning,
+        )
+    })();
+    if made.is_err() {
+        let _ = std::fs::remove_dir_all(world_dir);
+    }
+    made
+}
+
+/// Records a live tile as an area, taking its preview along.
+pub fn record_live_tile(
+    world_dir: &Path,
+    llbbox: &LLBBox,
+    xzbbox: &XZBBox,
+    preview: Option<&Path>,
+) -> Result<(), String> {
+    let manifest = Manifest::load(world_dir)?.ok_or_else(|| {
+        format!(
+            "{} vanished during live mode",
+            Manifest::path_in(world_dir).display()
+        )
+    })?;
+    let area_id = manifest.next_area_id;
+    let preview = preview.and_then(|src| {
+        let dir = world_dir.join(PREVIEW_DIR);
+        std::fs::create_dir_all(&dir).ok()?;
+        let dst = dir.join(format!("area-{area_id}.png"));
+        std::fs::rename(src, &dst)
+            .or_else(|_| std::fs::copy(src, &dst).map(|_| ()))
+            .ok()?;
+        Some(dst)
+    });
+    let run = RunContext {
+        world_dir: world_dir.to_path_buf(),
+        origin_lat: manifest.origin_lat,
+        origin_lon: manifest.origin_lon,
+        extending: true,
+        elevation: manifest.elevation,
+        replaced_chunks: 0,
+        area_id,
+    };
+    record_area(&run, llbbox, xzbbox, manifest.elevation, preview.as_deref())
 }
 
 /// Stores the elevation mapping as soon as the first terrain area has one,

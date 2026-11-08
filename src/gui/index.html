@@ -405,19 +405,61 @@
                   </div>
                 </div>
 
-                <div class="settings-row setting-tile is-wide">
-                  <label for="one-world-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map-plus"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="one_world">One World</span>
-                        <span class="tooltip-icon" data-tooltip="Adds every area you generate to one shared world instead of making a new world each time. Some settings are then fixed by that world. Java only.">?</span>
+                <!-- One World and the rows that only apply in Live, as one block -->
+                <div class="setting-stack is-wide" id="one-world-stack">
+                  <div class="settings-row setting-tile is-wide">
+                    <label class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map-plus"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading">
+                          <span data-localize="one_world">One World</span>
+                          <span class="tooltip-icon" data-tooltip="With On, every area you generate joins one shared world instead of becoming a new world. With Live, you play that world on a Minecraft server on this computer while Arnis generates the land around you. Some settings are then fixed by the world. Java only.">?</span>
+                        </span>
+                        <span class="setting-desc" id="one-world-desc" data-localize="one_world_desc_off">Every area becomes a world of its own. Java only.</span>
                       </span>
-                      <span class="setting-desc" data-localize="one_world_desc">Each area joins one growing world at its real position. Java only.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="one-world-toggle" name="one-world-toggle">
+                    </label>
+                    <div class="settings-control">
+                      <div class="segmented-control" id="one-world-group">
+                        <!-- data-default marks the shipped default; the active class is moved by JS -->
+                        <button type="button" class="segment active" data-default data-one-world="off" data-localize="one_world_off">Off</button>
+                        <button type="button" class="segment" data-one-world="on" data-localize="one_world_on">On</button>
+                        <button type="button" class="segment" data-one-world="live" data-localize="one_world_live">Live</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="settings-row setting-tile is-wide setting-sub" id="live-version-row" style="display: none;">
+                    <label for="live-version-select" class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tag"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading"><span data-localize="live_version">Minecraft version</span></span>
+                        <span class="setting-desc" data-localize="live_version_desc">The server's version. Automatic takes the one you played last, unless the world needs a newer one.</span>
+                      </span>
+                    </label>
+                    <div class="settings-control">
+                      <select id="live-version-select" name="live-version-select" class="settings-select">
+                        <option value="" selected data-localize="live_version_auto">Automatic</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="settings-row setting-tile is-wide setting-sub" id="live-view-distance-row" style="display: none;">
+                    <label for="live-view-distance-select" class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-eye"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading"><span data-localize="live_view_distance">View distance</span></span>
+                        <span class="setting-desc" data-localize="live_view_distance_desc">How far the server sends the world. Further takes more memory and more land generated ahead of you.</span>
+                      </span>
+                    </label>
+                    <div class="settings-control">
+                      <select id="live-view-distance-select" name="live-view-distance-select" class="settings-select">
+                        <option value="8">8</option>
+                        <option value="12" selected>12</option>
+                        <option value="16">16</option>
+                        <option value="24">24</option>
+                        <option value="32">32</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1091,6 +1133,7 @@
                       <option value="ua">Українська</option>
                       <option value="ja">日本語</option>
                       <option value="ro">Română</option>
+                      <option value="ka-GE">ქართული</option>
                     </select>
                   </div>
                 </div>
@@ -1436,6 +1479,30 @@
         <footer class="dialog-footer">
           <button type="button" class="dialog-button" id="one-world-confirm-cancel" data-localize="one_world_confirm_cancel">Cancel</button>
           <button type="button" class="dialog-button is-primary" id="one-world-confirm-ok" data-localize="one_world_confirm_ok">Generate</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Live mode: Mojang's server only runs once its EULA is accepted -->
+    <div id="live-modal" class="modal" style="display: none;">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="live-title" tabindex="-1">
+        <header class="dialog-header">
+          <div class="dialog-heading">
+            <h2 id="live-title" data-localize="live_eula_title">Minecraft EULA</h2>
+          </div>
+          <button type="button" class="dialog-close" id="live-close" aria-label="Close" title="Close (Esc)">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="dialog-body">
+          <p>
+            <span data-localize="live_eula_text">Live mode runs Mojang's Minecraft server on this computer, which needs you to accept the Minecraft End User License Agreement.</span>
+            <a href="#" id="live-eula-link" data-localize="live_eula_read">Read the EULA</a>
+          </p>
+        </div>
+        <footer class="dialog-footer">
+          <button type="button" class="dialog-button" id="live-cancel" data-localize="live_cancel">Cancel</button>
+          <button type="button" class="dialog-button is-primary" id="live-accept" data-localize="live_eula_accept">Accept and play</button>
         </footer>
       </div>
     </div>

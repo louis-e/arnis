@@ -35,6 +35,7 @@ mod ground_decoration;
 mod ground_generation;
 mod land_cover;
 mod landmarks;
+mod live;
 mod luanti_block_map;
 mod map_item;
 mod map_item_palette;
@@ -96,6 +97,9 @@ mod progress {
     pub fn emit_gui_error(_message: &str) {}
     pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
     pub fn emit_gui_progress_update_ex(_progress: f64, _message: &str, _streaming: bool) {}
+    pub fn while_waiting<T>(_waiting_for: &str, wait: impl FnOnce() -> T) -> T {
+        wait()
+    }
     pub fn emit_map_preview_ready() {}
     pub fn emit_show_in_folder(_path: &str) {}
     pub fn is_running_with_gui() -> bool {
@@ -149,9 +153,36 @@ fn exit_failed() -> ! {
 }
 
 fn run_cli() {
+    // A live tile is one of many runs a live session starts, so it skips the greeting.
+    let live_tile = std::env::args().any(|a| a == "--live-tile");
+
     // Configure thread pool with 90% CPU cap to keep system responsive
     floodfill_cache::configure_rayon_thread_pool(0.9);
 
+    if !live_tile {
+        print_banner();
+    }
+
+    // Parse input arguments
+    let mut args: Args = Args::parse();
+    let asked_mob_spawning = args.mob_spawning;
+    args::apply_body_defaults(&mut args);
+    args::apply_feature_needs(&mut args);
+
+    // Validate arguments (path requirements differ between Java and Bedrock)
+    if let Err(e) = args::validate_args(&args) {
+        eprintln!("{}: {}", "Error".red().bold(), e);
+        std::process::exit(1);
+    }
+
+    if args.live.live {
+        run_live_cli(args);
+        return;
+    }
+    run_generation_cli(args, asked_mob_spawning);
+}
+
+fn print_banner() {
     // Clean up old cached elevation tiles on startup
     elevation_data::cleanup_old_cached_tiles();
 
@@ -178,19 +209,103 @@ fn run_cli() {
 
     // Fire-and-forget update check; prints a one-line notice on a background thread.
     version_check::check_for_updates_async();
+}
 
-    // Parse input arguments
-    let mut args: Args = Args::parse();
-    let asked_mob_spawning = args.mob_spawning;
-    args::apply_body_defaults(&mut args);
-    args::apply_feature_needs(&mut args);
-
-    // Validate arguments (path requirements differ between Java and Bedrock)
-    if let Err(e) = args::validate_args(&args) {
-        eprintln!("{}: {}", "Error".red().bold(), e);
+/// Plays the One World live on a local server until Ctrl+C.
+fn run_live_cli(args: Args) {
+    let fail = |msg: &str| -> ! {
+        eprintln!("{} {msg}", "Error:".red().bold());
+        std::process::exit(1);
+    };
+    let Some(saves_dir) = args.path.clone() else {
+        fail("--live needs --output-dir (the Minecraft saves folder).");
+    };
+    let server_dir = live::server::server_dir();
+    if !live::server::eula_accepted(&server_dir) {
+        if !args.live.accept_eula {
+            fail(&format!(
+                "Running a Minecraft server needs your agreement to the Minecraft EULA ({}). Add --accept-eula to agree.",
+                live::server::EULA_URL
+            ));
+        }
+        if let Err(e) = live::server::accept_eula(&server_dir) {
+            fail(&e);
+        }
+    }
+    let world_name = args
+        .world_name
+        .as_deref()
+        .and_then(world_utils::world_folder_name)
+        .unwrap_or_else(|| one_world::DEFAULT_WORLD_NAME.to_string());
+    let start = match (args.spawn_lat, args.spawn_lng, args.bbox) {
+        (Some(lat), Some(lng), _) => Some((lat, lng)),
+        (_, _, Some(b)) => Some((
+            (b.min().lat() + b.max().lat()) / 2.0,
+            (b.min().lng() + b.max().lng()) / 2.0,
+        )),
+        _ => None,
+    };
+    let config = live::Config {
+        saves_dir,
+        world_name,
+        start,
+        version: args.live.version.clone(),
+        view_distance: args.live.view_distance,
+        port: args.live.port,
+        messages: live::Messages::default(),
+    };
+    // Downloads are shown in tenths, so the terminal is not flooded.
+    let last_download = std::sync::Mutex::new(None::<String>);
+    let notify = std::sync::Arc::new(move |s: &live::Status| {
+        let coarse = s.download.as_ref().map(|d| match d.text.rsplit_once(": ") {
+            Some((label, _)) => {
+                let tenth = d.progress.map_or(0, |p| (p * 10.0).floor() as u32 * 10);
+                format!("{label}: {tenth}%")
+            }
+            None => d.text.clone(),
+        });
+        let mut last = last_download.lock().unwrap_or_else(|e| e.into_inner());
+        if coarse != *last {
+            if let Some(d) = &coarse {
+                println!("[live] {d}");
+            }
+            *last = coarse;
+        }
+    });
+    let session = std::sync::Arc::new(std::sync::Mutex::new(Some(live::Session::start(
+        config, args, notify,
+    ))));
+    {
+        let session = session.clone();
+        let _ = ctrlc::set_handler(move || {
+            println!("\n[live] Stopping, please wait while the world is saved...");
+            if let Some(s) = session.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                s.request_stop();
+            }
+        });
+    }
+    loop {
+        let finished = session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_none_or(|s| s.is_finished());
+        if finished {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    let Some(session) = session.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+        return;
+    };
+    let status = session.status();
+    session.stop_and_wait();
+    if status.phase == "failed" {
         std::process::exit(1);
     }
+}
 
+fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     // Cave zone-map mode renders the cave biome layout for --bbox and exits, before any world
     // exists. It uses the same zone picker, seed and --cave-biomes amounts as --caves.
     if args.cave_zone_map.is_some() {
@@ -653,6 +768,15 @@ fn run_cli() {
 
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    // Before the land override, which would give them land to stand on.
+    let wet =
+        overture::drop_footprints_in_water(&mut parsed_elements, &ground, &xzbbox, args.scale);
+    if wet > 0 {
+        println!(
+            "  Left out {} Overture buildings standing in water",
+            wet.to_string().bright_white().bold()
+        );
+    }
     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
