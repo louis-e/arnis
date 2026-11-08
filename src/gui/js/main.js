@@ -1,5 +1,5 @@
 import { licenseText } from './license.js';
-import { fetchLanguage, invalidJSON } from './language.js';
+import { fetchLanguage, invalidJSON, matchLanguage } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
 import {
   initSettingsStore,
@@ -96,9 +96,10 @@ async function getLocalization() {
     return await fetchLanguage(savedLanguage);
   }
 
-  // Otherwise use the browser's language
-  const lang = navigator.language;
-  return await fetchLanguage(lang);
+  // Otherwise the offered language closest to the browser's
+  const select = document.getElementById("language-select");
+  const offered = select ? Array.from(select.options).map(opt => opt.value) : [];
+  return await fetchLanguage(detectBrowserLanguage(offered));
 }
 
 /**
@@ -1159,11 +1160,7 @@ function initEasterEggs() {
 
 // Language implied by the browser, ignoring any stored preference.
 function detectBrowserLanguage(availableOptions) {
-  const currentLang = navigator.language || 'en';
-  if (availableOptions.includes(currentLang)) return currentLang;
-  const base = currentLang.split('-')[0];
-  if (availableOptions.includes(base)) return base;
-  return 'en';
+  return matchLanguage(navigator.language, availableOptions);
 }
 
 // Gives the settings store the save path defaults. Not awaited, since startup

@@ -1,6 +1,7 @@
 use crate::clipping::{clip_way_to_bbox, clip_way_to_bbox_owned, mark_cut_ends};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::mapillary::geometry::parse_length_m;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fnv::{FnvHashMap, FnvHashSet};
@@ -1470,6 +1471,141 @@ fn elements<E: Borrow<OsmElement>>(slice: &[E]) -> impl Iterator<Item = &OsmElem
 // Parts replace the outline only when they cover at least this much of it.
 const MIN_PART_COVERAGE: f64 = 0.5;
 
+// Rows across an outline's bounds along which its coverage is measured: one every
+// COVERAGE_ROW_M, so a thin part on a big outline falls on some, and never fewer than
+// COVERAGE_ROWS, nor more than MAX_COVERAGE_ROWS on a broken outline.
+const COVERAGE_ROW_M: f64 = 2.0;
+const COVERAGE_ROWS: usize = 48;
+const MAX_COVERAGE_ROWS: usize = 2048;
+
+/// Southern, western, northern and eastern edge of (lat, lon) points.
+#[derive(Clone, Copy)]
+struct Bounds {
+    south: f64,
+    west: f64,
+    north: f64,
+    east: f64,
+}
+
+impl Bounds {
+    fn of<'a>(points: impl IntoIterator<Item = &'a (f64, f64)>) -> Self {
+        points.into_iter().fold(
+            Bounds {
+                south: f64::MAX,
+                west: f64::MAX,
+                north: f64::MIN,
+                east: f64::MIN,
+            },
+            |b, &(lat, lon)| Bounds {
+                south: b.south.min(lat),
+                west: b.west.min(lon),
+                north: b.north.max(lat),
+                east: b.east.max(lon),
+            },
+        )
+    }
+}
+
+/// Whether `parts` stand in for an outline: they cover at least `MIN_PART_COVERAGE` of
+/// its outer rings. Parts stacked on one footprint, as Philadelphia City Hall's tower is
+/// mapped three times from the ground up, count once, and a part only counts inside the
+/// outline.
+fn parts_cover(outline: &[Vec<(f64, f64)>], parts: &[&[(f64, f64)]]) -> bool {
+    // What the parts cover is never more than their areas add up to, so parts that are
+    // too small even added up settle it without sampling.
+    let outline_area: f64 = outline.iter().map(|r| ring_area(r)).sum();
+    let parts_area: f64 = parts.iter().map(|p| ring_area(p)).sum();
+    parts_area >= MIN_PART_COVERAGE * outline_area
+        && covered_share(outline, parts) >= MIN_PART_COVERAGE
+}
+
+/// Share of an outline's outer rings that at least one of `parts` covers, measured
+/// exactly along rows across it.
+fn covered_share(outline: &[Vec<(f64, f64)>], parts: &[&[(f64, f64)]]) -> f64 {
+    let b = Bounds::of(outline.iter().flatten());
+    if b.south >= b.north || b.west >= b.east {
+        return 0.0;
+    }
+    let rows = ((b.north - b.south) * 111_320.0 / COVERAGE_ROW_M).ceil() as usize;
+    let rows = rows.clamp(COVERAGE_ROWS, MAX_COVERAGE_ROWS);
+    let parts: Vec<(&[(f64, f64)], Bounds)> = parts.iter().map(|&p| (p, Bounds::of(p))).collect();
+    let (mut inside, mut covered) = (0.0, 0.0);
+    let (mut crossings, mut ground, mut over) = (Vec::new(), Vec::new(), Vec::new());
+    for row in 0..rows {
+        let lat = b.south + (row as f64 + 0.5) * (b.north - b.south) / rows as f64;
+        ground.clear();
+        for ring in outline {
+            row_spans(ring, lat, &mut crossings, &mut ground);
+        }
+        merge_spans(&mut ground);
+        if ground.is_empty() {
+            continue;
+        }
+        over.clear();
+        for (part, pb) in &parts {
+            if (pb.south..=pb.north).contains(&lat) {
+                row_spans(part, lat, &mut crossings, &mut over);
+            }
+        }
+        merge_spans(&mut over);
+        inside += ground.iter().map(|(w, e)| e - w).sum::<f64>();
+        covered += overlap(&ground, &over);
+    }
+    if inside > 0.0 {
+        covered / inside
+    } else {
+        0.0
+    }
+}
+
+/// Appends the stretches of latitude `lat` inside `ring`, west to east, by the same
+/// even-odd rule as `point_in_ring`.
+fn row_spans(ring: &[(f64, f64)], lat: f64, crossings: &mut Vec<f64>, out: &mut Vec<(f64, f64)>) {
+    crossings.clear();
+    let mut prev = match ring.last() {
+        Some(&p) => p,
+        None => return,
+    };
+    for &(la, lo) in ring {
+        let (pla, plo) = prev;
+        if (la > lat) != (pla > lat) {
+            crossings.push((plo - lo) * (lat - la) / (pla - la) + lo);
+        }
+        prev = (la, lo);
+    }
+    crossings.sort_unstable_by(f64::total_cmp);
+    out.extend(crossings.as_chunks::<2>().0.iter().map(|&[a, b]| (a, b)));
+}
+
+/// Sorts stretches west to east and joins those that touch or overlap.
+fn merge_spans(spans: &mut Vec<(f64, f64)>) {
+    spans.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+    spans.dedup_by(|next, kept| {
+        let joins = next.0 <= kept.1;
+        if joins {
+            kept.1 = kept.1.max(next.1);
+        }
+        joins
+    });
+}
+
+/// Length two sorted, merged sets of stretches share.
+fn overlap(a: &[(f64, f64)], b: &[(f64, f64)]) -> f64 {
+    let (mut i, mut j, mut shared) = (0, 0, 0.0);
+    while i < a.len() && j < b.len() {
+        let (w, e) = (a[i].0.max(b[j].0), a[i].1.min(b[j].1));
+        if e > w {
+            shared += e - w;
+        }
+        if a[i].1 < b[j].1 {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    shared
+}
+
 // Grid cell size (degrees) for the spatial index that buckets nearby outline bboxes.
 const SUPPRESSION_GRID_CELL_DEG: f64 = 0.0005;
 
@@ -1633,11 +1769,21 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
     let mut way_year: HashMap<u64, i32> = HashMap::new();
     let mut way_ground: HashMap<u64, bool> = HashMap::new();
     let mut housing_ways: HashSet<u64> = HashSet::new();
+    let mut tagged_parts: HashSet<u64> = HashSet::new();
+    let mut way_height: HashMap<u64, f64> = HashMap::new();
     for w in elements(ways).filter(|w| needed_ways.contains(&w.id)) {
         if let Some(ns) = w.nodes.as_ref() {
             way_nodes.insert(w.id, ns);
         }
         if let Some(t) = w.tags.as_ref() {
+            if t.get("building:part")
+                .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+            {
+                tagged_parts.insert(w.id);
+            }
+            if let Some(h) = t.get("height").and_then(|h| parse_length_m(h)) {
+                way_height.insert(w.id, h);
+            }
             way_hint.insert(w.id, building_style_hint(t));
             if let Some(y) = year_for_parts(t) {
                 way_year.insert(w.id, y);
@@ -1657,25 +1803,33 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
         .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
         .collect();
 
-    // Shoelace area of a closed ring; lon scaled by cos(lat) so only the ratio matters.
-    let way_area = |way_ref: u64| -> Option<f64> {
-        let ids = way_nodes.get(&way_ref)?;
-        let pts: Vec<(f64, f64)> = ids
+    // A member way's ring of (lat, lon), when it has enough nodes to enclose anything.
+    let way_ring = |way_ref: u64| -> Option<Vec<(f64, f64)>> {
+        let pts: Vec<(f64, f64)> = way_nodes
+            .get(&way_ref)?
             .iter()
             .filter_map(|id| node_ll.get(id).copied())
             .collect();
-        if pts.len() < 3 {
-            return None;
-        }
-        let lon_scale = pts[0].0.to_radians().cos();
-        let mut area = 0.0;
-        for i in 0..pts.len() {
-            let (lat_a, lon_a) = pts[i];
-            let (lat_b, lon_b) = pts[(i + 1) % pts.len()];
-            area += (lon_a * lat_b - lon_b * lat_a) * lon_scale;
-        }
-        Some((area / 2.0).abs())
+        (pts.len() >= 3).then_some(pts)
     };
+
+    // A building relation may give as its outline the outer ring of a multipolygon building,
+    // and that multipolygon carries the building's tags: Philadelphia City Hall's listing and
+    // type sit on it, not on the relation of its parts.
+    let mut ring_owner: HashMap<u64, &HashMap<String, String>> = HashMap::new();
+    for rel in elements(relations) {
+        let Some(tags) = &rel.tags else { continue };
+        if tags.get("type").map(|t| t.as_str()) != Some("multipolygon")
+            || !tags.contains_key("building")
+        {
+            continue;
+        }
+        for m in rel.members.iter().filter(|m| m.r#type == "way") {
+            if is_outline(m.role.trim()) {
+                ring_owner.entry(m.r#ref).or_insert(tags);
+            }
+        }
+    }
 
     let mut suppressed: OutlineSuppression = HashSet::new();
     for rel in elements(relations) {
@@ -1683,8 +1837,14 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
         if tags.get("type").map(|t| t.as_str()) != Some("building") {
             continue;
         }
+        let owner = rel
+            .members
+            .iter()
+            .filter(|m| m.r#type == "way" && is_outline(m.role.trim()))
+            .find_map(|m| ring_owner.get(&m.r#ref).copied());
 
-        // Style decision lives on the relation or any of its member ways.
+        // Style decision lives on the relation, any of its member ways, or the
+        // multipolygon its outline bounds.
         let mut rel_hint = building_style_hint(tags);
         if rel_hint == StyleHint::None {
             rel_hint = rel
@@ -1692,26 +1852,38 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
                 .iter()
                 .filter_map(|m| way_hint.get(&m.r#ref).copied())
                 .find(|h| *h != StyleHint::None)
+                .or_else(|| owner.map(building_style_hint))
                 .unwrap_or(StyleHint::None);
         }
         // So does its date, which the outline usually carries alone.
-        let rel_year = year_for_parts(tags).or_else(|| {
-            rel.members
-                .iter()
-                .filter(|m| is_outline(m.role.trim()))
-                .find_map(|m| way_year.get(&m.r#ref).copied())
-        });
+        let rel_year = year_for_parts(tags)
+            .or_else(|| {
+                rel.members
+                    .iter()
+                    .filter(|m| is_outline(m.role.trim()))
+                    .find_map(|m| way_year.get(&m.r#ref).copied())
+            })
+            .or_else(|| owner.and_then(year_for_parts));
 
         // Housing when the relation or its outline says so.
         let housing = is_housing_type(tags)
+            || owner.is_some_and(is_housing_type)
             || rel.members.iter().any(|m| {
                 is_outline(m.role.trim()) && m.r#type == "way" && housing_ways.contains(&m.r#ref)
             });
 
+        let group_seed = seed_with_residential_mark(
+            seed_with_year(
+                seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
+                rel_year,
+            ),
+            housing,
+        );
         // Sub-relation parts carry no way geometry here, so they skip the coverage gate.
         let mut has_part = false;
         let mut has_relation_part = false;
-        let mut part_area = 0.0;
+        let mut tallest_part: Option<f64> = None;
+        let mut part_rings: Vec<Vec<(f64, f64)>> = Vec::new();
         for m in &rel.members {
             if !m.role.trim().eq_ignore_ascii_case("part") {
                 continue;
@@ -1726,18 +1898,12 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
                 }
                 "way" => {
                     if way_ground.get(&m.r#ref).copied().unwrap_or(true) {
-                        part_area += way_area(m.r#ref).unwrap_or(0.0);
+                        part_rings.extend(way_ring(m.r#ref));
                     }
-                    part_group.insert(
-                        m.r#ref,
-                        seed_with_residential_mark(
-                            seed_with_year(
-                                seed_with_hint(RELATION_SEED_BIT | rel.id, rel_hint),
-                                rel_year,
-                            ),
-                            housing,
-                        ),
-                    );
+                    if let Some(&h) = way_height.get(&m.r#ref) {
+                        tallest_part = Some(tallest_part.map_or(h, |t: f64| t.max(h)));
+                    }
+                    part_group.insert(m.r#ref, group_seed);
                 }
                 _ => {}
             }
@@ -1745,6 +1911,7 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
         if !has_part {
             continue;
         }
+        let parts: Vec<&[(f64, f64)]> = part_rings.iter().map(Vec::as_slice).collect();
 
         for m in &rel.members {
             let r = m.role.trim();
@@ -1757,10 +1924,23 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
                 _ => continue,
             };
 
+            // An outline tagged as a part is one, often the podium the towers stand on,
+            // as the spatial pass takes such a way too, and it takes the towers' style.
+            // One as tall as the tallest part is the whole building, not a podium.
+            if kind == "way" && tagged_parts.contains(&m.r#ref) {
+                let podium = match (way_height.get(&m.r#ref), tallest_part) {
+                    (Some(&h), Some(t)) => h < t,
+                    _ => true,
+                };
+                if podium {
+                    part_group.insert(m.r#ref, group_seed);
+                    continue;
+                }
+            }
             // Keep the outline when the parts are too sparse to stand in for it.
             if kind == "way" && !has_relation_part {
-                if let Some(outline_area) = way_area(m.r#ref) {
-                    if outline_area > 0.0 && part_area / outline_area < MIN_PART_COVERAGE {
+                if let Some(outline) = way_ring(m.r#ref).filter(|r| ring_area(r) > 0.0) {
+                    if !parts_cover(&[outline], &parts) {
                         continue;
                     }
                 }
@@ -2024,17 +2204,10 @@ fn compute_spatial_part_suppression<E: Borrow<OsmElement>>(
         if a <= 0.0 {
             continue;
         }
-        let (mut min_la, mut min_lo, mut max_la, mut max_lo) =
-            (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        for &(la, lo) in &r {
-            min_la = min_la.min(la);
-            max_la = max_la.max(la);
-            min_lo = min_lo.min(lo);
-            max_lo = max_lo.max(lo);
-        }
+        let b = Bounds::of(&r);
         let gi = geoms.len();
-        let (c0a, c0o) = cell(min_la, min_lo);
-        let (c1a, c1o) = cell(max_la, max_lo);
+        let (c0a, c0o) = cell(b.south, b.west);
+        let (c1a, c1o) = cell(b.north, b.east);
         for ca in c0a..=c1a {
             for co in c0o..=c1o {
                 grid.entry((ca, co)).or_default().push(gi);
@@ -2047,16 +2220,15 @@ fn compute_spatial_part_suppression<E: Borrow<OsmElement>>(
         });
     }
 
-    // add each part area to every outline containing its centroid
-    let mut covered: HashMap<usize, f64> = HashMap::new();
-    for pid in part_ids {
-        let r = ring(pid);
-        let pa = ring_area(&r);
-        if pa <= 0.0 {
+    // credit each part to every outline containing its centroid
+    let part_rings: Vec<Vec<(f64, f64)>> = part_ids.iter().map(|&pid| ring(pid)).collect();
+    let mut covered: HashMap<usize, Vec<&[(f64, f64)]>> = HashMap::new();
+    for (&pid, r) in part_ids.iter().zip(&part_rings) {
+        if ring_area(r) <= 0.0 {
             continue;
         }
         let (mut sla, mut slo) = (0.0, 0.0);
-        for &(la, lo) in &r {
+        for &(la, lo) in r {
             sla += la;
             slo += lo;
         }
@@ -2070,7 +2242,7 @@ fn compute_spatial_part_suppression<E: Borrow<OsmElement>>(
         for &gi in cands {
             if point_in_ring(cla, clo, &geoms[gi].ring) {
                 if ground {
-                    *covered.entry(gi).or_insert(0.0) += pa;
+                    covered.entry(gi).or_default().push(r);
                 }
                 best = Some(match best {
                     Some(b) if (geoms[b].area, geoms[b].id) <= (geoms[gi].area, geoms[gi].id) => b,
@@ -2099,9 +2271,9 @@ fn compute_spatial_part_suppression<E: Borrow<OsmElement>>(
     }
 
     let mut suppressed: OutlineSuppression = HashSet::new();
-    for (gi, cov) in covered {
+    for (gi, parts) in covered {
         let g = &geoms[gi];
-        if cov / g.area >= MIN_PART_COVERAGE {
+        if parts_cover(std::slice::from_ref(&g.ring), &parts) {
             suppressed.insert(("way", g.id));
         }
     }
@@ -2245,7 +2417,7 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
         seed: u64,
     }
     struct RelPart {
-        area: f64,
+        rings: Vec<Vec<(f64, f64)>>,
         centroid: (f64, f64),
         ground: bool,
         /// Set for a building:part way, which joins its outline's group.
@@ -2316,7 +2488,7 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
                 continue;
             }
             parts.push(RelPart {
-                area,
+                rings,
                 centroid: (sla / cnt as f64, slo / cnt as f64),
                 ground: part_covers_ground(tags),
                 way: None,
@@ -2329,16 +2501,16 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
             continue;
         };
         let ring: Vec<(f64, f64)> = ns.iter().filter_map(|i| node_ll.get(i).copied()).collect();
-        let area = ring_area(&ring);
-        if area <= 0.0 || ring.is_empty() {
+        if ring_area(&ring) <= 0.0 || ring.is_empty() {
             continue;
         }
         let (sla, slo) = ring
             .iter()
             .fold((0.0, 0.0), |(a, o), &(la, lo)| (a + la, o + lo));
+        let centroid = (sla / ring.len() as f64, slo / ring.len() as f64);
         parts.push(RelPart {
-            area,
-            centroid: (sla / ring.len() as f64, slo / ring.len() as f64),
+            rings: vec![ring],
+            centroid,
             ground: part_covers_ground(tags),
             way: Some(w.id),
             relation: None,
@@ -2377,9 +2549,9 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
         }
     }
 
-    // Add each ground-level part's gross area to every outline whose footprint contains the
-    // part centroid (matches the way-based pass, which credits every containing outline).
-    let mut covered: HashMap<usize, f64> = HashMap::new();
+    // Credit each ground-level part to every outline whose footprint contains the part
+    // centroid (matches the way-based pass, which credits every containing outline).
+    let mut covered: HashMap<usize, Vec<&[(f64, f64)]>> = HashMap::new();
     for p in &parts {
         let (cla, clo) = p.centroid;
         let Some(cands) = grid.get(&cell(cla, clo)) else {
@@ -2400,7 +2572,10 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
             // volumes that float above the ground, so they can't stand in for the ground
             // footprint.
             if p.ground {
-                *covered.entry(gi).or_insert(0.0) += p.area;
+                covered
+                    .entry(gi)
+                    .or_default()
+                    .extend(p.rings.iter().map(Vec::as_slice));
             }
             best = Some(match best {
                 Some(b) if (outlines[b].area, outlines[b].id) <= (g.area, g.id) => b,
@@ -2421,9 +2596,9 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
     }
 
     let mut suppressed: OutlineSuppression = HashSet::new();
-    for (gi, cov) in covered {
+    for (gi, parts) in covered {
         let g = &outlines[gi];
-        if cov / g.area >= MIN_PART_COVERAGE {
+        if parts_cover(&g.rings, &parts) {
             suppressed.insert(("relation", g.id));
         }
     }
@@ -2862,6 +3037,57 @@ mod outline_suppression_tests {
             &mut HousingRelationParts::new(),
         );
 
+        assert!(suppressed.contains(&("way", 100)));
+    }
+
+    // Socony-Mobil Building: the outline is tagged as the 22 m podium part too, so the
+    // towers covering 65% of it leave the rest of the podium standing.
+    #[test]
+    fn an_outline_tagged_as_a_part_stays() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let outline = with_tag(with_tag(outline, "building:part", "yes"), "height", "22");
+        let (part, part_nodes) = square_way(200, 2000, 0.8);
+        let part = with_tag(part, "height", "174");
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("way", 200, "part"),
+        ]);
+
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let mut groups = PartGroups::new();
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline, part],
+            &nodes,
+            &mut groups,
+            &mut HousingRelationParts::new(),
+        );
+
+        assert!(!suppressed.contains(&("way", 100)));
+        // The podium takes the style of the towers on it.
+        assert!(groups.contains_key(&100));
+        assert_eq!(groups.get(&100), groups.get(&200));
+    }
+
+    // An outline tagged as a part with the tallest part's height is the whole building.
+    #[test]
+    fn an_outline_part_as_tall_as_its_towers_is_replaced_by_them() {
+        let (outline, outline_nodes) = square_way(100, 1000, 1.0);
+        let outline = with_tag(with_tag(outline, "building:part", "yes"), "height", "120");
+        let (part, part_nodes) = square_way(200, 2000, 0.8);
+        let part = with_tag(part, "height", "120");
+        let rel = building_relation(vec![
+            member("way", 100, "outline"),
+            member("way", 200, "part"),
+        ]);
+        let nodes: Vec<OsmElement> = outline_nodes.into_iter().chain(part_nodes).collect();
+        let suppressed = compute_outline_suppression(
+            &[rel],
+            &[outline, part],
+            &nodes,
+            &mut PartGroups::new(),
+            &mut HousingRelationParts::new(),
+        );
         assert!(suppressed.contains(&("way", 100)));
     }
 
@@ -3471,6 +3697,143 @@ mod outline_suppression_tests {
             &mut housing,
         );
         assert!(housing.is_empty());
+    }
+
+    #[test]
+    fn coverage_counts_what_the_parts_cover_once_and_only_inside() {
+        // Rings of (lat, lon): a square outline and strips of it from the west edge.
+        let strip = |w: f64, e: f64| vec![(0.0, w), (0.0, e), (10.0, e), (10.0, w), (0.0, w)];
+        let outline = vec![strip(0.0, 10.0)];
+        let (west, stacked, beside, outside) = (
+            strip(0.0, 3.0),
+            strip(0.0, 3.0),
+            strip(2.0, 5.0),
+            strip(12.0, 20.0),
+        );
+        let share = |parts: &[&Vec<(f64, f64)>]| {
+            let parts: Vec<&[(f64, f64)]> = parts.iter().map(|p| p.as_slice()).collect();
+            covered_share(&outline, &parts)
+        };
+        assert!((share(&[&west, &stacked, &outside]) - 0.3).abs() < 1e-9);
+        assert!((share(&[&west, &beside]) - 0.5).abs() < 1e-9);
+        assert_eq!(share(&[&outside]), 0.0);
+        // A campus a kilometre deep, and parts 6 m deep every 25 m across its south
+        // half: rows 21 m apart, one per 48th of it, would make that 8% and not 12%.
+        let deg = |m: f64| m / 111_320.0;
+        let campus = vec![vec![
+            (0.0, 0.0),
+            (0.0, deg(500.0)),
+            (deg(1000.0), deg(500.0)),
+            (deg(1000.0), 0.0),
+            (0.0, 0.0),
+        ]];
+        let strips: Vec<Vec<(f64, f64)>> = (0..20)
+            .map(|i| {
+                let (s, n) = (deg(25.0 * i as f64), deg(25.0 * i as f64 + 6.0));
+                vec![
+                    (s, 0.0),
+                    (s, deg(500.0)),
+                    (n, deg(500.0)),
+                    (n, 0.0),
+                    (s, 0.0),
+                ]
+            })
+            .collect();
+        let strips: Vec<&[(f64, f64)]> = strips.iter().map(Vec::as_slice).collect();
+        let got = covered_share(&campus, &strips);
+        assert!((got - 0.12).abs() < 0.005, "{got}");
+    }
+
+    // Philadelphia City Hall: a building relation lists the parts and, as its outline, the
+    // outer ring of the multipolygon that carries the listing. The parts take its style.
+    #[test]
+    fn parts_take_the_style_of_the_multipolygon_their_outline_bounds() {
+        let (ring, ring_nodes) = square_way(100, 1000, 1.0);
+        let (part, part_nodes) = square_way(200, 2000, 0.4);
+        let part = tagged(part, "building:part", "yes");
+        let parts = OsmElement {
+            r#type: "relation".into(),
+            id: 7,
+            lat: None,
+            lon: None,
+            nodes: None,
+            tags: Some(tagmap(&[("type", "building"), ("name", "City Hall")])),
+            members: vec![member("way", 200, "part"), member("way", 100, "outer")],
+        };
+        let hall = relation_el(
+            8,
+            &[("building", "civic"), ("ref:nrhp", "76001666")],
+            vec![member("way", 100, "outer")],
+        );
+        let nodes: Vec<OsmElement> = ring_nodes.into_iter().chain(part_nodes).collect();
+        let mut groups = PartGroups::new();
+        compute_outline_suppression(
+            &[parts, hall],
+            &[ring, part],
+            &nodes,
+            &mut groups,
+            &mut HousingRelationParts::new(),
+        );
+        assert_eq!(style_hint_from_seed(groups[&200]), StyleHint::Masonry);
+    }
+
+    // Philadelphia City Hall maps its tower as three parts from the ground up on one
+    // footprint. Stacked parts cover their ground once, so three parts on 36% of an
+    // outline leave it standing, whether it is a building relation's outline, a bare
+    // way or a multipolygon.
+    #[test]
+    fn stacked_parts_cover_their_ground_once() {
+        let stack = |side: f64| -> (Vec<OsmElement>, Vec<OsmElement>) {
+            (0..3u64)
+                .map(|i| {
+                    let (w, n) = square_way(200 + i, 2000 + 10 * i, side);
+                    (tagged(w, "building:part", "yes"), n)
+                })
+                .fold((Vec::new(), Vec::new()), |(mut ws, mut ns), (w, n)| {
+                    ws.push(w);
+                    ns.extend(n);
+                    (ws, ns)
+                })
+        };
+        let suppressed = |relations: &[&OsmElement], ways: &[&OsmElement], nodes: &[OsmElement]| {
+            suppress_outlines(
+                relations,
+                ways,
+                &nodes.iter().collect::<Vec<_>>(),
+                &mut PartGroups::new(),
+                &mut HousingRelationParts::new(),
+            )
+        };
+
+        let (outline, mut nodes) = square_way(100, 1000, 1.0);
+        let (parts, part_nodes) = stack(0.6);
+        nodes.extend(part_nodes);
+        let mut members = vec![member("way", 100, "outline")];
+        members.extend((200..203).map(|id| member("way", id, "part")));
+        let ways: Vec<&OsmElement> = std::iter::once(&outline).chain(&parts).collect();
+        assert!(suppressed(&[&building_relation(members)], &ways, &nodes).is_empty());
+
+        let outline = tagged(outline, "building", "yes");
+        let ways: Vec<&OsmElement> = std::iter::once(&outline).chain(&parts).collect();
+        assert!(suppressed(&[], &ways, &nodes).is_empty());
+
+        let (mut ways, mut nodes) = split_square([100, 101, 102, 103], [10, 11, 12, 13], 0.002);
+        let (parts, part_nodes) = stack(0.0012);
+        ways.extend(parts);
+        nodes.extend(part_nodes);
+        let outline = relation_el(
+            1,
+            &[("building", "civic")],
+            outer_members(&[100, 101, 102, 103]),
+        );
+        assert!(suppressed(&[&outline], &ways.iter().collect::<Vec<_>>(), &nodes).is_empty());
+
+        // One part over 64% of it still stands in for the outline.
+        let (big, big_nodes) = square_way(300, 3000, 0.0016);
+        ways.push(tagged(big, "building:part", "yes"));
+        nodes.extend(big_nodes);
+        let s = suppressed(&[&outline], &ways.iter().collect::<Vec<_>>(), &nodes);
+        assert!(s.contains(&("relation", 1)));
     }
 
     // A part way standing in the block's courtyard, or underground, is not the block: it

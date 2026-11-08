@@ -854,7 +854,62 @@ pub fn place_structure_yaw(
     }
 }
 
+/// Where a model's voxel columns land for one anchor and rotation.
+struct Stamp {
+    base_x: i32,
+    base_z: i32,
+    w: i32,
+    l: i32,
+    k: u8,
+    ax: i32,
+    az: i32,
+}
+
+impl Stamp {
+    fn new(schem: &StructureSchematic, base_x: i32, base_z: i32, rot: u8) -> Self {
+        let (k, w, l) = (rot & 3, schem.width, schem.length);
+        let (ax, az) = rotate_xz(schem.anchor_x, schem.anchor_z, w, l, k);
+        Stamp {
+            base_x,
+            base_z,
+            w,
+            l,
+            k,
+            ax,
+            az,
+        }
+    }
+
+    fn column(&self, vx: i32, vz: i32) -> (i32, i32) {
+        let (rx, rz) = rotate_xz(vx, vz, self.w, self.l, self.k);
+        (self.base_x + rx - self.ax, self.base_z + rz - self.az)
+    }
+}
+
+/// The world columns, each once, that `place_structure` fills from the model's bottom
+/// `storey` layers with the same anchor and rotation: what the model stands on, without
+/// an overhang further up.
+pub fn structure_base(
+    schem: &StructureSchematic,
+    base_x: i32,
+    base_z: i32,
+    rot: u8,
+    storey: i32,
+) -> Vec<(i32, i32)> {
+    let stamp = Stamp::new(schem, base_x, base_z, rot);
+    let mut columns: Vec<(i32, i32)> = schem
+        .voxels
+        .iter()
+        .filter(|&&(_, vy, _, _)| vy < storey)
+        .map(|&(vx, _, vz, _)| stamp.column(vx, vz))
+        .collect();
+    columns.sort_unstable();
+    columns.dedup();
+    columns
+}
+
 /// Stamp anchor at (base_x, base_z), lowest voxel at base_y, rotated by `rot`; `ground` fills under each column. Keep half-extent under TILE_EDITOR_HALO (64) or it clips at tile seams.
+/// Returns whether it was placed.
 pub fn place_structure(
     editor: &mut WorldEditor,
     schem: &StructureSchematic,
@@ -863,9 +918,7 @@ pub fn place_structure(
     base_y: i32,
     rot: u8,
     ground: Option<Block>,
-) {
-    let k = rot & 3;
-    let (w, l) = (schem.width, schem.length);
+) -> bool {
     // Skip if any voxel sits farther from the anchor than the tile halo, else it clips at seams.
     if schem.max_extent > crate::tile::TILE_EDITOR_HALO {
         eprintln!(
@@ -873,15 +926,14 @@ pub fn place_structure(
             schem.max_extent,
             crate::tile::TILE_EDITOR_HALO
         );
-        return;
+        return false;
     }
-    let (ax, az) = rotate_xz(schem.anchor_x, schem.anchor_z, w, l, k);
+    let stamp = Stamp::new(schem, base_x, base_z, rot);
+    let k = stamp.k;
     // Voxels share their states, so each distinct one is rotated once per placement.
     let mut rotated: Vec<(*const Value, Arc<Value>)> = Vec::new();
     for (vx, vy, vz, bwp) in &schem.voxels {
-        let (rx, rz) = rotate_xz(*vx, *vz, w, l, k);
-        let wx = base_x + rx - ax;
-        let wz = base_z + rz - az;
+        let (wx, wz) = stamp.column(*vx, *vz);
         let placed = if k == 0 {
             bwp.clone()
         } else {
@@ -906,6 +958,7 @@ pub fn place_structure(
             editor.set_block_absolute(g, wx, base_y - 1, wz, None, Some(&[]));
         }
     }
+    true
 }
 
 #[cfg(test)]

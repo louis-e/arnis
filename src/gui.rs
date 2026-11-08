@@ -2381,6 +2381,12 @@ fn gui_start_generation(
 
                     // OSM water override first, then bridge repair.
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    overture::drop_footprints_in_water(
+                        &mut parsed_elements,
+                        &ground,
+                        &xzbbox,
+                        args.scale,
+                    );
                     ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
                     ground.finish_land_cover(args.mode);

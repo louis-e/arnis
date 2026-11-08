@@ -64,10 +64,15 @@ mod stats {
 }
 
 use crate::args::OvertureSource;
+use crate::bresenham::bresenham_line;
 use crate::clipping::clip_way_to_bbox;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
-use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::mapillary::geometry::parse_length_m;
+use crate::osm_parser::{
+    point_in_ring, ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay,
+};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use parquet::file::metadata::ParquetMetaData;
@@ -75,7 +80,7 @@ use parquet::file::reader::{ChunkReader, FileReader, Length};
 use parquet::file::serialized_reader::SerializedFileReader;
 use parquet::record::Row;
 use reqwest::blocking::Client;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -703,6 +708,155 @@ pub fn deduplicate_against_osm(
             }
         })
         .collect()
+}
+
+/// Drops the footprints Overture added that stand out on open water, once the land
+/// cover knows OSM's water, and returns how many. ML extraction reads moored barges
+/// and bridge shadows on a river as roofs, as on the Schuylkill by 30th Street
+/// Station. OSM's own buildings over water stay, as does all that stands on a pier.
+pub fn drop_footprints_in_water(
+    elements: &mut Vec<ProcessedElement>,
+    ground: &crate::ground::Ground,
+    xzbbox: &XZBBox,
+    scale: f64,
+) -> usize {
+    use crate::land_cover::{osm_land_override::SHORE_BAND_M, LC_WATER};
+    let overture = |el: &ProcessedElement| el.id() & OVERTURE_ID_HIGH_BIT != 0;
+    if !elements.iter().any(overture) {
+        return 0;
+    }
+    // The land cover is laid out from the corner of the area.
+    let (min_x, min_z) = (xzbbox.min_x(), xzbbox.min_z());
+    let wet = |x: i32, z: i32| ground.cover_class(XZPoint::new(x - min_x, z - min_z)) == LC_WATER;
+    // ESA reads the shore's first pixel and a half as water, which the land override
+    // gives back to the buildings on it, so open water starts that far out.
+    let r = (SHORE_BAND_M * scale).ceil().max(1.0) as i32;
+    let around = [
+        (r, 0),
+        (-r, 0),
+        (0, r),
+        (0, -r),
+        (r, r),
+        (r, -r),
+        (-r, r),
+        (-r, -r),
+    ];
+    let decks = Decks::of(elements, scale);
+    drop_where_wet(elements, |x, z| {
+        wet(x, z) && around.iter().all(|&(dx, dz)| wet(x + dx, z + dz)) && !decks.hold(x, z)
+    })
+}
+
+/// Ground OSM maps out over water to stand on, piers, wharves and pontoons, under which
+/// the land cover keeps the water. A shed out on one is not afloat. Bridges are left
+/// out: their shadows on the water are what the ML extraction mistakes for roofs.
+struct Decks {
+    /// Outlines as (z, x) rings, for `point_in_ring`.
+    areas: Vec<Vec<(f64, f64)>>,
+    /// Cells of those mapped as a line, as wide as they are built and a block more.
+    lines: HashSet<(i32, i32)>,
+}
+
+impl Decks {
+    fn of(elements: &[ProcessedElement], scale: f64) -> Self {
+        use crate::land_cover::osm_land_override::{
+            is_over_water_structure, over_water_half_width,
+        };
+        let mut decks = Decks {
+            areas: Vec::new(),
+            lines: HashSet::new(),
+        };
+        for el in elements {
+            match el {
+                ProcessedElement::Way(way)
+                    if way.id & OVERTURE_ID_HIGH_BIT == 0 && is_over_water_structure(&way.tags) =>
+                {
+                    let area = way.tags.get("area").map(String::as_str) != Some("no");
+                    if !(area && decks.add_area(&way.nodes)) {
+                        // As wide as its `width`, as the waterfront builds the deck.
+                        let tagged = way
+                            .tags
+                            .get("width")
+                            .and_then(|w| parse_length_m(w))
+                            .filter(|w| (0.0..200.0).contains(w))
+                            .map_or(0, |w| (w * scale / 2.0).ceil() as i32);
+                        let half = over_water_half_width(way, scale).unwrap_or(2).max(tagged) + 1;
+                        decks.add_line(&way.nodes, half);
+                    }
+                }
+                ProcessedElement::Relation(rel) if is_over_water_structure(&rel.tags) => {
+                    for m in &rel.members {
+                        if m.role == ProcessedMemberRole::Outer {
+                            decks.add_area(&m.way.nodes);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        decks
+    }
+
+    /// Adds a closed ring; false when `nodes` do not close.
+    fn add_area(&mut self, nodes: &[ProcessedNode]) -> bool {
+        let corner = |n: Option<&ProcessedNode>| n.map(|n| (n.x, n.z));
+        let closed = nodes.len() >= 4 && corner(nodes.first()) == corner(nodes.last());
+        if closed {
+            self.areas
+                .push(nodes.iter().map(|n| (n.z as f64, n.x as f64)).collect());
+        }
+        closed
+    }
+
+    fn add_line(&mut self, nodes: &[ProcessedNode], half: i32) {
+        for pair in nodes.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            for (x, _, z) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
+                for dz in -half..=half {
+                    for dx in -half..=half {
+                        self.lines.insert((x + dx, z + dz));
+                    }
+                }
+            }
+        }
+    }
+
+    fn hold(&self, x: i32, z: i32) -> bool {
+        self.lines.contains(&(x, z))
+            || self
+                .areas
+                .iter()
+                .any(|r| point_in_ring(z as f64, x as f64, r))
+    }
+}
+
+/// Drops the Overture footprints whose middle and most of whose corners `is_water`.
+fn drop_where_wet(
+    elements: &mut Vec<ProcessedElement>,
+    is_water: impl Fn(i32, i32) -> bool,
+) -> usize {
+    let before = elements.len();
+    elements.retain(|el| {
+        let ProcessedElement::Way(way) = el else {
+            return true;
+        };
+        // A closed ring repeats its first corner last; that corner votes once.
+        let corners = match way.nodes.as_slice() {
+            [first, rest @ .., last] if first.x == last.x && first.z == last.z => {
+                &way.nodes[..=rest.len()]
+            }
+            all => all,
+        };
+        if way.id & OVERTURE_ID_HIGH_BIT == 0 || corners.is_empty() {
+            return true;
+        }
+        let n = corners.len() as i64;
+        let cx = corners.iter().map(|p| p.x as i64).sum::<i64>() / n;
+        let cz = corners.iter().map(|p| p.z as i64).sum::<i64>() / n;
+        let wet = corners.iter().filter(|p| is_water(p.x, p.z)).count();
+        !(is_water(cx as i32, cz as i32) && wet * 2 > corners.len())
+    });
+    before - elements.len()
 }
 
 // ─── Inner implementation ────────────────────────────────────────────────
@@ -2536,6 +2690,116 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         })
+    }
+
+    #[test]
+    fn footprints_overture_added_in_water_are_left_out() {
+        // A river runs from x = 100 to x = 200.
+        let wet = |x: i32, _z: i32| (100..200).contains(&x);
+        let square = |id: u64, x: i32| {
+            let corners = [(x, 0), (x + 10, 0), (x + 10, 10), (x, 10), (x, 0)];
+            ProcessedElement::Way(ProcessedWay {
+                id,
+                nodes: corners
+                    .iter()
+                    .map(|&(x, z)| ProcessedNode {
+                        id: 0,
+                        tags: HashMap::new(),
+                        x,
+                        z,
+                    })
+                    .collect(),
+                tags: HashMap::from([("building".to_string(), "yes".to_string())]),
+            })
+        };
+        let mut elements = vec![
+            square(gers_id_to_u64("barge"), 140),
+            square(gers_id_to_u64("bank"), 40),
+            // Half on the bank: a boathouse, not a shadow on the river, whichever
+            // corner its ring starts at.
+            square(gers_id_to_u64("boathouse"), 95),
+            square(gers_id_to_u64("slipway"), 195),
+            // OSM's own building on a pier.
+            square(7, 150),
+        ];
+        assert_eq!(drop_where_wet(&mut elements, wet), 1);
+        let kept: Vec<u64> = elements.iter().map(|e| e.id()).collect();
+        assert_eq!(
+            kept,
+            [
+                gers_id_to_u64("bank"),
+                gers_id_to_u64("boathouse"),
+                gers_id_to_u64("slipway"),
+                7
+            ]
+        );
+    }
+
+    #[test]
+    fn footprints_on_the_shore_or_a_pier_stay() {
+        // A river from x = 100 to x = 200, flat ground around it. A footprint that ESA
+        // half drowned on the quay stays, as do kiosks on a pier mapped as an area and
+        // on one mapped as a line, and on a wide one mapped as a line with a width;
+        // those out on the river go, the boat moored beside the narrow line too.
+        let ground = crate::ground::test_support::ground_with_water(300, 80, 0.0, |x, _| {
+            (100..200).contains(&x)
+        });
+        let bbox = XZBBox::rect_from_min_max(0, 0, 299, 79).unwrap();
+        let way = |id: u64, corners: &[(i32, i32)], tag: (&str, &str)| {
+            ProcessedElement::Way(ProcessedWay {
+                id,
+                nodes: corners
+                    .iter()
+                    .map(|&(x, z)| ProcessedNode {
+                        id: 0,
+                        tags: HashMap::new(),
+                        x,
+                        z,
+                    })
+                    .collect(),
+                tags: HashMap::from([(tag.0.to_string(), tag.1.to_string())]),
+            })
+        };
+        let square = |id: &str, x: i32, z: i32| {
+            let corners = [(x, z), (x + 10, z), (x + 10, z + 10), (x, z + 10), (x, z)];
+            way(gers_id_to_u64(id), &corners, ("building", "yes"))
+        };
+        let pier = ("man_made", "pier");
+        let mut elements = vec![
+            square("quay", 101, 10),
+            square("barge", 145, 10),
+            square("kiosk", 175, 10),
+            way(
+                9,
+                &[(165, 5), (195, 5), (195, 35), (165, 35), (165, 5)],
+                pier,
+            ),
+            square("pier end", 150, 50),
+            square("moored", 150, 62),
+            way(10, &[(120, 55), (190, 55)], pier),
+            way(11, &[(105, 35), (140, 35)], pier),
+            square("wide pier kiosk", 115, 40),
+        ];
+        if let ProcessedElement::Way(wide) = &mut elements[7] {
+            wide.tags.insert("width".to_string(), "20".to_string());
+        }
+        assert_eq!(
+            drop_footprints_in_water(&mut elements, &ground, &bbox, 1.0),
+            2
+        );
+        let kept: Vec<u64> = elements.iter().map(|e| e.id()).collect();
+        assert_eq!(
+            kept,
+            [
+                gers_id_to_u64("quay"),
+                gers_id_to_u64("kiosk"),
+                9,
+                gers_id_to_u64("pier end"),
+                10,
+                11,
+                gers_id_to_u64("wide pier kiosk")
+            ]
+        );
     }
 
     fn hints_with(key: OsmRef, hint: OsmAttributeHint) -> OvertureHints {
