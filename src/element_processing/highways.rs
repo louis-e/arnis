@@ -124,13 +124,17 @@ pub(crate) fn road_profile(
         })
         .collect();
     let half = ROAD_SMOOTHING.len() / 2;
+    // The weights sum to just under 1; unnormalised they pull a road a block towards Y 0
+    // a thousand blocks out, where One World terrain lies.
+    let total: f64 = ROAD_SMOOTHING.iter().sum();
     let smooth: Vec<f64> = (0..n)
         .map(|i| {
             ROAD_SMOOTHING
                 .iter()
                 .enumerate()
                 .map(|(k, w)| w * across[(i + k).saturating_sub(half).min(n - 1)])
-                .sum()
+                .sum::<f64>()
+                / total
         })
         .collect();
 
@@ -6249,6 +6253,25 @@ mod tests {
             })
             .collect();
         assert_eq!(edge[0], edge[1]);
+    }
+
+    #[test]
+    fn a_road_far_below_y_zero_stays_on_the_ground() {
+        for level in [-1120.3f32, 2650.4] {
+            let ground = sloped_ground(200, 60, |_, _| level);
+            let xzbbox = XZBBox::rect_from_xz_lengths(199.0, 59.0).unwrap();
+            let editor = tunnel_editor(&xzbbox, ground);
+            let ProcessedElement::Way(road) =
+                line_way(1, &[(10, 30), (190, 30)], &[("highway", "residential")])
+            else {
+                unreachable!()
+            };
+            let ys = road_profile(&editor, &road, 2, &HighwayConnectivityMap::new(), |_, _| {
+                None
+            });
+            let want = level.round() as i32;
+            assert!(ys.iter().all(|&y| y == want), "{level}: {ys:?}");
+        }
     }
 
     #[test]
