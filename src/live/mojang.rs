@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+// The launcher's own fixed index; the launcher's runtime and the system Java cover its loss.
 const RUNTIME_INDEX: &str = "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
 /// The oldest version an Arnis world opens in.
 pub const OLDEST_VERSION: &str = "1.21.4";

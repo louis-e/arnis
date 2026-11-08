@@ -1211,7 +1211,12 @@ fn provision(cfg: &Config, world_dir: &Path, reporter: &Reporter) -> Result<Prov
         }) {
             Ok(j) => j,
             Err(e) if e == "Cancelled" => return Err(e),
-            Err(e) => mojang::system_java(info.java_major).ok_or(e)?,
+            Err(e) => mojang::system_java(info.java_major).ok_or_else(|| {
+                format!(
+                    "Could not get Java {} for the server ({e}). Play Minecraft {version} once in the launcher, or install Java {}, then try again.",
+                    info.java_major, info.java_major
+                )
+            })?,
         },
     };
     reporter.update(|s| s.download = None);
