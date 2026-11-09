@@ -1476,11 +1476,14 @@ pub fn generate_world_with_options(
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
     let tiles = tile::create_tiles(&xzbbox, tile::DEFAULT_TILE_SIZE);
 
-    // Tile editors are created as JavaAnvil (WorldEditor::new), so their
-    // format-dependent block-entity schema (banners) only matches Java output.
-    // Restrict the parallel tile path to Java; Bedrock/Luanti large worlds use
-    // the sequential path (correct, just not tile-parallel).
-    let use_parallel_tiles = tiles.len() >= 3 && matches!(world_format, WorldFormat::JavaAnvil);
+    // Tile editors take the world's format, so what they write that depends on it (a
+    // banner's block entity) matches the output. Luanti keeps the sequential path: its
+    // editor carries a game and a ground level that the tile editors are not given.
+    let use_parallel_tiles = tiles.len() >= 3
+        && matches!(
+            world_format,
+            WorldFormat::JavaAnvil | WorldFormat::BedrockMcWorld
+        );
 
     if use_parallel_tiles {
         // Large area: process tiles in parallel using rayon.
@@ -1621,7 +1624,15 @@ pub fn generate_world_with_options(
             )
             .expect("Failed to create tile XZBBox");
 
-            let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
+            let mut tile_editor = WorldEditor::new_with_format_and_name(
+                PathBuf::new(),
+                &tile_xzbbox,
+                llbbox,
+                world_format,
+                None,
+                None,
+                false,
+            );
             tile_editor.set_ground(Arc::clone(&ground));
             tile_editor.set_water_field(Arc::clone(&big_water_field));
             tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
