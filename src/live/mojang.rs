@@ -384,6 +384,7 @@ pub fn download_java(
 }
 
 /// Whether a link at `rel` pointing at `target` resolves inside the runtime folder.
+#[cfg(any(unix, test))]
 fn link_stays_inside(rel: &str, target: &str) -> bool {
     use std::path::Component;
     if Path::new(target).is_absolute() {
