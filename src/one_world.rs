@@ -39,7 +39,8 @@ fn stable(v: f64, decimals: i32) -> f64 {
 }
 
 /// Ground data is fetched this far past the area and cropped again, so the
-/// smoothing passes (widest: built-up Gaussian, ~90 m) agree across seams.
+/// smoothing passes (widest: built-up Gaussian, ~90 m) agree across seams, out
+/// to the end of the geometry kept past the edge.
 pub fn ground_pad_blocks(scale: f64) -> i32 {
     ((100.0 * scale).ceil() as i32).max(96) + CLIP_PAD_BLOCKS
 }
