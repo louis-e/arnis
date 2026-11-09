@@ -22,6 +22,7 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             outputHashes = {
+              "fastnbt-2.6.1" = "sha256-A/e3dBxm2PkMRq1IccGrZjQvLooAD+2iSmWR4a+mPNU=";
               "rusty-leveldb-4.0.2" = "sha256-qrDxE4JiRRhzj1/Enni7Nlj3HLrhzbotqBSy2SK+2rs=";
               "nbtx-0.1.0" = "sha256-JoNSL1vrUbxX6hKWB4i/DX02+hsQemANJhQaEELlT2o=";
               "dda-voxelize-0.2.0-alpha.1" = "sha256-MiSvqlzvezp7TXIDZl7+/x+zCPcsbFo2hhMWBJKqvaE=";
