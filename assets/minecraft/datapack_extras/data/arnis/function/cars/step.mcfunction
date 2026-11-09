@@ -38,6 +38,9 @@ function arnis:cars/brake_lights
 execute if score #red arnis.car matches 1 if score #c arnis.car matches ..0 run tag @s add arnis.car.held
 execute unless score #red arnis.car matches 1 run tag @s remove arnis.car.held
 execute if score #c arnis.car matches 1.. run tag @s remove arnis.car.held
+# Walkers at a kerb wait only for cars that are moving.
+execute if score #c arnis.car matches ..0 run tag @s add arnis.car.still
+execute if score #c arnis.car matches 1.. run tag @s remove arnis.car.still
 execute if score #c arnis.car matches ..0 if entity @s[tag=arnis.car.ridden] run function arnis:cars/seat_check
 execute if score #c arnis.car matches ..0 run return 0
 execute store result entity @s data.d double 0.001 run scoreboard players get #c arnis.car

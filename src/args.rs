@@ -416,6 +416,13 @@ pub struct Args {
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
 
+    /// People who walk the mapped footways, sidewalks, squares, pedestrian streets and
+    /// paths, busier by day and near shops and sights, waiting at kerbs and, with
+    /// --traffic-lights, for the green man. Cars stop for them. Java 1.21.9+ shows them as mannequins in the
+    /// game's own skins, older versions as villagers.
+    #[arg(long, default_value_t = false)]
+    pub pedestrians: bool,
+
     #[command(flatten)]
     pub live: LiveArgs,
 }
@@ -909,6 +916,7 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.traffic_lights = false;
     args.discoveries = false;
     args.moving_vehicles = false;
+    args.pedestrians = false;
     // Nothing lives there, and the one barren biome would still spawn zombies.
     args.mob_spawning = MobSpawning::Off;
     // Airless bodies look right at night. Only a default: comparing against the
@@ -966,6 +974,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (args.disasters, "--disasters"),
         (args.body_gravity, "--body-gravity"),
         (args.moving_vehicles, "--moving-vehicles"),
+        (args.pedestrians, "--pedestrians"),
     ];
     if args.bedrock || args.luanti {
         // Bedrock runs the vehicles from an add-on of its own.
@@ -1278,6 +1287,10 @@ mod tests {
         assert!(validate_args(&parse(&["--bedrock", "--moving-vehicles"])).is_ok());
         let luanti = validate_args(&parse(&["--luanti", "--moving-vehicles"])).unwrap_err();
         assert!(luanti.contains("--moving-vehicles"), "{luanti}");
+        // Walkers are Java only.
+        let walkers = validate_args(&parse(&["--bedrock", "--pedestrians"])).unwrap_err();
+        assert!(walkers.contains("--pedestrians"), "{walkers}");
+        assert!(validate_args(&parse(&["--pedestrians", "--moving-vehicles"])).is_ok());
         let lights = validate_args(&parse(&[
             "--bedrock",
             "--moving-vehicles",

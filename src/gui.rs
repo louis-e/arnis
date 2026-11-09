@@ -1718,6 +1718,7 @@ fn gui_start_generation(
     zombie_outbreak: bool,
     disasters: bool,
     moving_vehicles: bool,
+    pedestrians: bool,
     body_gravity: bool,
     one_world: bool,
     one_world_name: String,
@@ -2023,6 +2024,7 @@ fn gui_start_generation(
                 zombie_outbreak,
                 disasters,
                 moving_vehicles,
+                pedestrians,
                 live: Default::default(),
             };
             // Same helper the CLI uses. Anything read before this point (the world prep

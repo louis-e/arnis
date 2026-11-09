@@ -13,6 +13,7 @@ use crate::bedrock_addon::{self, Fleet, Lamp};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::datapack::macro_coord;
+use crate::element_processing::ship_bodies::Vessel;
 use crate::element_processing::train_bodies::{self, Coach, Livery};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use fnv::FnvHashMap;
@@ -21,7 +22,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
 /// Moves a second: the pack moves trains every second tick.
-const STEPS_PER_S: f64 = 10.0;
+pub(crate) const STEPS_PER_S: f64 = 10.0;
 /// A switch leaves the line at a few degrees; turning further, a track is another line.
 const MAX_DEFLECT_DEG: f64 = 40.0;
 /// Headings at a node are taken this far along each track, in blocks.
@@ -29,10 +30,12 @@ const HEADING_REACH: f64 = 3.0;
 /// A track ending this close to the edge of the area runs on outside it.
 const EDGE_REACH: f64 = 3.0;
 /// How long a train stays outside the area before it comes back, in seconds.
-const LAYOVER_S: f64 = 25.0;
+pub(crate) const LAYOVER_S: f64 = 25.0;
 /// Most trains and carriages a world gets, whatever its rail network.
 const MAX_TRAINS: usize = 160;
 const MAX_CARRIAGES: usize = 1400;
+/// Most boats on top, each as much work a step as a train.
+const MAX_BOATS: usize = 60;
 /// Most route points the pack holds, about 45 bytes each in its storage.
 const MAX_POINTS: usize = 250_000;
 /// Longest timetable, so a train that cannot get round is dropped rather than run away.
@@ -55,16 +58,19 @@ const END_MARGIN_M: f64 = 6.0;
 const JUNCTION_RUN_M: f64 = 400.0;
 /// Slowest a train creeps up to where it stops, in blocks a step.
 const CREEP: f64 = 0.03;
+/// How far over the block a rail lies in a train stands.
+const RAIL_LIFT: f64 = 0.0625;
 /// Points of a route list written per line of the pack.
 const POINTS_PER_LINE: usize = 400;
 
-/// What runs on a track.
+/// What runs on a track, or on the water.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-enum Mode {
+pub(crate) enum Mode {
     Tram,
     Metro,
     SBahn,
     Rail,
+    Water(Vessel),
 }
 
 impl Mode {
@@ -104,6 +110,7 @@ impl Mode {
             Self::Metro => 65.0,
             Self::SBahn => 80.0,
             Self::Rail => 110.0,
+            Self::Water(v) => v.cruise_kmh(),
         }
     }
 
@@ -114,6 +121,7 @@ impl Mode {
             Self::Metro => (1.0, 1.0, 0.8),
             Self::SBahn => (0.9, 0.9, 0.7),
             Self::Rail => (0.6, 0.7, 0.6),
+            Self::Water(v) => v.accel(),
         }
     }
 
@@ -124,6 +132,7 @@ impl Mode {
             Self::Metro => (18.0, 30.0),
             Self::SBahn => (22.0, 40.0),
             Self::Rail => (35.0, 60.0),
+            Self::Water(v) => v.dwell_s(),
         }
     }
 
@@ -134,6 +143,7 @@ impl Mode {
             Self::Metro => 150.0,
             Self::SBahn => 200.0,
             Self::Rail => 330.0,
+            Self::Water(_) => 600.0,
         }
     }
 
@@ -143,39 +153,41 @@ impl Mode {
             StopKind::Tram => self == Self::Tram,
             StopKind::Metro => self == Self::Metro,
             StopKind::Train => matches!(self, Self::SBahn | Self::Rail),
-            StopKind::Any => self != Self::Tram,
+            StopKind::Any => matches!(self, Self::Metro | Self::SBahn | Self::Rail),
+            StopKind::Ferry => matches!(self, Self::Water(_)),
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum StopKind {
+pub(crate) enum StopKind {
     Tram,
     Metro,
     Train,
     Any,
+    Ferry,
 }
 
 /// How firmly a mapped feature says where a train stops.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-enum StopSource {
+pub(crate) enum StopSource {
     Station,
     OnTrack,
     Platform,
 }
 
-struct StopFeature {
-    kind: StopKind,
-    source: StopSource,
+pub(crate) struct StopFeature {
+    pub(crate) kind: StopKind,
+    pub(crate) source: StopSource,
     /// Points that reach a track: a node, or a platform's outline.
-    at: Vec<(f64, f64)>,
+    pub(crate) at: Vec<(f64, f64)>,
     /// Where on a track it reaches the train stops level with this.
-    centre: (f64, f64),
+    pub(crate) centre: (f64, f64),
 }
 
 /// How a track ends.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum End {
+pub(crate) enum End {
     /// At the edge of the area: the line goes on outside it.
     Edge,
     /// At a buffer stop.
@@ -185,7 +197,7 @@ enum End {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Shape {
+pub(crate) enum Shape {
     /// Closed on itself, as a ring line or a tram loop.
     Loop,
     /// In at one edge of the area and out at another.
@@ -203,21 +215,25 @@ struct Piece {
 }
 
 /// A route, a block between points.
-struct Route {
-    mode: Mode,
-    shape: Shape,
-    ends: [End; 2],
-    points: Vec<(f64, f64)>,
+pub(crate) struct Route {
+    pub(crate) mode: Mode,
+    pub(crate) shape: Shape,
+    pub(crate) ends: [End; 2],
+    pub(crate) points: Vec<(f64, f64)>,
     /// The way each point lies on.
-    ways: Vec<u64>,
+    pub(crate) ways: Vec<u64>,
     /// Speed limit at each point, blocks a step.
-    caps: Vec<f64>,
+    pub(crate) caps: Vec<f64>,
     /// Where the middle of a train stands at each stop, as an index into `points`.
-    stops: Vec<f64>,
+    pub(crate) stops: Vec<f64>,
+    /// The block a boat floats on at each point, where it is known before the rails are.
+    pub(crate) ys: Option<Vec<f64>>,
+    /// How far over that block the vehicle stands: a rail's depth, or a water surface.
+    pub(crate) lift: f64,
 }
 
 impl Route {
-    fn len(&self) -> f64 {
+    pub(crate) fn len(&self) -> f64 {
         match self.shape {
             Shape::Loop => self.points.len() as f64,
             _ => self.points.len().saturating_sub(1) as f64,
@@ -226,18 +242,18 @@ impl Route {
 }
 
 /// What a route runs, and how.
-struct Service {
-    route: usize,
+pub(crate) struct Service {
+    pub(crate) route: usize,
     /// Carriage bodies front to back, and how far behind the front carriage each centre is.
-    coaches: Vec<Coach>,
-    offsets: Vec<f64>,
+    pub(crate) coaches: Vec<Coach>,
+    pub(crate) offsets: Vec<f64>,
     /// Front carriage centre at each step, in thousandths of a block along the route.
-    timetable: Vec<i32>,
+    pub(crate) timetable: Vec<i32>,
     /// Length of one lap in thousandths of a block, through the stretch outside the area
     /// on a through route; 0 for a shuttle.
-    period: i64,
+    pub(crate) period: i64,
     /// The steps into the timetable each train starts at, and its livery.
-    trains: Vec<(usize, Livery)>,
+    pub(crate) trains: Vec<(usize, Livery)>,
 }
 
 impl Service {
@@ -262,21 +278,23 @@ pub struct TrainNetwork {
     size: f64,
     routes: Vec<Route>,
     services: Vec<Service>,
+    /// Of `services`, how many run boats.
+    ships: usize,
 }
 
-fn hash(a: u64, b: u64) -> u64 {
+pub(crate) fn hash(a: u64, b: u64) -> u64 {
     let mut h = a.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ b.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     h ^= h >> 29;
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     h ^ (h >> 32)
 }
 
-fn unit(dx: f64, dz: f64) -> Option<(f64, f64)> {
+pub(crate) fn unit(dx: f64, dz: f64) -> Option<(f64, f64)> {
     let len = dx.hypot(dz);
     (len > 1e-9).then(|| (dx / len, dz / len))
 }
 
-fn angle_deg(a: (f64, f64), b: (f64, f64)) -> f64 {
+pub(crate) fn angle_deg(a: (f64, f64), b: (f64, f64)) -> f64 {
     (a.0 * b.0 + a.1 * b.1).clamp(-1.0, 1.0).acos().to_degrees()
 }
 
@@ -285,7 +303,7 @@ fn angle_deg(a: (f64, f64), b: (f64, f64)) -> f64 {
 const MAX_STEP: f64 = 7.9;
 
 /// Blocks a step at `kmh` on a world of `scale` blocks a metre.
-fn step_speed(kmh: f64, scale: f64) -> f64 {
+pub(crate) fn step_speed(kmh: f64, scale: f64) -> f64 {
     (kmh / 3.6 / STEPS_PER_S * scale).min(MAX_STEP)
 }
 
@@ -336,15 +354,48 @@ impl TrainNetwork {
             size,
             routes,
             services,
+            ships: 0,
         }
     }
 
     pub fn train_count(&self) -> usize {
-        self.services.iter().map(|s| s.trains.len()).sum()
+        self.services.iter().map(|s| s.trains.len()).sum::<usize>() - self.ship_count()
+    }
+
+    pub fn ship_count(&self) -> usize {
+        self.services
+            .iter()
+            .rev()
+            .take(self.ships)
+            .map(|s| s.trains.len())
+            .sum()
     }
 
     pub fn is_empty(&self) -> bool {
         self.services.is_empty()
+    }
+
+    /// Adds the boats `ships::ShipPlan` planned, each a route and what sails it.
+    pub(crate) fn add_ships(&mut self, ships: Vec<(Route, Service)>) {
+        let points: usize = self
+            .services
+            .iter()
+            .map(|s| self.routes[s.route].points.len())
+            .sum();
+        let mut room = MAX_POINTS.saturating_sub(points);
+        let mut boats = MAX_BOATS;
+        for (route, mut service) in ships {
+            if route.points.len() > room || boats == 0 {
+                continue;
+            }
+            room -= route.points.len();
+            service.trains.truncate(boats);
+            boats -= service.trains.len();
+            service.route = self.routes.len();
+            self.routes.push(route);
+            self.services.push(service);
+            self.ships += 1;
+        }
     }
 
     /// The pack functions: the routes and timetables in storage, one function per train
@@ -358,8 +409,11 @@ impl TrainNetwork {
         let mut network = String::from("data modify storage arnis:trains tmp set value []\n");
         let mut all = String::new();
         let mut bodies: FnvHashMap<String, Vec<train_bodies::Part>> = FnvHashMap::default();
-        let mut doors: BTreeMap<String, Vec<f32>> = BTreeMap::new();
-        doors.insert(train_bodies::NO_DOORS.to_string(), Vec::new());
+        let mut doors: BTreeMap<String, train_bodies::Doors> = BTreeMap::new();
+        doors.insert(
+            train_bodies::NO_DOORS.to_string(),
+            train_bodies::doors(Coach::Tank(0)),
+        );
         let mut carriage = 0usize;
         for (t, service) in self.services.iter().enumerate() {
             let route = &self.routes[service.route];
@@ -482,10 +536,9 @@ impl TrainNetwork {
             let mut p = Vec::with_capacity(route.points.len() * 4);
             let mut last = [0i64; 4];
             for (i, &(x, z)) in route.points.iter().enumerate() {
-                // On the rail, which is a sixteenth of a block deep.
                 let at = [
                     (x * 100.0).round() as i64,
-                    ((ys[i] + 0.0625) * 1000.0).round() as i64,
+                    ((ys[i] + route.lift) * 1000.0).round() as i64,
                     (z * 100.0).round() as i64,
                     (heading(route, i) * 10.0).round() as i64,
                 ];
@@ -562,6 +615,9 @@ impl TrainNetwork {
 /// smoothed so a train rides a slope rather than its steps. None where most of the route
 /// has no rail to stand on.
 fn heights(route: &Route, rail_y: &impl Fn(u64, i32, i32) -> Option<i32>) -> Option<Vec<f64>> {
+    if let Some(ys) = &route.ys {
+        return Some(ys.clone());
+    }
     let raw: Vec<Option<f64>> = route
         .points
         .iter()
@@ -670,11 +726,10 @@ fn write_points(out: &mut String, r: usize, route: &Route, ys: &[f64]) {
     let n = route.points.len();
     let point = |i: usize| {
         let (x, z) = route.points[i];
-        // On the rail, which is a sixteenth of a block deep.
         format!(
             "{{x:{:.2}d,y:{:.3}d,z:{:.2}d,h:{:.1}f}}",
             macro_coord(x),
-            ys[i] + 0.0625,
+            ys[i] + route.lift,
             macro_coord(z),
             heading(route, i)
         )
@@ -1051,6 +1106,9 @@ fn lay_out(
         ways,
         caps,
         stops: Vec::new(),
+        ys: None,
+        // On the rail, which is a sixteenth of a block deep.
+        lift: RAIL_LIFT,
     })
 }
 
@@ -1136,7 +1194,7 @@ fn stop_features(elements: &[ProcessedElement]) -> Vec<StopFeature> {
 
 /// Where trains on a route stop, as points along it: each stop serving its kind of track
 /// that reaches it, one per stretch however many features mark it.
-fn stops_on(route: &Route, features: &[StopFeature], scale: f64) -> Vec<f64> {
+pub(crate) fn stops_on(route: &Route, features: &[StopFeature], scale: f64) -> Vec<f64> {
     // A coarse grid of the route's points, so each feature looks at its neighbourhood.
     const CELL: f64 = 32.0;
     let key = |x: f64, z: f64| ((x / CELL).floor() as i32, (z / CELL).floor() as i32);
@@ -1298,11 +1356,8 @@ fn service_for(r: usize, route: &Route, scale: f64, size: f64) -> Option<Service
     let len_m = route.len() / scale;
     let has_stops = !route.stops.is_empty();
     for short in [false, true] {
-        let (coaches, liveries) = train_bodies::compose(
-            route_kind(route, has_stops, len_m, seed),
-            seed,
-            short || len_m < 400.0,
-        );
+        let kind = route_kind(route, has_stops, len_m, seed)?;
+        let (coaches, liveries) = train_bodies::compose(kind, seed, short || len_m < 400.0);
         let lengths: Vec<f64> = coaches
             .iter()
             .map(|c| train_bodies::length_m(*c) * size)
@@ -1361,7 +1416,7 @@ fn service_for(r: usize, route: &Route, scale: f64, size: f64) -> Option<Service
 
 /// The closest any two of `n` trains spaced evenly through a looping `timetable` come,
 /// front to front, in thousandths of a block.
-fn closest(timetable: &[i32], period: i64, n: usize) -> f64 {
+pub(crate) fn closest(timetable: &[i32], period: i64, n: usize) -> f64 {
     let t = timetable.len();
     let gap = t / n;
     (0..t)
@@ -1376,12 +1431,14 @@ fn closest(timetable: &[i32], period: i64, n: usize) -> f64 {
 }
 
 /// What a route's trains look like.
-fn route_kind(route: &Route, has_stops: bool, len_m: f64, seed: u64) -> train_bodies::Kind {
+fn route_kind(route: &Route, has_stops: bool, len_m: f64, seed: u64) -> Option<train_bodies::Kind> {
     use train_bodies::Kind;
-    match route.mode {
+    Some(match route.mode {
         Mode::Tram => Kind::Tram,
         Mode::Metro => Kind::Metro,
         Mode::SBahn => Kind::SBahn,
+        // Boats are planned in `ships.rs`.
+        Mode::Water(_) => return None,
         Mode::Rail => {
             let roll = hash(seed, 3) % 100;
             if has_stops {
@@ -1398,15 +1455,15 @@ fn route_kind(route: &Route, has_stops: bool, len_m: f64, seed: u64) -> train_bo
                 }
             }
         }
-    }
+    })
 }
 
 /// A train's reach from its front carriage centre: ahead to its nose, back to the last
 /// carriage centre and on to its tail.
-struct Body {
-    front: f64,
-    span: f64,
-    back: f64,
+pub(crate) struct Body {
+    pub(crate) front: f64,
+    pub(crate) span: f64,
+    pub(crate) back: f64,
 }
 
 /// A stretch of a trip: where to get to, and what happens there.
@@ -1419,7 +1476,7 @@ struct Target {
 
 /// One trip of a route's trains, step by step: the front carriage centre in thousandths
 /// of a block, and the lap length the pack wraps it by (0 on a shuttle).
-fn timetable(route: &Route, body: &Body, scale: f64) -> Option<(Vec<i32>, i64)> {
+pub(crate) fn timetable(route: &Route, body: &Body, scale: f64) -> Option<(Vec<i32>, i64)> {
     let mode = route.mode;
     let (accel, brake, _) = mode.accel();
     let per_step2 = |a: f64| a / (STEPS_PER_S * STEPS_PER_S) * scale;

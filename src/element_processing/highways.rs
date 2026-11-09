@@ -419,13 +419,10 @@ pub(crate) fn surface_palette(
             return red;
         }
     }
-    let surface = tags.get("surface").map(String::as_str);
-    // Concrete or paved sidewalks read as uniform grey, not an asphalt speckle.
-    if is_pedestrian_way_tags(tags)
-        && matches!(surface, Some("concrete" | "paving_stones" | "sett"))
-    {
-        return &[SMOOTH_STONE];
+    if let Some(paving) = pedestrian_paving(tags) {
+        return paving;
     }
+    let surface = tags.get("surface").map(String::as_str);
     if let Some(blocks) = surface.and_then(get_blocks_for_surface) {
         return blocks;
     }
@@ -436,6 +433,20 @@ pub(crate) fn surface_palette(
         "escape" => &[SAND],
         "raceway" => raceways::unsurfaced_palette(tags).unwrap_or(DEFAULT_ROAD_MIX),
         _ => DEFAULT_ROAD_MIX,
+    }
+}
+
+/// A hard-surfaced footway, pedestrian street or square never takes the road's asphalt mix,
+/// or it reads as part of the road: paving is light grey, asphalt a darker grey.
+fn pedestrian_paving(tags: &HashMap<String, String>) -> Option<&'static [Block]> {
+    if !is_pedestrian_way_tags(tags) {
+        return None;
+    }
+    match tags.get("surface").map(String::as_str)? {
+        "concrete" | "concrete:plates" | "concrete:lanes" | "paving_stones" | "sett" | "paved"
+        | "cement" => Some(&[SMOOTH_STONE]),
+        "asphalt" | "chipseal" | "bitmac" => Some(&[GRAY_CONCRETE]),
+        _ => None,
     }
 }
 
@@ -1803,7 +1814,8 @@ fn generate_highways_internal(
             } else {
                 &[STONE]
             };
-            let surface_block: Block = get_blocks_for_surface_way(way, fallback)[0];
+            let surface_block: Block = pedestrian_paving(&way.tags)
+                .unwrap_or_else(|| get_blocks_for_surface_way(way, fallback))[0];
 
             // Fill the area using flood fill cache
             let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
@@ -3964,6 +3976,39 @@ mod tests {
             editor.check_for_block(10, 0, 39, Some(&[GRAY_CONCRETE])),
             "no edge stripe"
         );
+    }
+
+    #[test]
+    fn sidewalks_and_squares_never_look_like_the_road() {
+        let tags = |kv: &[(&str, &str)]| -> HashMap<String, String> {
+            kv.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let road = surface_palette("residential", &tags(&[("surface", "asphalt")]));
+        assert_eq!(road, DEFAULT_ROAD_MIX);
+        for (highway, kv, want) in [
+            (
+                "footway",
+                &[("footway", "sidewalk"), ("surface", "asphalt")][..],
+                GRAY_CONCRETE,
+            ),
+            ("pedestrian", &[("surface", "asphalt")], GRAY_CONCRETE),
+            ("footway", &[("surface", "paved")], SMOOTH_STONE),
+            ("pedestrian", &[("surface", "sett")], SMOOTH_STONE),
+            ("footway", &[], GRAY_CONCRETE),
+        ] {
+            let mut tags = tags(kv);
+            tags.insert("highway".into(), highway.into());
+            assert_eq!(surface_palette(highway, &tags), &[want], "{highway} {kv:?}");
+        }
+        // A square is filled with its first block.
+        let square = tags(&[
+            ("highway", "pedestrian"),
+            ("area", "yes"),
+            ("surface", "paving_stones"),
+        ]);
+        assert_eq!(pedestrian_paving(&square), Some(&[SMOOTH_STONE][..]));
     }
 
     #[test]

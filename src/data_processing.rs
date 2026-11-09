@@ -1278,6 +1278,32 @@ pub fn generate_world_with_options(
         );
         Arc::new(net)
     });
+    let mut walk_network = extras
+        .pedestrians
+        .then(|| {
+            let surfaces = highways::RoadSurfaces::new(
+                &editor,
+                &bridge_structures,
+                &highway_connectivity,
+                &tunnel_portals,
+                args.scale,
+            );
+            crate::element_processing::pedestrians::WalkNetwork::build(
+                &elements,
+                args.scale,
+                sign_region.drives_on_left(),
+                extras.traffic_lights,
+                &xzbbox,
+                |way, x, z| surfaces.y_at(way, x, z),
+            )
+        })
+        .filter(|net| !net.is_empty());
+    // People walk the pavement as it was built, so it is read back along their lanes.
+    let walk_probe = walk_network.as_ref().map(|net| Arc::new(net.probe()));
+    if let Some(probe) = &walk_probe {
+        editor.set_walk_probe(Arc::clone(probe));
+    }
+    extras.pedestrians = walk_network.is_some();
     // Java places the cars as the roads are built; Bedrock's add-on brings them in itself.
     let placed_cars = car_network
         .clone()
@@ -1285,17 +1311,41 @@ pub fn generate_world_with_options(
     if let Some(cars) = &placed_cars {
         editor.set_car_network(Arc::clone(cars));
     }
+    // Boats float on the water as it was built, so it is read back along their routes.
+    let ship_plan = extras
+        .cars
+        .then(|| {
+            crate::element_processing::ships::ShipPlan::build(
+                &elements,
+                args.scale,
+                &xzbbox,
+                |x, z| {
+                    let rel = crate::coordinate_system::cartesian::XZPoint::new(
+                        x - xzbbox.min_x(),
+                        z - xzbbox.min_z(),
+                    );
+                    ground.cover_class(rel) == crate::land_cover::LC_WATER
+                },
+            )
+        })
+        .filter(|plan| !plan.is_empty());
+    let water_probe = ship_plan.as_ref().map(|plan| Arc::new(plan.probe()));
+    if let Some(probe) = &water_probe {
+        editor.set_water_probe(Arc::clone(probe));
+    }
     // Trains ride the rails as they were laid, so the editors note where each one went.
-    let train_network = extras
+    let mut train_network = extras
         .cars
         .then(|| {
             crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
         })
-        .filter(|net| !net.is_empty());
+        .filter(|net| !net.is_empty() || ship_plan.is_some());
+    // Only trains need the rails' heights; boats find the water themselves.
     let rail_heights: Option<crate::world_editor::RailHeights> = train_network
         .as_ref()
+        .filter(|net| !net.is_empty())
         .map(|_| Arc::new(std::sync::Mutex::new(fnv::FnvHashMap::default())));
-    if let Some(net) = &train_network {
+    if let Some(net) = train_network.as_ref().filter(|net| !net.is_empty()) {
         println!(
             "  Moving vehicles: {} trains on the rail network",
             net.train_count()
@@ -2337,6 +2387,13 @@ pub fn generate_world_with_options(
     }
 
     if world_format == WorldFormat::BedrockMcWorld && extras.cars {
+        // Nothing is streamed out on Bedrock, so all the water is still there to read.
+        editor.probe_resident();
+        launch_ships(
+            train_network.as_mut(),
+            ship_plan.as_ref(),
+            water_probe.as_deref(),
+        );
         // Every editor is done laying rails, so the record can be read in place.
         let laid = rail_heights.as_ref().and_then(|h| h.lock().ok());
         match crate::bedrock_addon::vehicles(
@@ -2490,6 +2547,21 @@ pub fn generate_world_with_options(
     }
 
     if world_format == WorldFormat::JavaAnvil && extras.any() {
+        // The save read the water and the pavement of every region it wrote.
+        launch_ships(
+            train_network.as_mut(),
+            ship_plan.as_ref(),
+            water_probe.as_deref(),
+        );
+        // Kept for its boats, it may have ended up with none.
+        train_network = train_network.filter(|net| !net.is_empty());
+        extras.trains = train_network.is_some();
+        if let (Some(net), Some(probe)) = (walk_network.as_mut(), walk_probe.as_deref()) {
+            net.finish(probe);
+            println!("  Pedestrians: {} footway lanes to walk", net.lane_count());
+        }
+        walk_network = walk_network.filter(|net| !net.is_empty());
+        extras.pedestrians = walk_network.is_some();
         let (places, settlement) = extras_places.unwrap_or_default();
         let surface = crate::datapack::disasters::Surface::finish();
         let disasters = disaster_woods.map(|wooded| {
@@ -2530,7 +2602,7 @@ pub fn generate_world_with_options(
             car_functions: car_network
                 .as_ref()
                 .map(|net| {
-                    let mut functions = net.look_functions();
+                    let mut functions = net.look_functions(extras.pedestrians);
                     functions.extend(net.body_functions());
                     functions.push(net.kind_function());
                     functions.push(net.seat_function());
@@ -2541,11 +2613,17 @@ pub fn generate_world_with_options(
                     functions
                 })
                 .unwrap_or_default(),
+            walk_functions: walk_network
+                .as_ref()
+                .map(|net| net.pack_functions())
+                .unwrap_or_default(),
             train_functions: train_network
                 .as_ref()
-                .zip(rail_heights.as_ref())
-                .map(|(net, heights)| {
-                    let laid = heights.lock().map(|m| m.clone()).unwrap_or_default();
+                .map(|net| {
+                    let laid = rail_heights
+                        .as_ref()
+                        .and_then(|h| h.lock().ok().map(|m| m.clone()))
+                        .unwrap_or_default();
                     net.pack_functions(|way, x, z| laid.get(&(way, x, z)).copied())
                 })
                 .unwrap_or_default(),
@@ -2613,6 +2691,22 @@ pub fn generate_world_with_options(
     }
 
     Ok(output_path)
+}
+
+/// Puts the boats on the routes whose water turned out to carry them.
+fn launch_ships(
+    trains: Option<&mut crate::element_processing::trains::TrainNetwork>,
+    plan: Option<&crate::element_processing::ships::ShipPlan>,
+    probe: Option<&crate::water_probe::WaterProbe>,
+) {
+    let (Some(trains), Some(plan), Some(probe)) = (trains, plan, probe) else {
+        return;
+    };
+    trains.add_ships(plan.finish(probe));
+    let boats = trains.ship_count();
+    if boats > 0 {
+        println!("  Moving vehicles: {boats} ferries, ships and boats on the water");
+    }
 }
 
 /// The area's name for titles and dialogs: the one the GUI already put in the world's

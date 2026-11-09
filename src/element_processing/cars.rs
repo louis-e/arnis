@@ -102,6 +102,8 @@ const NARROW_LANE_OFFSET: f64 = 0.5;
 const ONCOMING_OFFSET: f64 = 1.0;
 /// A player this close to either of two spots ahead stops the car: the spots, and how close.
 const PLAYER_AT: (f64, f64, f64) = (3.0, 6.0, 2.0);
+/// How far round those spots a walker stops the car: about the lane, not the pavement.
+const WALKER_AT: f64 = 1.2;
 /// Steps a car gives way at a junction before it goes anyway, and up to 31 more by its number.
 const GIVE_WAY_STEPS: i32 = 30;
 /// A driver's pace, in thousandths of the lane speed, both ends included.
@@ -313,7 +315,11 @@ fn fitted_lane_line(
 }
 
 /// The lane's centre line: the node path pushed `offset` to the driving side.
-fn lane_line(nodes: &[&ProcessedNode], offset: f64, drives_on_left: bool) -> Vec<(f64, f64)> {
+pub(crate) fn lane_line(
+    nodes: &[&ProcessedNode],
+    offset: f64,
+    drives_on_left: bool,
+) -> Vec<(f64, f64)> {
     let centre: Vec<(f64, f64)> = nodes
         .iter()
         .map(|n| (n.x as f64 + 0.5, n.z as f64 + 0.5))
@@ -961,7 +967,7 @@ impl CarNetwork {
     }
 
     /// The pack functions that depend on the size of the cars: what a driver checks ahead.
-    pub fn look_functions(&self) -> Vec<(String, String)> {
+    pub fn look_functions(&self, walkers: bool) -> Vec<(String, String)> {
         let k = self.size;
         let d = |m: f64| format!("{:.2}", m * k);
         let mut out = Vec::new();
@@ -1051,7 +1057,7 @@ impl CarNetwork {
             dispatch,
         ));
 
-        let clear = format!(
+        let mut clear = format!(
             "# Crossing traffic right in front, or anyone ahead inside a junction: give way, but\n\
              # not for ever, since cars can block each other in a circle there. Which goes first\n\
              # is down to its number. Cars standing at a red line are no one's business.\n\
@@ -1079,6 +1085,22 @@ impl CarNetwork {
             far_l = d(PLAYER_AT.1 + LONG_EXTRA),
             pr = d(PLAYER_AT.2),
         );
+        if walkers {
+            // Closer round than for players, so someone on the pavement alongside is no reason.
+            let _ = write!(
+                clear,
+                "# Nor through anyone walking across.\n\
+                 execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^{near} if entity @e[tag=arnis.walker,distance=..{wr}] run scoreboard players set #t arnis.car 0\n\
+                 execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^{far} if entity @e[tag=arnis.walker,distance=..{wr}] run scoreboard players set #t arnis.car 0\n\
+                 execute if entity @s[tag=arnis.car.long] rotated as @s positioned ^ ^ ^{near_l} if entity @e[tag=arnis.walker,distance=..{wr}] run scoreboard players set #t arnis.car 0\n\
+                 execute if entity @s[tag=arnis.car.long] rotated as @s positioned ^ ^ ^{far_l} if entity @e[tag=arnis.walker,distance=..{wr}] run scoreboard players set #t arnis.car 0\n",
+                near = d(PLAYER_AT.0),
+                far = d(PLAYER_AT.1),
+                near_l = d(PLAYER_AT.0 + LONG_EXTRA),
+                far_l = d(PLAYER_AT.1 + LONG_EXTRA),
+                wr = d(WALKER_AT),
+            );
+        }
         out.push((
             "data/arnis/function/cars/clear.mcfunction".to_string(),
             clear,
@@ -1484,7 +1506,7 @@ fn body_name(kind: Kind, colour: &str) -> String {
 
 /// Splits a stretch until no waypoint is more than `MAX_SPAN` from the next and the
 /// ground in between is within a block of the straight line, so cars keep to the road.
-fn refine(
+pub(crate) fn refine(
     a: f64,
     b: f64,
     y_at: &impl Fn(f64) -> f64,
@@ -2404,6 +2426,21 @@ fn parts(kind: Kind, colour: &'static str) -> Vec<Part> {
             ),
         ]),
     }
+    // Windows and bumpers stand a hair proud of the body, so the two never flicker.
+    let mut boxes: Vec<crate::element_processing::train_bodies::Part> = out
+        .iter()
+        .map(|p| crate::element_processing::train_bodies::Part {
+            block: p.block,
+            size: p.size,
+            corner: p.corner,
+            tilt: 0.0,
+            glow: false,
+        })
+        .collect();
+    crate::element_processing::ship_bodies::apart(&mut boxes);
+    for (p, b) in out.iter_mut().zip(boxes) {
+        (p.size, p.corner) = (b.size, b.corner);
+    }
     out
 }
 
@@ -2464,6 +2501,42 @@ fn body(kind: Kind, colour: &'static str, size: f64) -> Vec<HashMap<String, Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_two_parts_of_a_car_flicker_against_each_other_or_hide_one_another() {
+        use crate::element_processing::train_bodies::Part as Box;
+        let mut found = Vec::new();
+        for kind in [
+            Kind::Sedan,
+            Kind::Hatchback,
+            Kind::Van,
+            Kind::Pickup,
+            Kind::Truck,
+            Kind::Bus,
+        ] {
+            let parts: Vec<Box> = parts(kind, "minecraft:red_concrete")
+                .iter()
+                .map(|p| Box {
+                    block: p.block,
+                    size: p.size,
+                    corner: p.corner,
+                    tilt: 0.0,
+                    glow: false,
+                })
+                .collect();
+            for (i, a) in parts.iter().enumerate() {
+                for b in &parts[i + 1..] {
+                    for f in crate::element_processing::ship_bodies::shared_faces(a, b) {
+                        found.push(format!("{kind:?} {} / {} {f:?}", a.block, b.block));
+                    }
+                }
+            }
+            for b in crate::element_processing::ship_bodies::buried(&parts) {
+                found.push(format!("{kind:?} {b}"));
+            }
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
 
     fn node(id: u64, x: i32, z: i32, tags: &[(&str, &str)]) -> ProcessedNode {
         ProcessedNode {
@@ -2592,7 +2665,7 @@ mod tests {
     #[test]
     fn buses_and_trucks_keep_their_length_behind_what_is_ahead() {
         let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
-        let looks = net.look_functions();
+        let looks = net.look_functions(false);
         let text = |name: &str| {
             looks
                 .iter()
@@ -2852,7 +2925,7 @@ mod tests {
         }
         let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         let look = net
-            .look_functions()
+            .look_functions(false)
             .into_iter()
             .find(|(p, _)| p.ends_with("cars/look.mcfunction"))
             .unwrap()
@@ -3088,7 +3161,7 @@ mod tests {
     fn a_rider_is_not_in_the_way_of_their_own_car() {
         let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         let clear = net
-            .look_functions()
+            .look_functions(false)
             .into_iter()
             .find(|(p, _)| p.ends_with("cars/clear.mcfunction"))
             .unwrap()
@@ -3129,7 +3202,7 @@ mod tests {
         }
         let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         let clear = net
-            .look_functions()
+            .look_functions(false)
             .into_iter()
             .find(|(p, _)| p.ends_with("cars/clear.mcfunction"))
             .unwrap()
@@ -3452,7 +3525,7 @@ mod tests {
     #[test]
     fn the_look_functions_scale_with_the_cars() {
         let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat, open);
-        let looks = net.look_functions();
+        let looks = net.look_functions(false);
         assert_eq!(looks.len(), 19);
         let h0 = &looks
             .iter()

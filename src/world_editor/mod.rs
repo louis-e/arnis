@@ -240,6 +240,9 @@ pub struct WorldEditor<'a> {
     /// The block each way's rails lie in, by way and column, shared with the tile editors
     /// so the trains can ride them; None when there are no trains.
     rail_heights: Option<RailHeights>,
+    /// Columns the ships and the walkers need read before their region is written out.
+    water_probe: Option<Arc<crate::water_probe::WaterProbe>>,
+    walk_probe: Option<Arc<crate::water_probe::WalkProbe>>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -336,6 +339,8 @@ impl<'a> WorldEditor<'a> {
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
             rail_heights: None,
+            water_probe: None,
+            walk_probe: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -404,6 +409,8 @@ impl<'a> WorldEditor<'a> {
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
             rail_heights: None,
+            water_probe: None,
+            walk_probe: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -472,6 +479,8 @@ impl<'a> WorldEditor<'a> {
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
             rail_heights: None,
+            water_probe: None,
+            walk_probe: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -1359,6 +1368,9 @@ impl<'a> WorldEditor<'a> {
         if self.format != WorldFormat::JavaAnvil {
             return Ok(false);
         }
+        if self.world.regions.contains_key(&(rx, rz)) {
+            self.probe_region(rx, rz);
+        }
         let Some(region) = self.world.regions.remove(&(rx, rz)) else {
             return Ok(false);
         };
@@ -1503,6 +1515,84 @@ impl<'a> WorldEditor<'a> {
     /// Shares the record of where rails were laid (across the main and tile editors).
     pub fn set_rail_heights(&mut self, heights: RailHeights) {
         self.rail_heights = Some(heights);
+    }
+
+    /// Has the columns the ships need read as each region is finished.
+    pub fn set_water_probe(&mut self, probe: Arc<crate::water_probe::WaterProbe>) {
+        self.water_probe = Some(probe);
+    }
+
+    /// Has the columns the walkers need read as each region is finished.
+    pub fn set_walk_probe(&mut self, probe: Arc<crate::water_probe::WalkProbe>) {
+        self.walk_probe = Some(probe);
+    }
+
+    /// Reads the probes' columns in region (rx, rz) while it is still in memory.
+    fn probe_region(&self, rx: i32, rz: i32) {
+        use crate::water_probe::{footing, walk_spot, water_column, water_span, Sample, Spot};
+        if let Some(probe) = &self.water_probe {
+            probe.read_region(rx, rz, |x, z, _| {
+                let spot = |y: i32| match self.world.get_block(x, y, z) {
+                    None => Spot::Open,
+                    Some(b) if b == WATER => Spot::Water,
+                    Some(b) if b == AIR || b == LILY_PAD => Spot::Open,
+                    Some(_) => Spot::Solid,
+                };
+                // Nothing but air over the highest block, so the search starts there.
+                let level = self.get_water_level(x, z);
+                let (low, high) = water_span(level);
+                self.world
+                    .highest_block_between(x, z, low, high)
+                    .map_or(Sample::default(), |top| water_column(spot, level, top))
+            });
+        }
+        if let Some(probe) = &self.walk_probe {
+            // Round a post too, for the walkers who step round it.
+            probe.read_region_round(
+                rx,
+                rz,
+                |x, z, level| {
+                    let spot = |y: i32| match self.world.get_block(x, y, z) {
+                        None => Spot::Open,
+                        Some(b) if b == WATER => Spot::Water,
+                        Some(b) => b.try_name().map_or(Spot::Open, |name| {
+                            // A slab is a bottom one unless its state says otherwise.
+                            let upper = |v: &Value| match v {
+                                Value::Compound(m) => {
+                                    matches!(m.get("type"), Some(Value::String(t)) if t != "bottom")
+                                }
+                                _ => false,
+                            };
+                            walk_spot(name, || match self.world.get_properties(x, y, z) {
+                                Some(p) => !upper(&p),
+                                None => !b.properties().is_some_and(|p| upper(&p)),
+                            })
+                        }),
+                    };
+                    footing(spot, level)
+                },
+                |f| f.post(),
+            );
+        }
+    }
+
+    /// Reads the probes' columns in every region still in memory, the ones never streamed out.
+    pub fn probe_resident(&self) {
+        let regions: Vec<(i32, i32)> = self
+            .water_probe
+            .iter()
+            .flat_map(|p| p.regions().collect::<Vec<_>>())
+            .chain(
+                self.walk_probe
+                    .iter()
+                    .flat_map(|p| p.regions().collect::<Vec<_>>()),
+            )
+            .collect();
+        for (rx, rz) in regions {
+            if self.world.regions.contains_key(&(rx, rz)) {
+                self.probe_region(rx, rz);
+            }
+        }
     }
 
     /// Records that `way` laid a rail in the block at `y` of column (x, z).
@@ -2672,6 +2762,7 @@ impl<'a> WorldEditor<'a> {
             }
         );
 
+        self.probe_resident();
         // Compact sections before saving: collapses uniform mixed sections back to
         // Uniform and repacks any overflowed direct sections that fit a palette again.
         self.world.compact_sections();

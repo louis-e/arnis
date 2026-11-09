@@ -2,9 +2,9 @@
 //!
 //! The base layer targets 1.21.4, the oldest version an Arnis world opens in. Later versions
 //! renamed or added what some features need, so overlays carry those files per pack format:
-//! 71 (1.21.5) the advancement background id, 80 (1.21.6) dialogs and the outbreak, 101
-//! (26.1) the world clock, 107 (26.2) namespaced entity predicates and 121 (26.3) typed
-//! conditions. A tag that names a function which failed to load is dropped whole, so every
+//! 71 (1.21.5) the advancement background id, 80 (1.21.6) dialogs and the outbreak, 88
+//! (1.21.9) mannequins, 101 (26.1) the world clock, 107 (26.2) namespaced entity predicates
+//! and 121 (26.3) typed conditions. A tag that names a function which failed to load is dropped whole, so every
 //! function an overlay replaces also exists, as a stub if need be, in the base layer.
 
 mod dialogs;
@@ -25,9 +25,10 @@ pub const PACK_NAME: &str = "arnis_extras";
 const BASE_FORMAT: u32 = 61;
 const MAX_FORMAT: u32 = i32::MAX as u32;
 /// Pack format each overlay starts at; later entries win where they overlap.
-const OVERLAYS: [(u32, &str); 5] = [
+const OVERLAYS: [(u32, &str); 6] = [
     (71, "ov71"),
     (80, "ov80"),
+    (88, "ov88"),
     (101, "ov101"),
     (107, "ov107"),
     (121, "ov121"),
@@ -140,6 +141,59 @@ const TRAINS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/trains/gone_at.mcfunction",
     "data/arnis/function/trains/sweep.mcfunction",
     "data/arnis/function/trains/board.mcfunction",
+];
+
+const WALK: &[(&str, &[u8])] = static_files![
+    "data/arnis/function/walk/aim.mcfunction",
+    "data/arnis/function/walk/aim_at.mcfunction",
+    "data/arnis/function/walk/along.mcfunction",
+    "data/arnis/function/walk/arrive.mcfunction",
+    "data/arnis/function/walk/blocked.mcfunction",
+    "data/arnis/function/walk/body.mcfunction",
+    "data/arnis/function/walk/carry.mcfunction",
+    "data/arnis/function/walk/cell.mcfunction",
+    "data/arnis/function/walk/chance.mcfunction",
+    "data/arnis/function/walk/company.mcfunction",
+    "data/arnis/function/walk/dress.mcfunction",
+    "data/arnis/function/walk/drive.mcfunction",
+    "data/arnis/function/walk/enter.mcfunction",
+    "data/arnis/function/walk/enter_at.mcfunction",
+    "data/arnis/function/walk/face.mcfunction",
+    "data/arnis/function/walk/go.mcfunction",
+    "data/arnis/function/walk/gone.mcfunction",
+    "data/arnis/function/walk/hold.mcfunction",
+    "data/arnis/function/walk/kerb.mcfunction",
+    "data/arnis/function/walk/lead.mcfunction",
+    "data/arnis/function/walk/legs.mcfunction",
+    "data/arnis/function/walk/light.mcfunction",
+    "data/arnis/function/walk/linger.mcfunction",
+    "data/arnis/function/walk/load.mcfunction",
+    "data/arnis/function/walk/look.mcfunction",
+    "data/arnis/function/walk/near.mcfunction",
+    "data/arnis/function/walk/next.mcfunction",
+    "data/arnis/function/walk/octagon.mcfunction",
+    "data/arnis/function/walk/onto.mcfunction",
+    "data/arnis/function/walk/pace.mcfunction",
+    "data/arnis/function/walk/pick.mcfunction",
+    "data/arnis/function/walk/pick_at.mcfunction",
+    "data/arnis/function/walk/place.mcfunction",
+    "data/arnis/function/walk/reach.mcfunction",
+    "data/arnis/function/walk/respawn.mcfunction",
+    "data/arnis/function/walk/settle.mcfunction",
+    "data/arnis/function/walk/slow.mcfunction",
+    "data/arnis/function/walk/snap.mcfunction",
+    "data/arnis/function/walk/spot.mcfunction",
+    "data/arnis/function/walk/spot_at.mcfunction",
+    "data/arnis/function/walk/step.mcfunction",
+    "data/arnis/function/walk/tick.mcfunction",
+    "data/arnis/function/walk/try.mcfunction",
+    "data/arnis/function/walk/turn.mcfunction",
+    "data/arnis/function/walk/turn_at.mcfunction",
+    "data/arnis/function/walk/turn_back.mcfunction",
+    "data/arnis/function/walk/turn_back_at.mcfunction",
+    "data/arnis/function/walk/turn_back_to.mcfunction",
+    "data/arnis/function/walk/wear.mcfunction",
+    "ov88/data/arnis/function/walk/body.mcfunction",
 ];
 
 const OUTBREAK: &[(&str, &[u8])] = static_files![
@@ -463,6 +517,7 @@ pub struct Extras {
     pub cars: bool,
     /// Set once the rail network turns out to have trains on it.
     pub trains: bool,
+    pub pedestrians: bool,
 }
 
 impl Extras {
@@ -480,6 +535,7 @@ impl Extras {
             disasters: args.disasters,
             cars: args.moving_vehicles,
             trains: false,
+            pedestrians: args.pedestrians,
         }
     }
 
@@ -505,6 +561,7 @@ impl Extras {
             || self.disasters
             || self.cars
             || self.trains
+            || self.pedestrians
     }
 
     /// Whether the area's name and places are needed at all.
@@ -568,6 +625,8 @@ pub struct PackContext {
     /// The functions that hold the routes and timetables, run each train and summon its
     /// carriages.
     pub train_functions: Vec<(String, String)>,
+    /// The functions that hold the footways and move the walkers at the world's scale.
+    pub walk_functions: Vec<(String, String)>,
     /// Which disasters the area gets and the water maps they rise by.
     pub disasters: Option<disasters::Plan>,
 }
@@ -685,6 +744,9 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     if ex.trains {
         add_static(TRAINS);
     }
+    if ex.pedestrians {
+        add_static(WALK);
+    }
 
     out.push(("pack.mcmeta".to_string(), pretty(&pack_mcmeta(ex))));
     out.push((
@@ -701,6 +763,7 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
         (ex.disasters, "disaster"),
         (ex.cars, "cars"),
         (ex.trains, "trains"),
+        (ex.pedestrians, "walk"),
     ]
     .into_iter()
     .filter_map(|(on, name)| on.then_some(name))
@@ -740,6 +803,13 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     if ex.trains {
         out.extend(
             ctx.train_functions
+                .iter()
+                .map(|(path, text)| (path.clone(), text.clone().into_bytes())),
+        );
+    }
+    if ex.pedestrians {
+        out.extend(
+            ctx.walk_functions
                 .iter()
                 .map(|(path, text)| (path.clone(), text.clone().into_bytes())),
         );
@@ -870,6 +940,7 @@ fn pack_mcmeta(ex: Extras) -> Value {
         (ex.disasters, "disasters"),
         (ex.cars, "moving cars"),
         (ex.trains, "trains"),
+        (ex.pedestrians, "pedestrians"),
     ] {
         if on {
             features.push(name);
@@ -992,6 +1063,7 @@ mod tests {
             red_amber: true,
             car_functions: Vec::new(),
             train_functions: Vec::new(),
+            walk_functions: Vec::new(),
             disasters: extras
                 .disasters
                 .then(|| disasters::Plan::for_tests(CelestialBody::Moon)),
@@ -1008,6 +1080,7 @@ mod tests {
             disasters: true,
             cars: true,
             trains: true,
+            pedestrians: true,
         }
     }
 
@@ -1032,11 +1105,13 @@ mod tests {
     }
 
     #[test]
-    fn the_clock_overlay_only_replaces_base_functions() {
+    fn the_clock_and_mannequin_overlays_only_replace_base_functions() {
         let files = files(&ctx(all()));
-        for (path, _) in files.iter().filter(|(p, _)| p.starts_with("ov101/")) {
-            let base = path.trim_start_matches("ov101/");
-            assert!(files.iter().any(|(p, _)| p == base), "{path}");
+        for overlay in ["ov88/", "ov101/"] {
+            for (path, _) in files.iter().filter(|(p, _)| p.starts_with(overlay)) {
+                let base = path.trim_start_matches(overlay);
+                assert!(files.iter().any(|(p, _)| p == base), "{path}");
+            }
         }
     }
 
@@ -1044,7 +1119,7 @@ mod tests {
     fn every_bundled_file_is_shipped_by_some_feature() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/minecraft/datapack_extras");
         let listed: std::collections::HashSet<&str> = [
-            CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, DISASTERS, CARS, TRAINS,
+            CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, DISASTERS, CARS, TRAINS, WALK,
         ]
         .iter()
         .flat_map(|set| set.iter().map(|(p, _)| *p))
@@ -1121,7 +1196,9 @@ mod tests {
                     .any(|f| {
                         name.starts_with(&format!("arnis:cars/{f}"))
                             || name.starts_with(&format!("arnis:trains/{f}"))
-                    });
+                    }) || ["network", "move", "ahead", "gap", "behind", "aside"]
+                        .iter()
+                        .any(|f| name == format!("arnis:walk/{f}"));
                     if name.contains("$(") || networked {
                         continue;
                     }
@@ -1191,6 +1268,7 @@ mod tests {
         let bedrock = all().for_format(WorldFormat::BedrockMcWorld);
         assert!(bedrock.cars);
         assert!(!bedrock.traffic_lights && !bedrock.disasters && !bedrock.pause_menu);
+        assert!(!bedrock.pedestrians);
         assert!(!bedrock.trains && !bedrock.wants_places());
         assert!(!all().for_format(WorldFormat::LuantiWorld).any());
         assert!(all().for_format(WorldFormat::JavaAnvil).disasters);

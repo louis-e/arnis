@@ -1,0 +1,1 @@
+$summon minecraft:mannequin $(x) $(y) $(z) {Tags:["arnis.walker","arnis.walk_new"],immovable:1b,Invulnerable:1b,Silent:1b,NoGravity:1b,hide_description:1b,profile:{texture:"$(t)",model:"$(m)"},equipment:$(eq),attributes:[{id:"minecraft:scale",base:$(size)}]}

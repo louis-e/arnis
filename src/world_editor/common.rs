@@ -1579,7 +1579,6 @@ impl WorldToModify {
     }
 
     /// Stored properties of the block at (x, y, z), if any.
-    #[cfg(test)]
     pub fn get_properties(&self, x: i32, y: i32, z: i32) -> Option<Arc<Value>> {
         let chunk_x = x >> 4;
         let chunk_z = z >> 4;
