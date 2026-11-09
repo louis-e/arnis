@@ -124,23 +124,24 @@ impl XZBBoxShape {
             .sum()
     }
 
-    /// A column inside, near the north-west corner and a block in from the edge where the
-    /// outline allows: where a rectangle puts its default spawn.
+    /// A column inside, near the north-west corner and a few blocks in from the edge where the
+    /// outline allows, so what is placed around the spawn lands inside too.
     pub fn first_inside(&self) -> Option<XZPoint> {
         let r = self.rect;
-        let (z, a) = (r.min().z..=r.max().z).find_map(|z| {
-            self.mask
-                .row(z)
-                .iter()
-                .find(|&&(a, b)| b >= r.min().x && a <= r.max().x)
-                .map(|&(a, _)| (z, a.max(r.min().x)))
-        })?;
-        let inward = XZPoint::new(a + 1, z + 1);
-        Some(if self.contains(&inward) {
-            inward
-        } else {
-            XZPoint::new(a, z)
-        })
+        for margin in [4, 1, 0] {
+            for z in r.min().z..=r.max().z {
+                for &(a, b) in self.mask.row(z) {
+                    let (a, b) = (a.max(r.min().x), b.min(r.max().x));
+                    if b - a < 2 * margin {
+                        continue;
+                    }
+                    if self.covers(a, z, a + 2 * margin, z + 2 * margin) {
+                        return Some(XZPoint::new(a + margin, z + margin));
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// The covered column nearest to `p`, which is `p` itself when it is inside.
@@ -408,9 +409,12 @@ fn sweep(rings: &[Vec<(f64, f64)>], rect: &XZBBoxRect, ranges: &mut [Vec<(f64, f
         keyed.sort_unstable_by(|p, q| p.0.total_cmp(&q.0));
         for pair in keyed.chunks_exact(2) {
             let (l, r) = (pair[0].1, pair[1].1);
-            let ends = [l.x_at(a), l.x_at(b), r.x_at(a), r.x_at(b)];
-            let lo = ends.iter().copied().fold(f64::INFINITY, f64::min);
-            let hi = ends.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            // A top on a block edge belongs to the row above: there the line only comes
+            // close, so a whole x it ends on is not reached in this row.
+            let shy = |v: f64| if top_row.is_some() { v - 1e-9 } else { v };
+            let (la, lb, ra, rb) = (l.x_at(a), l.x_at(b), r.x_at(a), r.x_at(b));
+            let lo = la.min(lb).min(ra).min(rb);
+            let hi = la.max(ra).max(shy(lb)).max(shy(rb));
             add(row, lo, hi);
             if let Some(top) = top_row {
                 add(top, l.x_at(b), r.x_at(b));
@@ -575,6 +579,17 @@ mod tests {
     }
 
     #[test]
+    fn a_line_ending_on_a_block_edge_does_not_reach_past_it() {
+        let frame = rect(0, 0, 30, 30);
+        let shape =
+            XZBBoxShape::new(frame, vec![ring(&[(10.5, 12.0), (21.5, 5.0), (22.0, 8.0)])]).unwrap();
+        // The edge reaches x = 22 only at z = 8, which is the next row.
+        assert!(!shape.contains(&XZPoint::new(22, 7)));
+        assert!(shape.contains(&XZPoint::new(22, 8)));
+        assert!(shape.contains(&XZPoint::new(21, 7)));
+    }
+
+    #[test]
     fn a_shape_past_the_rectangle_is_cut_to_it() {
         let frame = rect(0, 0, 10, 10);
         let shape = XZBBoxShape::new(
@@ -662,7 +677,11 @@ mod tests {
         )
         .unwrap();
         let p = shape.first_inside().unwrap();
-        assert!(shape.contains(&p));
-        assert!(p.z <= 2, "{p:?}");
+        assert!(shape.covers(p.x - 4, p.z - 4, p.x + 4, p.z + 4), "{p:?}");
+        assert!(p.z <= 10, "{p:?}");
+        // A sliver too thin for the margin still gets a column of its own.
+        let thin =
+            XZBBoxShape::new(frame, vec![ring(&[(2.0, 2.0), (30.0, 2.0), (30.0, 3.0)])]).unwrap();
+        assert!(thin.contains(&thin.first_inside().unwrap()));
     }
 }

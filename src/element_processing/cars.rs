@@ -594,19 +594,27 @@ impl CarNetwork {
         surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
         built: impl Fn(i32, i32) -> bool,
     ) -> Self {
-        let roads: Vec<(&ProcessedWay, i32, i8)> = elements
+        let found: Vec<(&ProcessedWay, (i32, i8))> = elements
             .iter()
             .filter_map(|e| match e {
                 ProcessedElement::Way(w) if w.nodes.len() >= 2 && drivable(&w.tags) => {
                     let highway = &w.tags["highway"];
                     Some((
                         w,
-                        highway_block_range(highway, &w.tags, scale),
-                        oneway_sign(highway, &w.tags),
+                        (
+                            highway_block_range(highway, &w.tags, scale),
+                            oneway_sign(highway, &w.tags),
+                        ),
                     ))
                 }
                 _ => None,
             })
+            .collect();
+        // A drawn outline cuts the roads where they leave it, which cars treat as the edge.
+        let found = crate::clipping::cut_ways_to_outline(found, world);
+        let roads: Vec<(&ProcessedWay, i32, i8)> = found
+            .iter()
+            .map(|(w, (half, oneway))| (w.as_ref(), *half, *oneway))
             .collect();
         let junctions = Junctions::build(roads.iter().map(|&(w, half, _)| (w, half)), scale);
         let arms = |id: u64| junctions.arms(id);
@@ -1863,8 +1871,16 @@ fn link(
     // Unless it runs off the area, where it goes on into roads left out.
     let near =
         |v: f64, lo: i32, hi: i32| v < lo as f64 + EDGE_REACH || v > (hi + 1) as f64 - EDGE_REACH;
+    // A drawn outline's edge counts too: roads are cut there as at the rectangle's.
+    let r = EDGE_REACH.ceil() as i32;
+    let off_outline = |p: &Waypoint| {
+        let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
+        world.outline().is_some() && !world.covers_rect(x - r, z - r, x + r, z + r)
+    };
     let at_edge = |p: &Waypoint| {
-        near(p.x, world.min_x(), world.max_x()) || near(p.z, world.min_z(), world.max_z())
+        near(p.x, world.min_x(), world.max_x())
+            || near(p.z, world.min_z(), world.max_z())
+            || off_outline(p)
     };
     let mut open: FnvHashSet<usize> = FnvHashSet::default();
     for (i, seg) in segments.iter().enumerate() {
@@ -2658,6 +2674,52 @@ mod tests {
                 if next.way == seg.way && !seg.turns_back {
                     assert!(heading(seg) * heading(next) > 0.0, "lane {i} turns back");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn cars_stay_in_drawn_areas_and_never_cross_the_gap() {
+        // Two areas with a gap between them, one long road through both.
+        let world = world()
+            .with_outline(vec![
+                vec![vec![
+                    (-2000.0, -50.0),
+                    (-300.0, -50.0),
+                    (-300.0, 50.0),
+                    (-2000.0, 50.0),
+                ]],
+                vec![vec![
+                    (300.0, -50.0),
+                    (2000.0, -50.0),
+                    (2000.0, 50.0),
+                    (300.0, 50.0),
+                ]],
+            ])
+            .unwrap();
+        let way = road(
+            1,
+            vec![node(10, -1500, 0, &[]), node(11, 1500, 0, &[])],
+            &[("lanes", "2")],
+        );
+        let net = CarNetwork::build(&[way], 1.0, false, false, &world, flat, open);
+        assert!(!net.segments.is_empty());
+        for seg in &net.segments {
+            let (a, b) = (seg.points[0].x, seg.points[seg.points.len() - 1].x);
+            assert!(
+                a.signum() == b.signum(),
+                "a lane runs across the gap: {a} -> {b}"
+            );
+            for w in seg.points.windows(2) {
+                assert!(
+                    (w[1].x - w[0].x).abs() < 50.0,
+                    "a jump of {}",
+                    w[1].x - w[0].x
+                );
+            }
+            for p in &seg.points {
+                let at = XZPoint::new(p.x.floor() as i32, p.z.floor() as i32);
+                assert!(world.contains(&at), "{at:?}");
             }
         }
     }

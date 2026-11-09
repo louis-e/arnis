@@ -5,7 +5,7 @@
 //! passes under its bridges. They then sail on the trains' timetables and pack functions.
 
 use crate::clipping::is_invented_node_id;
-use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::ship_bodies::Vessel;
 use crate::element_processing::train_bodies::Coach;
 use crate::element_processing::trains::{
@@ -80,6 +80,14 @@ pub struct ShipPlan {
 /// A way's nodes as (id, x, z), centred on their blocks.
 type Nodes = Vec<(u64, f64, f64)>;
 
+/// A line's pieces inside a drawn outline; the line itself where nothing is cut.
+fn in_outline(nodes: Nodes, way: u64, world: &XZBBox, cuts: &mut u64) -> Vec<Nodes> {
+    match crate::clipping::cut_line_to_outline(way, &nodes, world, cuts) {
+        None => vec![nodes],
+        Some(runs) => runs,
+    }
+}
+
 impl ShipPlan {
     /// `is_water` says where the land cover has open water, before anything is built.
     pub fn build(
@@ -123,8 +131,12 @@ impl ShipPlan {
                     if river {
                         rivers.push(nodes.clone());
                     }
+                    // A drawn outline cuts the lines where they leave it, as a rectangle does.
+                    let mut cuts = 0;
                     if let Some(cars) = ferry {
-                        ferries.push((nodes, way.id, cars));
+                        for nodes in in_outline(nodes, way.id, world, &mut cuts) {
+                            ferries.push((nodes, way.id, cars));
+                        }
                         if let Some(m) = way.tags.get("duration").and_then(|d| minutes(d)) {
                             durations.insert(way.id, m);
                         }
@@ -132,6 +144,7 @@ impl ShipPlan {
                         waterways.extend(
                             split_at_barriers(way)
                                 .into_iter()
+                                .flat_map(|nodes| in_outline(nodes, way.id, world, &mut cuts))
                                 .map(|nodes| (nodes, way.id, class)),
                         );
                     } else if is_terminal(&way.tags) {
@@ -1286,7 +1299,10 @@ fn leisure_loops(
     let mut open: Vec<bool> = (0..w * h)
         .map(|c| {
             let (x, z) = centre(c % w, c / w);
-            x <= world.max_x() && z <= world.max_z() && is_water(x, z)
+            x <= world.max_x()
+                && z <= world.max_z()
+                && world.contains(&XZPoint::new(x, z))
+                && is_water(x, z)
         })
         .collect();
     if !open.iter().any(|&o| o) {

@@ -2515,7 +2515,11 @@ $(document).ready(function () {
                 }));
             },
             end: function () {
-                if (shape.editing) shape.editing.enable();
+                if (!shape.editing) return;
+                // setLatLngs swapped the corner array, and the editor holds the one it
+                // was made with; its handles would stay where the shape was.
+                shape.editing.latlngs = [shape._latlngs];
+                shape.editing.enable();
             }
         });
     }

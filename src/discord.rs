@@ -4,7 +4,7 @@
 
 use serde_json::{json, Value};
 use std::io::{self, Read, Write};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -35,13 +35,20 @@ enum Event {
     Live(bool),
 }
 
+/// Whether there is a Discord application to show the status under.
+pub fn available() -> bool {
+    !APPLICATION_ID.is_empty()
+}
+
 fn send(event: Event) {
-    static SENDER: OnceLock<Option<Mutex<Sender<Event>>>> = OnceLock::new();
+    static SENDER: OnceLock<Option<Mutex<SyncSender<Event>>>> = OnceLock::new();
     let sender = SENDER.get_or_init(|| {
-        if APPLICATION_ID.is_empty() {
+        if !available() {
             return None;
         }
-        let (tx, rx) = mpsc::channel();
+        // Bounded: a worker stuck on a Discord that stopped answering drops updates instead
+        // of piling them up.
+        let (tx, rx) = mpsc::sync_channel(256);
         std::thread::Builder::new()
             .name("discord-status".into())
             .spawn(move || Worker::new().run(rx))
@@ -49,7 +56,7 @@ fn send(event: Event) {
         Some(Mutex::new(tx))
     });
     if let Some(tx) = sender {
-        let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(event);
+        let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).try_send(event);
     }
 }
 
@@ -74,13 +81,13 @@ impl Drop for Generation {
     }
 }
 
-/// A progress update of the running generation, as the GUI gets it.
+/// A progress update of the running generation, as the GUI gets it. An error ends the
+/// status only with the run itself, through [`Generation`]: a refused second start shows
+/// one too while the first goes on.
 pub fn progress(progress: f64, message: &str) {
     if message.starts_with("Done!") {
         send(Event::GenerationDone);
-    } else if message.starts_with("Error!") {
-        send(Event::GenerationEnded);
-    } else {
+    } else if !message.starts_with("Error!") {
         send(Event::Progress(progress, stage_of(message)));
     }
 }

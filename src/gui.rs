@@ -142,6 +142,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_log,
             gui_set_telemetry_consent,
             gui_set_discord_status,
+            gui_discord_available,
             gui_live_info,
             gui_live_start,
             gui_live_stop,
@@ -621,6 +622,12 @@ fn gui_set_telemetry_consent(consent: bool) {
 #[tauri::command]
 fn gui_set_discord_status(enabled: bool) {
     crate::discord::set_enabled(enabled);
+}
+
+/// Whether the build has a Discord application, without which the toggle is hidden.
+#[tauri::command]
+fn gui_discord_available() -> bool {
+    crate::discord::available()
 }
 
 /// Opens a native folder-picker dialog and returns the chosen path.

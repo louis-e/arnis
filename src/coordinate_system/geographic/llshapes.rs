@@ -37,6 +37,11 @@ impl LLShapes {
             }
             out.push(checked);
         }
+        // Areas on both sides of the meridian would put the whole globe in between.
+        let (_, w, _, e) = extent(out.iter().flatten().flatten());
+        if e - w > 180.0 {
+            return Err(format!("the shapes together: {ACROSS_MERIDIAN}"));
+        }
         Ok(Self { polygons: out })
     }
 
@@ -80,14 +85,8 @@ impl LLShapes {
 
     /// The rectangle around every shape: what is downloaded and processed.
     pub fn bbox(&self) -> LLBBox {
-        let (mut s, mut w, mut n, mut e) = (90.0_f64, 180.0_f64, -90.0_f64, -180.0_f64);
-        for p in self.polygons.iter().flatten().flatten() {
-            s = s.min(p.lat());
-            n = n.max(p.lat());
-            w = w.min(p.lng());
-            e = e.max(p.lng());
-        }
-        // Every ring has area, so the extent is never flat.
+        let (s, w, n, e) = extent(self.polygons.iter().flatten().flatten());
+        // Every ring spans some latitude and longitude, so the extent is never flat.
         LLBBox::new(s, w, n, e).expect("checked shapes span a rectangle")
     }
 
@@ -104,6 +103,23 @@ impl LLShapes {
     }
 }
 
+const ACROSS_MERIDIAN: &str = "it spans more than half the globe east to west, which is how an area across the 180° meridian looks; keep it on one side";
+
+/// South, west, north and east edge of some points.
+fn extent<'a>(points: impl IntoIterator<Item = &'a LLPoint>) -> (f64, f64, f64, f64) {
+    points.into_iter().fold(
+        (90.0_f64, 180.0_f64, -90.0_f64, -180.0_f64),
+        |(s, w, n, e), p| {
+            (
+                s.min(p.lat()),
+                w.min(p.lng()),
+                n.max(p.lat()),
+                e.max(p.lng()),
+            )
+        },
+    )
+}
+
 fn check_ring(ring: Vec<(f64, f64)>) -> Result<Vec<LLPoint>, String> {
     let mut points: Vec<LLPoint> = Vec::with_capacity(ring.len());
     for (lat, lng) in ring {
@@ -118,22 +134,26 @@ fn check_ring(ring: Vec<(f64, f64)>) -> Result<Vec<LLPoint>, String> {
     if points.len() < 3 {
         return Err("an outline needs at least three different points".to_string());
     }
-    let (w, e) = points.iter().fold((180.0_f64, -180.0_f64), |(w, e), p| {
-        (w.min(p.lng()), e.max(p.lng()))
-    });
+    let (s, w, n, e) = extent(&points);
     if e - w > 180.0 {
-        return Err(
-            "it spans more than half the globe east to west, which is how a shape across the 180° meridian looks; draw it on one side"
-                .to_string(),
-        );
+        return Err(ACROSS_MERIDIAN.to_string());
     }
+    // Taken about the first point, so the products stay small next to the area; a flat
+    // outline then comes out as nothing rather than as rounding noise.
+    let o = points[0];
     let twice_area: f64 = (0..points.len())
         .map(|i| {
             let (a, b) = (points[i], points[(i + 1) % points.len()]);
-            a.lng() * b.lat() - b.lng() * a.lat()
+            let (ax, ay, bx, by) = (
+                a.lng() - o.lng(),
+                a.lat() - o.lat(),
+                b.lng() - o.lng(),
+                b.lat() - o.lat(),
+            );
+            ax * by - bx * ay
         })
         .sum();
-    if twice_area.abs() < 1e-14 {
+    if n <= s || e <= w || twice_area.abs() <= 1e-9 * (n - s) * (e - w) {
         return Err("the outline encloses no area".to_string());
     }
     Ok(points)
@@ -276,6 +296,28 @@ mod tests {
         assert!(LLShapes::new(vec![vec![vec![(95.0, 1.0), (1.0, 2.0), (2.0, 3.0)]]]).is_err());
         let across = vec![(10.0, 179.0), (10.0, -179.0), (11.0, -179.0), (11.0, 179.0)];
         assert!(LLShapes::new(vec![vec![across]]).is_err());
+        // Each fine on its own, but together they reach round the globe.
+        assert!(LLShapes::new(vec![
+            vec![square(10.0, 178.0, 1.0)],
+            vec![square(10.0, -179.5, 1.0)]
+        ])
+        .is_err());
+        // Flat along a parallel: wide enough that the area sums to rounding noise.
+        let flat = vec![
+            (54.012476, 19.19447),
+            (54.012476, 48.380083),
+            (54.012476, -106.79187),
+        ];
+        assert!(LLShapes::new(vec![vec![flat]]).is_err());
+        let flat_ns = vec![(10.0, 5.0), (20.0, 5.0), (15.0, 5.0)];
+        assert!(LLShapes::new(vec![vec![flat_ns]]).is_err());
+        // A thin but real sliver is kept.
+        assert!(LLShapes::new(vec![vec![vec![
+            (52.5, 13.3),
+            (52.5, 13.4),
+            (52.50001, 13.35)
+        ]]])
+        .is_ok());
     }
 
     #[test]

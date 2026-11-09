@@ -856,7 +856,11 @@ pub fn generate_world_with_options(
     let void_world =
         world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
     editor.set_void_world(void_world);
-    if void_world && !extending {
+    // A drawn outline can miss that region in a flat world too, where the template's own
+    // chunks would then stand in the generated plain.
+    if (void_world || (xzbbox.outline().is_some() && world_format == WorldFormat::JavaAnvil))
+        && !extending
+    {
         // A world made by `create_new_world` starts with the flat template region. The area
         // rewrites it when it reaches that region; one it misses would stay a grass square.
         crate::world_utils::remove_untouched_template_region(&output_path);

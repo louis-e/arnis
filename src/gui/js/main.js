@@ -1535,9 +1535,17 @@ function initSettings() {
   });
 
   // Discord status: stored by the settings store, sent on every change and
-  // once more after the restore (see syncDiscordStatus).
+  // once more after the restore (see syncDiscordStatus). A build without a
+  // Discord application hides the row, which would do nothing.
   const discordToggle = document.getElementById("discord-status-toggle");
-  if (discordToggle) discordToggle.addEventListener("change", syncDiscordStatus);
+  if (discordToggle) {
+    discordToggle.addEventListener("change", syncDiscordStatus);
+    Promise.resolve(invoke('gui_discord_available')).then((available) => {
+      if (available) return;
+      const row = discordToggle.closest('.settings-row');
+      if (row) row.style.display = 'none';
+    }).catch(() => {});
+  }
 
 
   /// License and Credits
@@ -3948,6 +3956,11 @@ async function startGeneration() {
   if (generationButtonEnabled === false) {
     return;
   }
+  // One World and Live keep their areas as rectangles of whole chunks.
+  if (selectedShapes && (isLiveMode() || isOneWorldEnabled())) {
+    setBboxSelectionInfo(document.getElementById('bbox-selection-info'), "shapes_one_world", "#fa7878");
+    return;
+  }
   if (isLiveMode()) {
     startLive();
     return;
@@ -3973,13 +3986,6 @@ async function startGeneration() {
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
       const bboxSelectionInfo = document.getElementById('bbox-selection-info');
       setBboxSelectionInfo(bboxSelectionInfo, "select_location_first", "#fa7878");
-      return;
-    }
-
-    // One World keeps its areas as rectangles of whole chunks.
-    if (selectedShapes && isOneWorldEnabled()) {
-      const bboxSelectionInfo = document.getElementById('bbox-selection-info');
-      setBboxSelectionInfo(bboxSelectionInfo, "shapes_one_world", "#fa7878");
       return;
     }
 
