@@ -1030,7 +1030,7 @@ impl Block {
 }
 
 // Cache of stair NBT compounds shared across placements via Arc.
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 #[allow(clippy::type_complexity)]
 static STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
@@ -1077,15 +1077,8 @@ pub fn create_stair_with_properties(
     BlockWithProperties::from_arc(base_stair_block, Some(properties))
 }
 #[allow(clippy::type_complexity)]
-static TOP_STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-
-thread_local! {
-    /// What this thread has already taken from `TOP_STAIR_CACHE`. Every tile thread flips
-    /// stairs all the time, and they queued for that one lock on each of them.
-    static LOCAL_TOP_STAIRS: std::cell::RefCell<fnv::FnvHashMap<(u16, StairFacing, StairShape), Arc<Value>>> =
-        std::cell::RefCell::default();
-}
+static TOP_STAIR_CACHE: Lazy<RwLock<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// The facing and shape of a plain stair state (no other properties), as
 /// `create_stair_with_properties` builds it.
@@ -1128,22 +1121,19 @@ pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
         // instead of cloning and interning a compound on every placement.
         if let Some((facing, shape)) = plain_stair_state(map) {
             let key = (stair.block.id(), facing, shape);
-            let props = LOCAL_TOP_STAIRS.with(|local| {
-                let mut local = local.borrow_mut();
-                if let Some(props) = local.get(&key) {
-                    return props.clone();
-                }
-                let mut cache = TOP_STAIR_CACHE.lock().unwrap();
-                let props = cache
+            // Read first: every tile thread flips stairs all the time, and one lock for
+            // all of them had the threads queue on each flip.
+            let cached = TOP_STAIR_CACHE.read().unwrap().get(&key).cloned();
+            let props = cached.unwrap_or_else(|| {
+                let mut cache = TOP_STAIR_CACHE.write().unwrap();
+                cache
                     .entry(key)
                     .or_insert_with(|| {
                         let mut new_map = map.clone();
                         new_map.insert("half".to_string(), Value::String("top".to_string()));
                         intern_props(Value::Compound(new_map))
                     })
-                    .clone();
-                local.insert(key, props.clone());
-                props
+                    .clone()
             });
             stair.properties = Some(props);
             return stair;
@@ -2313,7 +2303,7 @@ mod material_tests {
         let d = flip(StairFacing::South, StairShape::Straight);
         assert!(!Arc::ptr_eq(&a, &c) && !Arc::ptr_eq(&a, &d));
 
-        // Each thread remembers what it looked up, and they still all share the one compound.
+        // Another thread gets the very same compound.
         let elsewhere = std::thread::spawn(move || {
             let first = flip(StairFacing::North, StairShape::Straight);
             let second = flip(StairFacing::North, StairShape::Straight);

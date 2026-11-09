@@ -36,8 +36,7 @@ use std::io::{Read as IoRead, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::Arc;
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 use zip::ZipWriter;
@@ -53,6 +52,24 @@ pub enum BedrockSaveError {
 }
 
 impl BedrockSaveError {
+    /// Whether the disk refused something, as opposed to the data being wrong: only then
+    /// can another folder fare better.
+    fn is_disk_fault(&self) -> bool {
+        use rusty_leveldb::StatusCode;
+        match self {
+            BedrockSaveError::Io(_) => true,
+            BedrockSaveError::Database(status) => matches!(
+                status.code,
+                StatusCode::IOError
+                    | StatusCode::PermissionDenied
+                    | StatusCode::NotFound
+                    | StatusCode::AlreadyExists
+                    | StatusCode::LockError
+            ),
+            _ => false,
+        }
+    }
+
     /// The cause in a few words, for the GUI's one-line status.
     pub fn reason(&self) -> &'static str {
         use std::io::ErrorKind;
@@ -151,19 +168,19 @@ const RAW_DEFLATE_COMPRESSOR_ID: u8 = 4;
 
 /// One of Bedrock's two block compressors: deflate, with or without the zlib header.
 ///
-/// The compressor state is kept between blocks: building it, tables and all, costs more
-/// than compressing a small block does.
+/// The compressor state is built on the first block and kept between blocks: building it,
+/// tables and all, costs more than compressing a small block does, and the zlib variant,
+/// which only reads, never needs one.
 struct DeflateCompressor {
     zlib_header: bool,
-    state: RefCell<flate2::Compress>,
+    state: RefCell<Option<flate2::Compress>>,
 }
 
 impl DeflateCompressor {
     fn new(zlib_header: bool) -> Self {
-        let level = flate2::Compression::new(BEDROCK_COMPRESSION_LEVEL);
         Self {
             zlib_header,
-            state: RefCell::new(flate2::Compress::new(level, zlib_header)),
+            state: RefCell::new(None),
         }
     }
 }
@@ -175,6 +192,10 @@ fn compression_error(e: impl std::fmt::Display) -> rusty_leveldb::Status {
 impl Compressor for DeflateCompressor {
     fn encode(&self, block: Vec<u8>) -> rusty_leveldb::Result<Vec<u8>> {
         let mut state = self.state.borrow_mut();
+        let state = state.get_or_insert_with(|| {
+            let level = flate2::Compression::new(BEDROCK_COMPRESSION_LEVEL);
+            flate2::Compress::new(level, self.zlib_header)
+        });
         state.reset();
         // Blocks of chunk data compress to a fraction; one that does not grows the buffer.
         let mut out = Vec::with_capacity(block.len() / 4 + 64);
@@ -217,7 +238,7 @@ fn bedrock_db_options() -> Options {
     Options {
         compressor_list: Rc::new(compressors),
         compressor: RAW_DEFLATE_COMPRESSOR_ID,
-        env: Rc::new(Box::new(MonotonicDiskEnv::new())),
+        env: Rc::new(Box::new(RetryingDiskEnv::new())),
         ..Options::default()
     }
 }
@@ -261,23 +282,21 @@ fn leveldb_status(method: &str, path: &Path, e: std::io::Error) -> rusty_leveldb
     status
 }
 
-/// The stock disk env with retries on file opens, renames and deletes, and a monotonic
-/// clock, since rusty-leveldb's compaction stats overflow when the wall clock steps back.
-struct MonotonicDiskEnv {
+/// The stock disk env with retries on file opens, renames and deletes, which a virus
+/// scanner or a sync client can hold up for a moment.
+struct RetryingDiskEnv {
     inner: PosixDiskEnv,
-    epoch: Instant,
 }
 
-impl MonotonicDiskEnv {
+impl RetryingDiskEnv {
     fn new() -> Self {
         Self {
             inner: PosixDiskEnv::new(),
-            epoch: Instant::now(),
         }
     }
 }
 
-impl Env for MonotonicDiskEnv {
+impl Env for RetryingDiskEnv {
     fn open_sequential_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn std::io::Read>> {
         retry_transient(|| File::open(p))
             .map(|f| Box::new(f) as Box<dyn std::io::Read>)
@@ -346,8 +365,7 @@ impl Env for MonotonicDiskEnv {
         self.inner.new_logger(p)
     }
     fn micros(&self) -> u64 {
-        // Offset by one so the first reading is never 0, like a wall clock's.
-        self.epoch.elapsed().as_micros() as u64 + 1
+        self.inner.micros()
     }
     fn sleep_for(&self, micros: u32) {
         self.inner.sleep_for(micros)
@@ -574,7 +592,7 @@ impl BedrockWriter {
             match self.write_staging(&staging.dir, world, xzbbox, llbbox) {
                 Ok(()) => return Ok(staging),
                 // Only the disk can fail differently somewhere else.
-                Err(e @ (BedrockSaveError::Io(_) | BedrockSaveError::Database(_))) => {
+                Err(e) if e.is_disk_fault() => {
                     eprintln!(
                         "Warning: staging the Bedrock world in '{}' failed: {e}",
                         staging.dir.display()
@@ -893,33 +911,19 @@ impl BedrockWriter {
         let db_path = dir.join("db");
         retry_transient(|| fs::create_dir_all(&db_path))?;
 
-        let mut chunks: Vec<(i32, i32, &ChunkToModify)> = world
-            .regions
-            .iter()
-            .flat_map(|((region_x, region_z), region)| {
-                region
-                    .chunks
-                    .iter()
-                    .map(move |((local_x, local_z), chunk)| {
-                        (region_x * 32 + local_x, region_z * 32 + local_z, chunk)
-                    })
-            })
-            .collect();
-        // Keys compare bytewise and start with the chunk position, little-endian.
-        chunks.sort_unstable_by_key(|&(x, z, _)| chunk_key_prefix(x, z));
+        let chunks = sorted_chunks(world);
 
         let progress = SaveProgress::new(chunks.len());
         let chunks_per_run = chunks_per_run(chunks.len(), rayon::current_num_threads());
-        let max_table_bytes = bedrock_db_options().max_file_size;
         let tables = self.write_tables(
             &db_path,
             &chunks,
             chunks_per_run,
-            max_table_bytes,
+            MAX_TABLE_BYTES,
             &progress,
         )?;
 
-        let total_bytes: u64 = tables.iter().map(|table| table.size as u64).sum();
+        let total_bytes: u64 = tables.iter().map(|table| table.size() as u64).sum();
         install_tables(
             &bedrock_db_options(),
             &db_path,
@@ -1411,7 +1415,9 @@ impl BedrockWriter {
         // Add db directory and its contents
         let db_path = dir.join("db");
         if db_path.is_dir() {
-            add_directory_to_zip(&mut writer, &db_path, "db", options)?;
+            // A table's blocks are deflated already; a second pass costs time and gains nothing.
+            let is_table = |path: &Path| path.extension().is_some_and(|ext| ext == "ldb");
+            add_directory_to_zip(&mut writer, &db_path, "db", options, &is_table)?;
         }
 
         writer.finish()?.sync_all()?;
@@ -1439,6 +1445,7 @@ fn add_directory_to_zip(
     dir_path: &std::path::Path,
     zip_prefix: &str,
     options: SimpleFileOptions,
+    stored: &dyn Fn(&Path) -> bool,
 ) -> Result<(), BedrockSaveError> {
     // Add directory entry
     writer.add_directory(format!("{}/", zip_prefix), options)?;
@@ -1454,9 +1461,7 @@ fn add_directory_to_zip(
         let zip_path = format!("{}/{}", zip_prefix, name);
 
         if path.is_file() {
-            // A table's blocks are deflated already; a second pass costs time and gains nothing.
-            let is_table = path.extension().is_some_and(|ext| ext == "ldb");
-            let options = if is_table {
+            let options = if stored(&path) {
                 options.compression_method(CompressionMethod::Stored)
             } else {
                 options
@@ -1465,7 +1470,7 @@ fn add_directory_to_zip(
             let contents = retry_transient(|| fs::read(&path))?;
             writer.write_all(&contents)?;
         } else if path.is_dir() {
-            add_directory_to_zip(writer, &path, &zip_path, options)?;
+            add_directory_to_zip(writer, &path, &zip_path, options, stored)?;
         }
     }
 
@@ -1672,9 +1677,6 @@ enum KeyTypeTag {
     SubChunkPrefix = 47,
     /// Concatenated block entity compounds.
     BlockEntity = 49,
-    /// Entities, which we never write: the Java ones other than frames have no Bedrock form.
-    #[cfg(test)]
-    Entity = 50,
     /// How far the chunk is generated.
     FinalizedState = 54,
 }
@@ -1702,9 +1704,31 @@ fn build_chunk_key_bytes(
     buffer
 }
 
+/// Every chunk of the world with its position, in the order of their keys: bytewise, the
+/// position little-endian. LevelDB keeps its tables in that order.
+fn sorted_chunks(world: &WorldToModify) -> Vec<(i32, i32, &ChunkToModify)> {
+    let mut chunks: Vec<(i32, i32, &ChunkToModify)> = world
+        .regions
+        .iter()
+        .flat_map(|((region_x, region_z), region)| {
+            region
+                .chunks
+                .iter()
+                .map(move |((local_x, local_z), chunk)| {
+                    (region_x * 32 + local_x, region_z * 32 + local_z, chunk)
+                })
+        })
+        .collect();
+    chunks.sort_unstable_by_key(|&(x, z, _)| chunk_key_prefix(x, z));
+    chunks
+}
+
 /// Sequence numbers set aside per chunk, more than the records one can have: a subchunk for
 /// each of the 256 section indices and four others.
 const SEQUENCES_PER_CHUNK: usize = 512;
+
+/// Size at which a table is closed and the next one begun, as LevelDB's own tables are.
+const MAX_TABLE_BYTES: usize = 2 << 20;
 
 /// Most chunks a worker writes in one go, about a table's worth in a dense city.
 const MAX_CHUNKS_PER_RUN: usize = 1024;
@@ -1722,8 +1746,6 @@ struct SaveProgress {
     bar: ProgressBar,
     total: usize,
     done: AtomicUsize,
-    /// Chunks at the last GUI update; held while emitting so updates stay in order.
-    reported: Mutex<usize>,
 }
 
 impl SaveProgress {
@@ -1739,7 +1761,6 @@ impl SaveProgress {
             bar,
             total,
             done: AtomicUsize::new(0),
-            reported: Mutex::new(0),
         }
     }
 
@@ -1747,13 +1768,9 @@ impl SaveProgress {
         let done = self.done.fetch_add(1, Ordering::Relaxed) + 1;
         self.bar.inc(1);
         // GUI progress spans 92%..97% for chunk writing, a step every half percent of it.
+        // Two threads may emit out of order; the emitter never lets the bar move back.
         let step = (self.total / 200).max(1);
-        if !done.is_multiple_of(step) && done != self.total {
-            return;
-        }
-        let mut reported = self.reported.lock().unwrap_or_else(|e| e.into_inner());
-        if done > *reported {
-            *reported = done;
+        if done.is_multiple_of(step) || done == self.total {
             emit_gui_progress_update(92.0 + done as f64 / self.total as f64 * 5.0, "");
         }
     }
@@ -2112,7 +2129,7 @@ mod tests {
     use serde_json::Value;
     use zip::ZipArchive;
 
-    fn test_writer(output_path: PathBuf) -> BedrockWriter {
+    pub(super) fn test_writer(output_path: PathBuf) -> BedrockWriter {
         BedrockWriter::new(
             output_path,
             "Arnis World: Test".to_string(),
@@ -2719,7 +2736,10 @@ mod tests {
             record(KeyTypeTag::FinalizedState, None),
             Some(2i32.to_le_bytes().to_vec())
         );
-        assert!(record(KeyTypeTag::Entity, None).is_none());
+        // No entity record (tag 50): the Java entities other than frames have no Bedrock form.
+        let mut entity_key = chunk_key_prefix(pos.0, pos.1).to_vec();
+        entity_key.push(50);
+        assert!(!records.contains_key(&entity_key));
 
         // Heightmap, then one plains storage and 23 "same as below".
         let data3d = record(KeyTypeTag::Data3D, None).unwrap();
@@ -2979,24 +2999,13 @@ mod tests {
 }
 
 #[cfg(test)]
-mod leveldb_options_tests {
+mod leveldb_tests {
     use super::*;
     use rusty_leveldb::LdbIterator;
     use rusty_leveldb::DB;
 
     fn writer(dir: &Path) -> BedrockWriter {
-        BedrockWriter::new(
-            dir.join("world"),
-            "Bulk Test".to_string(),
-            None,
-            None,
-            false,
-            "local".to_string(),
-            1.0,
-            crate::args::GameMode::Creative,
-            6000,
-            false,
-        )
+        super::tests::test_writer(dir.join("world"))
     }
 
     /// A world of 20 x 20 chunks around the origin, each with blocks at three section
@@ -3018,21 +3027,6 @@ mod leveldb_options_tests {
         world
     }
 
-    fn chunk_refs(world: &WorldToModify) -> Vec<(i32, i32, &ChunkToModify)> {
-        let mut chunks: Vec<_> = world
-            .regions
-            .iter()
-            .flat_map(|((rx, rz), region)| {
-                region
-                    .chunks
-                    .iter()
-                    .map(move |((x, z), chunk)| (rx * 32 + x, rz * 32 + z, chunk))
-            })
-            .collect();
-        chunks.sort_unstable_by_key(|&(x, z, _)| chunk_key_prefix(x, z));
-        chunks
-    }
-
     /// Every record of the database under `db_path`, in key order.
     fn read_all(db_path: &Path) -> Vec<DbRecord> {
         let mut opts = bedrock_db_options();
@@ -3049,7 +3043,7 @@ mod leveldb_options_tests {
 
     /// What the tables must hold: every chunk's records, in key order.
     fn expected_records(writer: &BedrockWriter, world: &WorldToModify) -> Vec<DbRecord> {
-        let mut records: Vec<DbRecord> = chunk_refs(world)
+        let mut records: Vec<DbRecord> = sorted_chunks(world)
             .into_iter()
             .flat_map(|(x, z, chunk)| writer.encode_chunk_records(x, z, chunk).unwrap())
             .collect();
@@ -3085,7 +3079,7 @@ mod leveldb_options_tests {
         let tmp = tempfile::tempdir().unwrap();
         let writer = writer(tmp.path());
         let world = world_around_origin();
-        let chunks = chunk_refs(&world);
+        let chunks = sorted_chunks(&world);
         let db_path = tmp.path().join("db");
         fs::create_dir_all(&db_path).unwrap();
 
@@ -3095,13 +3089,13 @@ mod leveldb_options_tests {
             .write_tables(&db_path, &chunks, 64, 2048, &progress)
             .unwrap();
         assert!(tables.len() > 7 * 2, "only {} tables", tables.len());
-        assert!(tables.iter().all(|t| t.size < 64 * 1024));
-        let mut numbers: Vec<u64> = tables.iter().map(|t| t.num).collect();
+        assert!(tables.iter().all(|t| t.size() < 64 * 1024));
+        let mut numbers: Vec<u64> = tables.iter().map(|t| t.num()).collect();
         numbers.sort_unstable();
         numbers.dedup();
         assert_eq!(numbers.len(), tables.len());
         assert_eq!(
-            tables.iter().map(|t| t.entries).sum::<usize>(),
+            tables.iter().map(|t| t.entries()).sum::<usize>(),
             chunks.len() * 6
         );
 
@@ -3118,6 +3112,19 @@ mod leveldb_options_tests {
             .unwrap();
         assert!(tmp.path().join("db").join("CURRENT").is_file());
         assert!(read_all(&tmp.path().join("db")).is_empty());
+    }
+
+    #[test]
+    fn only_a_disk_fault_is_worth_another_staging_folder() {
+        use rusty_leveldb::{Status, StatusCode};
+        let database = |code| BedrockSaveError::Database(Status::new(code, "x"));
+        assert!(BedrockSaveError::Io(std::io::Error::other("x")).is_disk_fault());
+        assert!(database(StatusCode::IOError).is_disk_fault());
+        assert!(database(StatusCode::PermissionDenied).is_disk_fault());
+        // Keys out of order or a block that will not compress fail the same anywhere.
+        assert!(!database(StatusCode::InvalidArgument).is_disk_fault());
+        assert!(!database(StatusCode::CompressionError).is_disk_fault());
+        assert!(!BedrockSaveError::Nbt("x".to_string()).is_disk_fault());
     }
 
     #[test]
@@ -3211,13 +3218,5 @@ mod leveldb_options_tests {
         }
         db.flush().unwrap();
         assert!(db.get(&(x % 10_000).to_le_bytes()).is_some());
-    }
-
-    #[test]
-    fn monotonic_env_clock_never_goes_backwards() {
-        let env = MonotonicDiskEnv::new();
-        let a = env.micros();
-        assert!(a > 0);
-        assert!(env.micros() >= a);
     }
 }

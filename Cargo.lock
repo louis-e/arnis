@@ -1528,7 +1528,7 @@ dependencies = [
 [[package]]
 name = "fastnbt"
 version = "2.6.1"
-source = "git+https://github.com/louis-e/fastnbt?rev=2906596ceea156751f67893c25eea8339ecb17d0#2906596ceea156751f67893c25eea8339ecb17d0"
+source = "git+https://github.com/louis-e/fastnbt?rev=705be60b7e0743f46b9800119f1f5b512f264df2#705be60b7e0743f46b9800119f1f5b512f264df2"
 dependencies = [
  "byteorder",
  "cesu8",
@@ -4767,7 +4767,7 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 [[package]]
 name = "rusty-leveldb"
 version = "4.0.2"
-source = "git+https://github.com/louis-e/leveldb-rs?rev=4eedbe0b8c29eb53427c9e317ad2d819ae82c39c#4eedbe0b8c29eb53427c9e317ad2d819ae82c39c"
+source = "git+https://github.com/louis-e/leveldb-rs?rev=6a68859bd70bc844e2226b7bc7056d1be1de63b9#6a68859bd70bc844e2226b7bc7056d1be1de63b9"
 dependencies = [
  "bytes",
  "crc32c",

@@ -66,7 +66,7 @@ tiff = "0.11"
 tokio = { version = "1.48.0", features = ["full"], optional = true }
 nbtx = { git = "https://github.com/louis-e/nbtx", rev = "551c38ac74f2e68a07d3dbdd354faac0c0ac966e" }
 zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
-rusty-leveldb = { git = "https://github.com/louis-e/leveldb-rs", rev = "4eedbe0b8c29eb53427c9e317ad2d819ae82c39c" }
+rusty-leveldb = { git = "https://github.com/louis-e/leveldb-rs", rev = "6a68859bd70bc844e2226b7bc7056d1be1de63b9" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
 quick-xml = "0.41.0"
@@ -87,4 +87,4 @@ path = "assets/refresh_wikidata_index.rs"
 # fastnbt 2.6.1 with a faster serializer: no allocation per field name and no UTF-8
 # validation per entry. Drop once a release carries it.
 [patch.crates-io]
-fastnbt = { git = "https://github.com/louis-e/fastnbt", rev = "2906596ceea156751f67893c25eea8339ecb17d0" }
+fastnbt = { git = "https://github.com/louis-e/fastnbt", rev = "705be60b7e0743f46b9800119f1f5b512f264df2" }
