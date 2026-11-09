@@ -352,6 +352,12 @@ pub fn generate_ground_region(
         _ => 0.12,
     };
 
+    // A drawn outline leaves some columns out. A flat world shows its filler plane there,
+    // as it does around the area, so the edge of a cut chunk is no trench to the void.
+    let shaped = xzbbox.outline().is_some();
+    let filler_outside =
+        shaped && args.world_type == crate::args::WorldType::Flat && !args.bedrock && !args.luanti;
+
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
             // Calculate the block range for this chunk, clamped to bbox
@@ -359,6 +365,18 @@ pub fn generate_ground_region(
             let chunk_max_x = ((chunk_x << 4) + 15).min(iter_max_x);
             let chunk_min_z = (chunk_z << 4).max(iter_min_z);
             let chunk_max_z = ((chunk_z << 4) + 15).min(iter_max_z);
+            // A chunk the outline misses stays unwritten, which the save fills like the
+            // surroundings of the area.
+            if shaped && !xzbbox.touches_rect(chunk_min_x, chunk_min_z, chunk_max_x, chunk_max_z) {
+                let cells = ((chunk_max_x - chunk_min_x + 1).max(0)
+                    * (chunk_max_z - chunk_min_z + 1).max(0)) as u64;
+                block_counter += cells;
+                ground_pb.set_position(block_counter);
+                if show_progress {
+                    gui_progress_grnd += progress_increment_grnd * cells as f64;
+                }
+                continue;
+            }
             let forest_fern_share = fern_share_at((chunk_x << 4) + 8, (chunk_z << 4) + 8);
             // Fallen rock is only looked for where the relief could hold a cliff.
             let talus_field = (terrain_enabled && planetary_body.is_none())
@@ -405,7 +423,10 @@ pub fn generate_ground_region(
                     && ground.is_in_rotated_bounds(chunk_min_x, chunk_min_z)
                     && ground.is_in_rotated_bounds(chunk_max_x, chunk_min_z)
                     && ground.is_in_rotated_bounds(chunk_min_x, chunk_max_z)
-                    && ground.is_in_rotated_bounds(chunk_max_x, chunk_max_z);
+                    && ground.is_in_rotated_bounds(chunk_max_x, chunk_max_z)
+                    // Whole sections would put stone under columns an outline leaves out.
+                    && (!shaped
+                        || xzbbox.covers_rect(chunk_min_x, chunk_min_z, chunk_max_x, chunk_max_z));
                 if rotated_in {
                     let min_ground_y: i32 = if let Some(ref cache) = chunk_ground_cache {
                         cache
@@ -449,7 +470,11 @@ pub fn generate_ground_region(
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
                     // Skip blocks outside the rotated original bounding box
-                    if !ground.is_in_rotated_bounds(x, z) {
+                    let outside_outline = shaped && !xzbbox.contains(&XZPoint::new(x, z));
+                    if !ground.is_in_rotated_bounds(x, z) || outside_outline {
+                        if outside_outline && filler_outside {
+                            editor.set_filler_outside_outline(x, z);
+                        }
                         block_counter += 1;
                         if block_counter.is_multiple_of(batch_size) {
                             ground_pb.set_position(block_counter);

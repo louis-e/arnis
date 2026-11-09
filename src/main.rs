@@ -21,6 +21,8 @@ mod datapack;
 mod decals;
 mod deferred_placement;
 mod deterministic_rng;
+#[cfg(feature = "gui")]
+mod discord;
 mod distant_horizons;
 mod ecoregion;
 mod element_processing;
@@ -166,6 +168,10 @@ fn run_cli() {
 
     // Parse input arguments
     let mut args: Args = Args::parse();
+    if let Err(e) = args::resolve_shapes(&mut args) {
+        eprintln!("{}: {}", "Error".red().bold(), e);
+        std::process::exit(1);
+    }
     let asked_mob_spawning = args.mob_spawning;
     args::apply_body_defaults(&mut args);
     args::apply_feature_needs(&mut args);
@@ -812,6 +818,14 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         }
     }
 
+    // Cut to the drawn shapes while the frame is still the projection's own.
+    xzbbox = projection::ProjectionSpec::from_args(&args)
+        .shaped(&effective_bbox, xzbbox, args.shapes.as_ref())
+        .unwrap_or_else(|e| {
+            eprintln!("{} {}", "Error:".red().bold(), e);
+            exit_failed();
+        });
+
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
     bench.mark("transform_map");
@@ -876,12 +890,8 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     // over nothing at all in a void one.
     let java_spawn = spawn_point.or_else(|| {
         (world_format == world_editor::WorldFormat::JavaAnvil).then(|| {
-            map_transformation::rotate::rotate_xz_point(
-                pre_rotation_bbox.min_x() + 1,
-                pre_rotation_bbox.min_z() + 1,
-                args.rotation,
-                &pre_rotation_bbox,
-            )
+            let (sx, sz) = pre_rotation_bbox.default_spawn();
+            map_transformation::rotate::rotate_xz_point(sx, sz, args.rotation, &pre_rotation_bbox)
         })
     });
     let spawn_y_for_java = java_spawn.map(|(sx, sz)| {

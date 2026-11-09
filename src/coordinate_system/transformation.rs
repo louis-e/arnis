@@ -102,6 +102,37 @@ impl CoordTransformer {
         ))
     }
 
+    /// Like `transform_point`, before rounding down to a block.
+    pub fn transform_point_f64(&self, llpoint: LLPoint) -> (f64, f64) {
+        match &self.mode {
+            ProjectionMode::Local => {
+                let rel_x = (llpoint.lng() - self.min_lng) / self.len_lng;
+                let rel_z = 1.0 - (llpoint.lat() - self.min_lat) / self.len_lat;
+                (rel_x * self.scale_factor_x, rel_z * self.scale_factor_z)
+            }
+            ProjectionMode::WebMercator(proj) => {
+                (proj.x_for_lon(llpoint.lng()), proj.z_for_lat(llpoint.lat()))
+            }
+        }
+    }
+
+    /// The shapes in block space, for `XZBBox::with_outline`.
+    pub fn transform_shapes(
+        &self,
+        shapes: &super::geographic::LLShapes,
+    ) -> Vec<super::cartesian::XZPolygon> {
+        shapes
+            .polygons()
+            .iter()
+            .map(|rings| {
+                rings
+                    .iter()
+                    .map(|ring| ring.iter().map(|&p| self.transform_point_f64(p)).collect())
+                    .collect()
+            })
+            .collect()
+    }
+
     pub fn transform_point(&self, llpoint: LLPoint) -> XZPoint {
         match &self.mode {
             ProjectionMode::Local => {

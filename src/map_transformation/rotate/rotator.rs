@@ -1,5 +1,5 @@
 use super::Operator;
-use crate::coordinate_system::cartesian::{XZBBox, XZBBoxRect, XZPoint};
+use crate::coordinate_system::cartesian::{XZBBox, XZBBoxRect, XZPoint, XZPolygon};
 use crate::elevation::MAX_ELEVATION_GRID_DIM;
 use crate::ground::{Ground, RotationMask};
 use crate::land_cover::LC_WATER;
@@ -150,7 +150,22 @@ pub fn rotate_world(
         .fold(f64::NEG_INFINITY, f64::max)
         .ceil() as i32;
 
-    *xzbbox = XZBBox::Rect(XZBBoxRect::new(
+    let outline: Option<Vec<XZPolygon>> = xzbbox.outline().map(|s| {
+        s.polygons()
+            .iter()
+            .map(|rings| {
+                rings
+                    .iter()
+                    .map(|ring| {
+                        ring.iter()
+                            .map(|&(x, z)| rotate_point(x, z, cx, cz, sin_r, cos_r))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
+    });
+    let rect = XZBBox::Rect(XZBBoxRect::new(
         XZPoint {
             x: new_min_x,
             z: new_min_z,
@@ -160,6 +175,10 @@ pub fn rotate_world(
             z: new_max_z,
         },
     )?);
+    *xzbbox = match outline {
+        Some(polygons) => rect.with_outline(polygons)?,
+        None => rect,
+    };
 
     // --- 2. Rotate all elements ---
     for elem in elements.iter_mut() {
@@ -595,6 +614,29 @@ mod tests {
 
         // 45° rotation of a square produces a larger bounding rect
         assert!(new_area > orig_area);
+    }
+
+    #[test]
+    fn a_drawn_outline_turns_with_the_world() {
+        let mut elements = Vec::new();
+        // The west half of a 101x101 square.
+        let mut xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0)
+            .unwrap()
+            .with_outline(vec![vec![vec![
+                (0.0, 0.0),
+                (40.0, 0.0),
+                (40.0, 100.0),
+                (0.0, 100.0),
+            ]]])
+            .unwrap();
+        let mut ground = Ground::new_flat(-62);
+        rotate_world(90.0, &mut elements, &mut xzbbox, &mut ground).unwrap();
+
+        // A quarter turn clockwise on the map takes the west half to the north.
+        let shape = xzbbox.outline().expect("still an outline");
+        assert!(xzbbox.contains(&XZPoint::new(50, 5)));
+        assert!(!xzbbox.contains(&XZPoint::new(50, 95)));
+        assert!(shape.covered_columns() >= 41 * 101 - 101);
     }
 
     // Elevation on, no land cover: the height grid must be rotated, not dropped.

@@ -2658,6 +2658,20 @@ impl<'a> WorldEditor<'a> {
         self.world.set_block_if_absent(x, absolute_y, z, block)
     }
 
+    /// The filler plane of a flat world, in a column of the rectangle a drawn outline leaves
+    /// out, where the area's own writes are refused.
+    pub fn set_filler_outside_outline(&mut self, x: i32, z: i32) {
+        let p = XZPoint::new(x, z);
+        if !self.xzbbox.bounding_rect().contains(&p)
+            || self.xzbbox.contains(&p)
+            || self.is_region_flushed(x, z)
+        {
+            return;
+        }
+        self.world
+            .set_block_if_absent(x, common::base_chunk_y(), z, common::base_chunk_block());
+    }
+
     /// Returns true if a non-AIR block exists at the given absolute coordinates.
     #[inline]
     pub fn block_exists_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {

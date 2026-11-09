@@ -110,6 +110,20 @@ impl ProjectionSpec {
         }
     }
 
+    /// `xzbbox`, the untransformed frame of `llbbox`, cut down to the drawn shapes if any.
+    pub fn shaped(
+        &self,
+        llbbox: &LLBBox,
+        xzbbox: XZBBox,
+        shapes: Option<&crate::coordinate_system::geographic::LLShapes>,
+    ) -> Result<XZBBox, String> {
+        let Some(shapes) = shapes else {
+            return Ok(xzbbox);
+        };
+        let (transformer, _) = self.transformer(llbbox)?;
+        xzbbox.with_outline(transformer.transform_shapes(shapes))
+    }
+
     pub fn clip_bbox(&self, xzbbox: &XZBBox) -> XZBBox {
         if self.clip_pad <= 0 {
             return xzbbox.clone();

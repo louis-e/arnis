@@ -284,8 +284,7 @@ pub fn save_luanti_world(
         // Explicit spawn: only scan the single column, no perimeter search.
         find_spawn_y_at_column(world, sx, sz, ground_level)
     } else {
-        let cx = (xzbbox.min_x() + xzbbox.max_x()) / 2;
-        let cz = (xzbbox.min_z() + xzbbox.max_z()) / 2;
+        let (cx, cz) = xzbbox.center_spawn();
         find_safe_spawn(world, cx, cz, ground_level)
     };
 

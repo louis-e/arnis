@@ -60,6 +60,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  syncDiscordStatus();
   // The store's restore fired the toggle's change event before the save path
   // and the world name were known; read the world once more with both in hand.
   refreshOneWorldState();
@@ -782,7 +783,7 @@ function registerMessageEvent() {
     // selection updates (typed ones carrying coordinates must not be).
     if (bboxText && !event.data.type) {
       console.log("Updated BBOX Coordinates:", bboxText);
-      displayBboxInfoText(bboxText);
+      displayBboxInfoText(bboxText, event.data.shapes);
     }
 
     // World toggled on the map toolbar
@@ -1533,6 +1534,11 @@ function initSettings() {
     syncTelemetryConsent();
   });
 
+  // Discord status: stored by the settings store, sent on every change and
+  // once more after the restore (see syncDiscordStatus).
+  const discordToggle = document.getElementById("discord-status-toggle");
+  if (discordToggle) discordToggle.addEventListener("change", syncDiscordStatus);
+
 
   /// License and Credits
   async function openLicense() {
@@ -1930,6 +1936,13 @@ function updateFormatToggleUI(format) {
 
 // Expose to window for onclick handlers
 window.setWorldFormat = setWorldFormat;
+
+// The backend shows nothing on Discord until it is told the toggle is on.
+function syncDiscordStatus() {
+  const toggle = document.getElementById("discord-status-toggle");
+  const enabled = !!(toggle && toggle.checked);
+  Promise.resolve(invoke('gui_set_discord_status', { enabled })).catch(() => {});
+}
 
 // The backend only reports crashes and errors while it holds a consent of true,
 // so push the stored answer to it at startup and on every change.
@@ -2623,6 +2636,9 @@ const AREA_THRESHOLDS = {
 
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
+// Drawn areas as [lat, lng] rings when the map selection is more than one
+// rectangle; null generates the plain bbox.
+let selectedShapes = null;
 let customBBoxValid = false;  // Tracks if custom input is valid
 let bboxInputError = false;  // The coordinate field holds input that did not validate
 
@@ -2664,7 +2680,8 @@ function refreshBboxSelectionInfo() {
 }
 
 // Function to handle incoming bbox data
-function displayBboxInfoText(bboxText) {
+function displayBboxInfoText(bboxText, shapes) {
+  selectedShapes = Array.isArray(shapes) && shapes.length ? shapes : null;
   // Two producers, two separators: the map posts formatBounds output, which is
   // space separated, while manual coordinate entry synthesizes a comma
   // separated string. Splitting on " " alone turned the manual one into a
@@ -3959,6 +3976,13 @@ async function startGeneration() {
       return;
     }
 
+    // One World keeps its areas as rectangles of whole chunks.
+    if (selectedShapes && isOneWorldEnabled()) {
+      const bboxSelectionInfo = document.getElementById('bbox-selection-info');
+      setBboxSelectionInfo(bboxSelectionInfo, "shapes_one_world", "#fa7878");
+      return;
+    }
+
     // Past every synchronous refusal, so from here the click is a real start.
     resetProgressUi(STARTING_MESSAGE);
 
@@ -4042,7 +4066,8 @@ async function startGeneration() {
         disasters: gameplayToggle('disasters-toggle'),
         bodyGravity: gameplayToggle('body-gravity-toggle'),
         oneWorld: oneWorld,
-        oneWorldName: oneWorld ? oneWorldFolderName() : ""
+        oneWorldName: oneWorld ? oneWorldFolderName() : "",
+        selectionShapes: oneWorld ? null : selectedShapes
     });
 
     console.log("Generation process started.");
