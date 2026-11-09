@@ -160,6 +160,7 @@ impl GroundFrame {
         let Some((world_w, world_h)) = self.world_dims else {
             let (ww, wh, gw, gh) = compute_grid_dims(bbox, scale);
             return FetchPlan {
+                m_per_cell: None,
                 bbox: *bbox,
                 dims: (ww, wh, gw, gh),
                 pad: 0,
@@ -194,6 +195,7 @@ impl GroundFrame {
                 proj.lon_for_x(x1),
             ) {
                 return FetchPlan {
+                    m_per_cell: (pad > 0).then(|| 1.0 / scale),
                     bbox: centres,
                     dims: (pw, ph, gw, gh),
                     pad,
@@ -210,6 +212,7 @@ impl GroundFrame {
         }
         let (_, _, gw, gh) = compute_grid_dims_for_world(world_w, world_h);
         FetchPlan {
+            m_per_cell: None,
             bbox: *bbox,
             dims: (world_w, world_h, gw, gh),
             pad: 0,
@@ -220,6 +223,9 @@ impl GroundFrame {
 }
 
 struct FetchPlan {
+    /// Metres per cell fixed by the One World frame, so every area smooths with the same
+    /// sigma; None measures the bbox.
+    m_per_cell: Option<f64>,
     bbox: LLBBox,
     /// `(world_width, world_height, grid_width, grid_height)`
     dims: (usize, usize, usize, usize),
@@ -312,7 +318,8 @@ impl Ground {
         let (mut land_cover, mut canopy) = std::thread::scope(|s| {
             let job = canopy_height
                 .then(|| s.spawn(move || canopy::fetch_canopy_data(&fetch_bbox, grid_w, grid_h)));
-            let lc = land_cover::fetch_land_cover_data(&fetch_bbox, grid_w, grid_h);
+            let lc =
+                land_cover::fetch_land_cover_data(&fetch_bbox, grid_w, grid_h, plan.m_per_cell);
             (lc, job.and_then(|h| h.join().ok()).flatten())
         });
         if land_cover.is_none() {
@@ -489,7 +496,7 @@ impl Ground {
             let canopy_job = canopy_height
                 .then(|| scope.spawn(|| canopy::fetch_canopy_data(bbox, grid_w, grid_h)));
             let mut land_cover = if body.is_earth() {
-                let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
+                let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h, plan.m_per_cell);
                 if lc.is_some() {
                     println!("Land cover data loaded successfully");
                 } else {

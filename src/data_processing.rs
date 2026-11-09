@@ -1114,7 +1114,7 @@ pub fn generate_world_with_options(
 
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
-    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
+    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &clip_bbox);
 
     // Tenants and surrounding areas per building, for interiors furnished by use.
     let interior_uses = if args.interior {
@@ -1126,14 +1126,14 @@ pub fn generate_world_with_options(
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
     let building_passages =
-        highways::collect_building_passage_coords(&elements, &xzbbox, args.scale);
+        highways::collect_building_passage_coords(&elements, &clip_bbox, args.scale);
 
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = Arc::new(highways::collect_road_surface_coords(
-        &elements, &editor, &xzbbox, args.scale,
+        &elements, &editor, &clip_bbox, args.scale,
     ));
     let barrier_clearance =
         barriers::RoadClearance::build(&elements, &editor, args.scale, Arc::clone(&road_mask));

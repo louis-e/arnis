@@ -447,6 +447,7 @@ pub fn fetch_land_cover_data(
     bbox: &LLBBox,
     grid_width: usize,
     grid_height: usize,
+    frame_m_per_cell: Option<f64>,
 ) -> Option<LandCoverData> {
     println!("Fetching land cover data (ESA WorldCover 2021)...");
     emit_gui_progress_update(9.0, "Downloading data...");
@@ -475,7 +476,8 @@ pub fn fetch_land_cover_data(
     // Sampling per cell is what keeps the grid gap-free at any --scale, and the raster
     // also feeds the shoreline reconstruction below.
     let mut raster: Option<EsaPixelRaster> = None;
-    let cells_per_meter = cells_per_meter(bbox, grid_width);
+    let cells_per_meter =
+        frame_m_per_cell.map_or_else(|| cells_per_meter(bbox, grid_width), |m| 1.0 / m);
     for (tile_lat, tile_lng, tile_url) in &tile_specs {
         match read_esa_tile_into_raster(
             &client,
