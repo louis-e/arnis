@@ -839,16 +839,23 @@ pub(crate) fn shared_faces(a: &Part, b: &Part) -> Vec<(usize, bool)> {
         .collect()
 }
 
-/// Pushes each part out of a face it shares with one before it, so what is laid on top,
-/// as a stripe on a hull or a window band on a carriage, shows rather than both in turn.
+/// Pushes the smaller of two parts out of a face they share, so the detail, a stripe on
+/// a hull, a window in a side, a lamp on a bumper, shows rather than both in turn.
 pub(crate) fn apart(parts: &mut [Part]) {
+    let volume = |p: &Part| p.size[0] * p.size[1] * p.size[2];
     for _ in 0..4 {
         let mut moved = false;
         for j in 1..parts.len() {
             for i in 0..j {
                 for (axis, far) in shared_faces(&parts[i], &parts[j]) {
-                    let to = parts[i].corner[axis] + if far { parts[i].size[axis] } else { 0.0 };
-                    let p = &mut parts[j];
+                    let (fixed, k) = if volume(&parts[i]) < volume(&parts[j]) {
+                        (j, i)
+                    } else {
+                        (i, j)
+                    };
+                    let f = &parts[fixed];
+                    let to = f.corner[axis] + if far { f.size[axis] } else { 0.0 };
+                    let p = &mut parts[k];
                     if far {
                         p.size[axis] = to + APART - p.corner[axis];
                     } else {
@@ -864,6 +871,30 @@ pub(crate) fn apart(parts: &mut [Part]) {
             break;
         }
     }
+}
+
+/// Parts wholly inside a part of another colour, which never show.
+#[cfg(test)]
+pub(crate) fn buried(parts: &[Part]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (i, a) in parts.iter().enumerate() {
+        for (j, b) in parts.iter().enumerate() {
+            if i == j || a.block == b.block || a.tilt != 0.0 || b.tilt != 0.0 {
+                continue;
+            }
+            let inside = (0..3).all(|k| {
+                a.corner[k] >= b.corner[k] - 1e-4
+                    && a.corner[k] + a.size[k] <= b.corner[k] + b.size[k] + 1e-4
+            });
+            if inside {
+                out.push(format!(
+                    "{} {:?}+{:?} in {}",
+                    a.block, a.corner, a.size, b.block
+                ));
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -901,7 +932,7 @@ mod tests {
     }
 
     #[test]
-    fn no_two_parts_of_a_boat_flicker_against_each_other() {
+    fn no_two_parts_of_a_boat_flicker_against_each_other_or_hide_one_another() {
         let mut found = Vec::new();
         for v in ALL {
             for &l in v.liveries() {
@@ -909,7 +940,8 @@ mod tests {
                     if low && !v.lowers() {
                         continue;
                     }
-                    for f in flickers(&v.parts(l, low)) {
+                    let parts = v.parts(l, low);
+                    for f in flickers(&parts).into_iter().chain(buried(&parts)) {
                         found.push(format!("{v:?} {} low {low}: {f}", l.name));
                     }
                 }

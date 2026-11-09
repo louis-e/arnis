@@ -1296,8 +1296,8 @@ mod tests {
     ];
 
     #[test]
-    fn no_two_parts_of_a_carriage_flicker_against_each_other() {
-        use crate::element_processing::ship_bodies::shared_faces;
+    fn no_two_parts_of_a_carriage_flicker_against_each_other_or_hide_one_another() {
+        use crate::element_processing::ship_bodies::{buried, shared_faces};
         let sets: [(&[Coach], &[Livery]); 8] = [
             (
                 &[
@@ -1332,6 +1332,9 @@ mod tests {
                                 found.push(format!("{coach:?} {} / {}", a.block, b.block));
                             }
                         }
+                    }
+                    for b in buried(&parts) {
+                        found.push(format!("{coach:?} {b}"));
                     }
                 }
             }

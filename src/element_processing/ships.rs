@@ -105,23 +105,30 @@ impl ShipPlan {
         for element in elements {
             match element {
                 ProcessedElement::Way(way) if way.nodes.len() >= 2 => {
+                    let river = matches!(
+                        way.tags.get("waterway").map(String::as_str),
+                        Some("river" | "canal")
+                    );
+                    let ferry = ferry_cars(&way.tags);
+                    let class = waterway_class(&way.tags);
+                    // Most ways are none of these, and are passed by without a copy.
+                    if !river && ferry.is_none() && class.is_none() && !is_terminal(&way.tags) {
+                        continue;
+                    }
                     let nodes: Nodes = way
                         .nodes
                         .iter()
                         .map(|n| (n.id, n.x as f64 + 0.5, n.z as f64 + 0.5))
                         .collect();
-                    if matches!(
-                        way.tags.get("waterway").map(String::as_str),
-                        Some("river" | "canal")
-                    ) {
+                    if river {
                         rivers.push(nodes.clone());
                     }
-                    if let Some(cars) = ferry_cars(&way.tags) {
+                    if let Some(cars) = ferry {
                         ferries.push((nodes, way.id, cars));
                         if let Some(m) = way.tags.get("duration").and_then(|d| minutes(d)) {
                             durations.insert(way.id, m);
                         }
-                    } else if let Some(class) = waterway_class(&way.tags) {
+                    } else if let Some(class) = class {
                         waterways.extend(
                             split_at_barriers(way)
                                 .into_iter()
@@ -381,9 +388,11 @@ impl ShipPlan {
                 cuts.push((start, i));
             }
         }
+        // Each stretch starts on a point whose columns across were read.
+        let stride = self.across(line.role).1;
         let mut bounds = vec![0];
         for &(a, b) in &cuts {
-            bounds.extend([a, b]);
+            bounds.extend([a, b - b % stride]);
         }
         bounds.push(n);
         bounds
@@ -1493,7 +1502,7 @@ mod tests {
         let plan = ShipPlan::build(&elements, 1.0, &world(), |_, _| false);
         // A pontoon twenty blocks long right where the line runs.
         let lake = |x: i32, z: i32| {
-            (300..1700).contains(&x) && (800..1200).contains(&z) && !(990..1010).contains(&x)
+            (300..1700).contains(&x) && (800..1200).contains(&z) && !(990..1011).contains(&x)
         };
         let ships = plan.finish(&probe_of(&plan, lake, |_, _| None));
         assert_eq!(ships.len(), 2);
@@ -1503,7 +1512,7 @@ mod tests {
                 xs.clone().fold(f64::MAX, f64::min),
                 xs.fold(f64::MIN, f64::max),
             );
-            assert!(hi < 990.0 || lo > 1010.0, "{lo} {hi}");
+            assert!(hi < 990.0 || lo > 1011.0, "{lo} {hi}");
         }
     }
 

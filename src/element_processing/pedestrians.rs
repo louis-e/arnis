@@ -309,8 +309,8 @@ impl WalkNetwork {
                         unit(b.0 - a.0, b.1 - a.1).unwrap_or((1.0, 0.0))
                     };
                     let group = |dir: (f64, f64)| if group_of(dir) == 'a' { 1 } else { 2 };
-                    if crossing {
-                        // A crossing way starts at the kerb.
+                    if crossing && road_at(nodes[0], piece.way.id).is_none() {
+                        // A crossing way starts at the kerb, unless mapped from the road's middle.
                         marks[0].1 = signalled.then(|| group(heading(0)));
                         marks[0].2 = !signalled;
                     }
@@ -591,12 +591,22 @@ impl WalkNetwork {
             round = d(0.7),
             walker = d(0.45),
         );
-        let gap = format!(
-            "# A car coming close to the kerb: wait for the gap.\n\
-             execute if entity @e[type=marker,tag=arnis.car,tag=!arnis.car.still,distance=..{}] run return 0\n\
-             return 1\n",
-            d(9.0)
-        );
+        // Only traffic across the walker's way counts; cars alongside pass by.
+        let mut gap =
+            String::from("# A car crossing the way ahead coming close: wait for the gap.\n");
+        let (along, across) = (["-45..45", "135..-135"], ["45..135", "-135..-45"]);
+        for (walker, cars) in [(along, across), (across, along)] {
+            for w in walker {
+                for c in cars {
+                    let _ = writeln!(
+                        gap,
+                        "execute if entity @s[y_rotation={w}] if entity @e[type=marker,tag=arnis.car,tag=!arnis.car.still,distance=..{},y_rotation={c}] run return 0",
+                        d(9.0)
+                    );
+                }
+            }
+        }
+        gap.push_str("return 1\n");
         // Company keeps clear of what a walker looks out for ahead.
         let behind = format!(
             "execute at @s run tp @s ^ ^ ^-{}\nfunction arnis:walk/aim\n",
@@ -1314,6 +1324,33 @@ mod tests {
                 lane.points
             );
             assert_eq!(lane.next.len(), 1, "turns round at the kerb");
+        }
+    }
+
+    #[test]
+    fn a_crossing_split_at_the_road_waits_only_at_the_kerbs() {
+        let crossing = &[("highway", "footway"), ("footway", "crossing")];
+        let elements = vec![
+            way(
+                1,
+                vec![
+                    node(1, -50, 0, &[]),
+                    node(2, 0, 0, &[]),
+                    node(3, 50, 0, &[]),
+                ],
+                &[("highway", "residential")],
+            ),
+            way(2, vec![node(10, 0, -10, &[]), node(2, 0, 0, &[])], crossing),
+            way(3, vec![node(2, 0, 0, &[]), node(11, 0, 10, &[])], crossing),
+        ];
+        let net = build(&elements, false);
+        let usable: Vec<&Lane> = net.lanes.iter().filter(|l| l.points.len() >= 2).collect();
+        assert!(!usable.is_empty());
+        for lane in usable {
+            let first = lane.points[0];
+            let kerb = first.kerb || first.light.is_some();
+            // On the road's middle nobody stops; at either kerb they do.
+            assert_eq!(kerb, first.z.abs() > 5.0, "{:?}", lane.points);
         }
     }
 

@@ -2503,7 +2503,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_two_parts_of_a_car_flicker_against_each_other() {
+    fn no_two_parts_of_a_car_flicker_against_each_other_or_hide_one_another() {
         use crate::element_processing::train_bodies::Part as Box;
         let mut found = Vec::new();
         for kind in [
@@ -2530,6 +2530,9 @@ mod tests {
                         found.push(format!("{kind:?} {} / {} {f:?}", a.block, b.block));
                     }
                 }
+            }
+            for b in crate::element_processing::ship_bodies::buried(&parts) {
+                found.push(format!("{kind:?} {b}"));
             }
         }
         assert!(found.is_empty(), "{}", found.join("\n"));
