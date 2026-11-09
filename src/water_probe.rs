@@ -265,10 +265,14 @@ pub fn walk_spot(name: &str, bottom: impl FnOnce() -> bool) -> Spot {
     }
 }
 
-/// Whether a block of this name is a post to pass rather than a step, as a fence, a wall
-/// or a tree trunk is.
+/// Whether a block of this name is a post to pass rather than a step, as a fence, a wall,
+/// a tree trunk or a bin is.
 fn too_tall(name: &str) -> bool {
-    const ENDS: [&str; 10] = [
+    const ENDS: [&str; 14] = [
+        "cauldron",
+        "barrel",
+        "redstone_block",
+        "composter",
         "_fence",
         "_fence_gate",
         "_wall",
@@ -390,6 +394,9 @@ mod tests {
             "iron_bars",
             "glass_pane",
             "spruce_log",
+            "cauldron",
+            "barrel",
+            "redstone_block",
         ] {
             assert!(too_tall(tall), "{tall}");
         }

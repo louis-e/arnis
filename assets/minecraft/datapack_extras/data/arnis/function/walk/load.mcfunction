@@ -8,13 +8,15 @@ scoreboard objectives add arnis.wn dummy
 scoreboard objectives add arnis.wv dummy
 scoreboard objectives add arnis.ww dummy
 scoreboard objectives add arnis.wb dummy
-# Each walker's own run of chances, shared with whoever walks with them.
+# Each walker's own run of chances, shared with whoever walks with them, and own pace.
 scoreboard objectives add arnis.wr dummy
+scoreboard objectives add arnis.wq dummy
 scoreboard players set #lcg_a arnis.walk 1103515245
 scoreboard players set #lcg_c arnis.walk 12345
 scoreboard players set #65536 arnis.walk 65536
 scoreboard players set #40 arnis.walk 40
 scoreboard players set #36 arnis.walk 36
+scoreboard players set #360 arnis.walk 360
 scoreboard players set #walk_t arnis 0
 # Half a second after the cars, so the two never add new ones in the same tick.
 scoreboard players set #walk_r arnis 5

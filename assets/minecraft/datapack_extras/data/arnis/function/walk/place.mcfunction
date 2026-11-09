@@ -8,8 +8,15 @@ $execute positioned $(x) $(y) $(z) if entity @e[tag=arnis.walker,distance=..2] r
 # Who: a look, a height, a pace, mostly the usual one, and their own run of chances.
 execute store result storage arnis:walk spawn.l int 1 run random value 0..17
 execute store result storage arnis:walk spawn.h int 1 run random value 0..7
-execute store result storage arnis:walk spawn.p int 1 run random value 0..3
-execute if data storage arnis:walk spawn{p:3} run data modify storage arnis:walk spawn.p set value 1
+scoreboard players set #p arnis.walk 3
+execute store result score #r arnis.walk run random value 0..15
+execute if score #r arnis.walk matches 0 run scoreboard players set #p arnis.walk 0
+execute if score #r arnis.walk matches 1..2 run scoreboard players set #p arnis.walk 1
+execute if score #r arnis.walk matches 3..5 run scoreboard players set #p arnis.walk 2
+execute if score #r arnis.walk matches 10..12 run scoreboard players set #p arnis.walk 4
+execute if score #r arnis.walk matches 13..14 run scoreboard players set #p arnis.walk 5
+execute if score #r arnis.walk matches 15 run scoreboard players set #p arnis.walk 6
+execute store result storage arnis:walk spawn.p int 1 run scoreboard players get #p arnis.walk
 execute store result storage arnis:walk spawn.seed int 1 run random value 0..2147483646
 # Some walk with company: a friend, or by day a child, who sets the pace.
 scoreboard players set #company arnis.walk 0

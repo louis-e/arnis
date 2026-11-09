@@ -6,4 +6,5 @@ scoreboard players set @s arnis.ww 0
 scoreboard players set @s arnis.wb 0
 execute store result score @s arnis.wr run data get storage arnis:walk spawn.seed
 function arnis:walk/pace with storage arnis:walk spawn
+scoreboard players operation @s arnis.wq = @s arnis.wv
 function arnis:walk/enter

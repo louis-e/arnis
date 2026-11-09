@@ -31,7 +31,10 @@ const CELLS_PER_LINE: usize = 256;
 const MAX_POINTS: usize = 300_000;
 /// An unhurried walk, in metres a second, and how much faster or slower people go.
 const WALK_MPS: f64 = 1.4;
-const PACES: [f64; 3] = [0.85, 1.0, 1.2];
+const PACES: [f64; 7] = [0.75, 0.84, 0.92, 1.0, 1.08, 1.16, 1.25];
+/// Room a walker keeps from street furniture it steps round, and the most it steps aside.
+const CLEAR: f64 = 0.35;
+const DETOUR_MAX: f64 = 1.2;
 /// How far from a way the shops, cafés and sights that bring people to it count.
 const FOOTFALL_M: f64 = 75.0;
 /// How far a walker on a way that meets a road waits back from its middle, past the kerb.
@@ -84,6 +87,221 @@ pub(crate) fn walk_density(tags: &HashMap<String, String>) -> Option<f64> {
         "bridleway" => 1.0 / 400.0,
         _ => return None,
     })
+}
+
+/// A piece of street furniture as built: its centre, half extents and, for a bench or a
+/// billboard set along the way, how much longer it is along the lane.
+#[derive(Clone, Copy)]
+struct Item {
+    x: f64,
+    z: f64,
+    hx: f64,
+    hz: f64,
+    long: f64,
+}
+
+/// The street furniture Arnis builds from a mapped node, as walkers should pass it.
+fn furniture(n: &ProcessedNode) -> Option<Item> {
+    let get = |k: &str| n.tags.get(k).map(String::as_str);
+    if get("layer").is_some_and(|l| l.starts_with('-'))
+        || get("level").is_some_and(|l| l.starts_with('-'))
+    {
+        return None;
+    }
+    let (half, long, dx) = match (get("amenity"), get("highway"), get("advertising")) {
+        (Some("waste_basket" | "waste_disposal" | "vending_machine" | "atm"), ..) => {
+            (0.5, 0.0, 0.0)
+        }
+        (Some("recycling"), ..) if get("recycling_type") == Some("container") => (0.5, 0.0, 0.0),
+        (Some("bench"), ..) => (0.5, 1.0, 0.0),
+        (Some("drinking_water"), ..) => (0.3, 0.0, 0.0),
+        (_, Some("street_lamp"), _) => (0.5, 0.0, 0.0),
+        (.., Some("column")) => (0.5, 0.0, 0.0),
+        (.., Some("billboard")) => (0.5, 1.0, 0.0),
+        (.., Some("poster_box")) => (0.5, 0.0, 0.5),
+        (.., Some("flag")) => (0.3, 0.0, 0.0),
+        _ if get("natural") == Some("tree") => (0.5, 0.0, 0.0),
+        _ if get("barrier") == Some("bollard") => (0.3, 0.0, 0.0),
+        _ if get("power") == Some("pole") => (0.4, 0.0, 0.0),
+        _ if get("emergency") == Some("fire_hydrant")
+            && !matches!(
+                get("fire_hydrant:type"),
+                Some("underground" | "wall" | "pond")
+            ) =>
+        {
+            (0.5, 0.0, 0.0)
+        }
+        _ => return None,
+    };
+    Some(Item {
+        x: n.x as f64 + 0.5 + dx,
+        z: n.z as f64 + 0.5,
+        hx: half + dx,
+        hz: half,
+        long,
+    })
+}
+
+/// Mapped street furniture by map cell, for lanes to step round.
+struct Furniture {
+    items: Vec<Item>,
+    cells: FnvHashMap<(i32, i32), Vec<u32>>,
+}
+
+impl Furniture {
+    const CELL: f64 = 8.0;
+
+    fn new(items: Vec<Item>) -> Self {
+        let mut cells: FnvHashMap<(i32, i32), Vec<u32>> = FnvHashMap::default();
+        for (i, o) in items.iter().enumerate() {
+            cells
+                .entry(Self::cell(o.x, o.z))
+                .or_default()
+                .push(i as u32);
+        }
+        Self { items, cells }
+    }
+
+    fn cell(x: f64, z: f64) -> (i32, i32) {
+        (
+            (x / Self::CELL).floor() as i32,
+            (z / Self::CELL).floor() as i32,
+        )
+    }
+
+    /// The lane bent a step aside round each piece it would brush, its ends left where
+    /// they are; a piece needing more than `DETOUR_MAX` aside is left to the probe.
+    fn go_round(&self, points: Vec<Point>) -> Vec<Point> {
+        if self.cells.is_empty() || points.len() < 2 {
+            return points;
+        }
+        let mut at = vec![0.0];
+        for w in points.windows(2) {
+            at.push(at[at.len() - 1] + (w[1].x - w[0].x).hypot(w[1].z - w[0].z));
+        }
+        let total = at[at.len() - 1];
+        let dir = |i: usize| {
+            let (a, b) = (points[i], points[i + 1]);
+            let len = (b.x - a.x).hypot(b.z - a.z).max(1e-9);
+            ((b.x - a.x) / len, (b.z - a.z) / len)
+        };
+        let mut near: Vec<u32> = Vec::new();
+        for w in points.windows(2) {
+            let (lo, hi) = (
+                Self::cell(w[0].x.min(w[1].x) - 3.0, w[0].z.min(w[1].z) - 3.0),
+                Self::cell(w[0].x.max(w[1].x) + 3.0, w[0].z.max(w[1].z) + 3.0),
+            );
+            for cx in lo.0..=hi.0 {
+                for cz in lo.1..=hi.1 {
+                    near.extend(self.cells.get(&(cx, cz)).into_iter().flatten());
+                }
+            }
+        }
+        near.sort_unstable();
+        near.dedup();
+        // (where along, signed step across, half length at full step, ramp)
+        let mut bends: Vec<(f64, f64, f64, f64)> = Vec::new();
+        for &i in &near {
+            let o = self.items[i as usize];
+            let mut best: Option<(f64, f64, f64, usize)> = None;
+            for k in 0..points.len() - 1 {
+                let (a, (ux, uz)) = (points[k], dir(k));
+                let len = at[k + 1] - at[k];
+                let t = ((o.x - a.x) * ux + (o.z - a.z) * uz).clamp(0.0, len);
+                let (px, pz) = (a.x + ux * t, a.z + uz * t);
+                let dist = (o.x - px).hypot(o.z - pz);
+                if best.is_none_or(|b| dist < b.0) {
+                    let left = (o.z - a.z) * ux - (o.x - a.x) * uz;
+                    best = Some((dist, at[k] + t, left, k));
+                }
+            }
+            let Some((_, s, left, k)) = best else {
+                continue;
+            };
+            let (ux, uz) = dir(k);
+            let wide = o.hx * uz.abs() + o.hz * ux.abs() + CLEAR;
+            if left.abs() >= wide {
+                continue;
+            }
+            let aside = wide - left.abs() + 0.1;
+            let plateau = o.hx * ux.abs() + o.hz * uz.abs() + o.long + CLEAR;
+            let room = s.min(total - s) - plateau - 0.1;
+            if aside > DETOUR_MAX || room < 0.6 {
+                continue;
+            }
+            let ramp = (1.5 * aside).max(1.0).min(room);
+            bends.push((s, if left > 0.0 { -aside } else { aside }, plateau, ramp));
+        }
+        if bends.is_empty() {
+            return points;
+        }
+        let off = |q: f64| {
+            bends.iter().fold(0.0f64, |acc, &(s, step, plateau, ramp)| {
+                let d = (q - s).abs();
+                let v = step * (1.0 - ((d - plateau) / ramp).max(0.0)).max(0.0);
+                if v.abs() > acc.abs() {
+                    v
+                } else {
+                    acc
+                }
+            })
+        };
+        let mut keys: Vec<(f64, Option<usize>)> =
+            at.iter().enumerate().map(|(k, &q)| (q, Some(k))).collect();
+        for &(s, _, plateau, ramp) in &bends {
+            for q in [
+                s - plateau - ramp,
+                s - plateau,
+                s + plateau,
+                s + plateau + ramp,
+            ] {
+                keys.push((q, None));
+            }
+        }
+        keys.sort_by(|p, q| p.0.total_cmp(&q.0).then(q.1.is_some().cmp(&p.1.is_some())));
+        let mut out: Vec<Point> = Vec::with_capacity(keys.len());
+        let mut last = f64::NEG_INFINITY;
+        for (q, vertex) in keys {
+            if vertex.is_none() && q - last < 0.05 {
+                continue;
+            }
+            last = q;
+            let k = at.partition_point(|&a| a <= q).clamp(1, points.len() - 1) - 1;
+            let (ux, uz) = match vertex {
+                Some(v) if v > 0 && v + 1 < points.len() => {
+                    let (p, n) = (dir(v - 1), dir(v));
+                    let (x, z) = (p.0 + n.0, p.1 + n.1);
+                    let len = x.hypot(z);
+                    if len < 1e-6 {
+                        n
+                    } else {
+                        (x / len, z / len)
+                    }
+                }
+                Some(v) => dir(v.min(points.len() - 2)),
+                None => dir(k),
+            };
+            let mut p = match vertex {
+                Some(v) => points[v],
+                None => {
+                    let (a, b) = (points[k], points[k + 1]);
+                    let f = ((q - at[k]) / (at[k + 1] - at[k]).max(1e-9)).clamp(0.0, 1.0);
+                    Point {
+                        x: a.x + (b.x - a.x) * f,
+                        y: a.y + (b.y - a.y) * f,
+                        z: a.z + (b.z - a.z) * f,
+                        light: None,
+                        kerb: false,
+                    }
+                }
+            };
+            let step = off(q);
+            p.x -= uz * step;
+            p.z += ux * step;
+            out.push(p);
+        }
+        out
+    }
 }
 
 /// Shops, cafés, sights and stations, which bring people onto the ways near them.
@@ -156,6 +374,7 @@ pub struct WalkNetwork {
     meta: Vec<Meta>,
     size: f64,
     scale: f64,
+    keep_left: bool,
 }
 
 /// A lane's piece, whether it runs backward along it, its first and last node and whether
@@ -199,6 +418,7 @@ impl WalkNetwork {
         // the widest, the first road there and whether any other meets it.
         let mut roads: FnvHashMap<u64, (i32, u64, bool)> = FnvHashMap::default();
         let mut draws: Vec<(f64, f64)> = Vec::new();
+        let mut obstacles: Vec<Item> = Vec::new();
         for e in elements {
             match e {
                 ProcessedElement::Way(w) if drivable(&w.tags) => {
@@ -210,6 +430,9 @@ impl WalkNetwork {
                     }
                 }
                 _ => {}
+            }
+            if let ProcessedElement::Node(n) = e {
+                obstacles.extend(furniture(n));
             }
             match e {
                 ProcessedElement::Node(n) if draws_people(&n.tags) => {
@@ -226,6 +449,7 @@ impl WalkNetwork {
             }
         }
         let footfall = Footfall::new(&draws, FOOTFALL_M * scale);
+        let furniture = Furniture::new(obstacles);
 
         let mut uses: FnvHashMap<u64, usize> = FnvHashMap::default();
         for (w, _, _) in &ways {
@@ -381,6 +605,8 @@ impl WalkNetwork {
                             alt.push(at(middle.point_at(s * stretch)));
                         }
                     }
+                    let pts = furniture.go_round(pts);
+                    let alt = furniture.go_round(alt);
                     points += pts.len();
                     let mid = path.point_at(path.length() / 2.0);
                     lanes.push(Lane {
@@ -407,6 +633,7 @@ impl WalkNetwork {
             prune(&mut lanes);
         }
         link(&mut lanes, &meta, scale);
+        untrap(&mut lanes, scale);
         let spots = spots(&lanes, &meta, scale);
         Self {
             lanes,
@@ -414,6 +641,7 @@ impl WalkNetwork {
             meta,
             size,
             scale,
+            keep_left,
         }
     }
 
@@ -449,8 +677,17 @@ impl WalkNetwork {
                 let best = best.unwrap_or(Settled {
                     points: Vec::new(),
                     cut: (false, false),
+                    posts: Vec::new(),
                 });
-                lane.points = best.points;
+                // Round the posts it met, as round mapped furniture, on ground taken as level.
+                let posts = best.posts.iter().map(|&(x, z)| Item {
+                    x: x as f64 + 0.5,
+                    z: z as f64 + 0.5,
+                    hx: 0.4,
+                    hz: 0.4,
+                    long: 0.0,
+                });
+                lane.points = Furniture::new(posts.collect()).go_round(best.points);
                 lane.cut = best.cut;
                 lane.out &= !best.cut.1;
             }
@@ -460,6 +697,7 @@ impl WalkNetwork {
             prune(&mut self.lanes);
         }
         link(&mut self.lanes, &self.meta, self.scale);
+        untrap(&mut self.lanes, self.scale);
         self.spots = spots(&self.lanes, &self.meta, self.scale);
     }
 
@@ -473,7 +711,7 @@ impl WalkNetwork {
     }
 
     /// Thousandths of a block a walker of each pace covers in a step of two ticks.
-    fn paces(&self) -> [i32; 3] {
+    fn paces(&self) -> [i32; 7] {
         PACES.map(|p| (WALK_MPS * p * 0.1 * self.scale * 1000.0).round().max(20.0) as i32)
     }
 
@@ -575,7 +813,8 @@ impl WalkNetwork {
         }
 
         let mut moves = String::new();
-        for p in paces {
+        // The usual paces first, as most walk at them.
+        for p in [3, 2, 4, 1, 5, 0, 6].map(|i| paces[i]) {
             let _ = writeln!(
                 moves,
                 "execute if score @s arnis.wv matches {p} run return run tp @s ^ ^ ^{:.3}",
@@ -583,13 +822,36 @@ impl WalkNetwork {
             );
         }
         let ahead = format!(
-            "# Someone right in front: a player, or after a while of waiting only a player.\n\
+            "# Someone right in front: 1 to wait for a player; 4 to queue behind a walker who\n\
+             # stands, is all but touching or crosses; 3 to step aside for one coming the other\n\
+             # way; 2 to fall in behind one going the same way. Queued 20 s, a walker goes on to\n\
+             # the next point.\n\
              execute positioned ^ ^ ^{near} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{round}] run return 1\n\
-             execute if score @s arnis.wb matches ..29 positioned ^ ^ ^{near} if entity @e[tag=arnis.walker,distance=..{walker}] run return 1\n\
-             return 0\n",
+             execute if score @s arnis.wb matches 200.. run return 0\n\
+             execute positioned ^ ^ ^{close} if entity @e[tag=arnis.walker,distance=..{touch}] run return 4\n\
+             execute positioned ^ ^ ^{near} unless entity @e[tag=arnis.walker,distance=..{walker}] run return 0\n\
+             execute positioned ^ ^ ^{near} if entity @e[tag=arnis.walker,distance=..{walker},scores={{arnis.ww=1..}}] run return 4\n\
+             execute positioned ^ ^ ^{near} if entity @e[tag=arnis.walker,distance=..{walker},scores={{arnis.wb=1..199}}] run return 4\n\
+             execute store result score #yaw arnis.walk run data get entity @s Rotation[0]\n\
+             execute positioned ^ ^ ^{near} as @e[tag=arnis.walker,distance=..{walker},sort=nearest,limit=1] run function arnis:walk/lead\n\
+             execute unless score #turn arnis.walk matches -135..135 run return 3\n\
+             execute if score #turn arnis.walk matches -45..45 run return 2\n\
+             return 4\n",
             near = d(0.9),
             round = d(0.7),
             walker = d(0.45),
+            // Closer in, short of the walker's own place.
+            close = d(0.35),
+            touch = d(0.33),
+        );
+        // Each to their own side, as on the roads.
+        let aside = format!(
+            "tag @s add arnis.w_aside\ntp @s ^{} ^ ^\nfunction arnis:walk/aim\n",
+            if self.keep_left {
+                d(0.4)
+            } else {
+                format!("-{}", d(0.4))
+            }
         );
         // Only traffic across the walker's way counts; cars alongside pass by.
         let mut gap =
@@ -629,6 +891,10 @@ impl WalkNetwork {
             (
                 "data/arnis/function/walk/behind.mcfunction".to_string(),
                 behind,
+            ),
+            (
+                "data/arnis/function/walk/aside.mcfunction".to_string(),
+                aside,
             ),
         ]
     }
@@ -766,6 +1032,8 @@ fn steps(points: &[Point]) -> Vec<Step> {
 struct Settled {
     points: Vec<Point>,
     cut: (bool, bool),
+    /// Columns of the posts it passes, as a lamp or a tree trunk nobody mapped.
+    posts: Vec<(i32, i32)>,
 }
 
 impl Settled {
@@ -785,6 +1053,7 @@ fn settle(points: &[Point], probe: &WalkProbe) -> Option<Settled> {
     let mut feet: Vec<Option<f64>> = Vec::with_capacity(steps.len());
     let mut prev: Option<f64> = None;
     let mut post: Option<(i32, i32)> = None;
+    let mut posts = Vec::new();
     for s in &steps {
         let (x, z, level) = s.column();
         let footing = probe.get(x, z, level);
@@ -803,6 +1072,9 @@ fn settle(points: &[Point], probe: &WalkProbe) -> Option<Settled> {
             }
             // One post is walked past, but not a wall, nor posts side by side.
             None if footing.is_some_and(|f| f.thin()) && post.is_none_or(|p| p == (x, z)) => {
+                if post.is_none() {
+                    posts.push((x, z));
+                }
                 post = Some((x, z));
                 Some(prev.unwrap_or(s.y))
             }
@@ -863,6 +1135,7 @@ fn settle(points: &[Point], probe: &WalkProbe) -> Option<Settled> {
     Some(Settled {
         points: out,
         cut: (a > 0, b + 1 < steps.len()),
+        posts,
     })
 }
 
@@ -1019,6 +1292,99 @@ fn link(lanes: &mut [Lane], meta: &[Meta], scale: f64) {
             next = backs[i].filter(|_| near).into_iter().collect();
         }
         lanes[i].next = next;
+    }
+}
+
+/// Takes the ways into a few lanes walkers could never leave, as a stub cut short at both
+/// ends that is only turned round in, so that nobody paces it for ever.
+fn untrap(lanes: &mut [Lane], scale: f64) {
+    let n = lanes.len();
+    let length = |l: &Lane| {
+        l.points
+            .windows(2)
+            .map(|w| (w[1].x - w[0].x).hypot(w[1].z - w[0].z))
+            .sum::<f64>()
+    };
+    loop {
+        // Kosaraju: finish order along the links, then groups along them reversed.
+        let mut order = Vec::with_capacity(n);
+        let mut seen = vec![false; n];
+        for start in 0..n {
+            if seen[start] {
+                continue;
+            }
+            seen[start] = true;
+            let mut stack = vec![(start, 0usize)];
+            while let Some((i, k)) = stack.pop() {
+                if let Some(&j) = lanes[i].next.get(k) {
+                    stack.push((i, k + 1));
+                    if !seen[j] {
+                        seen[j] = true;
+                        stack.push((j, 0));
+                    }
+                } else {
+                    order.push(i);
+                }
+            }
+        }
+        let mut into: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (i, lane) in lanes.iter().enumerate() {
+            for &j in &lane.next {
+                into[j].push(i);
+            }
+        }
+        let mut group = vec![usize::MAX; n];
+        let mut groups = 0;
+        for &start in order.iter().rev() {
+            if group[start] != usize::MAX {
+                continue;
+            }
+            group[start] = groups;
+            let mut stack = vec![start];
+            while let Some(i) = stack.pop() {
+                for &j in &into[i] {
+                    if group[j] == usize::MAX {
+                        group[j] = groups;
+                        stack.push(j);
+                    }
+                }
+            }
+            groups += 1;
+        }
+        // A group is a trap when nothing leads out of it, not even off the area, and it is
+        // too short to be walked as a network of its own.
+        let mut open = vec![false; groups];
+        let mut size = vec![0.0; groups];
+        for (i, lane) in lanes.iter().enumerate() {
+            let g = group[i];
+            size[g] += length(lane);
+            if lane.out || lane.next.is_empty() || lane.next.iter().any(|&j| group[j] != g) {
+                open[g] = true;
+            }
+        }
+        let trap = |g: usize| !open[g] && size[g] < 2.0 * SCRAP_M * scale;
+        let mut changed = false;
+        for i in 0..n {
+            let g = group[i];
+            if trap(g) {
+                continue;
+            }
+            let before = lanes[i].next.len();
+            lanes[i].next.retain(|&j| !trap(group[j]));
+            if lanes[i].next.len() != before {
+                changed = true;
+                if lanes[i].next.is_empty() {
+                    lanes[i].next = lanes[i]
+                        .back
+                        .filter(|&b| !trap(group[b]))
+                        .into_iter()
+                        .collect();
+                }
+            }
+        }
+        if !changed {
+            return;
+        }
     }
 }
 
@@ -1231,7 +1597,18 @@ mod tests {
         net.finish(&probe);
         let (east, west) = (&net.lanes[0], &net.lanes[1]);
         assert!(east.points.iter().all(|p| p.z < 1.0), "{:?}", east.points);
-        assert!(west.points.iter().all(|p| p.z < 0.0), "{:?}", west.points);
+        assert!(west.points.iter().all(|p| p.z < 1.0), "{:?}", west.points);
+        // The westbound lane steps round the lamp, back on its side either way of it.
+        let passing = Measured::new(west.points.iter().map(|p| (p.x, p.z)).collect());
+        for k in 0..=1000 {
+            let (x, z) = passing.point_at(passing.length() * f64::from(k) / 1000.0);
+            if (20.1..=20.9).contains(&x) {
+                assert!(z >= -0.5 + 0.4 + CLEAR - 1e-9, "{x} {z}");
+            }
+            if !(17.0..24.0).contains(&x) {
+                assert!(z < 0.0, "{x} {z}");
+            }
+        }
         // Walking each lane, nobody sinks into the step or the slab, nor floats far.
         let feet = |x: f64, z: f64| match (x.floor() as i32, z.floor() as i32) {
             (30, -1) => 65.5,
@@ -1462,6 +1839,129 @@ mod tests {
     }
 
     #[test]
+    fn nobody_is_led_into_a_stub_they_can_never_leave() {
+        let lane = |len: f64, next: Vec<usize>, back: usize| Lane {
+            points: [0.0, len]
+                .map(|x| Point {
+                    x,
+                    y: 64.0,
+                    z: 0.0,
+                    light: None,
+                    kerb: false,
+                })
+                .to_vec(),
+            alt: Vec::new(),
+            next,
+            back: Some(back),
+            cut: (false, true),
+            beside: Vec::new(),
+            out: false,
+            density: 1.0,
+        };
+        // A long way both ways (0, 1), a lane off it (4, 5), and a stub cut at both ends
+        // (2, 3) that 1 and 4 lead into but that only ever turns round into itself.
+        let mut lanes = vec![
+            lane(100.0, vec![1], 1),
+            lane(100.0, vec![0, 2, 4], 0),
+            lane(4.0, vec![3], 3),
+            lane(4.0, vec![2], 2),
+            lane(50.0, vec![2], 5),
+            lane(50.0, vec![0], 4),
+        ];
+        untrap(&mut lanes, 1.0);
+        assert_eq!(lanes[1].next, vec![0, 4]);
+        assert_eq!(lanes[4].next, vec![5]);
+        assert_eq!(lanes[2].next, vec![3]);
+        // A long stretch only turned round in is a network of its own, and kept.
+        let mut lanes = vec![
+            lane(100.0, vec![1], 1),
+            lane(100.0, vec![0, 2], 0),
+            lane(80.0, vec![3], 3),
+            lane(80.0, vec![2], 2),
+        ];
+        untrap(&mut lanes, 1.0);
+        assert_eq!(lanes[1].next, vec![0, 2]);
+    }
+
+    #[test]
+    fn paces_spread_round_an_unhurried_walk() {
+        let net = build(&[], false);
+        let paces = net.paces();
+        assert!(paces.windows(2).all(|w| w[0] < w[1]), "{paces:?}");
+        // Weighted 1, 2, 3, 4, 3, 2, 1 as the pack draws them.
+        let mean = paces
+            .iter()
+            .zip([1, 2, 3, 4, 3, 2, 1])
+            .map(|(p, w)| p * w)
+            .sum::<i32>() as f64
+            / 16.0;
+        assert!((mean - WALK_MPS * 100.0).abs() < 1.0, "{mean}");
+        assert!(paces[0] >= 100 && paces[6] <= 180, "{paces:?}");
+    }
+
+    #[test]
+    fn lanes_step_round_bins_benches_and_trees_but_keep_their_ends() {
+        let line = |z: f64| -> Vec<Point> {
+            [0.5, 40.5]
+                .map(|x| Point {
+                    x,
+                    y: 64.0,
+                    z,
+                    light: None,
+                    kerb: true,
+                })
+                .to_vec()
+        };
+        let item = |x: i32, z: i32, tags: &[(&str, &str)]| furniture(&node(1, x, z, tags)).unwrap();
+        let bin = item(10, 0, &[("amenity", "waste_basket")]);
+        let bench = item(20, 1, &[("amenity", "bench")]);
+        let tree = item(30, -2, &[("natural", "tree")]);
+        let street = Furniture::new(vec![bin, bench, tree]);
+        let lane = street.go_round(line(0.9));
+        assert_eq!(lane.first().unwrap().x, 0.5);
+        assert_eq!(lane.last().unwrap().x, 40.5);
+        assert!(lane.first().unwrap().kerb && lane.last().unwrap().kerb);
+        // Nowhere along it within reach of the bin or the bench.
+        let measured = Measured::new(lane.iter().map(|p| (p.x, p.z)).collect());
+        for k in 0..=400 {
+            let (x, z) = measured.point_at(measured.length() * k as f64 / 400.0);
+            for o in [bin, bench] {
+                let (gx, gz) = ((x - o.x).abs() - o.hx - o.long, (z - o.z).abs() - o.hz);
+                assert!(gx > 0.0 || gz >= CLEAR, "{x} {z} near {} {}", o.x, o.z);
+            }
+            // Straight on where nothing stands, and the tree well off it is passed as is.
+            if !(6.0..34.0).contains(&x) || (27.0..34.0).contains(&x) {
+                assert!((z - 0.9).abs() < 1e-9, "{x} {z}");
+            }
+        }
+        // Clear of the bin on the side it is on, never more than a step aside.
+        assert!(lane.iter().all(|p| (p.z - 0.9).abs() <= DETOUR_MAX + 1e-9));
+        assert!(lane.iter().any(|p| p.z > 1.3));
+        // Something filling the way is left for the probe.
+        let wide = Furniture::new(vec![item(10, 10, &[("advertising", "poster_box")])]);
+        let along_z = line(11.0)
+            .into_iter()
+            .map(|p| Point {
+                x: 11.0,
+                z: p.x,
+                ..p
+            })
+            .collect();
+        assert_eq!(wide.go_round(along_z).len(), 2);
+        assert!(furniture(&node(2, 0, 0, &[("amenity", "post_box")])).is_none());
+        assert!(furniture(&node(
+            3,
+            0,
+            0,
+            &[
+                ("emergency", "fire_hydrant"),
+                ("fire_hydrant:type", "underground")
+            ]
+        ))
+        .is_none());
+    }
+
+    #[test]
     fn the_pack_functions_hold_every_lane_and_move_at_each_pace() {
         let elements = vec![way(
             1,
@@ -1474,7 +1974,8 @@ mod tests {
         let network = text("walk/network.mcfunction");
         assert_eq!(network.matches("{p:[").count(), 2);
         assert!(network.contains("grid merge value"));
-        assert_eq!(text("walk/move.mcfunction").lines().count(), 3);
+        assert_eq!(text("walk/move.mcfunction").lines().count(), 7);
+        assert!(text("walk/aside.mcfunction").contains("tp @s ^-0.40 ^ ^"));
         for (_, body) in &functions {
             for line in body.lines().filter(|l| !l.starts_with('#')) {
                 assert!(!line.contains("$("), "{line}");
