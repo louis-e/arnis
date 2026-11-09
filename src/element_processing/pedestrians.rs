@@ -597,6 +597,11 @@ impl WalkNetwork {
              return 1\n",
             d(9.0)
         );
+        // Company keeps clear of what a walker looks out for ahead.
+        let behind = format!(
+            "execute at @s run tp @s ^ ^ ^-{}\nfunction arnis:walk/aim\n",
+            d(1.7)
+        );
         vec![
             (
                 "data/arnis/function/walk/network.mcfunction".to_string(),
@@ -611,6 +616,10 @@ impl WalkNetwork {
                 ahead,
             ),
             ("data/arnis/function/walk/gap.mcfunction".to_string(), gap),
+            (
+                "data/arnis/function/walk/behind.mcfunction".to_string(),
+                behind,
+            ),
         ]
     }
 }

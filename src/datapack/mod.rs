@@ -146,11 +146,14 @@ const TRAINS: &[(&str, &[u8])] = static_files![
 const WALK: &[(&str, &[u8])] = static_files![
     "data/arnis/function/walk/aim.mcfunction",
     "data/arnis/function/walk/aim_at.mcfunction",
+    "data/arnis/function/walk/along.mcfunction",
     "data/arnis/function/walk/arrive.mcfunction",
     "data/arnis/function/walk/blocked.mcfunction",
     "data/arnis/function/walk/body.mcfunction",
     "data/arnis/function/walk/carry.mcfunction",
     "data/arnis/function/walk/cell.mcfunction",
+    "data/arnis/function/walk/chance.mcfunction",
+    "data/arnis/function/walk/company.mcfunction",
     "data/arnis/function/walk/dress.mcfunction",
     "data/arnis/function/walk/drive.mcfunction",
     "data/arnis/function/walk/enter.mcfunction",
@@ -162,6 +165,7 @@ const WALK: &[(&str, &[u8])] = static_files![
     "data/arnis/function/walk/kerb.mcfunction",
     "data/arnis/function/walk/legs.mcfunction",
     "data/arnis/function/walk/light.mcfunction",
+    "data/arnis/function/walk/linger.mcfunction",
     "data/arnis/function/walk/load.mcfunction",
     "data/arnis/function/walk/look.mcfunction",
     "data/arnis/function/walk/near.mcfunction",
@@ -1190,7 +1194,7 @@ mod tests {
                     .any(|f| {
                         name.starts_with(&format!("arnis:cars/{f}"))
                             || name.starts_with(&format!("arnis:trains/{f}"))
-                    }) || ["network", "move", "ahead", "gap"]
+                    }) || ["network", "move", "ahead", "gap", "behind"]
                         .iter()
                         .any(|f| name == format!("arnis:walk/{f}"));
                     if name.contains("$(") || networked {
