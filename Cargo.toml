@@ -83,8 +83,3 @@ tempfile = "3.26.0"
 [[example]]
 name = "refresh_wikidata_index"
 path = "assets/refresh_wikidata_index.rs"
-
-# fastnbt 2.6.1 with a faster serializer: no allocation per field name and no UTF-8
-# validation per entry. Drop once a release carries it.
-[patch.crates-io]
-fastnbt = { git = "https://github.com/louis-e/fastnbt", rev = "705be60b7e0743f46b9800119f1f5b512f264df2" }

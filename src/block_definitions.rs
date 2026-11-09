@@ -1030,7 +1030,7 @@ impl Block {
 }
 
 // Cache of stair NBT compounds shared across placements via Arc.
-use std::sync::{Mutex, RwLock};
+use std::sync::Mutex;
 
 #[allow(clippy::type_complexity)]
 static STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
@@ -1077,8 +1077,8 @@ pub fn create_stair_with_properties(
     BlockWithProperties::from_arc(base_stair_block, Some(properties))
 }
 #[allow(clippy::type_complexity)]
-static TOP_STAIR_CACHE: Lazy<RwLock<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
+static TOP_STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// The facing and shape of a plain stair state (no other properties), as
 /// `create_stair_with_properties` builds it.
@@ -1121,21 +1121,13 @@ pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
         // instead of cloning and interning a compound on every placement.
         if let Some((facing, shape)) = plain_stair_state(map) {
             let key = (stair.block.id(), facing, shape);
-            // Read first: every tile thread flips stairs all the time, and one lock for
-            // all of them had the threads queue on each flip.
-            let cached = TOP_STAIR_CACHE.read().unwrap().get(&key).cloned();
-            let props = cached.unwrap_or_else(|| {
-                let mut cache = TOP_STAIR_CACHE.write().unwrap();
-                cache
-                    .entry(key)
-                    .or_insert_with(|| {
-                        let mut new_map = map.clone();
-                        new_map.insert("half".to_string(), Value::String("top".to_string()));
-                        intern_props(Value::Compound(new_map))
-                    })
-                    .clone()
+            let mut cache = TOP_STAIR_CACHE.lock().unwrap();
+            let props = cache.entry(key).or_insert_with(|| {
+                let mut new_map = map.clone();
+                new_map.insert("half".to_string(), Value::String("top".to_string()));
+                intern_props(Value::Compound(new_map))
             });
-            stair.properties = Some(props);
+            stair.properties = Some(props.clone());
             return stair;
         }
         let mut new_map = map.clone();
@@ -2302,17 +2294,6 @@ mod material_tests {
         let c = flip(StairFacing::North, StairShape::OuterLeft);
         let d = flip(StairFacing::South, StairShape::Straight);
         assert!(!Arc::ptr_eq(&a, &c) && !Arc::ptr_eq(&a, &d));
-
-        // Another thread gets the very same compound.
-        let elsewhere = std::thread::spawn(move || {
-            let first = flip(StairFacing::North, StairShape::Straight);
-            let second = flip(StairFacing::North, StairShape::Straight);
-            assert!(Arc::ptr_eq(&first, &second));
-            first
-        })
-        .join()
-        .unwrap();
-        assert!(Arc::ptr_eq(&a, &elsewhere));
     }
 
     #[test]
