@@ -3507,6 +3507,45 @@ mod eviction_guard_tests {
     }
 
     #[test]
+    fn a_drawn_outline_keeps_every_write_inside_it() {
+        // The south-west triangle of a 64x64 square, as a tile editor sees it too.
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63)
+            .unwrap()
+            .with_outline(vec![vec![vec![(0.0, 0.0), (0.0, 63.0), (63.0, 63.0)]]])
+            .unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        // The filler height is a process global other tests move.
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        for bbox in [xzbbox.clone(), xzbbox.crop(0, 0, 40, 63).unwrap()] {
+            let mut editor = WorldEditor::new(std::env::temp_dir(), &bbox, llbbox);
+            let (inside, outside) = ((5, 50), (30, 5));
+            for (x, z) in [inside, outside] {
+                editor.set_block_absolute(STONE, x, 1, z, None, None);
+                editor.set_block_if_absent_absolute(STONE, x, 2, z);
+                editor.fill_column_absolute(STONE, x, z, 3, 5, false);
+                editor.fill_column_with_absolute(x, z, 6, 7, |_| STONE);
+            }
+            for y in 1..=7 {
+                assert!(editor.block_exists_absolute(inside.0, y, inside.1), "y {y}");
+                assert!(
+                    !editor.block_exists_absolute(outside.0, y, outside.1),
+                    "y {y}"
+                );
+            }
+            // The flat filler goes only where the outline leaves a column out.
+            editor.set_filler_outside_outline(inside.0, inside.1);
+            editor.set_filler_outside_outline(outside.0, outside.1);
+            editor.set_filler_outside_outline(70, 5);
+            let y = base_chunk_y();
+            assert!(!editor.block_exists_absolute(70, y, 5));
+            assert!(editor.block_exists_absolute(outside.0, y, outside.1));
+            if !(1..=7).contains(&y) {
+                assert!(!editor.block_exists_absolute(inside.0, y, inside.1));
+            }
+        }
+    }
+
+    #[test]
     fn solid_blocks_that_read_like_plants_are_not_passable() {
         for solid in [
             "grass_block",
