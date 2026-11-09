@@ -1368,7 +1368,9 @@ impl<'a> WorldEditor<'a> {
         if self.format != WorldFormat::JavaAnvil {
             return Ok(false);
         }
-        self.probe_region(rx, rz);
+        if self.world.regions.contains_key(&(rx, rz)) {
+            self.probe_region(rx, rz);
+        }
         let Some(region) = self.world.regions.remove(&(rx, rz)) else {
             return Ok(false);
         };

@@ -320,6 +320,7 @@ impl ShipPlan {
         let cell = (SHARED_M * self.size).max(4.0);
         let key = |&(x, z): &(f64, f64)| ((x / cell).floor() as i32, (z / cell).floor() as i32);
         let mut sailed: FnvHashMap<(i32, i32), ()> = FnvHashMap::default();
+        let mut kept = Vec::new();
         for (route, service) in ferries {
             let shared = route
                 .points
@@ -333,9 +334,11 @@ impl ShipPlan {
                 continue;
             }
             sailed.extend(route.points.iter().map(|p| (key(p), ())));
-            out.push((route, service));
+            kept.push((route, service));
         }
-        out
+        // The mapped ferry lines first, should the pack run short of room.
+        kept.extend(out);
+        kept
     }
 
     /// A ferry line cut where it runs over more land than a quay or a jetty, as a water bus
@@ -837,7 +840,7 @@ fn minutes(value: &str) -> Option<u32> {
         .collect::<Option<_>>()?;
     match parts[..] {
         [m] => Some(m),
-        [h, m] | [h, m, _] => Some(h * 60 + m),
+        [h, m] | [h, m, _] => h.checked_mul(60)?.checked_add(m),
         _ => None,
     }
 }
@@ -1320,7 +1323,7 @@ fn leisure_loops(
         keep_off(route, KEEP_OFF_ROUTE_M * scale);
     }
     // Distance to land in cells, the edge of the area counting as land.
-    let mut dist = vec![u32::MAX / 2; w * h];
+    let mut dist = vec![u16::MAX / 2; w * h];
     for (c, d) in dist.iter_mut().enumerate() {
         let (cx, cz) = (c % w, c / w);
         if !open[c] || cx == 0 || cz == 0 || cx + 1 == w || cz + 1 == h {
@@ -1343,18 +1346,22 @@ fn leisure_loops(
                 if px < 0 || pz < 0 || px >= w as isize || pz >= h as isize {
                     continue;
                 }
-                best = best.min(dist[pz as usize * w + px as usize] + cost);
+                best = best.min(dist[pz as usize * w + px as usize].saturating_add(cost));
             }
             dist[c] = best;
         }
     }
     let metres = |c: usize| dist[c] as f64 / 3.0 * CELL as f64 / scale;
     let (r_min, r_max) = LOOP_RADIUS_M;
-    let mut candidates: Vec<usize> = (0..w * h)
-        .filter(|&c| open[c] && metres(c) >= r_min + SHORE_M)
-        .collect();
-    let area_km2 = candidates.len() as f64 * (CELL as f64 / scale).powi(2) / 1e6;
+    let fits = |c: usize| open[c] && metres(c) >= r_min + SHORE_M;
+    let count = (0..w * h).filter(|&c| fits(c)).count();
+    let area_km2 = count as f64 * (CELL as f64 / scale).powi(2) / 1e6;
     let wanted = ((area_km2 * BOATS_PER_KM2).round() as usize).min(MAX_LEISURE);
+    // A sample of a sea is plenty to place a few dozen boats from.
+    let every = (count / (wanted.max(1) * 64)).max(1) as u64;
+    let mut candidates: Vec<usize> = (0..w * h)
+        .filter(|&c| fits(c) && trains::hash(c as u64, 0x5A3).is_multiple_of(every))
+        .collect();
     candidates.sort_by_key(|&c| trains::hash(c as u64, 0xB0A7));
     let mut placed: Vec<((f64, f64), f64)> = Vec::new();
     let mut out = Vec::new();

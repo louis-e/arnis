@@ -40,6 +40,8 @@ const KERB_BACK: f64 = 1.5;
 /// before a point is put in where the ground bends, in blocks.
 const SINK: f64 = 0.3;
 const FLOAT: f64 = 0.6;
+/// How far a walker turning round looks for the lane back, in blocks.
+const BESIDE_M: f64 = 6.0;
 /// Pieces of footway cut off from everything else that add up to less than this, in
 /// metres, get no walkers: a stub in a back yard, a step in front of a door.
 const SCRAP_M: f64 = 30.0;
@@ -139,8 +141,8 @@ struct Lane {
     /// Cut short of its first or its last node by something in the way.
     cut: (bool, bool),
     /// For each point, the nearest point of the lane back, where a walker turning round
-    /// carries on from.
-    beside: Vec<usize>,
+    /// carries on from; None where that is too far off, past whatever cut the lanes.
+    beside: Vec<Option<usize>>,
     /// Runs off the edge of the area, where walkers leave.
     out: bool,
     density: f64,
@@ -312,7 +314,12 @@ impl WalkNetwork {
                         marks[0].1 = signalled.then(|| group(heading(0)));
                         marks[0].2 = !signalled;
                     }
-                    for (k, n) in nodes.iter().enumerate().take(nodes.len() - 1).skip(1) {
+                    // Every road crossed on the way, and one at the end where the way carries
+                    // on across it; one it ends on is cut short of below.
+                    for (k, n) in nodes.iter().enumerate().skip(1) {
+                        if k == nodes.len() - 1 && uses[&n.id] < 2 {
+                            continue;
+                        }
                         let Some(road) = road_at(n, piece.way.id) else {
                             continue;
                         };
@@ -399,7 +406,7 @@ impl WalkNetwork {
         if points > MAX_POINTS {
             prune(&mut lanes);
         }
-        link(&mut lanes, &meta);
+        link(&mut lanes, &meta, scale);
         let spots = spots(&lanes, &meta, scale);
         Self {
             lanes,
@@ -452,7 +459,7 @@ impl WalkNetwork {
         if self.lanes.iter().map(|l| l.points.len()).sum::<usize>() > MAX_POINTS {
             prune(&mut self.lanes);
         }
-        link(&mut self.lanes, &self.meta);
+        link(&mut self.lanes, &self.meta, self.scale);
         self.spots = spots(&self.lanes, &self.meta, self.scale);
     }
 
@@ -502,6 +509,11 @@ impl WalkNetwork {
                 if b > 0 {
                     network.push(',');
                 }
+                // A lane nobody walks only holds its place in the list.
+                if lane.points.len() < 2 {
+                    network.push_str("{p:[],n:[I;],b:-1,r:[I;],o:0b}");
+                    continue;
+                }
                 network.push_str("{p:[");
                 for (i, p) in lane.points.iter().enumerate() {
                     if i > 0 {
@@ -523,7 +535,11 @@ impl WalkNetwork {
                     network.push('}');
                 }
                 let next: Vec<String> = lane.next.iter().map(|n| n.to_string()).collect();
-                let beside: Vec<String> = lane.beside.iter().map(|k| k.to_string()).collect();
+                let beside: Vec<String> = lane
+                    .beside
+                    .iter()
+                    .map(|k| k.map_or(-1, |k| k as i64).to_string())
+                    .collect();
                 let _ = write!(
                     network,
                     "],n:[I;{}],b:{},r:[I;{}],o:{}b}}",
@@ -905,7 +921,7 @@ fn prune(lanes: &mut [Lane]) {
 
 /// Where each lane leads on: every lane leaving its end but the way back, or the way
 /// back at a dead end. A lane off the edge of the area leads nowhere: its walkers leave.
-fn link(lanes: &mut [Lane], meta: &[Meta]) {
+fn link(lanes: &mut [Lane], meta: &[Meta], scale: f64) {
     let usable = |l: &Lane| l.points.len() >= 2;
     // A lane cut short of its first node is not reached from there, only turned into.
     let mut starting: FnvHashMap<u64, Vec<usize>> = FnvHashMap::default();
@@ -934,22 +950,31 @@ fn link(lanes: &mut [Lane], meta: &[Meta]) {
                 })
         })
         .collect();
-    let besides: Vec<Vec<usize>> = (0..lanes.len())
+    let reach = (BESIDE_M * scale).max(2.0);
+    let cell = |x: f64, z: f64| ((x / reach).floor() as i32, (z / reach).floor() as i32);
+    let besides: Vec<Vec<Option<usize>>> = (0..lanes.len())
         .map(|i| {
             let Some(b) = backs[i] else {
                 return Vec::new();
             };
             let back = &lanes[b].points;
+            let mut grid: FnvHashMap<(i32, i32), Vec<usize>> = FnvHashMap::default();
+            for (k, q) in back.iter().enumerate() {
+                grid.entry(cell(q.x, q.z)).or_default().push(k);
+            }
             lanes[i]
                 .points
                 .iter()
                 .map(|p| {
-                    (0..back.len())
-                        .min_by(|&a, &c| {
-                            let gap = |k: usize| (back[k].x - p.x).hypot(back[k].z - p.z);
-                            gap(a).total_cmp(&gap(c))
-                        })
-                        .unwrap_or(0)
+                    let (cx, cz) = cell(p.x, p.z);
+                    (-1..=1)
+                        .flat_map(|dx| (-1..=1).map(move |dz| (cx + dx, cz + dz)))
+                        .filter_map(|c| grid.get(&c))
+                        .flatten()
+                        .map(|&k| (k, (back[k].x - p.x).hypot(back[k].z - p.z)))
+                        .filter(|&(_, d)| d <= reach)
+                        .min_by(|a, c| a.1.total_cmp(&c.1))
+                        .map(|(k, _)| k)
                 })
                 .collect()
         })
@@ -965,11 +990,14 @@ fn link(lanes: &mut [Lane], meta: &[Meta]) {
             .collect();
         next.sort_unstable();
         lanes[i].back = backs[i];
+        // Turned round where the way back is out of reach, walkers would cross whatever
+        // is between: they leave there instead.
+        let near = beside.last().is_some_and(Option::is_some);
         lanes[i].beside = beside;
         if lanes[i].out {
             next.clear();
         } else if next.is_empty() || lanes[i].cut.1 {
-            next = backs[i].into_iter().collect();
+            next = backs[i].filter(|_| near).into_iter().collect();
         }
         lanes[i].next = next;
     }
@@ -1222,7 +1250,7 @@ mod tests {
         // Turned round, a walker carries on from beside where it stopped.
         let (stop, on) = (
             north.points[north.points.len() - 1],
-            north.beside[north.points.len() - 1],
+            north.beside[north.points.len() - 1].unwrap(),
         );
         assert!(
             (south.points[on].z - stop.z).abs() < 3.0,

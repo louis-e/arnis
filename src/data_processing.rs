@@ -1340,8 +1340,10 @@ pub fn generate_world_with_options(
             crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
         })
         .filter(|net| !net.is_empty() || ship_plan.is_some());
+    // Only trains need the rails' heights; boats find the water themselves.
     let rail_heights: Option<crate::world_editor::RailHeights> = train_network
         .as_ref()
+        .filter(|net| !net.is_empty())
         .map(|_| Arc::new(std::sync::Mutex::new(fnv::FnvHashMap::default())));
     if let Some(net) = train_network.as_ref().filter(|net| !net.is_empty()) {
         println!(
@@ -2551,6 +2553,9 @@ pub fn generate_world_with_options(
             ship_plan.as_ref(),
             water_probe.as_deref(),
         );
+        // Kept for its boats, it may have ended up with none.
+        train_network = train_network.filter(|net| !net.is_empty());
+        extras.trains = train_network.is_some();
         if let (Some(net), Some(probe)) = (walk_network.as_mut(), walk_probe.as_deref()) {
             net.finish(probe);
             println!("  Pedestrians: {} footway lanes to walk", net.lane_count());
@@ -2614,9 +2619,11 @@ pub fn generate_world_with_options(
                 .unwrap_or_default(),
             train_functions: train_network
                 .as_ref()
-                .zip(rail_heights.as_ref())
-                .map(|(net, heights)| {
-                    let laid = heights.lock().map(|m| m.clone()).unwrap_or_default();
+                .map(|net| {
+                    let laid = rail_heights
+                        .as_ref()
+                        .and_then(|h| h.lock().ok().map(|m| m.clone()))
+                        .unwrap_or_default();
                     net.pack_functions(|way, x, z| laid.get(&(way, x, z)).copied())
                 })
                 .unwrap_or_default(),

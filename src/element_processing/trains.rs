@@ -34,6 +34,8 @@ pub(crate) const LAYOVER_S: f64 = 25.0;
 /// Most trains and carriages a world gets, whatever its rail network.
 const MAX_TRAINS: usize = 160;
 const MAX_CARRIAGES: usize = 1400;
+/// Most boats on top, each as much work a step as a train.
+const MAX_BOATS: usize = 60;
 /// Most route points the pack holds, about 45 bytes each in its storage.
 const MAX_POINTS: usize = 250_000;
 /// Longest timetable, so a train that cannot get round is dropped rather than run away.
@@ -375,13 +377,20 @@ impl TrainNetwork {
 
     /// Adds the boats `ships::ShipPlan` planned, each a route and what sails it.
     pub(crate) fn add_ships(&mut self, ships: Vec<(Route, Service)>) {
-        let points: usize = self.routes.iter().map(|r| r.points.len()).sum();
+        let points: usize = self
+            .services
+            .iter()
+            .map(|s| self.routes[s.route].points.len())
+            .sum();
         let mut room = MAX_POINTS.saturating_sub(points);
+        let mut boats = MAX_BOATS;
         for (route, mut service) in ships {
-            if route.points.len() > room {
+            if route.points.len() > room || boats == 0 {
                 continue;
             }
             room -= route.points.len();
+            service.trains.truncate(boats);
+            boats -= service.trains.len();
             service.route = self.routes.len();
             self.routes.push(route);
             self.services.push(service);
