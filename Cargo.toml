@@ -66,7 +66,7 @@ tiff = "0.11"
 tokio = { version = "1.48.0", features = ["full"], optional = true }
 nbtx = { git = "https://github.com/louis-e/nbtx", rev = "551c38ac74f2e68a07d3dbdd354faac0c0ac966e" }
 zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
-rusty-leveldb = { git = "https://github.com/louis-e/leveldb-rs", rev = "6a68859bd70bc844e2226b7bc7056d1be1de63b9" }
+rusty-leveldb = { git = "https://github.com/louis-e/leveldb-rs", rev = "a4102ad6c11c473a54fa8dc374061fa1795c29e1" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
 quick-xml = "0.41.0"
