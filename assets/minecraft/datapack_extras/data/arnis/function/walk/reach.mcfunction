@@ -15,9 +15,10 @@ execute if score @s arnis.ww matches 1.. run return 0
 # Now and then someone stops for a moment, and whoever is with them too.
 execute if score #stop arnis.walk matches 0 run function arnis:walk/linger
 execute if score @s arnis.ww matches 1.. run return 0
-# Someone else on the very spot: let them get a step ahead.
-tag @s add arnis.w_me
-execute if entity @e[tag=arnis.walker,tag=!arnis.w_me,distance=..0.3] run scoreboard players set @s arnis.ww 8
-tag @s remove arnis.w_me
+# Someone older on the very spot: let them get a step ahead.
+scoreboard players operation #me arnis.walk = @s arnis.wk
+scoreboard players set #crowd arnis.walk 0
+execute at @s as @e[tag=arnis.walker,distance=..0.3] if score @s arnis.wk < #me arnis.walk run scoreboard players set #crowd arnis.walk 1
+execute if score #crowd arnis.walk matches 1 run scoreboard players set @s arnis.ww 8
 execute if score @s arnis.ww matches 1.. run return 0
 function arnis:walk/next

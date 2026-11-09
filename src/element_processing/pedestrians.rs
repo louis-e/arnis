@@ -1,9 +1,10 @@
-//! People walking the mapped footways, sidewalks, pedestrian streets and paths, run by the
-//! extras data pack. A lane each way along every way, more on a wide pedestrian street, the
-//! ways on at each junction, where walkers wait at a kerb or a light and how busy each way
-//! is are worked out here and written into the pack as storage. Each walker is a mannequin
-//! (a villager before 1.21.9) the pack carries from point to point; the storage layout and
-//! the scores are the contract with `assets/minecraft/datapack_extras/data/arnis/function/walk`.
+//! People walking the mapped footways, sidewalks, squares, pedestrian streets and paths,
+//! run by the extras data pack. A lane each way along every way, more on a wide pedestrian
+//! street, lines across squares, the ways on at each junction, where walkers wait at a kerb
+//! or a light and how busy each way is are worked out here and written into the pack as
+//! storage. Each walker is a mannequin (a villager before 1.21.9) the pack carries from
+//! point to point; the storage layout and the scores are the contract with
+//! `assets/minecraft/datapack_extras/data/arnis/function/walk`.
 
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
@@ -11,9 +12,9 @@ use crate::datapack::macro_coord;
 use crate::element_processing::cars::{drivable, lane_line};
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::traffic_lights::group_of;
-use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::water_probe::WalkProbe;
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 
@@ -30,8 +31,8 @@ const CELLS_PER_LINE: usize = 256;
 /// Most points the pack holds, about 40 bytes each in its storage.
 const MAX_POINTS: usize = 300_000;
 /// An unhurried walk, in metres a second, and how much faster or slower people go.
-const WALK_MPS: f64 = 1.4;
-const PACES: [f64; 7] = [0.75, 0.84, 0.92, 1.0, 1.08, 1.16, 1.25];
+const WALK_MPS: f64 = 1.5;
+const PACES: [f64; 7] = [0.75, 0.85, 0.93, 1.0, 1.07, 1.16, 1.3];
 /// Room a walker keeps from street furniture it steps round, and the most it steps aside.
 const CLEAR: f64 = 0.35;
 const DETOUR_MAX: f64 = 1.2;
@@ -54,22 +55,7 @@ pub(crate) fn walk_density(tags: &HashMap<String, String>) -> Option<f64> {
     let get = |k: &str| tags.get(k).map(String::as_str);
     let highway = get("highway")?;
     let yes = |k: &str| matches!(get(k), Some("yes" | "designated" | "permissive"));
-    let closed = |k: &str| matches!(get(k), Some("no" | "private" | "use_sidepath"));
-    let bridge = matches!(get("bridge"), Some(v) if v != "no");
-    // Underground and indoor ways are not where the ground says they are; a pier a layer
-    // up or a way under a roof is found on what was built, like any other way.
-    let off_grade = matches!(get("tunnel"), Some(v) if v != "no")
-        || get("layer")
-            .and_then(|l| l.parse::<i32>().ok())
-            .is_some_and(|l| l < 0 && !bridge)
-        || get("level").is_some_and(|l| l != "0");
-    if off_grade
-        || get("area") == Some("yes")
-        || get("indoor") == Some("yes")
-        || tags.contains_key("conveying")
-        || closed("access") && !yes("foot")
-        || closed("foot")
-    {
+    if off_limits(tags) || get("area") == Some("yes") {
         return None;
     }
     Some(match highway {
@@ -87,6 +73,25 @@ pub(crate) fn walk_density(tags: &HashMap<String, String>) -> Option<f64> {
         "bridleway" => 1.0 / 400.0,
         _ => return None,
     })
+}
+
+/// Underground, indoor, other levels and closed to people on foot.
+fn off_limits(tags: &HashMap<String, String>) -> bool {
+    let get = |k: &str| tags.get(k).map(String::as_str);
+    let yes = |k: &str| matches!(get(k), Some("yes" | "designated" | "permissive"));
+    let closed = |k: &str| matches!(get(k), Some("no" | "private" | "use_sidepath"));
+    let bridge = matches!(get("bridge"), Some(v) if v != "no");
+    // Underground and indoor ways are not where the ground says they are; a pier a layer
+    // up or a way under a roof is found on what was built, like any other way.
+    matches!(get("tunnel"), Some(v) if v != "no")
+        || get("layer")
+            .and_then(|l| l.parse::<i32>().ok())
+            .is_some_and(|l| l < 0 && !bridge)
+        || get("level").is_some_and(|l| l != "0")
+        || get("indoor") == Some("yes")
+        || tags.contains_key("conveying")
+        || closed("access") && !yes("foot")
+        || closed("foot")
 }
 
 /// A piece of street furniture as built: its centre, half extents and, for a bench or a
@@ -207,6 +212,9 @@ impl Furniture {
             for k in 0..points.len() - 1 {
                 let (a, (ux, uz)) = (points[k], dir(k));
                 let len = at[k + 1] - at[k];
+                if len < 1e-6 {
+                    continue;
+                }
                 let t = ((o.x - a.x) * ux + (o.z - a.z) * uz).clamp(0.0, len);
                 let (px, pz) = (a.x + ux * t, a.z + uz * t);
                 let dist = (o.x - px).hypot(o.z - pz);
@@ -215,15 +223,16 @@ impl Furniture {
                     best = Some((dist, at[k] + t, left, k));
                 }
             }
-            let Some((_, s, left, k)) = best else {
+            let Some((dist, s, left, k)) = best else {
                 continue;
             };
             let (ux, uz) = dir(k);
             let wide = o.hx * uz.abs() + o.hz * ux.abs() + CLEAR;
-            if left.abs() >= wide {
+            // Off the lane's end or round its corner counts as far as it really is.
+            if dist >= wide {
                 continue;
             }
-            let aside = wide - left.abs() + 0.1;
+            let aside = wide - dist + 0.1;
             let plateau = o.hx * ux.abs() + o.hz * uz.abs() + o.long + CLEAR;
             let room = s.min(total - s) - plateau - 0.1;
             if aside > DETOUR_MAX || room < 0.6 {
@@ -271,11 +280,13 @@ impl Furniture {
                 Some(v) if v > 0 && v + 1 < points.len() => {
                     let (p, n) = (dir(v - 1), dir(v));
                     let (x, z) = (p.0 + n.0, p.1 + n.1);
+                    // Along the bisector, longer at a corner so both sides keep the step.
                     let len = x.hypot(z);
                     if len < 1e-6 {
                         n
                     } else {
-                        (x / len, z / len)
+                        let k = (2.0 / len).min(2.0) / len;
+                        (x * k, z * k)
                     }
                 }
                 Some(v) => dir(v.min(points.len() - 2)),
@@ -302,6 +313,317 @@ impl Furniture {
         }
         out
     }
+}
+
+/// Square metres for each person on a square or a pedestrian area, before footfall.
+const SQUARE_M2: f64 = 100.0;
+/// Shortest and longest line across a square, in metres, and most lines from each way in.
+const ACROSS_MIN_M: f64 = 8.0;
+const ACROSS_MAX_M: f64 = 120.0;
+const ACROSS_EACH: usize = 4;
+/// Way ids of the lines across squares: bit 62, past every OSM id, with Overture's bit 63 clear.
+const ACROSS_ID: u64 = 1 << 62;
+
+fn is_across(id: u64) -> bool {
+    id >> 62 == 1
+}
+
+/// A square or a pedestrian area, crossed straight between the ways into it.
+struct Square {
+    rings: Vec<Vec<(f64, f64)>>,
+    outline: FnvHashSet<u64>,
+    min: (f64, f64),
+    max: (f64, f64),
+    people: f64,
+}
+
+impl Square {
+    fn of(e: &ProcessedElement, scale: f64) -> Option<Self> {
+        let tags = e.tags();
+        let get = |k: &str| tags.get(k).map(String::as_str);
+        let per_m2 = match (get("highway"), get("place")) {
+            (Some("pedestrian"), _) | (None, Some("square")) => 1.0 / SQUARE_M2,
+            (Some("footway"), _) => 0.5 / SQUARE_M2,
+            _ => return None,
+        };
+        if off_limits(tags) || tags.contains_key("building") {
+            return None;
+        }
+        // A closed pedestrian way without area=yes is a loop walked round, not an area.
+        let rings: Vec<(&[ProcessedNode], bool)> = match e {
+            ProcessedElement::Way(w) if get("area") == Some("yes") || get("highway").is_none() => {
+                vec![(&w.nodes[..], false)]
+            }
+            ProcessedElement::Relation(r) if get("type") == Some("multipolygon") => r
+                .members
+                .iter()
+                .filter_map(|m| match m.role {
+                    ProcessedMemberRole::Outer => Some((&m.way.nodes[..], false)),
+                    ProcessedMemberRole::Inner => Some((&m.way.nodes[..], true)),
+                    ProcessedMemberRole::Part => None,
+                })
+                .collect(),
+            _ => return None,
+        };
+        let mut square = Square {
+            rings: Vec::new(),
+            outline: Default::default(),
+            min: (f64::MAX, f64::MAX),
+            max: (f64::MIN, f64::MIN),
+            people: 0.0,
+        };
+        let mut area = 0.0;
+        for (nodes, inner) in rings {
+            let (Some(a), Some(b)) = (nodes.first(), nodes.last()) else {
+                continue;
+            };
+            if nodes.len() < 4 || (a.x, a.z) != (b.x, b.z) {
+                continue;
+            }
+            let ring: Vec<(f64, f64)> = nodes
+                .iter()
+                .map(|n| (n.x as f64 + 0.5, n.z as f64 + 0.5))
+                .collect();
+            let twice: f64 = ring
+                .windows(2)
+                .map(|w| w[0].0 * w[1].1 - w[1].0 * w[0].1)
+                .sum();
+            area += if inner { -0.5 } else { 0.5 } * twice.abs();
+            for &(x, z) in &ring {
+                square.min = (square.min.0.min(x), square.min.1.min(z));
+                square.max = (square.max.0.max(x), square.max.1.max(z));
+            }
+            square.outline.extend(nodes.iter().map(|n| n.id));
+            square.rings.push(ring);
+        }
+        square.people = area / (scale * scale) * per_m2;
+        (square.people > 0.0).then_some(square)
+    }
+
+    /// Inside, by the even-odd rule over every ring, holes included.
+    fn contains(&self, (x, z): (f64, f64)) -> bool {
+        let mut inside = false;
+        for w in self.rings.iter().flat_map(|r| r.windows(2)) {
+            let ((x1, z1), (x2, z2)) = (w[0], w[1]);
+            if (z1 > z) != (z2 > z) && x < x1 + (z - z1) / (z2 - z1) * (x2 - x1) {
+                inside = !inside;
+            }
+        }
+        inside
+    }
+
+    fn near(&self, p: (f64, f64), reach: f64) -> bool {
+        p.0 >= self.min.0 - reach
+            && p.0 <= self.max.0 + reach
+            && p.1 >= self.min.1 - reach
+            && p.1 <= self.max.1 + reach
+    }
+
+    fn by_edge(&self, p: (f64, f64), reach: f64) -> bool {
+        self.rings
+            .iter()
+            .flat_map(|r| r.windows(2))
+            .any(|w| seg_dist(p, w[0], w[1]) <= reach)
+    }
+}
+
+fn seg_dist(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dz) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dz * dz;
+    let t = if len2 > 0.0 {
+        (((p.0 - a.0) * dx + (p.1 - a.1) * dz) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dz)
+}
+
+/// Straight lines across squares and pedestrian areas between the ways that come into
+/// them, as people cut across, each a footway of two nodes with the people a metre it
+/// carries each way. No line leaves the area, crosses a road or joins two points of one
+/// way; whatever stands on the square is found once it is built.
+fn across_squares(
+    elements: &[ProcessedElement],
+    ways: &[(&ProcessedWay, i32, f64)],
+    uses: &FnvHashMap<u64, usize>,
+    roads: &FnvHashMap<u64, (i32, u64, bool)>,
+    scale: f64,
+) -> Vec<(ProcessedWay, f64)> {
+    let squares: Vec<Square> = elements
+        .iter()
+        .filter_map(|e| Square::of(e, scale))
+        .collect();
+    if squares.is_empty() {
+        return Vec::new();
+    }
+    const CELL: f64 = 64.0;
+    let cell = |(x, z): (f64, f64)| ((x / CELL).floor() as i32, (z / CELL).floor() as i32);
+    let mut grid: FnvHashMap<(i32, i32), Vec<usize>> = FnvHashMap::default();
+    for (i, sq) in squares.iter().enumerate() {
+        let (a, b) = (cell(sq.min), cell(sq.max));
+        for cx in a.0 - 1..=b.0 + 1 {
+            for cz in a.1 - 1..=b.1 + 1 {
+                grid.entry((cx, cz)).or_default().push(i);
+            }
+        }
+    }
+    let centre = |n: &ProcessedNode| (n.x as f64 + 0.5, n.z as f64 + 0.5);
+    // The roads near each square, by their middle line and half width.
+    type Road = ((f64, f64), (f64, f64), f64);
+    let mut near_roads: Vec<Vec<Road>> = vec![Vec::new(); squares.len()];
+    for e in elements {
+        let ProcessedElement::Way(w) = e else {
+            continue;
+        };
+        if !drivable(&w.tags) {
+            continue;
+        }
+        let half = f64::from(highway_block_range(&w.tags["highway"], &w.tags, scale));
+        for seg in w.nodes.windows(2) {
+            let (a, b) = (centre(&seg[0]), centre(&seg[1]));
+            let mut hit: Vec<usize> = Vec::new();
+            let steps = ((b.0 - a.0).hypot(b.1 - a.1) / CELL).ceil() as usize + 1;
+            for k in 0..=steps {
+                let t = k as f64 / steps as f64;
+                let p = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+                for &i in grid.get(&cell(p)).into_iter().flatten() {
+                    if !hit.contains(&i) && squares[i].near(p, CELL + half) {
+                        hit.push(i);
+                        near_roads[i].push((a, b, half));
+                    }
+                }
+            }
+        }
+    }
+    // The ways in: nodes on the outline, and where a way ends, meets another or comes in.
+    let mut doors: Vec<Vec<(&ProcessedNode, Vec<u64>)>> = vec![Vec::new(); squares.len()];
+    for &(w, ..) in ways {
+        let last = w.nodes.len() - 1;
+        for (k, n) in w.nodes.iter().enumerate() {
+            if roads.contains_key(&n.id) || is_invented_node_id(n.id) {
+                continue;
+            }
+            let p = centre(n);
+            for &i in grid.get(&cell(p)).into_iter().flatten() {
+                let sq = &squares[i];
+                if !sq.near(p, 2.0) {
+                    continue;
+                }
+                let on = sq.outline.contains(&n.id);
+                let inside = |n: &ProcessedNode| sq.contains(centre(n));
+                let edge = k == 0
+                    || k == last
+                    || uses.get(&n.id).is_some_and(|&u| u > 1)
+                    || !inside(&w.nodes[k - 1])
+                    || !inside(&w.nodes[k + 1]);
+                if !(on || edge && (inside(n) || sq.by_edge(p, 2.0))) {
+                    continue;
+                }
+                let list = &mut doors[i];
+                if let Some(d) = list.iter_mut().find(|d| d.0.id == n.id) {
+                    d.1.push(w.id);
+                } else if list
+                    .iter()
+                    .all(|d| (centre(d.0).0 - p.0).hypot(centre(d.0).1 - p.1) > 3.0)
+                {
+                    list.push((n, vec![w.id]));
+                }
+            }
+        }
+    }
+    let mut lines: Vec<(ProcessedWay, f64)> = Vec::new();
+    for (i, sq) in squares.iter().enumerate() {
+        let doors = &doors[i];
+        let clear = |a: (f64, f64), b: (f64, f64)| {
+            let len = (b.0 - a.0).hypot(b.1 - a.1);
+            // Clear of the edge away from its ends, or one way's lane runs outside.
+            let inside = (2..(len - 1.0) as usize).all(|k| {
+                let p = (
+                    a.0 + (b.0 - a.0) * k as f64 / len,
+                    a.1 + (b.1 - a.1) * k as f64 / len,
+                );
+                sq.contains(p) && (k < 4 || k as f64 > len - 4.0 || !sq.by_edge(p, 1.5))
+            });
+            inside
+                && near_roads[i]
+                    .iter()
+                    .all(|&(p, q, half)| seg_seg_dist(a, b, p, q) > half + 1.0)
+        };
+        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        for (j, a) in doors.iter().enumerate() {
+            let pa = centre(a.0);
+            let mut others: Vec<(usize, f64)> = doors
+                .iter()
+                .enumerate()
+                .filter(|(k, b)| *k != j && !b.1.iter().any(|w| a.1.contains(w)))
+                .map(|(k, b)| (k, (centre(b.0).0 - pa.0).hypot(centre(b.0).1 - pa.1)))
+                .filter(|&(_, d)| (ACROSS_MIN_M * scale..=ACROSS_MAX_M * scale).contains(&d))
+                .collect();
+            others.sort_by(|x, y| x.1.total_cmp(&y.1));
+            // Enough to fan out from; a vast area is not walked end to end anyway.
+            others.truncate(4 * ACROSS_EACH);
+            let mut headings: Vec<(f64, f64)> = Vec::new();
+            for (k, _) in others {
+                if headings.len() >= ACROSS_EACH {
+                    break;
+                }
+                let pb = centre(doors[k].0);
+                let Some(h) = unit(pb.0 - pa.0, pb.1 - pa.1) else {
+                    continue;
+                };
+                // Fanned out, not three lines to the same corner.
+                if headings.iter().any(|g| g.0 * h.0 + g.1 * h.1 > 0.866) || !clear(pa, pb) {
+                    continue;
+                }
+                headings.push(h);
+                let pair = (j.min(k), j.max(k));
+                if !pairs.contains(&pair) {
+                    pairs.push(pair);
+                }
+            }
+        }
+        let metres: f64 = pairs
+            .iter()
+            .map(|&(a, b)| {
+                let (pa, pb) = (centre(doors[a].0), centre(doors[b].0));
+                (pb.0 - pa.0).hypot(pb.1 - pa.1) / scale
+            })
+            .sum();
+        if metres <= 0.0 {
+            continue;
+        }
+        let density = (sq.people / (2.0 * metres)).min(1.0 / 8.0);
+        for (a, b) in pairs {
+            let bare = |n: &ProcessedNode| ProcessedNode {
+                id: n.id,
+                tags: HashMap::new(),
+                x: n.x,
+                z: n.z,
+            };
+            let way = ProcessedWay {
+                id: ACROSS_ID | lines.len() as u64,
+                nodes: vec![bare(doors[a].0), bare(doors[b].0)],
+                tags: [("highway".to_string(), "footway".to_string())].into(),
+            };
+            lines.push((way, density));
+        }
+    }
+    lines
+}
+
+fn seg_seg_dist(a: (f64, f64), b: (f64, f64), p: (f64, f64), q: (f64, f64)) -> f64 {
+    let cross = |o: (f64, f64), u: (f64, f64), v: (f64, f64)| {
+        (u.0 - o.0) * (v.1 - o.1) - (u.1 - o.1) * (v.0 - o.0)
+    };
+    let (d1, d2) = (cross(a, b, p), cross(a, b, q));
+    let (d3, d4) = (cross(p, q, a), cross(p, q, b));
+    if (d1 > 0.0) != (d2 > 0.0) && (d3 > 0.0) != (d4 > 0.0) {
+        return 0.0;
+    }
+    seg_dist(a, p, q)
+        .min(seg_dist(b, p, q))
+        .min(seg_dist(p, a, b))
+        .min(seg_dist(q, a, b))
 }
 
 /// Shops, cafés, sights and stations, which bring people onto the ways near them.
@@ -353,6 +675,9 @@ struct Lane {
     points: Vec<Point>,
     /// The same points along the middle of the way, walked if the side is blocked.
     alt: Vec<Point>,
+    /// The lane before it was bent round street furniture, if it was: walked if the bend
+    /// runs into something the straight lane passes.
+    plain: Vec<Point>,
     next: Vec<usize>,
     /// The lane back the other way, turned round into at a dead end or a blocked path.
     back: Option<usize>,
@@ -364,6 +689,8 @@ struct Lane {
     /// Runs off the edge of the area, where walkers leave.
     out: bool,
     density: f64,
+    /// Cuts across a square: dropped if anything stands in its way.
+    across: bool,
 }
 
 /// The walkable ways of an area.
@@ -457,6 +784,20 @@ impl WalkNetwork {
                 *uses.entry(n.id).or_default() += 1;
             }
         }
+        let across = across_squares(elements, &ways, &uses, &roads, scale);
+        for (w, _) in &across {
+            for n in &w.nodes {
+                *uses.entry(n.id).or_default() += 1;
+            }
+        }
+        let ways: Vec<(&ProcessedWay, i32, f64)> = ways
+            .into_iter()
+            .chain(
+                across
+                    .iter()
+                    .map(|(w, d)| (w, highway_block_range("footway", &w.tags, scale), *d)),
+            )
+            .collect();
         let mut pieces: Vec<Piece> = Vec::new();
         for &(way, half, density) in &ways {
             let mut start = 0;
@@ -605,19 +946,29 @@ impl WalkNetwork {
                             alt.push(at(middle.point_at(s * stretch)));
                         }
                     }
+                    let across = is_across(piece.way.id);
+                    let plain = pts.clone();
                     let pts = furniture.go_round(pts);
-                    let alt = furniture.go_round(alt);
+                    let plain = if plain == pts { Vec::new() } else { plain };
+                    // A line across a square has no middle to fall back on.
+                    let alt = if across {
+                        Vec::new()
+                    } else {
+                        furniture.go_round(alt)
+                    };
                     points += pts.len();
                     let mid = path.point_at(path.length() / 2.0);
                     lanes.push(Lane {
                         points: pts,
                         alt,
+                        plain,
                         next: Vec::new(),
                         back: None,
                         cut: (false, false),
                         beside: Vec::new(),
                         out: at_edge(nodes[nodes.len() - 1]),
                         density: piece.density * footfall.at(mid) * 2.0 / (count as f64 + 1.0),
+                        across,
                     });
                     meta.push((
                         p,
@@ -652,6 +1003,7 @@ impl WalkNetwork {
             steps(&l.points)
                 .into_iter()
                 .chain(steps(&l.alt))
+                .chain(steps(&l.plain))
                 .map(|s| s.column())
         }))
     }
@@ -662,9 +1014,18 @@ impl WalkNetwork {
     pub fn finish(&mut self, probe: &WalkProbe) {
         for lane in &mut self.lanes {
             if lane.points.len() >= 2 {
-                let side = settle(&lane.points, probe);
+                let mut side = settle(&lane.points, probe);
+                // Bent round street furniture into a wall: straight on, if that gets further.
+                if side.as_ref().is_none_or(|s| s.cut != (false, false)) {
+                    if let Some(p) = settle(&lane.plain, probe) {
+                        if side.as_ref().is_none_or(|s| p.length() > s.length()) {
+                            side = Some(p);
+                        }
+                    }
+                }
                 let best = match side {
                     Some(s) if s.cut == (false, false) => Some(s),
+                    _ if lane.across => None,
                     side => match (side, settle(&lane.alt, probe)) {
                         (Some(s), Some(m))
                             if s.length() >= m.length() && m.cut != (false, false) =>
@@ -679,19 +1040,33 @@ impl WalkNetwork {
                     cut: (false, false),
                     posts: Vec::new(),
                 });
-                // Round the posts it met, as round mapped furniture, on ground taken as level.
-                let posts = best.posts.iter().map(|&(x, z)| Item {
-                    x: x as f64 + 0.5,
-                    z: z as f64 + 0.5,
-                    hx: 0.4,
-                    hz: 0.4,
-                    long: 0.0,
-                });
-                lane.points = Furniture::new(posts.collect()).go_round(best.points);
+                // Round the posts it met, as round mapped furniture, onto the ground read
+                // round them; where that is not clear, past them.
+                let posts: Vec<Item> = best
+                    .posts
+                    .iter()
+                    .map(|&(x, z)| Item {
+                        x: x as f64 + 0.5,
+                        z: z as f64 + 0.5,
+                        hx: 0.4,
+                        hz: 0.4,
+                        long: 0.0,
+                    })
+                    .collect();
+                lane.points = if posts.is_empty() {
+                    best.points
+                } else {
+                    let bent = Furniture::new(posts).go_round(best.points.clone());
+                    match settle(&bent, probe) {
+                        Some(s) if s.cut == (false, false) => s.points,
+                        _ => best.points,
+                    }
+                };
                 lane.cut = best.cut;
                 lane.out &= !best.cut.1;
             }
             lane.alt = Vec::new();
+            lane.plain = Vec::new();
         }
         if self.lanes.iter().map(|l| l.points.len()).sum::<usize>() > MAX_POINTS {
             prune(&mut self.lanes);
@@ -720,6 +1095,7 @@ impl WalkNetwork {
     pub fn pack_functions(&self) -> Vec<(String, String)> {
         let k = self.size;
         let d = |m: f64| format!("{:.2}", m * k);
+        let d3 = |m: f64| format!("{:.3}", m * k);
         let mut network = format!(
             "scoreboard players set #day_cap arnis.walk {DAY_NEAR}\n\
              scoreboard players set #night_cap arnis.walk {NIGHT_NEAR}\n\
@@ -821,28 +1197,33 @@ impl WalkNetwork {
                 f64::from(p) / 1000.0
             );
         }
+        // Waits on someone held up themselves go to the older walker, so no two ever wait
+        // on each other.
         let ahead = format!(
             "# Someone right in front: 1 to wait for a player; 4 to queue behind a walker who\n\
-             # stands, is all but touching or crosses; 3 to step aside for one coming the other\n\
-             # way; 2 to fall in behind one going the same way. Queued 20 s, a walker goes on to\n\
-             # the next point.\n\
+             # stands, is all but touching, crosses or queues; 3 to step aside for one coming\n\
+             # the other way or held up behind; 2 to fall in behind one going the same way.\n\
+             # Queued 20 s, a walker goes on to the next point.\n\
              execute positioned ^ ^ ^{near} if entity @a[gamemode=!spectator,tag=!arnis.riding,distance=..{round}] run return 1\n\
              execute if score @s arnis.wb matches 200.. run return 0\n\
-             execute positioned ^ ^ ^{close} if entity @e[tag=arnis.walker,distance=..{touch}] run return 4\n\
+             scoreboard players operation #me arnis.walk = @s arnis.wk\n\
+             execute positioned ^ ^ ^{close} as @e[tag=arnis.walker,distance=..{touch}] unless score @s arnis.wb matches 1.. run return 4\n\
+             execute positioned ^ ^ ^{close} as @e[tag=arnis.walker,distance=..{touch}] if score @s arnis.wk < #me arnis.walk run return 4\n\
              execute positioned ^ ^ ^{near} unless entity @e[tag=arnis.walker,distance=..{walker}] run return 0\n\
-             execute positioned ^ ^ ^{near} if entity @e[tag=arnis.walker,distance=..{walker},scores={{arnis.ww=1..}}] run return 4\n\
-             execute positioned ^ ^ ^{near} if entity @e[tag=arnis.walker,distance=..{walker},scores={{arnis.wb=1..199}}] run return 4\n\
-             execute store result score #yaw arnis.walk run data get entity @s Rotation[0]\n\
+             scoreboard players operation #yaw arnis.walk = @s arnis.wy\n\
              execute positioned ^ ^ ^{near} as @e[tag=arnis.walker,distance=..{walker},sort=nearest,limit=1] run function arnis:walk/lead\n\
              execute unless score #turn arnis.walk matches -135..135 run return 3\n\
+             execute positioned ^ ^ ^{near} if entity @e[tag=arnis.walker,distance=..{walker},scores={{arnis.ww=1..}}] run return 4\n\
+             execute positioned ^ ^ ^{near} as @e[tag=arnis.walker,distance=..{walker},scores={{arnis.wb=1..199}}] if score @s arnis.wk < #me arnis.walk run return 4\n\
              execute if score #turn arnis.walk matches -45..45 run return 2\n\
-             return 4\n",
+             execute if score #free arnis.walk matches 1 run return 4\n\
+             return 3\n",
             near = d(0.9),
             round = d(0.7),
             walker = d(0.45),
-            // Closer in, short of the walker's own place.
-            close = d(0.35),
-            touch = d(0.33),
+            // Closer in, short of the walker's own place, so it never counts itself.
+            close = d3(0.35),
+            touch = d3(0.32),
         );
         // Each to their own side, as on the roads.
         let aside = format!(
@@ -1351,8 +1732,7 @@ fn untrap(lanes: &mut [Lane], scale: f64) {
             }
             groups += 1;
         }
-        // A group is a trap when nothing leads out of it, not even off the area, and it is
-        // too short to be walked as a network of its own.
+        // A group is closed when nothing leads out of it, not even off the area.
         let mut open = vec![false; groups];
         let mut size = vec![0.0; groups];
         for (i, lane) in lanes.iter().enumerate() {
@@ -1362,21 +1742,24 @@ fn untrap(lanes: &mut [Lane], scale: f64) {
                 open[g] = true;
             }
         }
-        let trap = |g: usize| !open[g] && size[g] < 2.0 * SCRAP_M * scale;
+        // Entered from a bigger network it is a stub; alone, or bigger than whatever leads
+        // in, it is a network of its own.
+        let trap = |from: usize, g: usize| {
+            from != g && !open[g] && (size[g] < 2.0 * SCRAP_M * scale || size[g] < size[from])
+        };
         let mut changed = false;
         for i in 0..n {
             let g = group[i];
-            if trap(g) {
-                continue;
-            }
             let before = lanes[i].next.len();
-            lanes[i].next.retain(|&j| !trap(group[j]));
+            lanes[i].next.retain(|&j| !trap(g, group[j]));
             if lanes[i].next.len() != before {
                 changed = true;
-                if lanes[i].next.is_empty() {
+                // Turned round only where the way back is in reach, as `link` does.
+                let near = lanes[i].beside.last().is_some_and(Option::is_some);
+                if lanes[i].next.is_empty() && near {
                     lanes[i].next = lanes[i]
                         .back
-                        .filter(|&b| !trap(group[b]))
+                        .filter(|&b| !trap(g, group[b]))
                         .into_iter()
                         .collect();
                 }
@@ -1851,12 +2234,14 @@ mod tests {
                 })
                 .to_vec(),
             alt: Vec::new(),
+            plain: Vec::new(),
             next,
             back: Some(back),
             cut: (false, true),
-            beside: Vec::new(),
+            beside: vec![Some(0); 2],
             out: false,
             density: 1.0,
+            across: false,
         };
         // A long way both ways (0, 1), a lane off it (4, 5), and a stub cut at both ends
         // (2, 3) that 1 and 4 lead into but that only ever turns round into itself.
@@ -1872,10 +2257,19 @@ mod tests {
         assert_eq!(lanes[1].next, vec![0, 4]);
         assert_eq!(lanes[4].next, vec![5]);
         assert_eq!(lanes[2].next, vec![3]);
-        // A long stretch only turned round in is a network of its own, and kept.
+        // A longer stub off a bigger network is a trap too; a network bigger than the way
+        // into it is one of its own.
         let mut lanes = vec![
             lane(100.0, vec![1], 1),
             lane(100.0, vec![0, 2], 0),
+            lane(80.0, vec![3], 3),
+            lane(80.0, vec![2], 2),
+        ];
+        untrap(&mut lanes, 1.0);
+        assert_eq!(lanes[1].next, vec![0]);
+        let mut lanes = vec![
+            lane(40.0, vec![1], 1),
+            lane(40.0, vec![0, 2], 0),
             lane(80.0, vec![3], 3),
             lane(80.0, vec![2], 2),
         ];
@@ -1896,7 +2290,182 @@ mod tests {
             .sum::<i32>() as f64
             / 16.0;
         assert!((mean - WALK_MPS * 100.0).abs() < 1.0, "{mean}");
-        assert!(paces[0] >= 100 && paces[6] <= 180, "{paces:?}");
+        assert!(paces[0] >= 100 && paces[6] <= 200, "{paces:?}");
+    }
+
+    /// A 40 block square with a way in at the middle of each side, and the lanes across it.
+    fn square(extra: Vec<ProcessedElement>) -> (Vec<ProcessedElement>, WalkNetwork) {
+        let n = |id: u64, x: i32, z: i32| node(id, x, z, &[]);
+        let ring = vec![
+            n(1, 100, 100),
+            n(11, 120, 100),
+            n(2, 140, 100),
+            n(12, 140, 120),
+            n(3, 140, 140),
+            n(13, 120, 140),
+            n(4, 100, 140),
+            n(14, 100, 120),
+            n(1, 100, 100),
+        ];
+        let mut elements = vec![way(50, ring, &[("highway", "pedestrian"), ("area", "yes")])];
+        for (id, door, x, z) in [
+            (61, 11, 120, 60),
+            (62, 12, 180, 120),
+            (63, 13, 120, 180),
+            (64, 14, 60, 120),
+        ] {
+            let at = match door {
+                11 => (120, 100),
+                12 => (140, 120),
+                13 => (120, 140),
+                _ => (100, 120),
+            };
+            elements.push(way(
+                id,
+                vec![n(id + 100, x, z), n(door, at.0, at.1)],
+                &[("highway", "footway")],
+            ));
+        }
+        elements.extend(extra);
+        let net = build(&elements, false);
+        (elements, net)
+    }
+
+    fn across(net: &WalkNetwork) -> Vec<&Lane> {
+        net.lanes
+            .iter()
+            .filter(|l| l.across && l.points.len() >= 2)
+            .collect()
+    }
+
+    #[test]
+    fn people_cut_across_squares_between_the_ways_in() {
+        let (_, mut net) = square(Vec::new());
+        // Each way in to the three others, a lane each way.
+        assert_eq!(across(&net).len(), 12);
+        let into_north = net
+            .lanes
+            .iter()
+            .position(|l| !l.across && l.points.last().is_some_and(|p| p.z < 101.0))
+            .unwrap();
+        assert!(net.lanes[into_north]
+            .next
+            .iter()
+            .all(|&j| net.lanes[j].across));
+        assert_eq!(net.lanes[into_north].next.len(), 3);
+        // A statue in the middle takes the straight lines over; the diagonals stay.
+        use crate::water_probe::{footing, Spot};
+        let probe = net.probe();
+        for (rx, rz) in probe.regions().collect::<Vec<_>>() {
+            probe.read_region(rx, rz, |x, z, level| {
+                let statue = (116..=124).contains(&x) && (116..=124).contains(&z);
+                footing(
+                    |y| match y {
+                        _ if y <= 64 || statue && y <= 70 => Spot::Solid,
+                        _ => Spot::Open,
+                    },
+                    level,
+                )
+            });
+        }
+        net.finish(&probe);
+        let left = across(&net);
+        assert_eq!(left.len(), 8);
+        for l in left {
+            assert!(l
+                .points
+                .iter()
+                .all(|p| p.x < 115.0 || p.x > 125.0 || p.z < 115.0 || p.z > 125.0));
+        }
+    }
+
+    #[test]
+    fn lines_across_a_square_cross_no_road_and_no_hole() {
+        let road = way(
+            70,
+            vec![node(71, 50, 125, &[]), node(72, 190, 125, &[])],
+            &[("highway", "residential")],
+        );
+        let (_, net) = square(vec![road]);
+        let lanes = across(&net);
+        // North to east, north to west and east to west, never over the road to the south.
+        assert_eq!(lanes.len(), 6);
+        assert!(lanes.iter().all(|l| l.points.iter().all(|p| p.z < 123.0)));
+
+        let (mut elements, _) = square(Vec::new());
+        let ProcessedElement::Way(outline) = elements.remove(0) else {
+            unreachable!()
+        };
+        let hole: Vec<ProcessedNode> = [(112, 112), (128, 112), (128, 128), (112, 128), (112, 112)]
+            .iter()
+            .enumerate()
+            .map(|(k, &(x, z))| node(80 + (k as u64 % 4), x, z, &[]))
+            .collect();
+        let member =
+            |id: u64, nodes: Vec<ProcessedNode>, role| crate::osm_parser::ProcessedMember {
+                role,
+                way: std::sync::Arc::new(ProcessedWay {
+                    id,
+                    nodes,
+                    tags: HashMap::new(),
+                }),
+            };
+        elements.push(ProcessedElement::Relation(
+            crate::osm_parser::ProcessedRelation {
+                id: 90,
+                tags: [("type", "multipolygon"), ("highway", "pedestrian")]
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .into(),
+                members: vec![
+                    member(91, outline.nodes, ProcessedMemberRole::Outer),
+                    member(92, hole, ProcessedMemberRole::Inner),
+                ],
+            },
+        ));
+        let net = build(&elements, false);
+        // Only the diagonals go round the hole.
+        assert_eq!(across(&net).len(), 8);
+    }
+
+    #[test]
+    fn a_post_is_stepped_round_only_onto_ground_read_round_it() {
+        use crate::water_probe::{footing, Spot};
+        let walled = |wall: bool| {
+            let elements = vec![way(
+                1,
+                vec![node(1, 0, 0, &[]), node(2, 60, 0, &[])],
+                &[("highway", "footway")],
+            )];
+            let mut net = build(&elements, false);
+            // A lamp on the eastbound lane, and maybe a wall beside it where it would step.
+            let block = |x: i32, z: i32, y: i32| match (x, z) {
+                _ if y <= 64 => Spot::Solid,
+                (30, 1) if y <= 67 => Spot::Tall,
+                (27..=33, 0) if wall && y <= 70 => Spot::Solid,
+                _ => Spot::Open,
+            };
+            let probe = net.probe();
+            for (rx, rz) in probe.regions().collect::<Vec<_>>() {
+                probe.read_region_round(
+                    rx,
+                    rz,
+                    |x, z, level| footing(|y| block(x, z, y), level),
+                    |f| f.post(),
+                );
+            }
+            net.finish(&probe);
+            net.lanes[0].points.clone()
+        };
+        let east = walled(false);
+        assert!(
+            east.iter()
+                .any(|p| (29.0..32.0).contains(&p.x) && p.z < 1.0),
+            "{east:?}"
+        );
+        let east = walled(true);
+        assert!(east.iter().all(|p| p.z > 1.0), "{east:?}");
+        assert_eq!(east.first().unwrap().x, 0.5);
+        assert_eq!(east.last().unwrap().x, 60.5);
     }
 
     #[test]
@@ -1948,6 +2517,18 @@ mod tests {
             })
             .collect();
         assert_eq!(wide.go_round(along_z).len(), 2);
+        // A lamp past a corner, two blocks off the lane, leaves it be.
+        let corner: Vec<Point> = [(0.5, 0.0), (20.5, 0.0), (20.5, -20.0)]
+            .map(|(x, z)| Point {
+                x,
+                y: 64.0,
+                z,
+                light: None,
+                kerb: false,
+            })
+            .to_vec();
+        let lamp = Furniture::new(vec![item(22, 0, &[("highway", "street_lamp")])]);
+        assert_eq!(lamp.go_round(corner.clone()), corner);
         assert!(furniture(&node(2, 0, 0, &[("amenity", "post_box")])).is_none());
         assert!(furniture(&node(
             3,

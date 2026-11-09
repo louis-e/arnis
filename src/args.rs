@@ -416,9 +416,9 @@ pub struct Args {
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
 
-    /// People who walk the mapped footways, sidewalks, pedestrian streets and paths, busier
-    /// by day and near shops and sights, waiting at kerbs and, with --traffic-lights, for
-    /// the green man. Cars stop for them. Java 1.21.9+ shows them as mannequins in the
+    /// People who walk the mapped footways, sidewalks, squares, pedestrian streets and
+    /// paths, busier by day and near shops and sights, waiting at kerbs and, with
+    /// --traffic-lights, for the green man. Cars stop for them. Java 1.21.9+ shows them as mannequins in the
     /// game's own skins, older versions as villagers.
     #[arg(long, default_value_t = false)]
     pub pedestrians: bool,

@@ -84,6 +84,11 @@ impl Footing {
     pub fn thin(&self) -> bool {
         self.thin
     }
+
+    /// A post or a trunk where the ground was planned: nothing to stand on within a block.
+    pub fn post(&self) -> bool {
+        self.thin && (FOOT_BELOW - 1..=FOOT_BELOW + 1).all(|k| self.levels & (1 << k) == 0)
+    }
 }
 
 /// A column as (x, z, level).
@@ -94,6 +99,8 @@ pub struct Probe<S> {
     /// Each region's columns, sorted, so a sample is found by search and stored compactly.
     wanted: FnvHashMap<(i32, i32), Vec<Column>>,
     read: Mutex<FnvHashMap<(i32, i32), Vec<S>>>,
+    /// Columns read round the samples `read_region_round` picked, by (x, z).
+    round: Mutex<FnvHashMap<(i32, i32), S>>,
 }
 
 pub type WaterProbe = Probe<Sample>;
@@ -114,6 +121,7 @@ impl<S: Copy> Probe<S> {
         Self {
             wanted,
             read: Mutex::new(FnvHashMap::default()),
+            round: Mutex::new(FnvHashMap::default()),
         }
     }
 
@@ -123,6 +131,18 @@ impl<S: Copy> Probe<S> {
 
     /// Reads the columns of region (rx, rz) once, `column` turning (x, z, level) into a sample.
     pub fn read_region(&self, rx: i32, rz: i32, column: impl Fn(i32, i32, i32) -> S) {
+        self.read_region_round(rx, rz, column, |_| false);
+    }
+
+    /// As `read_region`, also reading the columns two blocks round each sample `round`
+    /// picks, at its level, while the region is still there to read.
+    pub fn read_region_round(
+        &self,
+        rx: i32,
+        rz: i32,
+        column: impl Fn(i32, i32, i32) -> S,
+        round: impl Fn(&S) -> bool,
+    ) {
         let Some(columns) = self.wanted.get(&(rx, rz)) else {
             return;
         };
@@ -130,6 +150,21 @@ impl<S: Copy> Probe<S> {
             return;
         }
         let samples: Vec<S> = columns.iter().map(|&c| column(c.0, c.1, c.2)).collect();
+        let mut extra = Vec::new();
+        for (&(x, z, level), s) in columns.iter().zip(&samples) {
+            if !round(s) {
+                continue;
+            }
+            for (dx, dz) in (-2..=2).flat_map(|dx| (-2..=2).map(move |dz| (dx, dz))) {
+                let (x, z) = (x + dx, z + dz);
+                if (dx, dz) != (0, 0) && (x >> 9, z >> 9) == (rx, rz) {
+                    extra.push(((x, z), column(x, z, level)));
+                }
+            }
+        }
+        if let Ok(mut round) = self.round.lock() {
+            round.extend(extra);
+        }
         if let Ok(mut read) = self.read.lock() {
             read.insert((rx, rz), samples);
         }
@@ -137,12 +172,15 @@ impl<S: Copy> Probe<S> {
 
     pub fn get(&self, x: i32, z: i32, level: i32) -> Option<S> {
         let region = (x >> 9, z >> 9);
-        let i = self
-            .wanted
-            .get(&region)?
-            .binary_search(&(x, z, level))
-            .ok()?;
-        self.read.lock().ok()?.get(&region)?.get(i).copied()
+        let asked = || {
+            let i = self
+                .wanted
+                .get(&region)?
+                .binary_search(&(x, z, level))
+                .ok()?;
+            self.read.lock().ok()?.get(&region)?.get(i).copied()
+        };
+        asked().or_else(|| self.round.lock().ok()?.get(&(x, z)).copied())
     }
 }
 

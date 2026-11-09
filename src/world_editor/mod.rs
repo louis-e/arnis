@@ -1547,26 +1547,32 @@ impl<'a> WorldEditor<'a> {
             });
         }
         if let Some(probe) = &self.walk_probe {
-            probe.read_region(rx, rz, |x, z, level| {
-                let spot = |y: i32| match self.world.get_block(x, y, z) {
-                    None => Spot::Open,
-                    Some(b) if b == WATER => Spot::Water,
-                    Some(b) => b.try_name().map_or(Spot::Open, |name| {
-                        // A slab is a bottom one unless its state says otherwise.
-                        let upper = |v: &Value| match v {
-                            Value::Compound(m) => {
-                                matches!(m.get("type"), Some(Value::String(t)) if t != "bottom")
-                            }
-                            _ => false,
-                        };
-                        walk_spot(name, || match self.world.get_properties(x, y, z) {
-                            Some(p) => !upper(&p),
-                            None => !b.properties().is_some_and(|p| upper(&p)),
-                        })
-                    }),
-                };
-                footing(spot, level)
-            });
+            // Round a post too, for the walkers who step round it.
+            probe.read_region_round(
+                rx,
+                rz,
+                |x, z, level| {
+                    let spot = |y: i32| match self.world.get_block(x, y, z) {
+                        None => Spot::Open,
+                        Some(b) if b == WATER => Spot::Water,
+                        Some(b) => b.try_name().map_or(Spot::Open, |name| {
+                            // A slab is a bottom one unless its state says otherwise.
+                            let upper = |v: &Value| match v {
+                                Value::Compound(m) => {
+                                    matches!(m.get("type"), Some(Value::String(t)) if t != "bottom")
+                                }
+                                _ => false,
+                            };
+                            walk_spot(name, || match self.world.get_properties(x, y, z) {
+                                Some(p) => !upper(&p),
+                                None => !b.properties().is_some_and(|p| upper(&p)),
+                            })
+                        }),
+                    };
+                    footing(spot, level)
+                },
+                |f| f.post(),
+            );
         }
     }
 

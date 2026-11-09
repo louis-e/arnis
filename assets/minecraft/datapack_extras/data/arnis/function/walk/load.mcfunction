@@ -8,9 +8,12 @@ scoreboard objectives add arnis.wn dummy
 scoreboard objectives add arnis.wv dummy
 scoreboard objectives add arnis.ww dummy
 scoreboard objectives add arnis.wb dummy
-# Each walker's own run of chances, shared with whoever walks with them, and own pace.
+# Each walker's own run of chances, shared with whoever walks with them, own pace,
+# heading and number: of two held up by each other, the younger waits.
 scoreboard objectives add arnis.wr dummy
 scoreboard objectives add arnis.wq dummy
+scoreboard objectives add arnis.wy dummy
+scoreboard objectives add arnis.wk dummy
 scoreboard players set #lcg_a arnis.walk 1103515245
 scoreboard players set #lcg_c arnis.walk 12345
 scoreboard players set #65536 arnis.walk 65536
