@@ -804,6 +804,14 @@ pub fn generate_world_with_options(
     let one_world = args.one_world_run.as_ref();
     let extending = one_world.is_some_and(|run| run.extending);
     let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
+    if let Some(shape) = xzbbox.outline() {
+        let all = shape.rect().total_blocks();
+        let inside = shape.covered_columns();
+        println!(
+            "  Area shape covers {inside} of the {all} columns around it ({:.0}%)",
+            inside as f64 * 100.0 / all.max(1) as f64
+        );
+    }
 
     // Before anything reads a footprint: nothing is built on a runway.
     let dropped = highways::drop_buildings_on_aircraft_pavement(&mut elements, args.scale);
@@ -848,7 +856,10 @@ pub fn generate_world_with_options(
     let void_world =
         world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
     editor.set_void_world(void_world);
-    if void_world && !extending {
+    // An outline can miss it in a flat world too, where its template chunks would stand in the plain.
+    if (void_world || (xzbbox.outline().is_some() && world_format == WorldFormat::JavaAnvil))
+        && !extending
+    {
         // A world made by `create_new_world` starts with the flat template region. The area
         // rewrites it when it reaches that region; one it misses would stay a grass square.
         crate::world_utils::remove_untouched_template_region(&output_path);
@@ -1468,7 +1479,7 @@ pub fn generate_world_with_options(
         let (sx, sz) = options
             .spawn_point
             .or_else(|| crate::map_item::read_spawn_xz(&output_path))
-            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+            .unwrap_or_else(|| xzbbox.default_spawn());
         (sx >> 9, sz >> 9)
     });
 
@@ -1616,13 +1627,15 @@ pub fn generate_world_with_options(
             // max_* are exclusive; rect_from_min_max treats max as inclusive,
             // so subtract 1. Clamp to the world bbox so edge-tile halos don't
             // extend past world bounds.
-            let tile_xzbbox = XZBBox::rect_from_min_max(
-                (tile_bounds.min_x - tile::TILE_EDITOR_HALO).max(xzbbox.min_x()),
-                (tile_bounds.min_z - tile::TILE_EDITOR_HALO).max(xzbbox.min_z()),
-                (tile_bounds.max_x - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_x()),
-                (tile_bounds.max_z - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_z()),
-            )
-            .expect("Failed to create tile XZBBox");
+            // A crop keeps a drawn outline's mask, so tiles write only inside it too.
+            let tile_xzbbox = xzbbox
+                .crop(
+                    (tile_bounds.min_x - tile::TILE_EDITOR_HALO).max(xzbbox.min_x()),
+                    (tile_bounds.min_z - tile::TILE_EDITOR_HALO).max(xzbbox.min_z()),
+                    (tile_bounds.max_x - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_x()),
+                    (tile_bounds.max_z - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_z()),
+                )
+                .expect("Failed to create tile XZBBox");
 
             let mut tile_editor = WorldEditor::new_with_format_and_name(
                 PathBuf::new(),
@@ -2376,7 +2389,7 @@ pub fn generate_world_with_options(
         let (sx, sz) = options
             .spawn_point
             .or_else(|| crate::map_item::read_spawn_xz(&output_path))
-            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+            .unwrap_or_else(|| xzbbox.default_spawn());
         if wants_map_item {
             editor.place_map_item_frame(sx, sz, first_map_id, first_map_id + 1);
         } else {

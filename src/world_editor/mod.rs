@@ -2658,6 +2658,19 @@ impl<'a> WorldEditor<'a> {
         self.world.set_block_if_absent(x, absolute_y, z, block)
     }
 
+    /// A flat world's filler plane in a column the drawn outline leaves out of the rectangle.
+    pub fn set_filler_outside_outline(&mut self, x: i32, z: i32) {
+        let p = XZPoint::new(x, z);
+        if !self.xzbbox.bounding_rect().contains(&p)
+            || self.xzbbox.contains(&p)
+            || self.is_region_flushed(x, z)
+        {
+            return;
+        }
+        self.world
+            .set_block_if_absent(x, common::base_chunk_y(), z, common::base_chunk_block());
+    }
+
     /// Returns true if a non-AIR block exists at the given absolute coordinates.
     #[inline]
     pub fn block_exists_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
@@ -3490,6 +3503,45 @@ mod eviction_guard_tests {
         assert!(!editor.block_exists_absolute(41, 1, 10));
         assert!(editor.block_exists_absolute(42, 1, 10), "halo wood passes");
         assert!(editor.block_exists_absolute(43, 1, 10), "halo leaves pass");
+    }
+
+    #[test]
+    fn a_drawn_outline_keeps_every_write_inside_it() {
+        // The south-west triangle of a 64x64 square, as a tile editor sees it too.
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63)
+            .unwrap()
+            .with_outline(vec![vec![vec![(0.0, 0.0), (0.0, 63.0), (63.0, 63.0)]]])
+            .unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        // The filler height is a process global other tests move.
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        for bbox in [xzbbox.clone(), xzbbox.crop(0, 0, 40, 63).unwrap()] {
+            let mut editor = WorldEditor::new(std::env::temp_dir(), &bbox, llbbox);
+            let (inside, outside) = ((5, 50), (30, 5));
+            for (x, z) in [inside, outside] {
+                editor.set_block_absolute(STONE, x, 1, z, None, None);
+                editor.set_block_if_absent_absolute(STONE, x, 2, z);
+                editor.fill_column_absolute(STONE, x, z, 3, 5, false);
+                editor.fill_column_with_absolute(x, z, 6, 7, |_| STONE);
+            }
+            for y in 1..=7 {
+                assert!(editor.block_exists_absolute(inside.0, y, inside.1), "y {y}");
+                assert!(
+                    !editor.block_exists_absolute(outside.0, y, outside.1),
+                    "y {y}"
+                );
+            }
+            // The flat filler goes only where the outline leaves a column out.
+            editor.set_filler_outside_outline(inside.0, inside.1);
+            editor.set_filler_outside_outline(outside.0, outside.1);
+            editor.set_filler_outside_outline(70, 5);
+            let y = base_chunk_y();
+            assert!(!editor.block_exists_absolute(70, y, 5));
+            assert!(editor.block_exists_absolute(outside.0, y, outside.1));
+            if !(1..=7).contains(&y) {
+                assert!(!editor.block_exists_absolute(inside.0, y, inside.1));
+            }
+        }
     }
 
     #[test]

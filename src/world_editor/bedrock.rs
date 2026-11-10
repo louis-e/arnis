@@ -685,11 +685,7 @@ impl BedrockWriter {
         // Header: version (4 bytes LE) + length (4 bytes LE)
 
         // Use custom spawn point if provided, otherwise center of bbox
-        let (spawn_x, spawn_z) = self.spawn_point.unwrap_or_else(|| {
-            let x = (xzbbox.min_x() + xzbbox.max_x()) / 2;
-            let z = (xzbbox.min_z() + xzbbox.max_z()) / 2;
-            (x, z)
-        });
+        let (spawn_x, spawn_z) = self.spawn_point.unwrap_or_else(|| xzbbox.center_spawn());
 
         // Calculate spawn Y from ground elevation data, or default to 64
         let spawn_y = self

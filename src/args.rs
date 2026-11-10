@@ -14,6 +14,26 @@ pub struct Args {
     #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
     pub bbox: Option<LLBBox>,
 
+    /// Generate only inside this outline instead of a rectangle: "lat,lng lat,lng lat,lng ...".
+    /// Repeat it to merge several shapes into one world, where they keep their real
+    /// positions. Data is still downloaded for the rectangle around all of them.
+    #[arg(
+        long = "polygon",
+        value_name = "POINTS",
+        allow_hyphen_values = true,
+        conflicts_with = "bbox"
+    )]
+    pub polygon: Vec<String>,
+
+    /// Like --polygon, from the Polygon and MultiPolygon features of a GeoJSON file (holes
+    /// are kept out). Combines with --polygon.
+    #[arg(long = "polygon-file", value_name = "FILE", conflicts_with = "bbox")]
+    pub polygon_file: Option<PathBuf>,
+
+    /// The shapes of --polygon and --polygon-file, read by `resolve_shapes`.
+    #[arg(skip)]
+    pub shapes: Option<crate::coordinate_system::geographic::LLShapes>,
+
     /// Local OSM data to generate from instead of downloading it: an .osm/.xml file (OSM XML)
     /// or Overpass JSON. Without --bbox, the area is taken from the file.
     #[arg(long, group = "location")]
@@ -947,7 +967,41 @@ pub const DEFAULT_WORLD_TIME: i64 = 6_000;
 /// Minecraft tick for midnight (tick 0 is 06:00).
 pub const MIDNIGHT_TICKS: i64 = 18_000;
 
+/// Reads --polygon/--polygon-file into `args.shapes` and sets --bbox to their rectangle.
+pub fn resolve_shapes(args: &mut Args) -> Result<(), String> {
+    use crate::coordinate_system::geographic::LLShapes;
+    let mut polygons = Vec::new();
+    for (i, points) in args.polygon.iter().enumerate() {
+        let ring =
+            LLShapes::parse_points(points).map_err(|e| format!("--polygon {}: {e}", i + 1))?;
+        polygons.push(vec![ring]);
+    }
+    if let Some(path) = &args.polygon_file {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("--polygon-file {}: {e}", path.display()))?;
+        polygons.extend(
+            LLShapes::from_geojson(&text)
+                .map_err(|e| format!("--polygon-file {}: {e}", path.display()))?,
+        );
+    }
+    if polygons.is_empty() {
+        return Ok(());
+    }
+    let shapes = LLShapes::new(polygons).map_err(|e| format!("--polygon: {e}"))?;
+    args.bbox = Some(shapes.bbox());
+    args.shapes = Some(shapes);
+    Ok(())
+}
+
 pub fn validate_args(args: &Args) -> Result<(), String> {
+    // One World and live mode track their areas as rectangles of whole chunks.
+    if args.shapes.is_some() && (args.one_world || args.live.live) {
+        return Err(
+            "--polygon makes a world of its own; --one-world and --live generate rectangles."
+                .to_string(),
+        );
+    }
+
     // Moon/Mars scale is ours, and sits below MIN_SCALE by design.
     if args.body.is_earth() {
         validate_scale(args.scale)?;
@@ -1229,6 +1283,12 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                             .to_string(),
                     );
                 }
+            }
+            if args.shapes.as_ref().is_some_and(|s| !s.contains(&llpoint)) {
+                return Err(
+                    "Spawn point (--spawn-lat, --spawn-lng) must be inside the --polygon shapes."
+                        .to_string(),
+                );
             }
         }
         _ => {}
@@ -2219,5 +2279,55 @@ mod tests {
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(validate_args(&args).is_err());
+    }
+
+    #[test]
+    fn polygons_set_the_area_and_its_rectangle() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let resolved = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::try_parse_from(cmd.iter()).map_err(|e| e.to_string())?;
+            resolve_shapes(&mut args)?;
+            validate_args(&args)?;
+            Ok::<Args, String>(args)
+        };
+
+        let tri = "52.50,13.37 52.53,13.37 52.50,13.42";
+        let args = resolved(&[
+            "--polygon",
+            tri,
+            "--polygon",
+            "52.6,13.5 52.61,13.5 52.61,13.52",
+        ])
+        .unwrap();
+        let shapes = args.shapes.as_ref().unwrap();
+        assert_eq!(shapes.polygons().len(), 2);
+        let bbox = args.bbox.unwrap();
+        assert_eq!((bbox.min().lat(), bbox.min().lng()), (52.50, 13.37));
+        assert_eq!((bbox.max().lat(), bbox.max().lng()), (52.61, 13.52));
+
+        // The rectangle and the shape are two ways of saying where; one is enough.
+        assert!(resolved(&["--bbox", "1,2,3,4", "--polygon", tri]).is_err());
+        assert!(resolved(&["--polygon", "52.5,13.3 52.6,13.3"]).is_err());
+        assert!(resolved(&["--polygon", tri, "--one-world"]).is_err());
+
+        let inside = ["--spawn-lat", "52.505", "--spawn-lng", "13.38"];
+        assert!(resolved(&[&["--polygon", tri][..], &inside[..]].concat()).is_ok());
+        // Inside the rectangle, across the diagonal from the triangle.
+        let outside = ["--spawn-lat", "52.528", "--spawn-lng", "13.415"];
+        assert!(resolved(&[&["--polygon", tri][..], &outside[..]].concat()).is_err());
+
+        let geojson = tmpdir.path().join("area.geojson");
+        std::fs::write(
+            &geojson,
+            r#"{"type":"Polygon","coordinates":[[[13.37,52.5],[13.42,52.5],[13.42,52.53],[13.37,52.5]]]}"#,
+        )
+        .unwrap();
+        let file = geojson.to_str().unwrap();
+        let args = resolved(&["--polygon-file", file, "--polygon", tri]).unwrap();
+        assert_eq!(args.shapes.unwrap().polygons().len(), 2);
+        assert!(resolved(&["--polygon-file", "/no/such/file.geojson"]).is_err());
     }
 }

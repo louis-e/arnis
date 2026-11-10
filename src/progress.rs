@@ -126,6 +126,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         return;
     }
     remember_status(message);
+    crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -147,6 +148,7 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
         return;
     }
     remember_status(message);
+    crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -199,6 +201,7 @@ pub fn emit_show_in_folder(path: &str) {
 
 /// Live mode's state, for the GUI.
 pub fn emit_live_status(status: &crate::live::Status) {
+    crate::discord::live(&status.phase);
     if let Some(window) = get_main_window() {
         if let Err(e) = window.emit("live-status", status) {
             eprintln!("Failed to emit live-status event: {e}");

@@ -1,4 +1,5 @@
 use super::rectangle::XZBBoxRect;
+use super::shape::{XZBBoxShape, XZPolygon};
 use crate::coordinate_system::cartesian::{XZPoint, XZVector};
 use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
@@ -7,6 +8,8 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 #[derive(Clone, Debug)]
 pub enum XZBBox {
     Rect(XZBBoxRect),
+    /// The columns of a drawn outline inside its rectangle.
+    Shape(XZBBoxShape),
 }
 
 impl XZBBox {
@@ -65,16 +68,86 @@ impl XZBBox {
     }
 
     /// Check whether an XZPoint is covered
+    #[inline]
     pub fn contains(&self, xzpoint: &XZPoint) -> bool {
         match self {
             Self::Rect(r) => r.contains(xzpoint),
+            Self::Shape(s) => s.contains(xzpoint),
         }
     }
 
     /// Return the circumscribed rectangle of the current XZBBox shape
+    #[inline]
     pub fn bounding_rect(&self) -> XZBBoxRect {
         match self {
             Self::Rect(r) => *r,
+            Self::Shape(s) => s.rect(),
+        }
+    }
+
+    /// Keeps only the columns of this rectangle that lie in the outline.
+    pub fn with_outline(self, polygons: Vec<XZPolygon>) -> Result<Self, String> {
+        Ok(Self::Shape(XZBBoxShape::new(
+            self.bounding_rect(),
+            polygons,
+        )?))
+    }
+
+    /// The drawn outline, when there is one.
+    pub fn outline(&self) -> Option<&XZBBoxShape> {
+        match self {
+            Self::Rect(_) => None,
+            Self::Shape(s) => Some(s),
+        }
+    }
+
+    /// This area seen through an inclusive rectangle, which keeps an outline's mask.
+    pub fn crop(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> Result<Self, String> {
+        let rect = XZBBoxRect::new(XZPoint::new(min_x, min_z), XZPoint::new(max_x, max_z))?;
+        Ok(match self {
+            Self::Rect(_) => Self::Rect(rect),
+            Self::Shape(s) => Self::Shape(s.crop(rect)),
+        })
+    }
+
+    /// Whether every column of the inclusive rectangle is covered.
+    pub fn covers_rect(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> bool {
+        match self {
+            Self::Rect(r) => {
+                r.contains(&XZPoint::new(min_x, min_z)) && r.contains(&XZPoint::new(max_x, max_z))
+            }
+            Self::Shape(s) => s.covers(min_x, min_z, max_x, max_z),
+        }
+    }
+
+    /// Whether any column of the inclusive rectangle is covered.
+    pub fn touches_rect(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> bool {
+        match self {
+            Self::Rect(r) => {
+                min_x <= r.max().x && max_x >= r.min().x && min_z <= r.max().z && max_z >= r.min().z
+            }
+            Self::Shape(s) => s.touches(min_x, min_z, max_x, max_z),
+        }
+    }
+
+    /// The middle of the area, or the column of a drawn outline nearest to it.
+    pub fn center_spawn(&self) -> (i32, i32) {
+        let center = XZPoint::new(
+            (self.min_x() + self.max_x()) / 2,
+            (self.min_z() + self.max_z()) / 2,
+        );
+        let p = self
+            .outline()
+            .and_then(|s| s.nearest_inside(center))
+            .unwrap_or(center);
+        (p.x, p.z)
+    }
+
+    /// Where a world starts without a spawn picked: a block in from the north-west corner.
+    pub fn default_spawn(&self) -> (i32, i32) {
+        match self.outline().and_then(XZBBoxShape::first_inside) {
+            Some(p) => (p.x, p.z),
+            None => (self.min_x() + 1, self.min_z() + 1),
         }
     }
 
@@ -103,6 +176,7 @@ impl fmt::Display for XZBBox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rect(r) => write!(f, "XZBBox::{r}"),
+            Self::Shape(s) => write!(f, "XZBBox::{s}"),
         }
     }
 }
@@ -114,15 +188,14 @@ impl Add<XZVector> for XZBBox {
     fn add(self, other: XZVector) -> XZBBox {
         match self {
             Self::Rect(r) => Self::Rect(r + other),
+            Self::Shape(s) => Self::Shape(s + other),
         }
     }
 }
 
 impl AddAssign<XZVector> for XZBBox {
     fn add_assign(&mut self, other: XZVector) {
-        match self {
-            Self::Rect(r) => *r += other,
-        }
+        *self = self.clone() + other;
     }
 }
 
@@ -132,15 +205,14 @@ impl Sub<XZVector> for XZBBox {
     fn sub(self, other: XZVector) -> XZBBox {
         match self {
             Self::Rect(r) => Self::Rect(r - other),
+            Self::Shape(s) => Self::Shape(s - other),
         }
     }
 }
 
 impl SubAssign<XZVector> for XZBBox {
     fn sub_assign(&mut self, other: XZVector) {
-        match self {
-            Self::Rect(r) => *r -= other,
-        }
+        *self = self.clone() - other;
     }
 }
 

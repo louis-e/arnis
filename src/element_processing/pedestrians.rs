@@ -730,16 +730,22 @@ impl WalkNetwork {
         surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
     ) -> Self {
         let size = scale.clamp(0.4, 3.0);
-        let ways: Vec<(&ProcessedWay, i32, f64)> = elements
+        let found: Vec<(&ProcessedWay, (i32, f64))> = elements
             .iter()
             .filter_map(|e| match e {
                 ProcessedElement::Way(w) if w.nodes.len() >= 2 => {
                     let density = walk_density(&w.tags)?;
                     let half = highway_block_range(&w.tags["highway"], &w.tags, scale);
-                    Some((w, half, density))
+                    Some((w, (half, density)))
                 }
                 _ => None,
             })
+            .collect();
+        // A drawn outline cuts the paths where they leave it, which walkers treat as the edge.
+        let found = crate::clipping::cut_ways_to_outline(found, world);
+        let ways: Vec<(&ProcessedWay, i32, f64)> = found
+            .iter()
+            .map(|(w, (half, density))| (w.as_ref(), *half, *density))
             .collect();
         // How wide the road is at every node a road runs through, where a walker crosses:
         // the widest, the first road there and whether any other meets it.
@@ -784,7 +790,16 @@ impl WalkNetwork {
                 *uses.entry(n.id).or_default() += 1;
             }
         }
-        let across = across_squares(elements, &ways, &uses, &roads, scale);
+        let across: Vec<(ProcessedWay, f64)> =
+            across_squares(elements, &ways, &uses, &roads, scale)
+                .into_iter()
+                .flat_map(|(w, d)| {
+                    crate::clipping::cut_way_to_outline(&w, world)
+                        .unwrap_or_else(|| vec![w])
+                        .into_iter()
+                        .map(move |p| (p, d))
+                })
+                .collect();
         for (w, _) in &across {
             for n in &w.nodes {
                 *uses.entry(n.id).or_default() += 1;

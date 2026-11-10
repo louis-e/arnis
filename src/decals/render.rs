@@ -7,11 +7,11 @@ use super::posters;
 use super::registry::DecalKey;
 use super::templates;
 use crate::map_item_palette::nearest_map_color;
-use image::RgbImage;
+use image::RgbaImage;
 
 /// World preview raster used for local "you are here" maps.
 pub struct PreviewRaster<'a> {
-    pub img: &'a RgbImage,
+    pub img: &'a RgbaImage,
     pub min_x: i32,
     pub min_z: i32,
     /// Blocks per preview pixel.
@@ -121,15 +121,15 @@ fn local_map(canvas: &mut Canvas, x: i32, z: i32, preview: Option<&PreviewRaster
                     let wz = z - LOCAL_MAP_HALF_SPAN + j * span / h;
                     let px = (wx - p.min_x) / p.step as i32;
                     let pz = (wz - p.min_z) / p.step as i32;
-                    let id = if px < 0
-                        || pz < 0
-                        || px >= p.img.width() as i32
-                        || pz >= p.img.height() as i32
-                    {
-                        colors::LIGHT_GRAY
-                    } else {
-                        let c = p.img.get_pixel(px as u32, pz as u32).0;
-                        nearest_map_color(c[0], c[1], c[2])
+                    let c = (px >= 0
+                        && pz >= 0
+                        && px < p.img.width() as i32
+                        && pz < p.img.height() as i32)
+                        .then(|| p.img.get_pixel(px as u32, pz as u32).0)
+                        .filter(|c| c[3] > 0);
+                    let id = match c {
+                        Some(c) => nearest_map_color(c[0], c[1], c[2]),
+                        None => colors::LIGHT_GRAY,
                     };
                     canvas.set(i, j, id);
                 }
@@ -310,11 +310,11 @@ mod tests {
 
     #[test]
     fn local_map_samples_the_preview() {
-        let mut img = RgbImage::from_pixel(64, 64, image::Rgb([0, 124, 0]));
+        let mut img = RgbaImage::from_pixel(64, 64, image::Rgba([0, 124, 0, 255]));
         // Blue lake at the top-left quadrant of the raster.
         for y in 0..20 {
             for x in 0..20 {
-                img.put_pixel(x, y, image::Rgb([64, 64, 255]));
+                img.put_pixel(x, y, image::Rgba([64, 64, 255, 255]));
             }
         }
         let raster = PreviewRaster {

@@ -319,7 +319,7 @@ fn parse_kmh(raw: &str) -> Option<f64> {
 impl TrainNetwork {
     pub fn build(elements: &[ProcessedElement], scale: f64, world: &XZBBox) -> Self {
         let size = scale.clamp(0.4, 3.0);
-        let pieces = pieces(elements);
+        let pieces = pieces(elements, world);
         let mut routes = routes(&pieces, world, scale);
         let features = stop_features(elements);
         for route in &mut routes {
@@ -746,15 +746,17 @@ fn write_points(out: &mut String, r: usize, route: &Route, ys: &[f64]) {
     }
 }
 
-/// The tracks trains run on, split where they meet.
-fn pieces(elements: &[ProcessedElement]) -> Vec<Piece> {
-    let ways: Vec<(&ProcessedWay, Mode)> = elements
+/// The tracks trains run on, split where they meet and cut where they leave a drawn outline.
+fn pieces(elements: &[ProcessedElement], world: &XZBBox) -> Vec<Piece> {
+    let found: Vec<(&ProcessedWay, Mode)> = elements
         .iter()
         .filter_map(|e| match e {
             ProcessedElement::Way(w) if w.nodes.len() >= 2 => Mode::of(w).map(|m| (w, m)),
             _ => None,
         })
         .collect();
+    let found = crate::clipping::cut_ways_to_outline(found, world);
+    let ways: Vec<(&ProcessedWay, Mode)> = found.iter().map(|(w, m)| (w.as_ref(), *m)).collect();
     let mut uses: FnvHashMap<u64, usize> = FnvHashMap::default();
     for (way, _) in &ways {
         for n in &way.nodes {
@@ -1870,6 +1872,42 @@ mod tests {
 
     fn net(elements: &[ProcessedElement]) -> TrainNetwork {
         TrainNetwork::build(elements, 1.0, &world())
+    }
+
+    #[test]
+    fn trains_stay_in_drawn_areas_and_leave_at_their_edges() {
+        use crate::coordinate_system::cartesian::XZPoint;
+        // Two areas with a gap between them, a line running through both.
+        let world = world()
+            .with_outline(vec![
+                vec![vec![
+                    (0.0, 0.0),
+                    (700.0, 0.0),
+                    (700.0, 2000.0),
+                    (0.0, 2000.0),
+                ]],
+                vec![vec![
+                    (1300.0, 0.0),
+                    (2000.0, 0.0),
+                    (2000.0, 2000.0),
+                    (1300.0, 2000.0),
+                ]],
+            ])
+            .unwrap();
+        let elements = vec![track(1, line(100, (0, 1000), (2000, 1000), 20), "rail")];
+        let net = TrainNetwork::build(&elements, 1.0, &world);
+        assert_eq!(net.routes.len(), 2);
+        for route in &net.routes {
+            assert_eq!(
+                route.shape,
+                Shape::Through,
+                "a cut end is an edge, not a buffer"
+            );
+            for &(x, z) in &route.points {
+                let p = XZPoint::new(x.floor() as i32, z.floor() as i32);
+                assert!(world.contains(&p), "{p:?}");
+            }
+        }
     }
 
     #[test]

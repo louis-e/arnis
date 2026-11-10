@@ -9,7 +9,7 @@ use crate::progress::emit_gui_progress_update;
 use crate::world_utils::WorldLayout;
 use fastnbt::{ByteArray, Value};
 use flate2::read::GzDecoder;
-use image::RgbImage;
+use image::RgbaImage;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -132,7 +132,7 @@ fn map_geometry(max_dim: i32) -> (i32, i8, bool) {
 // Quantized 128x128 colors: average the preview pixels under each map pixel's footprint.
 #[allow(clippy::too_many_arguments)]
 fn build_colors(
-    img: &RgbImage,
+    img: &RgbaImage,
     img_min_x: i32,
     img_min_z: i32,
     step: u32,
@@ -168,6 +168,10 @@ fn build_colors(
             for pz in pz0..=pz1 {
                 for px in px0..=px1 {
                     let p = img.get_pixel(px as u32, pz as u32);
+                    // Unsampled, as outside a drawn outline: left transparent on the map.
+                    if p.0[3] == 0 {
+                        continue;
+                    }
                     r += p.0[0] as u64;
                     g += p.0[1] as u64;
                     b += p.0[2] as u64;
@@ -502,6 +506,15 @@ mod tests {
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
         let xzbbox = XZBBox::rect_from_xz_lengths(300.0, 100.0).unwrap();
         let preview = PreviewAccumulator::new(&xzbbox);
+        // Ground under the centre only.
+        let mut region = crate::world_editor::RegionToModify::default();
+        let chunk = region.get_or_create_chunk(9, 3);
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set_block(x, 0, z, crate::block_definitions::STONE);
+            }
+        }
+        preview.ingest_region(0, 0, &region);
         write_map_item(&world, &preview, &xzbbox, next_map_id(&world.join("data"))).unwrap();
 
         let Value::Compound(root) = read_gzip_nbt(&map_file(&world, FIRST_MAP_ID)).unwrap() else {
@@ -520,6 +533,8 @@ mod tests {
         // Non-square world: center sampled, area past the short axis stays transparent.
         assert_ne!(colors[64 * 128 + 64], TRANSPARENT as i8);
         assert_eq!(colors[(64 + 40) * 128 + 64], TRANSPARENT as i8);
+        // So does a column nothing was drawn on, as outside a drawn outline.
+        assert_eq!(colors[64 * 128 + 40], TRANSPARENT as i8);
 
         let Value::Compound(idroot) = read_gzip_nbt(&world.join("data/idcounts.dat")).unwrap()
         else {
