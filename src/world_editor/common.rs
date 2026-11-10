@@ -786,6 +786,42 @@ fn pack_palette_indices(indices: &[u16; SECTION_BLOCKS], bits_per_block: usize) 
     LongArray::new(data)
 }
 
+/// A text that is the same for equal values. A compound's `Debug` output follows the
+/// iteration order of its hash map, which differs between two maps holding the same
+/// entries, so two equal block states compared by it only matched by chance.
+fn canonical_repr(value: &Value) -> String {
+    fn write(value: &Value, out: &mut String) {
+        use std::fmt::Write as _;
+        match value {
+            Value::Compound(map) => {
+                let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+                entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+                out.push('{');
+                for (key, value) in entries {
+                    let _ = write!(out, "{key:?}:");
+                    write(value, out);
+                    out.push(',');
+                }
+                out.push('}');
+            }
+            Value::List(items) => {
+                out.push('[');
+                for item in items {
+                    write(item, out);
+                    out.push(',');
+                }
+                out.push(']');
+            }
+            other => {
+                let _ = write!(out, "{other:?}");
+            }
+        }
+    }
+    let mut out = String::new();
+    write(value, &mut out);
+    out
+}
+
 fn make_palette_item(block: Block, stored_props: Option<&Arc<Value>>) -> PaletteItem {
     PaletteItem {
         name: format!("{}:{}", block.namespace(), block.name()),
@@ -1068,8 +1104,8 @@ impl SectionToModify {
                 let id = match props_by_ptr.entry(Arc::as_ptr(p) as usize) {
                     std::collections::hash_map::Entry::Occupied(e) => *e.get(),
                     std::collections::hash_map::Entry::Vacant(e) => {
-                        // Distinct Arcs with equal Debug output must still collapse.
-                        let id = *props_by_repr.entry(format!("{p:?}")).or_insert_with(|| {
+                        // Distinct Arcs with equal contents must still collapse.
+                        let id = *props_by_repr.entry(canonical_repr(p)).or_insert_with(|| {
                             let id = next_id;
                             next_id += 1;
                             id
@@ -2377,7 +2413,7 @@ mod to_section_tests {
         let mut indices = Vec::with_capacity(SECTION_BLOCKS);
         for (i, block) in section.storage.iter().enumerate() {
             let properties = section.properties.get(&i);
-            let props_key = properties.map(|p| format!("{p:?}"));
+            let props_key = properties.map(|p| canonical_repr(p));
             let palette_index = match palette_lookup.entry((block, props_key)) {
                 std::collections::hash_map::Entry::Occupied(e) => *e.get(),
                 std::collections::hash_map::Entry::Vacant(e) => {
@@ -2425,6 +2461,71 @@ mod to_section_tests {
             );
         }
         s
+    }
+
+    /// A block state as the generators build it: a compound of strings in a map of its own.
+    fn state(pairs: &[(&str, &str)]) -> Arc<Value> {
+        Arc::new(Value::Compound(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn equal_states_in_maps_of_their_own_share_one_palette_entry() {
+        // Every std HashMap hashes with its own keys, so two maps with the same entries
+        // list them in different orders more often than not. Forty of them never agree.
+        let pairs = [
+            ("bottom", "false"),
+            ("distance", "0"),
+            ("waterlogged", "false"),
+            ("shape", "straight"),
+        ];
+        let mut s = SectionToModify::default();
+        for i in 0..40 {
+            s.storage.set(i, STONE);
+            s.properties.insert(i, state(&pairs));
+        }
+        // A different state, and a nested one, each stay apart.
+        s.storage.set(100, STONE);
+        s.properties
+            .insert(100, state(&[("bottom", "true"), ("distance", "0")]));
+        for i in 200..210 {
+            s.storage.set(i, STONE);
+            let inner = (*state(&[("a", "1"), ("b", "2"), ("c", "3")])).clone();
+            let nested = Value::Compound(
+                [
+                    ("inner".to_string(), inner),
+                    ("list".to_string(), Value::List(vec![Value::Int(1)])),
+                ]
+                .into_iter()
+                .collect(),
+            );
+            s.properties.insert(i, Arc::new(nested));
+        }
+
+        let section = s.to_section(0);
+        // Air, and one entry for each of the three states.
+        assert_eq!(section.block_states.palette.len(), 4);
+        // And every cell points at the entry of its state: four bits a cell, sixteen to a long.
+        let longs: &[i64] = section.block_states.data.as_ref().expect("packed data");
+        let entry = |cell: usize| (longs[cell / 16] >> ((cell % 16) * 4)) & 15;
+        assert!((0..40).all(|cell| entry(cell) == entry(0)));
+        assert!((200..210).all(|cell| entry(cell) == entry(200)));
+        let distinct: std::collections::HashSet<i64> =
+            [entry(0), entry(100), entry(200), entry(300)].into();
+        assert_eq!(distinct.len(), 4);
+
+        assert_eq!(
+            canonical_repr(&state(&pairs)),
+            canonical_repr(&state(&pairs))
+        );
+        assert_ne!(
+            canonical_repr(&state(&[("a", "b")])),
+            canonical_repr(&state(&[("a", "c")]))
+        );
     }
 
     #[test]
