@@ -38,24 +38,17 @@ pub fn mark_cut_ends(nodes: &mut [ProcessedNode], ends: [(i32, i32); 2], way_id:
     }
 }
 
-/// Indices of the invented ids for where a line leaves a drawn outline, clear of a
-/// rectangle's cuts, which count the way's nodes.
+/// Invented id indices for outline cuts, clear of a rectangle's, which count the way's nodes.
 const OUTLINE_CUT_BASE: u64 = 9_000_000;
 
-/// How far past a drawn outline a line may stray before it counts as leaving: a road or
-/// river traced as the outline wavers that much across it.
+/// How far a line traced along the outline may waver across it without leaving.
 const OUTLINE_SLACK: i32 = 2;
 
-/// Shortest run cut at both ends worth keeping, in blocks: a line that only grazes a
-/// corner of the outline would give a vehicle nowhere to go.
+/// Shortest run cut at both ends worth keeping, in blocks; a grazed corner leaves nowhere to go.
 const MIN_CUT_RUN: f64 = 12.0;
 
-/// The runs of a line that lie inside a drawn outline, as `(id, x, z)` points in block space.
-/// Where the line leaves, a run ends on a point of its own inside, with an invented id: what
-/// the vehicle networks read as the edge of the area, as at a rectangle's cut. Straying up to
-/// `OUTLINE_SLACK` blocks out and back is not leaving. `None` when there is nothing to cut:
-/// no outline, or the line stays inside. `cuts` counts the cuts made on this way so far, so
-/// pieces of one way cut apart get ids of their own.
+/// The runs of a line inside a drawn outline, cut ends getting invented ids as at a rectangle's
+/// edge; `None` when nothing is cut. `cuts` numbers the cuts of this way across calls.
 pub fn cut_line_to_outline(
     way_id: u64,
     points: &[(u64, f64, f64)],
@@ -68,10 +61,17 @@ pub fn cut_line_to_outline(
         let (bx, bz) = block(x, z);
         world.contains(&XZPoint::new(bx, bz))
     };
+    let r = OUTLINE_SLACK;
+    // A column with the outline on two opposite sides is a gap between areas, not a waver.
+    let between = |bx: i32, bz: i32| {
+        let hit = |dx: i32, dz: i32| {
+            (1..=2 * r).any(|k| world.contains(&XZPoint::new(bx + dx * k, bz + dz * k)))
+        };
+        (hit(1, 0) && hit(-1, 0)) || (hit(0, 1) && hit(0, -1))
+    };
     let near = |x: f64, z: f64| {
         let (bx, bz) = block(x, z);
-        let r = OUTLINE_SLACK;
-        world.touches_rect(bx - r, bz - r, bx + r, bz + r)
+        world.touches_rect(bx - r, bz - r, bx + r, bz + r) && !between(bx, bz)
     };
     let before = *cuts;
     let mut cut_at = |x: f64, z: f64| {
@@ -84,11 +84,10 @@ pub fn cut_line_to_outline(
     let Some(&first) = points.first() else {
         return Some(runs);
     };
-    // A line starting just outside starts in, unless it never gets inside at all.
-    let mut is_in = near(first.1, first.2);
-    // The last point truly inside with how long the run was there, and the sample after
-    // it: a run that strays and then leaves for good ends on the boundary between them.
-    let mut last_in = inside(first.1, first.2).then_some((first.1, first.2, 1usize));
+    // A line starting just outside is cut where it enters, as one ending there is where it leaves.
+    let mut is_in = inside(first.1, first.2);
+    // Last point truly inside with the run length there, and the first sample out after it.
+    let mut last_in = (first.1, first.2, 1usize);
     let mut after_in: Option<(f64, f64)> = None;
     if is_in {
         run.push(first);
@@ -128,31 +127,25 @@ pub fn cut_line_to_outline(
                 if inside(x, z) {
                     // The last sample is the node itself, recorded once it is in the run.
                     if s < steps {
-                        last_in = Some((x, z, run.len()));
+                        last_in = (x, z, run.len());
                     }
                     after_in = None;
                 } else {
-                    after_in.get_or_insert((x, z));
+                    let out = *after_in.get_or_insert((x, z));
                     if !near(x, z) {
-                        match last_in {
-                            Some((lx, lz, len)) => {
-                                let (cx, cz) = boundary((lx, lz), after_in.unwrap());
-                                run.truncate(len);
-                                run.push(cut_at(cx, cz));
-                                close(&mut run, starts_cut, true);
-                            }
-                            // Never inside: only passing by.
-                            None => run.clear(),
-                        }
+                        let (lx, lz, len) = last_in;
+                        let (cx, cz) = boundary((lx, lz), out);
+                        run.truncate(len);
+                        run.push(cut_at(cx, cz));
+                        close(&mut run, starts_cut, true);
                         is_in = false;
-                        last_in = None;
                     }
                 }
             } else if inside(x, z) {
                 let (cx, cz) = boundary((x, z), at(t0));
                 run.push(cut_at(cx, cz));
                 starts_cut = true;
-                last_in = Some((x, z, run.len()));
+                last_in = (x, z, run.len());
                 after_in = None;
                 is_in = true;
             }
@@ -161,22 +154,22 @@ pub fn cut_line_to_outline(
         if is_in {
             run.push(b);
             if inside(b.1, b.2) {
-                last_in = Some((b.1, b.2, run.len()));
+                last_in = (b.1, b.2, run.len());
                 after_in = None;
             }
         }
     }
     if is_in {
-        match (last_in, after_in) {
-            (None, _) => run.clear(),
+        match after_in {
             // A line ending just outside ends on the boundary.
-            (Some((lx, lz, len)), Some(out)) => {
+            Some(out) => {
+                let (lx, lz, len) = last_in;
                 let (cx, cz) = boundary((lx, lz), out);
                 run.truncate(len);
                 run.push(cut_at(cx, cz));
                 close(&mut run, starts_cut, true);
             }
-            (Some(_), None) => close(&mut run, starts_cut, false),
+            None => close(&mut run, starts_cut, false),
         }
     }
     if *cuts == before && runs.len() == 1 && runs[0].len() == points.len() {
@@ -185,8 +178,7 @@ pub fn cut_line_to_outline(
     Some(runs)
 }
 
-/// [`cut_line_to_outline`] for a way: its pieces inside the outline, cut ends as nodes of
-/// their own without tags, or `None` when the way needs no cutting.
+/// [`cut_line_to_outline`] for a way, cut ends as untagged nodes of their own.
 pub fn cut_way_to_outline(
     way: &crate::osm_parser::ProcessedWay,
     world: &XZBBox,
@@ -220,8 +212,7 @@ pub fn cut_way_to_outline(
     )
 }
 
-/// Ways a vehicle network runs on, cut to a drawn outline in their own order; a way that
-/// needs no cutting, as every way of a rectangle, is passed through as it is.
+/// Ways cut to a drawn outline in their own order; uncut ways pass through borrowed.
 pub fn cut_ways_to_outline<'a, T: Copy>(
     ways: Vec<(&'a crate::osm_parser::ProcessedWay, T)>,
     world: &XZBBox,
@@ -237,12 +228,7 @@ pub fn cut_ways_to_outline<'a, T: Copy>(
     for (w, t) in ways {
         match cut_way_to_outline(w, world) {
             None => out.push((Cow::Borrowed(w), t)),
-            Some(pieces) => out.extend(
-                pieces
-                    .into_iter()
-                    .filter(|p| p.nodes.len() >= 2)
-                    .map(|p| (Cow::Owned(p), t)),
-            ),
+            Some(pieces) => out.extend(pieces.into_iter().map(|p| (Cow::Owned(p), t))),
         }
     }
     out
@@ -1052,7 +1038,7 @@ mod tests {
             ]]])
             .unwrap();
         // A road traced as the outline's east edge, wavering a block or two across it.
-        let road: Vec<(u64, f64, f64)> = (0..40)
+        let road: Vec<(u64, f64, f64)> = (1..40)
             .map(|k| {
                 let x = 100.5 + if k % 2 == 0 { 1.5 } else { -1.5 };
                 (k as u64 + 1, x, 5.5 + k as f64 * 4.5)
@@ -1064,8 +1050,7 @@ mod tests {
         let graze = [(1, 95.5, -8.5), (2, 108.5, 4.5)];
         assert_eq!(cut_line_to_outline(3, &graze, &world, &mut 0), Some(vec![]));
 
-        // A node just outside before the line leaves: the run ends on the boundary after the
-        // last node inside and drops the stray one.
+        // A stray node just outside before the line leaves is dropped for a cut on the boundary.
         let out = [
             (1, 50.5, 50.5),
             (2, 99.5, 50.5),
@@ -1081,6 +1066,35 @@ mod tests {
             is_invented_node_id(end.0) && end.1 > 99.5 && end.1 < 101.0,
             "{end:?}"
         );
+    }
+
+    #[test]
+    fn a_narrow_gap_cuts_and_a_line_starting_just_outside_starts_on_a_cut() {
+        // Two areas four columns apart, closer than a waver may stray.
+        let world = XZBBox::rect_from_min_max(0, 0, 60, 30)
+            .unwrap()
+            .with_outline(vec![
+                vec![vec![(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]],
+                vec![vec![(35.0, 0.0), (60.0, 0.0), (60.0, 20.0), (35.0, 20.0)]],
+            ])
+            .unwrap();
+        let line = [(1, 5.5, 10.5), (2, 55.5, 10.5)];
+        let runs = cut_line_to_outline(7, &line, &world, &mut 0).unwrap();
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        assert!(runs
+            .iter()
+            .flatten()
+            .all(|p| world.contains(&XZPoint::new(p.1.floor() as i32, p.2.floor() as i32))));
+
+        let start = [(1, 45.5, 21.5), (2, 45.5, 5.5)];
+        let runs = cut_line_to_outline(7, &start, &world, &mut 0).unwrap();
+        assert_eq!(runs.len(), 1);
+        let (a, b) = (runs[0][0], runs[0][1]);
+        assert!(
+            is_invented_node_id(a.0) && (a.2 - 21.0).abs() < 0.01,
+            "{a:?}"
+        );
+        assert_eq!(b.0, 2);
     }
 
     #[test]

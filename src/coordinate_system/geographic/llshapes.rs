@@ -13,8 +13,7 @@ pub struct LLShapes {
 }
 
 impl LLShapes {
-    /// Polygons of `(lat, lng)` rings, outer ring first. Repeated points and a closing point
-    /// are dropped; a ring needs three points and some area.
+    /// Polygons of `(lat, lng)` rings, outer first; each ring needs three distinct points and area.
     pub fn new(polygons: Vec<LLRings>) -> Result<Self, String> {
         if polygons.is_empty() {
             return Err("No shape was given.".to_string());
@@ -90,15 +89,20 @@ impl LLShapes {
         LLBBox::new(s, w, n, e).expect("checked shapes span a rectangle")
     }
 
-    /// Whether the point lies in some shape (and outside that shape's holes).
+    /// Whether the point lies in some shape, outside its holes; edges count as in, as for blocks.
     pub fn contains(&self, p: &LLPoint) -> bool {
         self.polygons.iter().any(|rings| {
-            rings
-                .iter()
-                .filter(|ring| ring_contains(ring, p.lng(), p.lat()))
-                .count()
-                % 2
-                == 1
+            rings.iter().any(|ring| on_ring(ring, p))
+                || rings
+                    .iter()
+                    .filter(|ring| {
+                        let points: Vec<(f64, f64)> =
+                            ring.iter().map(|q| (q.lat(), q.lng())).collect();
+                        crate::osm_parser::point_in_ring(p.lat(), p.lng(), &points)
+                    })
+                    .count()
+                    % 2
+                    == 1
         })
     }
 }
@@ -138,8 +142,7 @@ fn check_ring(ring: Vec<(f64, f64)>) -> Result<Vec<LLPoint>, String> {
     if e - w > 180.0 {
         return Err(ACROSS_MERIDIAN.to_string());
     }
-    // Taken about the first point, so the products stay small next to the area; a flat
-    // outline then comes out as nothing rather than as rounding noise.
+    // About the first point, so a flat outline gives zero rather than rounding noise.
     let o = points[0];
     let twice_area: f64 = (0..points.len())
         .map(|i| {
@@ -159,26 +162,18 @@ fn check_ring(ring: Vec<(f64, f64)>) -> Result<Vec<LLPoint>, String> {
     Ok(points)
 }
 
-/// Even-odd test of (x, y) against one ring, boundary counting as inside.
-fn ring_contains(ring: &[LLPoint], x: f64, y: f64) -> bool {
-    let mut inside = false;
-    for i in 0..ring.len() {
+fn on_ring(ring: &[LLPoint], p: &LLPoint) -> bool {
+    let (x, y) = (p.lng(), p.lat());
+    (0..ring.len()).any(|i| {
         let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
         let (ax, ay, bx, by) = (a.lng(), a.lat(), b.lng(), b.lat());
         let cross = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
-        let on_segment = cross.abs() <= 1e-12 * (1.0 + ax.abs().max(bx.abs()))
+        cross.abs() <= 1e-12 * (1.0 + ax.abs().max(bx.abs()))
             && x >= ax.min(bx) - 1e-12
             && x <= ax.max(bx) + 1e-12
             && y >= ay.min(by) - 1e-12
-            && y <= ay.max(by) + 1e-12;
-        if on_segment {
-            return true;
-        }
-        if (ay > y) != (by > y) && x < ax + (y - ay) * (bx - ax) / (by - ay) {
-            inside = !inside;
-        }
-    }
-    inside
+            && y <= ay.max(by) + 1e-12
+    })
 }
 
 fn geojson_ring(v: &serde_json::Value) -> Result<Vec<(f64, f64)>, String> {
@@ -329,6 +324,8 @@ mod tests {
         assert!(s.contains(&LLPoint::new(1.4, 1.4).unwrap()));
         assert!(!s.contains(&LLPoint::new(1.1, 1.9).unwrap()));
         assert!(s.contains(&LLPoint::new(0.0, 1.5).unwrap()));
+        // A hole's edge is in, as the block grid has it.
+        assert!(s.contains(&LLPoint::new(1.0, 1.5).unwrap()));
         assert!(!s.contains(&LLPoint::new(3.5, 1.0).unwrap()));
     }
 

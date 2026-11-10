@@ -352,8 +352,7 @@ pub fn generate_ground_region(
         _ => 0.12,
     };
 
-    // A drawn outline leaves some columns out. A flat world shows its filler plane there,
-    // as it does around the area, so the edge of a cut chunk is no trench to the void.
+    // A flat world fills columns the outline leaves out, so a cut chunk's edge is no trench.
     let shaped = xzbbox.outline().is_some();
     let filler_outside =
         shaped && args.world_type == crate::args::WorldType::Flat && !args.bedrock && !args.luanti;
@@ -365,8 +364,7 @@ pub fn generate_ground_region(
             let chunk_max_x = ((chunk_x << 4) + 15).min(iter_max_x);
             let chunk_min_z = (chunk_z << 4).max(iter_min_z);
             let chunk_max_z = ((chunk_z << 4) + 15).min(iter_max_z);
-            // A chunk the outline misses stays unwritten, which the save fills like the
-            // surroundings of the area.
+            // A chunk the outline misses stays unwritten, filled by the save like the area's surroundings.
             if shaped && !xzbbox.touches_rect(chunk_min_x, chunk_min_z, chunk_max_x, chunk_max_z) {
                 let cells = ((chunk_max_x - chunk_min_x + 1).max(0)
                     * (chunk_max_z - chunk_min_z + 1).max(0)) as u64;

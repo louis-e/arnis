@@ -793,16 +793,12 @@ impl WalkNetwork {
         let across: Vec<(ProcessedWay, f64)> =
             across_squares(elements, &ways, &uses, &roads, scale)
                 .into_iter()
-                .flat_map(
-                    |(w, d)| match crate::clipping::cut_way_to_outline(&w, world) {
-                        None => vec![(w, d)],
-                        Some(pieces) => pieces
-                            .into_iter()
-                            .filter(|p| p.nodes.len() >= 2)
-                            .map(|p| (p, d))
-                            .collect(),
-                    },
-                )
+                .flat_map(|(w, d)| {
+                    crate::clipping::cut_way_to_outline(&w, world)
+                        .unwrap_or_else(|| vec![w])
+                        .into_iter()
+                        .map(move |p| (p, d))
+                })
                 .collect();
         for (w, _) in &across {
             for n in &w.nodes {

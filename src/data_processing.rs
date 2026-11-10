@@ -856,8 +856,7 @@ pub fn generate_world_with_options(
     let void_world =
         world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
     editor.set_void_world(void_world);
-    // A drawn outline can miss that region in a flat world too, where the template's own
-    // chunks would then stand in the generated plain.
+    // An outline can miss it in a flat world too, where its template chunks would stand in the plain.
     if (void_world || (xzbbox.outline().is_some() && world_format == WorldFormat::JavaAnvil))
         && !extending
     {

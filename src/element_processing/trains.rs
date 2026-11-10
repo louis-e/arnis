@@ -746,8 +746,7 @@ fn write_points(out: &mut String, r: usize, route: &Route, ys: &[f64]) {
     }
 }
 
-/// The tracks trains run on, split where they meet. A drawn outline cuts them where they
-/// leave it, and trains treat the cut as the edge of the area.
+/// The tracks trains run on, split where they meet and cut where they leave a drawn outline.
 fn pieces(elements: &[ProcessedElement], world: &XZBBox) -> Vec<Piece> {
     let found: Vec<(&ProcessedWay, Mode)> = elements
         .iter()

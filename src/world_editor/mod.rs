@@ -2658,8 +2658,7 @@ impl<'a> WorldEditor<'a> {
         self.world.set_block_if_absent(x, absolute_y, z, block)
     }
 
-    /// The filler plane of a flat world, in a column of the rectangle a drawn outline leaves
-    /// out, where the area's own writes are refused.
+    /// A flat world's filler plane in a column the drawn outline leaves out of the rectangle.
     pub fn set_filler_outside_outline(&mut self, x: i32, z: i32) {
         let p = XZPoint::new(x, z);
         if !self.xzbbox.bounding_rect().contains(&p)

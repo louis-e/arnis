@@ -6,12 +6,7 @@ use std::sync::Arc;
 /// One drawn polygon in block space: its outer ring, then any holes, as (x, z) vertices.
 pub type XZPolygon = Vec<Vec<(f64, f64)>>;
 
-/// The columns of a rectangle that lie in a drawn outline.
-///
-/// A column belongs to the outline when some point of the closed outline lands on it, as a
-/// node would through the coordinate transform, so a rectangle drawn as a shape covers the
-/// same columns as the rectangle itself. Each polygon fills by the even-odd rule over its
-/// rings, which leaves its holes out, and the polygons merge.
+/// Columns some point of the drawn outline floors onto, as nodes do; even-odd per polygon, merged.
 #[derive(Clone, Debug)]
 pub struct XZBBoxShape {
     rect: XZBBoxRect,
@@ -22,8 +17,7 @@ pub struct XZBBoxShape {
 struct SpanMask {
     polygons: Vec<XZPolygon>,
     min_z: i32,
-    /// Row `min_z + r` covers `spans[offsets[r]..offsets[r + 1]]`: sorted, disjoint,
-    /// inclusive x ranges.
+    /// Row `min_z + r`: `spans[offsets[r]..offsets[r + 1]]`, sorted disjoint inclusive x ranges.
     offsets: Vec<u32>,
     spans: Vec<(i32, i32)>,
 }
@@ -124,8 +118,7 @@ impl XZBBoxShape {
             .sum()
     }
 
-    /// A column inside, near the north-west corner and a few blocks in from the edge where the
-    /// outline allows, so what is placed around the spawn lands inside too.
+    /// A column near the north-west corner, a few blocks in where possible so spawn items land inside.
     pub fn first_inside(&self) -> Option<XZPoint> {
         let r = self.rect;
         for margin in [4, 1, 0] {
@@ -326,13 +319,8 @@ fn merge(row: &mut Vec<(i32, i32)>) {
     row.truncate(out);
 }
 
-/// Adds the x extent of one polygon to every row of `rect` it reaches.
-///
-/// Rows split at every vertex height into slabs no edge starts or ends inside, where the
-/// even-odd pairs of the edges crossing the slab bound the filled part. A slab never spans
-/// a block edge, as every whole height is a split too, so it adds to one row; a slab ending
-/// on a block edge adds its top line to the row above it too, which is how a top edge on a
-/// block edge keeps its row, and horizontal edges add their own row.
+/// Adds one polygon's x extent to the rows of `rect`, slab by slab between vertex and whole heights;
+/// a slab ending on a block edge also adds its top line to that row, as horizontal edges do theirs.
 fn sweep(
     rings: &[Vec<(f64, f64)>],
     rect: &XZBBoxRect,
@@ -356,8 +344,7 @@ fn sweep(
         let r = (row - min_z) as usize;
         let cells = &mut cells[r];
         cells.push((a, b));
-        // Merged each time it doubles, so an outline crossing a row many times holds about
-        // its spans and no more.
+        // Merged each time it doubles, so a row crossed many times stays near its true span count.
         if cells.len() >= 64 && cells.len() >= 2 * merged[r] as usize {
             merge(cells);
             merged[r] = cells.len() as u32;
@@ -436,8 +423,7 @@ fn sweep(
         active.extend(keyed.iter().map(|k| k.1));
         for pair in keyed.chunks_exact(2) {
             let (l, r) = (pair[0].1, pair[1].1);
-            // A top on a block edge belongs to the row above: there the line only comes
-            // close, so a whole x it ends on is not reached in this row.
+            // A top on a block edge belongs to the row above, so a whole x it ends on is not reached here.
             let shy = |v: f64| if top_row.is_some() { v - 1e-9 } else { v };
             let (la, lb, ra, rb) = (l.x_at(a), l.x_at(b), r.x_at(a), r.x_at(b));
             let lo = la.min(lb).min(ra).min(rb);

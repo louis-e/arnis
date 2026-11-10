@@ -1739,8 +1739,7 @@ fn gui_start_generation(
     use progress::emit_gui_error;
     use LLBBox;
 
-    // Drawn shapes replace the rectangle; their own extent is the area that is fetched.
-    // The status line holds 35 characters, so the detail goes to the log.
+    // Shapes replace the rectangle; the status line holds 35 characters, so details go to the log.
     let shapes = match selection_shapes.filter(|rings| !rings.is_empty()) {
         Some(rings) => match LLShapes::new(rings.into_iter().map(|ring| vec![ring]).collect()) {
             Ok(shapes) => Some(shapes),

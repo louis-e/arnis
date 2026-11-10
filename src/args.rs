@@ -967,8 +967,7 @@ pub const DEFAULT_WORLD_TIME: i64 = 6_000;
 /// Minecraft tick for midnight (tick 0 is 06:00).
 pub const MIDNIGHT_TICKS: i64 = 18_000;
 
-/// Reads --polygon and --polygon-file into `args.shapes`, and sets --bbox to the rectangle
-/// around them.
+/// Reads --polygon/--polygon-file into `args.shapes` and sets --bbox to their rectangle.
 pub fn resolve_shapes(args: &mut Args) -> Result<(), String> {
     use crate::coordinate_system::geographic::LLShapes;
     let mut polygons = Vec::new();

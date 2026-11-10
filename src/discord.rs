@@ -1,6 +1,4 @@
-//! The Discord status while Arnis is open ("Playing Arnis"), sent to the Discord app on the
-//! same machine over its local socket. Nothing leaves the machine from here, and only fixed
-//! phrases are shown: never a place, a path or a world name.
+//! Discord status ("Playing Arnis") over the local Discord socket; only fixed phrases, no places.
 
 use serde_json::{json, Value};
 use std::io::{self, Read, Write};
@@ -8,8 +6,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// The Discord application that names the status "Arnis" and holds its logo. Empty leaves
-/// the status off.
+/// The Discord application named "Arnis" holding the logo; empty leaves the status off.
 const APPLICATION_ID: &str = "";
 /// Key of the logo among the application's Rich Presence art assets.
 const LOGO_ASSET: &str = "arnis";
@@ -46,8 +43,7 @@ fn send(event: Event) {
         if !available() {
             return None;
         }
-        // Bounded: a worker stuck on a Discord that stopped answering drops updates instead
-        // of piling them up.
+        // Bounded, so a worker stuck on an unresponsive Discord drops updates instead of piling them.
         let (tx, rx) = mpsc::sync_channel(256);
         std::thread::Builder::new()
             .name("discord-status".into())
@@ -81,9 +77,7 @@ impl Drop for Generation {
     }
 }
 
-/// A progress update of the running generation, as the GUI gets it. An error ends the
-/// status only with the run itself, through [`Generation`]: a refused second start shows
-/// one too while the first goes on.
+/// A generation progress update; errors are ignored, as a refused second start emits one too.
 pub fn progress(progress: f64, message: &str) {
     if message.starts_with("Done!") {
         send(Event::GenerationDone);
@@ -340,7 +334,41 @@ const MAX_FRAME: usize = 1 << 20;
 #[cfg(unix)]
 type Pipe = std::os::unix::net::UnixStream;
 #[cfg(windows)]
-type Pipe = std::fs::File;
+struct Pipe(std::fs::File);
+
+#[cfg(windows)]
+impl Read for Pipe {
+    // Waits at most 5 s for an answer, as the Unix socket's read timeout does.
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::{Foundation::HANDLE, System::Pipes::PeekNamedPipe};
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut ready = 0u32;
+            let handle = HANDLE(self.0.as_raw_handle());
+            unsafe { PeekNamedPipe(handle, None, 0, None, Some(&mut ready), None) }?;
+            if ready > 0 {
+                let n = buf.len().min(ready as usize);
+                return self.0.read(&mut buf[..n]);
+            }
+            if Instant::now() >= deadline {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Write for Pipe {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
 
 struct Connection {
     pipe: Pipe,
@@ -504,6 +532,7 @@ fn open_pipe(path: &std::path::Path) -> io::Result<Pipe> {
         .read(true)
         .write(true)
         .open(path)
+        .map(Pipe)
 }
 
 #[cfg(test)]

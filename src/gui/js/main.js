@@ -1534,9 +1534,7 @@ function initSettings() {
     syncTelemetryConsent();
   });
 
-  // Discord status: stored by the settings store, sent on every change and
-  // once more after the restore (see syncDiscordStatus). A build without a
-  // Discord application hides the row, which would do nothing.
+  // Discord status: sent on change and after restore; hidden in builds without a Discord app.
   const discordToggle = document.getElementById("discord-status-toggle");
   if (discordToggle) {
     discordToggle.addEventListener("change", syncDiscordStatus);
@@ -2644,8 +2642,7 @@ const AREA_THRESHOLDS = {
 
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
-// Drawn areas as [lat, lng] rings when the map selection is more than one
-// rectangle; null generates the plain bbox.
+// Drawn areas as [lat, lng] rings, or null for a single rectangle (the plain bbox).
 let selectedShapes = null;
 let customBBoxValid = false;  // Tracks if custom input is valid
 let bboxInputError = false;  // The coordinate field holds input that did not validate

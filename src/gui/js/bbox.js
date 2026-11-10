@@ -1214,8 +1214,7 @@ $(document).ready(function () {
             var target = contextMenuElement._area;
             hideContextMenu();
             if (!target || !drawnItems.hasLayer(target)) return;
-            // The delete path resets the bounds, notifies the parent and
-            // refreshes the handles, as the trash button does for all of them.
+            // The delete path resets bounds, notifies the parent and refreshes handles.
             map.fire('draw:deleted', { layers: L.layerGroup([target]) });
         });
 
@@ -1660,8 +1659,7 @@ $(document).ready(function () {
     map.addLayer(drawnItems);
 
     // ========== Area shapes ==========
-    // The selection is one or more areas: rectangles and drawn shapes (an
-    // L.Rectangle is an L.Polygon too). The marker beside them is the spawn.
+    // The selection: one or more rectangles and drawn shapes (L.Rectangle is an L.Polygon too).
     var AREA_STYLE = {
         color: '#fecc44',
         opacity: 1.0,
@@ -1687,8 +1685,7 @@ $(document).ready(function () {
         return L.LineUtil.isFlat(ll) ? ll : ll[0];
     }
 
-    // [lat, lng] points moved onto the map copy around longitude 0, or null
-    // when the ring crosses the 180° meridian, which no single copy holds.
+    // [lat, lng] points on the map copy around longitude 0; null across the 180° meridian.
     function normalizedRing(layer) {
         var ring = ringOf(layer);
         var west = Infinity, east = -Infinity;
@@ -1698,8 +1695,7 @@ $(document).ready(function () {
         return ring.map(function (p) { return [p.lat, p.lng + shift]; });
     }
 
-    // Whether these areas, each on the copy of the map around longitude 0, stay
-    // within half the globe east to west together.
+    // Whether these areas, moved onto the copy around longitude 0, span at most 180° together.
     function fitOneSide(areas) {
         var west = Infinity, east = -Infinity;
         for (var i = 0; i < areas.length; i++) {
@@ -1710,13 +1706,11 @@ $(document).ready(function () {
         return east - west <= 180;
     }
 
-    // What the parent sends for generation: null for a single rectangle (the
-    // plain bbox), otherwise every area as a ring.
+    // For generation: null for a single rectangle (the plain bbox), else every area as a ring.
     function selectionShapes() {
         var areas = areaLayers();
         if (areas.length === 0 || (areas.length === 1 && areas[0] instanceof L.Rectangle)) return null;
-        // A ring across the meridian goes as it is: the backend refuses it, rather than
-        // generating the other areas without a word.
+        // Sent as is across the meridian, so the backend refuses it instead of silently dropping it.
         return areas.map(function (l) {
             return normalizedRing(l) || ringOf(l).map(function (p) { return [p.lat, p.lng]; });
         });
@@ -1746,9 +1740,7 @@ $(document).ready(function () {
         return null;
     }
 
-    // Shift held at any point of a drawing adds the new area to the selection
-    // instead of replacing it. Only a drawing counts: an area set from the
-    // coordinate field or the location hash always replaces.
+    // Shift held during a drawing adds the area; one set from the coordinate field always replaces.
     var _drawing = false;
     var _addToSelection = false;
     var _boxZoomWasOn = false;
@@ -1763,8 +1755,7 @@ $(document).ready(function () {
     map.on('draw:drawstart', function () {
         _drawing = true;
         _addToSelection = false;
-        // Shift-drag is also Leaflet's box zoom, which would zoom into the
-        // rectangle being drawn.
+        // Shift-drag is also Leaflet's box zoom, which would zoom into the drawing.
         _boxZoomWasOn = !!(map.boxZoom && map.boxZoom.enabled());
         if (_boxZoomWasOn) map.boxZoom.disable();
     });
@@ -2198,8 +2189,7 @@ $(document).ready(function () {
         if (rect) refreshToolLabel(rect);
     }
 
-    // Leaflet.draw's own click handler starts the tool, so a locked one is
-    // stopped before it gets there.
+    // Stops a locked tool before Leaflet.draw's own click handler starts it.
     (function guardShapeTool() {
         var btn = document.querySelector('.leaflet-draw-toolbar .leaflet-draw-draw-polygon');
         if (!btn) return;
@@ -2416,8 +2406,7 @@ $(document).ready(function () {
     // same centre handle.
     var _bboxHandles = [];
 
-    // A single rectangle shows as before, the bounds frame drawn over it. With
-    // shapes the frame would read as part of the area, so it goes invisible.
+    // The bounds frame shows over a single rectangle only; with shapes it would look like an area.
     function styleBoundsFrame(areas) {
         var plain = areas.length === 1 && areas[0] instanceof L.Rectangle;
         bounds.setStyle(plain ? { opacity: 1.0, fillOpacity: 0.2 } : { opacity: 0, fillOpacity: 0 });
@@ -2534,8 +2523,7 @@ $(document).ready(function () {
             },
             end: function () {
                 if (!shape.editing) return;
-                // setLatLngs swapped the corner array, and the editor holds the one it
-                // was made with; its handles would stay where the shape was.
+                // setLatLngs swapped the corner array; the editor would keep handles on the old one.
                 shape.editing.latlngs = [shape._latlngs];
                 shape.editing.enable();
             }
@@ -2571,8 +2559,7 @@ $(document).ready(function () {
         var area = isArea(e.layer);
         var adding = area && _drawing && _addToSelection && !_shapesLocked && areaLayers().length > 0;
 
-        // No single copy of the map holds an area across the 180° meridian, nor two
-        // areas on either side of it.
+        // No map copy holds an area across the 180° meridian, nor areas on both sides of it.
         var together = adding ? areaLayers().concat([e.layer]) : [e.layer];
         if (area && !(e.layer instanceof L.Rectangle && !adding) && !fitOneSide(together)) {
             showRotationToast(mapText('map_shape_date_line', 'Draw the area on one side of the 180° meridian.'));
@@ -2733,8 +2720,7 @@ $(document).ready(function () {
 function notifyBboxUpdate() {
     var shapes = typeof window.arnisSelectionShapes === 'function' ? window.arnisSelectionShapes() : null;
     var bboxText = document.getElementById('boxbounds').textContent;
-    // Shapes on another copy of the map are moved back into range, and the
-    // rectangle around them with them.
+    // Shapes on another map copy move back into range, with their rectangle.
     if (shapes) {
         var s = 90, w = 180, n = -90, e = -180;
         shapes.forEach(function (ring) {
