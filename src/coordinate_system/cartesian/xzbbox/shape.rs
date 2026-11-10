@@ -421,8 +421,7 @@ fn sweep(
         // Kept in this order, so the next slab sorts a list that is nearly sorted already.
         active.clear();
         active.extend(keyed.iter().map(|k| k.1));
-        for pair in keyed.chunks_exact(2) {
-            let (l, r) = (pair[0].1, pair[1].1);
+        for &[(_, l), (_, r)] in keyed.as_chunks::<2>().0 {
             // A top on a block edge belongs to the row above, so a whole x it ends on is not reached here.
             let shy = |v: f64| if top_row.is_some() { v - 1e-9 } else { v };
             let (la, lb, ra, rb) = (l.x_at(a), l.x_at(b), r.x_at(a), r.x_at(b));
