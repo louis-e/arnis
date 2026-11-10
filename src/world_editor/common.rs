@@ -2506,12 +2506,17 @@ mod to_section_tests {
             s.properties.insert(i, Arc::new(nested));
         }
 
-        let palette = s.to_section(0).block_states.palette;
+        let section = s.to_section(0);
         // Air, and one entry for each of the three states.
-        assert_eq!(palette.len(), 4);
-        let (_, indices) = reference_palette(&s);
-        assert!(indices[..40].iter().all(|&i| i == indices[0]));
-        assert!(indices[200..210].iter().all(|&i| i == indices[200]));
+        assert_eq!(section.block_states.palette.len(), 4);
+        // And every cell points at the entry of its state: four bits a cell, sixteen to a long.
+        let longs: &[i64] = section.block_states.data.as_ref().expect("packed data");
+        let entry = |cell: usize| (longs[cell / 16] >> ((cell % 16) * 4)) & 15;
+        assert!((0..40).all(|cell| entry(cell) == entry(0)));
+        assert!((200..210).all(|cell| entry(cell) == entry(200)));
+        let distinct: std::collections::HashSet<i64> =
+            [entry(0), entry(100), entry(200), entry(300)].into();
+        assert_eq!(distinct.len(), 4);
 
         assert_eq!(
             canonical_repr(&state(&pairs)),
