@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The Discord application named "Arnis" holding the logo; empty leaves the status off.
-const APPLICATION_ID: &str = "";
+const APPLICATION_ID: &str = "1569634874472661033";
 /// Key of the logo among the application's Rich Presence art assets.
 const LOGO_ASSET: &str = "arnis";
 const WEBSITE: &str = "https://arnismc.com";
