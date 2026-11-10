@@ -37,6 +37,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 use zip::ZipWriter;
@@ -52,24 +53,6 @@ pub enum BedrockSaveError {
 }
 
 impl BedrockSaveError {
-    /// Whether the disk refused something, as opposed to the data being wrong: only then
-    /// can another folder fare better.
-    fn is_disk_fault(&self) -> bool {
-        use rusty_leveldb::StatusCode;
-        match self {
-            BedrockSaveError::Io(_) => true,
-            BedrockSaveError::Database(status) => matches!(
-                status.code,
-                StatusCode::IOError
-                    | StatusCode::PermissionDenied
-                    | StatusCode::NotFound
-                    | StatusCode::AlreadyExists
-                    | StatusCode::LockError
-            ),
-            _ => false,
-        }
-    }
-
     /// The cause in a few words, for the GUI's one-line status.
     pub fn reason(&self) -> &'static str {
         use std::io::ErrorKind;
@@ -238,7 +221,7 @@ fn bedrock_db_options() -> Options {
     Options {
         compressor_list: Rc::new(compressors),
         compressor: RAW_DEFLATE_COMPRESSOR_ID,
-        env: Rc::new(Box::new(RetryingDiskEnv::new())),
+        env: Rc::new(Box::new(MonotonicDiskEnv::new())),
         ..Options::default()
     }
 }
@@ -282,21 +265,24 @@ fn leveldb_status(method: &str, path: &Path, e: std::io::Error) -> rusty_leveldb
     status
 }
 
-/// The stock disk env with retries on file opens, renames and deletes, which a virus
-/// scanner or a sync client can hold up for a moment.
-struct RetryingDiskEnv {
+/// The stock disk env with retries on file opens, renames and deletes, and a monotonic
+/// clock, since rusty-leveldb's compaction stats overflow when the wall clock steps back.
+/// Nothing compacts while a world is saved any more, but the databases the tests open do.
+struct MonotonicDiskEnv {
     inner: PosixDiskEnv,
+    epoch: Instant,
 }
 
-impl RetryingDiskEnv {
+impl MonotonicDiskEnv {
     fn new() -> Self {
         Self {
             inner: PosixDiskEnv::new(),
+            epoch: Instant::now(),
         }
     }
 }
 
-impl Env for RetryingDiskEnv {
+impl Env for MonotonicDiskEnv {
     fn open_sequential_file(&self, p: &Path) -> rusty_leveldb::Result<Box<dyn std::io::Read>> {
         retry_transient(|| File::open(p))
             .map(|f| Box::new(f) as Box<dyn std::io::Read>)
@@ -365,7 +351,8 @@ impl Env for RetryingDiskEnv {
         self.inner.new_logger(p)
     }
     fn micros(&self) -> u64 {
-        self.inner.micros()
+        // Offset by one so the first reading is never 0, like a wall clock's.
+        self.epoch.elapsed().as_micros() as u64 + 1
     }
     fn sleep_for(&self, micros: u32) {
         self.inner.sleep_for(micros)
@@ -592,7 +579,7 @@ impl BedrockWriter {
             match self.write_staging(&staging.dir, world, xzbbox, llbbox) {
                 Ok(()) => return Ok(staging),
                 // Only the disk can fail differently somewhere else.
-                Err(e) if e.is_disk_fault() => {
+                Err(e @ (BedrockSaveError::Io(_) | BedrockSaveError::Database(_))) => {
                     eprintln!(
                         "Warning: staging the Bedrock world in '{}' failed: {e}",
                         staging.dir.display()
@@ -3115,19 +3102,6 @@ mod leveldb_tests {
     }
 
     #[test]
-    fn only_a_disk_fault_is_worth_another_staging_folder() {
-        use rusty_leveldb::{Status, StatusCode};
-        let database = |code| BedrockSaveError::Database(Status::new(code, "x"));
-        assert!(BedrockSaveError::Io(std::io::Error::other("x")).is_disk_fault());
-        assert!(database(StatusCode::IOError).is_disk_fault());
-        assert!(database(StatusCode::PermissionDenied).is_disk_fault());
-        // Keys out of order or a block that will not compress fail the same anywhere.
-        assert!(!database(StatusCode::InvalidArgument).is_disk_fault());
-        assert!(!database(StatusCode::CompressionError).is_disk_fault());
-        assert!(!BedrockSaveError::Nbt("x".to_string()).is_disk_fault());
-    }
-
-    #[test]
     fn chunk_keys_sort_bytewise_not_by_coordinate() {
         // The low byte of x comes first, so chunk 256 sorts before chunk 1, and a negative
         // coordinate after every positive one of the same low byte.
@@ -3218,5 +3192,13 @@ mod leveldb_tests {
         }
         db.flush().unwrap();
         assert!(db.get(&(x % 10_000).to_le_bytes()).is_some());
+    }
+
+    #[test]
+    fn monotonic_env_clock_never_goes_backwards() {
+        let env = MonotonicDiskEnv::new();
+        let a = env.micros();
+        assert!(a > 0);
+        assert!(env.micros() >= a);
     }
 }
