@@ -352,7 +352,8 @@ pub fn generate_ground_region(
         _ => 0.12,
     };
 
-    // A flat world fills columns the outline leaves out, so a cut chunk's edge is no trench.
+    // A flat world fills columns the outline leaves out, so a cut chunk's edge is no trench;
+    // Bedrock and Luanti are void around the area anyway.
     let shaped = xzbbox.outline().is_some();
     let filler_outside =
         shaped && args.world_type == crate::args::WorldType::Flat && !args.bedrock && !args.luanti;

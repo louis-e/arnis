@@ -74,9 +74,11 @@ pub fn cut_line_to_outline(
         world.touches_rect(bx - r, bz - r, bx + r, bz + r) && !between(bx, bz)
     };
     let before = *cuts;
+    // Invented ids drop a way id's top bits, which mark lines of our own, as across squares.
+    let base = OUTLINE_CUT_BASE + (way_id >> 62) * 250_000;
     let mut cut_at = |x: f64, z: f64| {
         *cuts += 1;
-        (invented_node_id(way_id, OUTLINE_CUT_BASE + *cuts), x, z)
+        (invented_node_id(way_id, base + *cuts), x, z)
     };
     let mut runs: Vec<Vec<(u64, f64, f64)>> = Vec::new();
     let mut run: Vec<(u64, f64, f64)> = Vec::new();
@@ -1010,9 +1012,21 @@ mod tests {
             "{a:?} {b:?}"
         );
 
-        // A second piece of the same way gets new ids.
+        // A second piece of the same way gets new ids, and a line of our own keeps apart.
         let again = cut_line_to_outline(7, &line, &world, &mut cuts).unwrap();
         assert!(again.iter().flatten().all(|p| p.0 != a.0 && p.0 != b.0));
+        let ours = cut_line_to_outline((1 << 62) | 7, &line, &world, &mut 0).unwrap();
+        let osm = cut_line_to_outline(7, &line, &world, &mut 0).unwrap();
+        let cut_ids = |runs: &Vec<Vec<(u64, f64, f64)>>| -> Vec<u64> {
+            runs.iter()
+                .flatten()
+                .map(|p| p.0)
+                .filter(|&id| is_invented_node_id(id))
+                .collect()
+        };
+        let (ours, osm) = (cut_ids(&ours), cut_ids(&osm));
+        assert_eq!(ours.len(), 2);
+        assert!(ours.iter().all(|id| !osm.contains(id)), "{ours:?} {osm:?}");
 
         // Inside, outside, and off an outline.
         let inside = [(1, 2.5, 2.5), (2, 25.5, 15.5)];

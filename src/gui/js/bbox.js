@@ -2426,10 +2426,7 @@ $(document).ready(function () {
     map.addLayer(bounds);
 
     // ========== Always-on area handles ==========
-    // Rectangles get corner handles and a centre handle that moves them; drawn
-    // shapes get their corners (Leaflet.draw's vertex editing, which also adds
-    // a corner from the middle of an edge and drops one on a click) and the
-    // same centre handle.
+    // Rectangles get corner handles, shapes Leaflet.draw's vertex editing; both a centre move handle.
     var _bboxHandles = [];
 
     // The bounds frame shows over a single rectangle only; with shapes it would look like an area.
