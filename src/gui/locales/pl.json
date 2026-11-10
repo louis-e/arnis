@@ -215,6 +215,7 @@
   "map_shape_undo": "Usuń ostatni punkt",
   "map_draw_cancel": "Anuluj",
   "map_shape_date_line": "Narysuj obszar po jednej stronie południka 180°.",
+  "map_shape_too_far": "Za daleko od pozostałych obszarów: wygenerowane zostałoby też wszystko pomiędzy. Wygeneruj go jako osobny świat.",
   "map_remove_area": "Usuń ten obszar",
   "map_tool_rotation": "Kąt obrotu",
   "map_tool_rotation_desc": "Narysuj linię wzdłuż ulicy, aby wyrównać do niej świat.",

@@ -215,6 +215,7 @@
   "map_shape_undo": "Izbriši zadnjo točko",
   "map_draw_cancel": "Prekliči",
   "map_shape_date_line": "Območje narišite na eni strani 180. poldnevnika.",
+  "map_shape_too_far": "Predaleč od drugih območij: ustvarilo bi se tudi vse vmes. Ustvarite ga kot ločen svet.",
   "map_remove_area": "Odstrani to območje",
   "map_tool_rotation": "Kot zasuka",
   "map_tool_rotation_desc": "Narišite črto vzdolž ulice, da svet poravnate z njo.",

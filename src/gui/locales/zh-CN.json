@@ -215,6 +215,7 @@
   "map_shape_undo": "删除最后一个点",
   "map_draw_cancel": "取消",
   "map_shape_date_line": "请在 180° 经线的一侧绘制区域。",
+  "map_shape_too_far": "离其他区域太远：它们之间的一切也会被生成。请将其作为单独的世界生成。",
   "map_remove_area": "移除此区域",
   "map_tool_rotation": "旋转角度",
   "map_tool_rotation_desc": "沿街道画一条线，使世界与之对齐。",

@@ -215,6 +215,7 @@
   "map_shape_undo": "Supprimer le dernier point",
   "map_draw_cancel": "Annuler",
   "map_shape_date_line": "Dessinez la zone d'un seul côté du méridien 180°.",
+  "map_shape_too_far": "Trop loin des autres zones : tout ce qui les sépare serait aussi généré. Générez-la comme un monde à part.",
   "map_remove_area": "Retirer cette zone",
   "map_tool_rotation": "Angle de rotation",
   "map_tool_rotation_desc": "Tracez une ligne le long d'une rue pour aligner le monde sur elle.",

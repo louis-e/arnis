@@ -215,6 +215,7 @@
   "map_shape_undo": "Apagar o último ponto",
   "map_draw_cancel": "Cancelar",
   "map_shape_date_line": "Desenhe a área de um só lado do meridiano 180°.",
+  "map_shape_too_far": "Longe demais das outras áreas: tudo entre elas também seria gerado. Gere-a como um mundo separado.",
   "map_remove_area": "Remover esta área",
   "map_tool_rotation": "Ângulo de rotação",
   "map_tool_rotation_desc": "Trace uma linha ao longo de uma rua para alinhar o mundo a ela.",

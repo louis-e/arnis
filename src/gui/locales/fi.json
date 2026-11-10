@@ -215,6 +215,7 @@
   "map_shape_undo": "Poista viimeinen piste",
   "map_draw_cancel": "Peruuta",
   "map_shape_date_line": "Piirrä alue 180° pituuspiirin toiselle puolelle.",
+  "map_shape_too_far": "Liian kaukana muista alueista: myös kaikki niiden välissä generoitaisiin. Generoi se omaksi maailmakseen.",
   "map_remove_area": "Poista tämä alue",
   "map_tool_rotation": "Kiertokulma",
   "map_tool_rotation_desc": "Piirrä viiva kadun suuntaisesti kohdistaaksesi maailman siihen.",

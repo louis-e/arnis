@@ -215,6 +215,7 @@
   "map_shape_undo": "最後の点を削除",
   "map_draw_cancel": "キャンセル",
   "map_shape_date_line": "180°経線をまたがないように範囲を描いてください。",
+  "map_shape_too_far": "他の範囲から遠すぎます。間のすべても生成されてしまいます。別のワールドとして生成してください。",
   "map_remove_area": "この範囲を削除",
   "map_tool_rotation": "回転角度",
   "map_tool_rotation_desc": "通りに沿って線を引き、ワールドをその向きに合わせます。",

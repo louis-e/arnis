@@ -1706,6 +1706,32 @@ $(document).ready(function () {
         return east - west <= 180;
     }
 
+    // Earth's "extensive" size tier at scale 1, in m²: past it, a mostly empty rectangle is refused.
+    var FAR_APART_M2 = 100e6;
+
+    // Whether the rectangle around these areas, all of which is downloaded and processed, is
+    // large and mostly empty: such areas are better generated as worlds of their own.
+    function tooFarApart(areas) {
+        if (areas.length < 2 || currentBody !== 'earth') return false;
+        var rad = Math.PI / 180, R = 6371000;
+        var size = function (s, w, n, e) {
+            return R * R * (n - s) * rad * (e - w) * rad * Math.cos((s + n) / 2 * rad);
+        };
+        var own = 0, all = [90, 180, -90, -180];
+        for (var i = 0; i < areas.length; i++) {
+            var ring = normalizedRing(areas[i]);
+            if (!ring) return false;
+            var b = [90, 180, -90, -180];
+            ring.forEach(function (p) {
+                b = [Math.min(b[0], p[0]), Math.min(b[1], p[1]), Math.max(b[2], p[0]), Math.max(b[3], p[1])];
+            });
+            own += size(b[0], b[1], b[2], b[3]);
+            all = [Math.min(all[0], b[0]), Math.min(all[1], b[1]), Math.max(all[2], b[2]), Math.max(all[3], b[3])];
+        }
+        var total = size(all[0], all[1], all[2], all[3]);
+        return total > FAR_APART_M2 && total > 2 * own;
+    }
+
     // For generation: null for a single rectangle (the plain bbox), else every area as a ring.
     function selectionShapes() {
         var areas = areaLayers();
@@ -2427,6 +2453,9 @@ $(document).ready(function () {
         styleBoundsFrame(areas);
         if (selectionShapes() && !fitOneSide(areas)) {
             showRotationToast(mapText('map_shape_date_line', 'Draw the area on one side of the 180° meridian.'));
+        } else if (tooFarApart(areas)) {
+            // Moved apart by a handle: kept, but said.
+            showRotationToast(mapText('map_shape_too_far', 'Too far from the other areas: everything between them would be generated too. Make it a world of its own.'));
         }
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
@@ -2563,6 +2592,10 @@ $(document).ready(function () {
         var together = adding ? areaLayers().concat([e.layer]) : [e.layer];
         if (area && !(e.layer instanceof L.Rectangle && !adding) && !fitOneSide(together)) {
             showRotationToast(mapText('map_shape_date_line', 'Draw the area on one side of the 180° meridian.'));
+            return;
+        }
+        if (adding && tooFarApart(together)) {
+            showRotationToast(mapText('map_shape_too_far', 'Too far from the other areas: everything between them would be generated too. Make it a world of its own.'));
             return;
         }
 

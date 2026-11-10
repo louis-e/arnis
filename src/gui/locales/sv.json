@@ -215,6 +215,7 @@
   "map_shape_undo": "Ta bort sista punkten",
   "map_draw_cancel": "Avbryt",
   "map_shape_date_line": "Rita området på ena sidan av 180°-meridianen.",
+  "map_shape_too_far": "För långt från de andra områdena: allt mellan dem skulle också genereras. Generera det som en egen värld.",
   "map_remove_area": "Ta bort det här området",
   "map_tool_rotation": "Rotationsvinkel",
   "map_tool_rotation_desc": "Rita en linje längs en gata för att rikta in världen efter den.",

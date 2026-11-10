@@ -215,6 +215,7 @@
   "map_shape_undo": "Ištrinti paskutinį tašką",
   "map_draw_cancel": "Atšaukti",
   "map_shape_date_line": "Nubrėžkite sritį vienoje 180° dienovidinio pusėje.",
+  "map_shape_too_far": "Per toli nuo kitų sričių: būtų sugeneruota ir viskas tarp jų. Sugeneruokite ją kaip atskirą pasaulį.",
   "map_remove_area": "Pašalinti šią sritį",
   "map_tool_rotation": "Pasukimo kampas",
   "map_tool_rotation_desc": "Nubrėžkite liniją išilgai gatvės, kad pasaulis būtų sulygiuotas su ja.",

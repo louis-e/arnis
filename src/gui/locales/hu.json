@@ -215,6 +215,7 @@
   "map_shape_undo": "Utolsó pont törlése",
   "map_draw_cancel": "Mégse",
   "map_shape_date_line": "A területet a 180°-os délkör egyik oldalán rajzold meg.",
+  "map_shape_too_far": "Túl messze van a többi területtől: a köztük lévő rész is generálódna. Generáld külön világként.",
   "map_remove_area": "Terület eltávolítása",
   "map_tool_rotation": "Forgatási szög",
   "map_tool_rotation_desc": "Húzz egy vonalat egy utca mentén, hogy a világot hozzá igazítsd.",

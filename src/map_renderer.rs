@@ -1,11 +1,11 @@
 // Top-down map preview rendered from the in-memory world during save.
 
 use crate::block_definitions::Block;
-use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::world_editor::{BlockStorage, RegionToModify, SectionToModify};
 use fnv::FnvHashMap;
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use image::{Rgb, RgbImage};
+use image::{Rgb, Rgba, RgbaImage};
 use once_cell::sync::Lazy;
 use std::cmp::Reverse;
 use std::io::BufWriter;
@@ -82,6 +82,8 @@ pub struct PreviewAccumulator {
     shade_half_band: f32,
     /// Per output pixel: [r_sum, g_sum, b_sum, sample_count].
     frame: Mutex<Vec<[u16; 4]>>,
+    /// A drawn outline: columns outside it stay unsampled, so the rectangle around it stays clear.
+    outline: Option<XZBBox>,
 }
 
 impl PreviewAccumulator {
@@ -114,6 +116,7 @@ impl PreviewAccumulator {
             shade_base,
             shade_half_band: shade_band as f32 / 2.0,
             frame: Mutex::new(vec![[0u16; 4]; out_w as usize * out_h as usize]),
+            outline: xzbbox.outline().is_some().then(|| xzbbox.clone()),
         }
     }
 
@@ -159,6 +162,10 @@ impl PreviewAccumulator {
                     if wx < x0
                         || wx > x1
                         || !((wx - self.min_x) as u32 % self.step).is_multiple_of(self.stride)
+                        || self
+                            .outline
+                            .as_ref()
+                            .is_some_and(|o| !o.contains(&XZPoint::new(wx, wz)))
                     {
                         continue;
                     }
@@ -210,26 +217,28 @@ impl PreviewAccumulator {
         self.step
     }
 
-    /// Averages the samples into an image without consuming the frame.
-    pub fn render_image(&self) -> RgbImage {
+    /// Averages the samples into an image without consuming the frame; unsampled pixels are
+    /// transparent white, so readers ignoring alpha still see white.
+    pub fn render_image(&self) -> RgbaImage {
         let frame = self.frame.lock().unwrap();
-        let mut img = RgbImage::from_pixel(self.out_w, self.out_h, Rgb([255, 255, 255]));
+        let mut img = RgbaImage::from_pixel(self.out_w, self.out_h, Rgba([255, 255, 255, 0]));
         for (i, cell) in frame.iter().enumerate() {
             let n = cell[3];
             if n == 0 {
                 continue;
             }
-            let px = Rgb([
+            let px = Rgba([
                 (cell[0] / n) as u8,
                 (cell[1] / n) as u8,
                 (cell[2] / n) as u8,
+                255,
             ]);
             img.put_pixel(i as u32 % self.out_w, i as u32 / self.out_w, px);
         }
         img
     }
 
-    /// Averages the samples and writes the PNG; unsampled pixels stay white.
+    /// Averages the samples and writes the PNG; unsampled pixels stay transparent.
     pub fn finalize(&self, output_path: &Path) -> Result<PathBuf, String> {
         let img = self.render_image();
         // Free the accumulator; the preview is only written once.
@@ -955,18 +964,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("preview.png");
         a.finalize(&path).unwrap();
-        let img = image::open(&path).unwrap().to_rgb8();
+        let img = image::open(&path).unwrap().to_rgba8();
         assert_eq!(img.dimensions(), (16, 16));
+        let rgb = |x, y| {
+            let p = img.get_pixel(x, y).0;
+            assert_eq!(p[3], 255);
+            Rgb([p[0], p[1], p[2]])
+        };
         assert_eq!(
-            *img.get_pixel(0, 0),
+            rgb(0, 0),
             apply_elevation_shading(Rgb([128, 128, 128]), 0, a.shade_base, a.shade_half_band)
         );
         assert_eq!(
-            *img.get_pixel(1, 0),
+            rgb(1, 0),
             apply_elevation_shading(Rgb([86, 125, 70]), 5, a.shade_base, a.shade_half_band)
         );
-        // Untouched column stays white.
-        assert_eq!(*img.get_pixel(5, 5), Rgb([255, 255, 255]));
+        // Untouched column stays clear.
+        assert_eq!(*img.get_pixel(5, 5), Rgba([255, 255, 255, 0]));
     }
 
     #[test]
@@ -994,10 +1008,38 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("preview.png");
         a.finalize(&path).unwrap();
-        let img = image::open(&path).unwrap().to_rgb8();
+        let img = image::open(&path).unwrap().to_rgba8();
         assert_eq!(img.dimensions(), (4096, 8));
-        assert_eq!(*img.get_pixel(0, 0), expected);
-        assert_eq!(*img.get_pixel(1, 0), Rgb([255, 255, 255]));
+        let p = img.get_pixel(0, 0).0;
+        assert_eq!((Rgb([p[0], p[1], p[2]]), p[3]), (expected, 255));
+        assert_eq!(*img.get_pixel(1, 0), Rgba([255, 255, 255, 0]));
+    }
+
+    #[test]
+    fn a_drawn_outline_leaves_the_rest_of_its_rectangle_clear() {
+        // The west half of a 16x16 world, every column of which has ground.
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15)
+            .unwrap()
+            .with_outline(vec![vec![vec![
+                (0.0, 0.0),
+                (7.0, 0.0),
+                (7.0, 15.0),
+                (0.0, 15.0),
+            ]]])
+            .unwrap();
+        let a = PreviewAccumulator::new(&bbox);
+        let mut region = RegionToModify::default();
+        let chunk = region.get_or_create_chunk(0, 0);
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set_block(x, 0, z, STONE);
+            }
+        }
+        a.ingest_region(0, 0, &region);
+        let img = a.render_image();
+        assert_eq!(img.get_pixel(3, 8).0[3], 255);
+        assert_eq!(img.get_pixel(7, 8).0[3], 255);
+        assert_eq!(*img.get_pixel(8, 8), Rgba([255, 255, 255, 0]));
     }
 }
 

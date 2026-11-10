@@ -215,6 +215,7 @@
   "map_shape_undo": "Șterge ultimul punct",
   "map_draw_cancel": "Anulează",
   "map_shape_date_line": "Desenează zona de o singură parte a meridianului de 180°.",
+  "map_shape_too_far": "Prea departe de celelalte zone: s-ar genera și tot ce este între ele. Generează-o ca lume separată.",
   "map_remove_area": "Elimină această zonă",
   "map_tool_rotation": "Unghi de rotație",
   "map_tool_rotation_desc": "Trasează o linie de-a lungul unei străzi pentru a alinia lumea cu ea.",

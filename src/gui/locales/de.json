@@ -215,6 +215,7 @@
   "map_shape_undo": "Letzten Punkt löschen",
   "map_draw_cancel": "Abbrechen",
   "map_shape_date_line": "Zeichne den Bereich auf einer Seite des 180. Längengrads.",
+  "map_shape_too_far": "Zu weit von den anderen Bereichen entfernt: Alles dazwischen würde mitgeneriert. Generiere ihn als eigene Welt.",
   "map_remove_area": "Diesen Bereich entfernen",
   "map_tool_rotation": "Rotationswinkel",
   "map_tool_rotation_desc": "Eine Linie entlang einer Straße ziehen, um die Welt daran auszurichten.",

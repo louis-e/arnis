@@ -215,6 +215,7 @@
   "map_shape_undo": "마지막 점 삭제",
   "map_draw_cancel": "취소",
   "map_shape_date_line": "180° 경선의 한쪽에만 영역을 그리세요.",
+  "map_shape_too_far": "다른 영역과 너무 멀리 떨어져 있습니다. 그 사이의 모든 것도 생성됩니다. 별도의 월드로 생성하세요.",
   "map_remove_area": "이 영역 제거",
   "map_tool_rotation": "회전 각도",
   "map_tool_rotation_desc": "도로를 따라 선을 그어 월드를 그 방향에 맞춥니다.",

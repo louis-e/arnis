@@ -215,6 +215,7 @@
   "map_shape_undo": "Dzēst pēdējo punktu",
   "map_draw_cancel": "Atcelt",
   "map_shape_date_line": "Zīmējiet apgabalu vienā 180° meridiāna pusē.",
+  "map_shape_too_far": "Pārāk tālu no citiem apgabaliem: tiktu ģenerēts arī viss starp tiem. Ģenerējiet to kā atsevišķu pasauli.",
   "map_remove_area": "Noņemt šo apgabalu",
   "map_tool_rotation": "Rotācijas leņķis",
   "map_tool_rotation_desc": "Novelciet līniju gar ielu, lai pasauli izlīdzinātu ar to.",

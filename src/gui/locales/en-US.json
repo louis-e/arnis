@@ -215,6 +215,7 @@
   "map_shape_undo": "Delete last point",
   "map_draw_cancel": "Cancel",
   "map_shape_date_line": "Draw the area on one side of the 180° meridian.",
+  "map_shape_too_far": "Too far from the other areas: everything between them would be generated too. Make it a world of its own.",
   "map_remove_area": "Remove this area",
   "map_tool_rotation": "Rotation angle",
   "map_tool_rotation_desc": "Draw a line along a street to line the world up with it.",
