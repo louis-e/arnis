@@ -74,7 +74,7 @@ pub fn realm_for_latlon(lat: f64, lon: f64) -> &'static str {
     "vanilla-plus"
 }
 
-/// Load the pack of the area's main ecoregion (else by bbox centre), or None for legacy trees.
+/// Load the pack of the area's main ecoregion (else by bbox centre), or None for legacy/no-tree mode.
 pub fn load(
     args: &Args,
     bbox: LLBBox,
@@ -83,7 +83,7 @@ pub fn load(
     blocks_per_meter: f64,
     ecoregions: Option<&EcoMap>,
 ) -> Option<RegionLibrary> {
-    if args.legacy_trees {
+    if args.legacy_trees || args.no_trees {
         return None;
     }
     let sizes = SizeFilter::up_to(args.max_tree_size);
@@ -141,6 +141,23 @@ pub fn load(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn no_trees_skips_tree_pack_loading() {
+        let args = crate::args::Args::try_parse_from([
+            "arnis",
+            "--output-dir",
+            ".",
+            "--bbox",
+            "1,2,3,4",
+            "--no-trees",
+        ])
+        .unwrap();
+        let bbox = crate::coordinate_system::geographic::LLBBox::new(1.0, 2.0, 3.0, 4.0).unwrap();
+
+        assert!(load(&args, bbox, 1.0, 0, 1.0, None).is_none());
+    }
 
     /// Every model a manifest lists exists and loads as a tree, and every
     /// contributed model is listed somewhere.

@@ -47,6 +47,9 @@ fn natural_area(
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
+            if args.no_trees {
+                return;
+            }
             if let ProcessedElement::Node(node) = element {
                 let mapped = MappedTree::from_tags(&node.tags, node.id);
                 Tree::create_mapped(
@@ -58,6 +61,9 @@ fn natural_area(
                 );
             }
         } else if natural_type == "tree_row" {
+            if args.no_trees {
+                return;
+            }
             if let ProcessedElement::Way(way) = element {
                 let mapped = MappedTree::from_tags(&way.tags, way.id);
                 for (x, z) in tree_row_positions(&way.nodes, editor.scale()) {
@@ -338,7 +344,10 @@ fn natural_area(
                                 continue;
                             }
                             let random_choice = rng.random_range(0..500);
-                            if random_choice == 0 && editor.land_cover_backs_trees(x, z) {
+                            if random_choice == 0
+                                && !args.no_trees
+                                && editor.land_cover_backs_trees(x, z)
+                            {
                                 Tree::create(
                                     editor,
                                     (x, 1, z),
@@ -369,7 +378,8 @@ fn natural_area(
                             }
                             let density = crate::ground_generation::value_noise_01(x, z, 32);
                             let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
-                            let spawn_tree = rng.random_range(0..tree_threshold) == 0;
+                            let spawn_tree =
+                                rng.random_range(0..tree_threshold) == 0 && !args.no_trees;
                             let random_choice: i32 = rng.random_range(0..30);
                             if spawn_tree {
                                 let tree_type = *trees_ok_to_generate
@@ -461,7 +471,7 @@ fn natural_area(
                                 }
                                 "swamp" | "mangrove" => {
                                     let r: i32 = rng.random_range(0..40);
-                                    if r == 0 {
+                                    if r == 0 && !args.no_trees {
                                         let tree_type = if wetland_type == "mangrove" {
                                             TreeType::Mangrove
                                         } else if rng.random_bool(0.6) {
@@ -594,7 +604,10 @@ fn natural_area(
                                 continue;
                             }
                             let hill_chance = rng.random_range(0..1000);
-                            if hill_chance == 0 && editor.land_cover_backs_trees(x, z) {
+                            if hill_chance == 0
+                                && !args.no_trees
+                                && editor.land_cover_backs_trees(x, z)
+                            {
                                 // 0.1% chance for rare trees
                                 Tree::create(
                                     editor,

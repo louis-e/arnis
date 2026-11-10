@@ -2012,6 +2012,7 @@ fn gui_start_generation(
                 cave_zone_map_step: None,
                 legacy_trees: legacy_trees_enabled,
                 max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
+                no_trees: false,
                 fields: crate::element_processing::field_texture::FieldPreset::from_str_lossy(
                     &field_preset,
                 ),

@@ -1066,7 +1066,8 @@ pub fn generate_world_with_options(
     // Materialize the lazy water-blend mask now, before world memory peaks.
     ground.warm_water_blend();
     bench.mark("ground_warm");
-    // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
+    // Load the schematic tree pack once; None uses procedural trees unless --no-trees is set.
+    // The pack is shared with tile editors.
     // Uses the area's floor, not args: the montane check measures blocks above it, and the
     // base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
     // blocks back into metres, which compression makes far smaller than args.scale.

@@ -191,6 +191,10 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = crate::trees::tree_library::TreeSize::Giant)]
     pub max_tree_size: crate::trees::tree_library::TreeSize,
 
+    /// Do not generate any trees, including mapped trees, land-cover trees and canopy trees.
+    #[arg(long, default_value_t = false)]
+    pub no_trees: bool,
+
     /// Place trees from the Meta/WRI global canopy height map instead of assuming
     /// every tree-cover cell is forest. Land cover still decides the surface.
     #[arg(long = "canopy-height", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
@@ -1510,6 +1514,18 @@ mod tests {
                 "accepted {bad}"
             );
         }
+    }
+
+    #[test]
+    fn no_trees_flag_is_opt_in() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::try_parse_from(cmd.iter()).unwrap()
+        };
+
+        assert!(!parse(&[]).no_trees);
+        assert!(parse(&["--no-trees"]).no_trees);
     }
 
     #[test]

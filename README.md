@@ -43,6 +43,8 @@ GUI Build: ```cargo run --release```<br>
 
 All command line options, like the generation modes, winter and One World, are explained on the [Command Line Usage](https://github.com/louis-e/arnis/wiki/Command-Line-Usage) wiki page.
 
+Pass `--no-trees` to disable all tree placement, including mapped OSM trees, tree rows, land-cover trees, canopy trees, and schematic tree loading. Other natural and park vegetation can still be generated. Live tiles inherit the setting from their One World session.
+
 After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --output-dir=YOUR_PATH/.minecraft/saves --bbox="min_lat,min_lng,max_lat,max_lng"`

@@ -256,7 +256,10 @@ fn landuse_area(
                     if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
                         editor.set_block(RED_FLOWER, x, 1, z, None, None);
                     }
-                } else if (30..33).contains(&random_choice) && editor.land_cover_backs_trees(x, z) {
+                } else if (30..33).contains(&random_choice)
+                    && !args.no_trees
+                    && editor.land_cover_backs_trees(x, z)
+                {
                     Tree::create(
                         editor,
                         (x, 1, z),
@@ -276,7 +279,7 @@ fn landuse_area(
                 // Density-modulated spawn: thickets in some patches, clearings in others.
                 let density = crate::ground_generation::value_noise_01(x, z, 32);
                 let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
-                if rng.random_range(0..tree_threshold) == 0 {
+                if rng.random_range(0..tree_threshold) == 0 && !args.no_trees {
                     let tree_type = *trees_ok_to_generate
                         .choose(&mut rng)
                         .unwrap_or(&TreeType::Oak);
@@ -353,7 +356,7 @@ fn landuse_area(
             }
             "meadow" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 let random_choice: i32 = rng.random_range(0..1001);
-                if random_choice < 5 && editor.land_cover_backs_trees(x, z) {
+                if random_choice < 5 && !args.no_trees && editor.land_cover_backs_trees(x, z) {
                     Tree::create(
                         editor,
                         (x, 1, z),
@@ -379,7 +382,7 @@ fn landuse_area(
                 }
             }
             "orchard" => {
-                if x % 18 == 0 && z % 10 == 0 {
+                if x % 18 == 0 && z % 10 == 0 && !args.no_trees {
                     Tree::create(
                         editor,
                         (x, 1, z),

@@ -1083,6 +1083,7 @@ pub fn generate_ground_region(
                             // Placed before the vegetation pass, whose own guard then sees
                             // the trunk and leaves the column alone.
                             if canopy_tree
+                                && !args.no_trees
                                 && slope <= 4
                                 && ground_allows_trees
                                 && !tunnel_footprint.contains(x, z)
@@ -1129,6 +1130,7 @@ pub fn generate_ground_region(
                                         };
                                         let choice = rng.random_range(0..tree_rate);
                                         if choice == 0
+                                            && !args.no_trees
                                             && !canopy_covered
                                             && !editor.under_mapped_crown(x, z)
                                         {
