@@ -126,7 +126,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         return;
     }
     remember_status(message);
-    crate::discord::progress(progress, message);
+    crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -148,7 +148,7 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
         return;
     }
     remember_status(message);
-    crate::discord::progress(progress, message);
+    crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),

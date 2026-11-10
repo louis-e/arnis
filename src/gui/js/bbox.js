@@ -949,7 +949,7 @@ $(document).ready(function () {
     // One World: the user hid the areas, and the world they were hidden for.
     var oneWorldOverlayHidden = false;
     // Slider positions: a One World shows its areas opaque unless told otherwise.
-    var overlayOpacity = { world: 50, oneWorld: 100 };
+    var overlayOpacity = { world: 70, oneWorld: 100 };
     var oneWorldFittedPath = null;
 
     function setWorldOverlayOpacity(value) {
@@ -1024,7 +1024,7 @@ $(document).ready(function () {
             slider.type = 'range';
             slider.min = '0';
             slider.max = '100';
-            slider.value = '50';
+            slider.value = '70';
             slider.id = 'world-preview-opacity';
             slider.title = 'Overlay Opacity';
 
@@ -1100,7 +1100,7 @@ $(document).ready(function () {
             }
 
             var opacity = document.getElementById('world-preview-opacity');
-            var opacityValue = opacity ? opacity.value / 100 : 0.5;
+            var opacityValue = opacity ? opacity.value / 100 : 0.7;
 
             worldOverlay = buildWorldOverlay(data, opacityValue);
             worldOverlay.addTo(map);

@@ -14,8 +14,6 @@ const WEBSITE: &str = "https://arnismc.com";
 
 /// Discord takes five updates per 20 seconds.
 const MIN_GAP: Duration = Duration::from_secs(4);
-/// A moving percentage only goes out this often.
-const PROGRESS_GAP: Duration = Duration::from_secs(15);
 const RECONNECT_GAP: Duration = Duration::from_secs(20);
 /// How long "generated a world" stays up before the status goes back to the map.
 const FINISHED_FOR: Duration = Duration::from_secs(10 * 60);
@@ -26,7 +24,6 @@ const REFRESH: Duration = Duration::from_secs(5 * 60);
 enum Event {
     Enabled(bool),
     GenerationStarted,
-    Progress(f64, &'static str),
     GenerationDone,
     GenerationEnded,
     Live(bool),
@@ -77,42 +74,16 @@ impl Drop for Generation {
     }
 }
 
-/// A generation progress update; errors are ignored, as a refused second start emits one too.
-pub fn progress(progress: f64, message: &str) {
+/// A generation progress message; only the finish changes the status, which shows no stages.
+pub fn progress(message: &str) {
     if message.starts_with("Done!") {
         send(Event::GenerationDone);
-    } else if !message.starts_with("Error!") {
-        send(Event::Progress(progress, stage_of(message)));
     }
 }
 
 /// Live mode's server phase.
 pub fn live(phase: &str) {
     send(Event::Live(matches!(phase, "starting" | "running")));
-}
-
-/// A fixed label for a progress message, or "" to keep the last one.
-fn stage_of(message: &str) -> &'static str {
-    const STAGES: [(&str, &str); 14] = [
-        ("Downloading data", "Downloading map data"),
-        ("Loading data from file", "Reading map data"),
-        ("Waiting for", "Downloading map data"),
-        ("Processing elevation", "Shaping the terrain"),
-        ("Processing terrain", "Shaping the terrain"),
-        ("Transforming map", "Preparing the map"),
-        ("Processing data", "Preparing the map"),
-        ("Generating area", "Building the area"),
-        ("Generating ground", "Laying the ground"),
-        ("Carving caves", "Carving caves"),
-        ("Sprinkling ore", "Carving caves"),
-        ("Facades", "Adding facades"),
-        ("Saving", "Saving the world"),
-        ("Finalizing", "Finishing up"),
-    ];
-    STAGES
-        .iter()
-        .find(|(prefix, _)| message.starts_with(prefix))
-        .map_or("", |&(_, label)| label)
 }
 
 /// Milliseconds, which Discord's timestamps are in.
@@ -125,11 +96,7 @@ fn unix_now() -> u64 {
 #[derive(Clone, PartialEq, Debug)]
 enum Phase {
     Map,
-    Generating {
-        since: u64,
-        percent: u8,
-        stage: &'static str,
-    },
+    Generating(u64),
     Finished(Instant),
     Live(u64),
 }
@@ -150,17 +117,9 @@ impl Shown {
                 state: None,
                 since: app_start,
             },
-            Phase::Generating {
-                since,
-                percent,
-                stage,
-            } => Shown {
+            Phase::Generating(since) => Shown {
                 details: "Generating a Minecraft world",
-                state: Some(if stage.is_empty() {
-                    format!("{percent}%")
-                } else {
-                    format!("{stage} · {percent}%")
-                }),
+                state: None,
                 since: *since,
             },
             Phase::Finished(_) => Shown {
@@ -221,7 +180,7 @@ impl Worker {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
-            // A burst of progress settles into one update.
+            // A burst of events settles into one update.
             while let Ok(event) = rx.try_recv() {
                 self.apply(event);
             }
@@ -232,35 +191,19 @@ impl Worker {
     fn apply(&mut self, event: Event) {
         match event {
             Event::Enabled(on) => self.enabled = on,
-            Event::GenerationStarted => {
-                self.phase = Phase::Generating {
-                    since: unix_now(),
-                    percent: 0,
-                    stage: "",
-                }
-            }
-            Event::Progress(p, label) => {
-                if let Phase::Generating { percent, stage, .. } = &mut self.phase {
-                    if p >= 0.0 {
-                        *percent = p.clamp(0.0, 100.0) as u8;
-                    }
-                    if !label.is_empty() {
-                        *stage = label;
-                    }
-                }
-            }
+            Event::GenerationStarted => self.phase = Phase::Generating(unix_now()),
             Event::GenerationDone => {
-                if matches!(self.phase, Phase::Generating { .. }) {
+                if matches!(self.phase, Phase::Generating(_)) {
                     self.phase = Phase::Finished(Instant::now());
                 }
             }
             Event::GenerationEnded => {
-                if matches!(self.phase, Phase::Generating { .. }) {
+                if matches!(self.phase, Phase::Generating(_)) {
                     self.phase = Phase::Map;
                 }
             }
             Event::Live(on) => match (&self.phase, on) {
-                (Phase::Live(_), true) | (Phase::Generating { .. }, _) => {}
+                (Phase::Live(_), true) | (Phase::Generating(_), _) => {}
                 (_, true) => self.phase = Phase::Live(unix_now()),
                 (Phase::Live(_), false) => self.phase = Phase::Map,
                 (_, false) => {}
@@ -284,12 +227,7 @@ impl Worker {
         if self.shown.as_ref() == Some(&want) && !stale {
             return;
         }
-        let only_percent = self
-            .shown
-            .as_ref()
-            .is_some_and(|s| s.details == want.details);
-        let gap = if only_percent { PROGRESS_GAP } else { MIN_GAP };
-        if self.last_send.is_some_and(|t| t.elapsed() < gap) {
+        if self.last_send.is_some_and(|t| t.elapsed() < MIN_GAP) {
             return;
         }
         if self.conn.is_none() {
@@ -555,36 +493,22 @@ mod tests {
     }
 
     #[test]
-    fn only_fixed_labels_reach_the_status() {
-        assert_eq!(stage_of("Generating ground..."), "Laying the ground");
-        assert_eq!(stage_of("Saving Bedrock world..."), "Saving the world");
-        assert_eq!(
-            stage_of("Facades: downloading photos 3/40..."),
-            "Adding facades"
-        );
-        assert_eq!(stage_of("Berlin, Mitte"), "");
-        assert_eq!(stage_of(""), "");
-    }
-
-    #[test]
     fn a_generation_moves_through_its_phases() {
         let mut w = Worker::new();
-        w.apply(Event::Progress(40.0, "Laying the ground"));
+        w.apply(Event::GenerationDone);
         assert_eq!(
             w.phase,
             Phase::Map,
-            "progress outside a generation is a precompute"
+            "a finish outside a generation is a precompute"
         );
 
         w.apply(Event::GenerationStarted);
-        w.apply(Event::Progress(12.6, "Shaping the terrain"));
-        w.apply(Event::Progress(-1.0, ""));
         let shown = Shown::of(&w.phase, w.app_start);
         assert_eq!(shown.details, "Generating a Minecraft world");
-        assert_eq!(shown.state.as_deref(), Some("Shaping the terrain · 12%"));
+        assert_eq!(shown.state, None, "no stage or percentage");
 
         w.apply(Event::Live(true));
-        assert!(matches!(w.phase, Phase::Generating { .. }));
+        assert!(matches!(w.phase, Phase::Generating(_)));
         w.apply(Event::GenerationDone);
         assert!(matches!(w.phase, Phase::Finished(_)));
         // The guard dropping after Done! keeps the finished status.
