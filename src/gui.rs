@@ -1745,9 +1745,14 @@ fn gui_start_generation(
         Some(rings) => match LLShapes::new(rings.into_iter().map(|ring| vec![ring]).collect()) {
             Ok(shapes) => Some(shapes),
             Err(e) => {
+                let short = if e.contains("180") {
+                    "Areas cross the 180° meridian."
+                } else {
+                    "The drawn area is not valid."
+                };
                 let e = format!("The drawn area cannot be used: {e}");
                 eprintln!("{e}");
-                emit_gui_error("The drawn area is not valid.");
+                emit_gui_error(short);
                 return Err(e);
             }
         },

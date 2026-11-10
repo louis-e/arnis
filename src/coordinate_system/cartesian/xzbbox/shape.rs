@@ -129,14 +129,20 @@ impl XZBBoxShape {
     pub fn first_inside(&self) -> Option<XZPoint> {
         let r = self.rect;
         for margin in [4, 1, 0] {
+            let size = 2 * margin;
             for z in r.min().z..=r.max().z {
                 for &(a, b) in self.mask.row(z) {
                     let (a, b) = (a.max(r.min().x), b.min(r.max().x));
-                    if b - a < 2 * margin {
-                        continue;
-                    }
-                    if self.covers(a, z, a + 2 * margin, z + 2 * margin) {
-                        return Some(XZPoint::new(a + margin, z + margin));
+                    // Slid along the row, as the rows below may start further in.
+                    let mut x = a;
+                    for _ in 0..256 {
+                        if x + size > b {
+                            break;
+                        }
+                        if self.covers(x, z, x + size, z + size) {
+                            return Some(XZPoint::new(x + margin, z + margin));
+                        }
+                        x += margin.max(1);
                     }
                 }
             }
@@ -281,37 +287,18 @@ impl SpanMask {
     fn build(rect: &XZBBoxRect, polygons: Vec<XZPolygon>) -> Self {
         let min_z = rect.min().z;
         let rows = (rect.max().z as i64 - min_z as i64 + 1) as usize;
-        let mut ranges: Vec<Vec<(f64, f64)>> = vec![Vec::new(); rows];
+        let mut cells: Vec<Vec<(i32, i32)>> = vec![Vec::new(); rows];
+        let mut merged = vec![0u32; rows];
         for rings in &polygons {
-            sweep(rings, rect, &mut ranges);
+            sweep(rings, rect, &mut cells, &mut merged);
         }
 
-        let (lo_x, hi_x) = (rect.min().x, rect.max().x);
         let mut offsets = Vec::with_capacity(rows + 1);
         let mut spans: Vec<(i32, i32)> = Vec::new();
         offsets.push(0u32);
-        let mut cells: Vec<(i32, i32)> = Vec::new();
-        for row in ranges {
-            cells.clear();
-            for (lo, hi) in row {
-                // Clamped in f64, so a far-off vertex cannot overflow the cast.
-                let a = lo.floor().max(lo_x as f64) as i32;
-                let b = hi.floor().min(hi_x as f64) as i32;
-                if a <= b {
-                    cells.push((a, b));
-                }
-            }
-            cells.sort_unstable();
-            let row_start = spans.len();
-            for &(a, b) in &cells {
-                let open = spans.len() > row_start;
-                match spans.last_mut() {
-                    Some(last) if open && a <= last.1.saturating_add(1) => {
-                        last.1 = last.1.max(b);
-                    }
-                    _ => spans.push((a, b)),
-                }
-            }
+        for mut row in cells {
+            merge(&mut row);
+            spans.extend_from_slice(&row);
             offsets.push(spans.len() as u32);
         }
         Self {
@@ -323,6 +310,22 @@ impl SpanMask {
     }
 }
 
+/// Sorts a row's ranges and joins those that overlap or touch.
+fn merge(row: &mut Vec<(i32, i32)>) {
+    row.sort_unstable();
+    let mut out = 0;
+    for i in 0..row.len() {
+        let (a, b) = row[i];
+        if out > 0 && a <= row[out - 1].1.saturating_add(1) {
+            row[out - 1].1 = row[out - 1].1.max(b);
+        } else {
+            row[out] = (a, b);
+            out += 1;
+        }
+    }
+    row.truncate(out);
+}
+
 /// Adds the x extent of one polygon to every row of `rect` it reaches.
 ///
 /// Rows split at every vertex height into slabs no edge starts or ends inside, where the
@@ -330,13 +333,34 @@ impl SpanMask {
 /// a block edge, as every whole height is a split too, so it adds to one row; a slab ending
 /// on a block edge adds its top line to the row above it too, which is how a top edge on a
 /// block edge keeps its row, and horizontal edges add their own row.
-fn sweep(rings: &[Vec<(f64, f64)>], rect: &XZBBoxRect, ranges: &mut [Vec<(f64, f64)>]) {
+fn sweep(
+    rings: &[Vec<(f64, f64)>],
+    rect: &XZBBoxRect,
+    cells: &mut [Vec<(i32, i32)>],
+    merged: &mut [u32],
+) {
     let min_z = rect.min().z as i64;
     let max_z = rect.max().z as i64;
+    let (lo_x, hi_x) = (rect.min().x as f64, rect.max().x as f64);
     let mut add = |row: f64, lo: f64, hi: f64| {
         let row = row as i64;
-        if row >= min_z && row <= max_z {
-            ranges[(row - min_z) as usize].push((lo.min(hi), lo.max(hi)));
+        if row < min_z || row > max_z {
+            return;
+        }
+        // Clamped in f64, so a far-off vertex cannot overflow the cast.
+        let a = lo.min(hi).floor().max(lo_x) as i32;
+        let b = lo.max(hi).floor().min(hi_x) as i32;
+        if a > b {
+            return;
+        }
+        let r = (row - min_z) as usize;
+        let cells = &mut cells[r];
+        cells.push((a, b));
+        // Merged each time it doubles, so an outline crossing a row many times holds about
+        // its spans and no more.
+        if cells.len() >= 64 && cells.len() >= 2 * merged[r] as usize {
+            merge(cells);
+            merged[r] = cells.len() as u32;
         }
     };
 
@@ -407,6 +431,9 @@ fn sweep(rings: &[Vec<(f64, f64)>], rect: &XZBBoxRect, ranges: &mut [Vec<(f64, f
         keyed.clear();
         keyed.extend(active.iter().map(|e| (e.x_at(mid), *e)));
         keyed.sort_unstable_by(|p, q| p.0.total_cmp(&q.0));
+        // Kept in this order, so the next slab sorts a list that is nearly sorted already.
+        active.clear();
+        active.extend(keyed.iter().map(|k| k.1));
         for pair in keyed.chunks_exact(2) {
             let (l, r) = (pair[0].1, pair[1].1);
             // A top on a block edge belongs to the row above: there the line only comes
@@ -679,6 +706,15 @@ mod tests {
         let p = shape.first_inside().unwrap();
         assert!(shape.covers(p.x - 4, p.z - 4, p.x + 4, p.z + 4), "{p:?}");
         assert!(p.z <= 10, "{p:?}");
+        // A west edge slanting away to the south-east still leaves room for the margin.
+        let slant = XZBBoxShape::new(
+            rect(0, 0, 400, 400),
+            vec![ring(&[(0.0, 0.0), (400.0, 0.0), (400.0, 400.0)])],
+        )
+        .unwrap();
+        let p = slant.first_inside().unwrap();
+        assert!(slant.covers(p.x - 4, p.z - 4, p.x + 4, p.z + 4), "{p:?}");
+        assert!(p.z <= 10 && p.x <= 20, "{p:?}");
         // A sliver too thin for the margin still gets a column of its own.
         let thin =
             XZBBoxShape::new(frame, vec![ring(&[(2.0, 2.0), (30.0, 2.0), (30.0, 3.0)])]).unwrap();

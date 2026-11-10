@@ -38,18 +38,24 @@ pub fn mark_cut_ends(nodes: &mut [ProcessedNode], ends: [(i32, i32); 2], way_id:
     }
 }
 
-/// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
-/// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
-/// `clip_way_to_bbox` for an owned way: one lying wholly inside comes back as is, uncopied.
 /// Indices of the invented ids for where a line leaves a drawn outline, clear of a
 /// rectangle's cuts, which count the way's nodes.
 const OUTLINE_CUT_BASE: u64 = 9_000_000;
 
+/// How far past a drawn outline a line may stray before it counts as leaving: a road or
+/// river traced as the outline wavers that much across it.
+const OUTLINE_SLACK: i32 = 2;
+
+/// Shortest run cut at both ends worth keeping, in blocks: a line that only grazes a
+/// corner of the outline would give a vehicle nowhere to go.
+const MIN_CUT_RUN: f64 = 12.0;
+
 /// The runs of a line that lie inside a drawn outline, as `(id, x, z)` points in block space.
-/// Where the line leaves, a run ends on a point of its own just inside, with an invented id:
-/// what the vehicle networks read as the edge of the area, as at a rectangle's cut. `None`
-/// when there is nothing to cut: no outline, or the line stays inside. `cuts` counts the
-/// cuts made on this way so far, so pieces of one way cut apart get ids of their own.
+/// Where the line leaves, a run ends on a point of its own inside, with an invented id: what
+/// the vehicle networks read as the edge of the area, as at a rectangle's cut. Straying up to
+/// `OUTLINE_SLACK` blocks out and back is not leaving. `None` when there is nothing to cut:
+/// no outline, or the line stays inside. `cuts` counts the cuts made on this way so far, so
+/// pieces of one way cut apart get ids of their own.
 pub fn cut_line_to_outline(
     way_id: u64,
     points: &[(u64, f64, f64)],
@@ -57,20 +63,58 @@ pub fn cut_line_to_outline(
     cuts: &mut u64,
 ) -> Option<Vec<Vec<(u64, f64, f64)>>> {
     world.outline()?;
-    let inside = |x: f64, z: f64| world.contains(&XZPoint::new(x.floor() as i32, z.floor() as i32));
-    let (mut runs, mut run) = (Vec::new(), Vec::new());
+    let block = |x: f64, z: f64| (x.floor() as i32, z.floor() as i32);
+    let inside = |x: f64, z: f64| {
+        let (bx, bz) = block(x, z);
+        world.contains(&XZPoint::new(bx, bz))
+    };
+    let near = |x: f64, z: f64| {
+        let (bx, bz) = block(x, z);
+        let r = OUTLINE_SLACK;
+        world.touches_rect(bx - r, bz - r, bx + r, bz + r)
+    };
     let before = *cuts;
     let mut cut_at = |x: f64, z: f64| {
         *cuts += 1;
         (invented_node_id(way_id, OUTLINE_CUT_BASE + *cuts), x, z)
     };
+    let mut runs: Vec<Vec<(u64, f64, f64)>> = Vec::new();
+    let mut run: Vec<(u64, f64, f64)> = Vec::new();
+    let mut starts_cut = false;
     let Some(&first) = points.first() else {
         return Some(runs);
     };
-    let mut was_in = inside(first.1, first.2);
-    if was_in {
+    // A line starting just outside starts in, unless it never gets inside at all.
+    let mut is_in = near(first.1, first.2);
+    // The last point truly inside with how long the run was there, and the sample after
+    // it: a run that strays and then leaves for good ends on the boundary between them.
+    let mut last_in = inside(first.1, first.2).then_some((first.1, first.2, 1usize));
+    let mut after_in: Option<(f64, f64)> = None;
+    if is_in {
         run.push(first);
     }
+    let boundary = |(ax, az): (f64, f64), (bx, bz): (f64, f64)| {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..16 {
+            let mid = (lo + hi) / 2.0;
+            if inside(ax + (bx - ax) * mid, az + (bz - az) * mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        (ax + (bx - ax) * lo, az + (bz - az) * lo)
+    };
+    let mut close = |run: &mut Vec<(u64, f64, f64)>, starts_cut: bool, ends_cut: bool| {
+        let length: f64 = run
+            .windows(2)
+            .map(|w| (w[1].1 - w[0].1).hypot(w[1].2 - w[0].2))
+            .sum();
+        if run.len() >= 2 && !(starts_cut && ends_cut && length < MIN_CUT_RUN) {
+            runs.push(std::mem::take(run));
+        }
+        run.clear();
+    };
     for pair in points.windows(2) {
         let (a, b) = (pair[0], pair[1]);
         let at = |t: f64| (a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t);
@@ -80,42 +124,62 @@ pub fn cut_line_to_outline(
         for s in 1..=steps {
             let t1 = s as f64 / steps as f64;
             let (x, z) = at(t1);
-            let now_in = inside(x, z);
-            if now_in != was_in {
-                // The boundary lies between t0 and t1; `lo` stays on the side it left.
-                let (mut lo, mut hi) = (t0, t1);
-                for _ in 0..16 {
-                    let mid = (lo + hi) / 2.0;
-                    let (mx, mz) = at(mid);
-                    if inside(mx, mz) == was_in {
-                        lo = mid;
-                    } else {
-                        hi = mid;
+            if is_in {
+                if inside(x, z) {
+                    // The last sample is the node itself, recorded once it is in the run.
+                    if s < steps {
+                        last_in = Some((x, z, run.len()));
                     }
-                }
-                if was_in {
-                    let (cx, cz) = at(lo);
-                    run.push(cut_at(cx, cz));
-                    if run.len() >= 2 {
-                        runs.push(std::mem::take(&mut run));
-                    }
-                    run.clear();
+                    after_in = None;
                 } else {
-                    let (cx, cz) = at(hi);
-                    run.push(cut_at(cx, cz));
+                    after_in.get_or_insert((x, z));
+                    if !near(x, z) {
+                        match last_in {
+                            Some((lx, lz, len)) => {
+                                let (cx, cz) = boundary((lx, lz), after_in.unwrap());
+                                run.truncate(len);
+                                run.push(cut_at(cx, cz));
+                                close(&mut run, starts_cut, true);
+                            }
+                            // Never inside: only passing by.
+                            None => run.clear(),
+                        }
+                        is_in = false;
+                        last_in = None;
+                    }
                 }
-                was_in = now_in;
+            } else if inside(x, z) {
+                let (cx, cz) = boundary((x, z), at(t0));
+                run.push(cut_at(cx, cz));
+                starts_cut = true;
+                last_in = Some((x, z, run.len()));
+                after_in = None;
+                is_in = true;
             }
             t0 = t1;
         }
-        if was_in {
+        if is_in {
             run.push(b);
+            if inside(b.1, b.2) {
+                last_in = Some((b.1, b.2, run.len()));
+                after_in = None;
+            }
         }
     }
-    if run.len() >= 2 {
-        runs.push(run);
+    if is_in {
+        match (last_in, after_in) {
+            (None, _) => run.clear(),
+            // A line ending just outside ends on the boundary.
+            (Some((lx, lz, len)), Some(out)) => {
+                let (cx, cz) = boundary((lx, lz), out);
+                run.truncate(len);
+                run.push(cut_at(cx, cz));
+                close(&mut run, starts_cut, true);
+            }
+            (Some(_), None) => close(&mut run, starts_cut, false),
+        }
     }
-    if *cuts == before && was_in && runs.len() == 1 {
+    if *cuts == before && runs.len() == 1 && runs[0].len() == points.len() {
         return None;
     }
     Some(runs)
@@ -184,6 +248,9 @@ pub fn cut_ways_to_outline<'a, T: Copy>(
     out
 }
 
+/// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
+/// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
+/// `clip_way_to_bbox` for an owned way: one lying wholly inside comes back as is, uncopied.
 pub fn clip_way_to_bbox_owned(nodes: Vec<ProcessedNode>, xzbbox: &XZBBox) -> Vec<ProcessedNode> {
     if nodes
         .iter()
@@ -971,6 +1038,49 @@ mod tests {
         );
         let rect = XZBBox::rect_from_min_max(0, 0, 100, 20).unwrap();
         assert!(cut_line_to_outline(7, &line, &rect, &mut 0).is_none());
+    }
+
+    #[test]
+    fn a_line_along_the_outline_is_not_cut_to_pieces() {
+        let world = XZBBox::rect_from_min_max(0, 0, 200, 200)
+            .unwrap()
+            .with_outline(vec![vec![vec![
+                (0.0, 0.0),
+                (100.0, 0.0),
+                (100.0, 200.0),
+                (0.0, 200.0),
+            ]]])
+            .unwrap();
+        // A road traced as the outline's east edge, wavering a block or two across it.
+        let road: Vec<(u64, f64, f64)> = (0..40)
+            .map(|k| {
+                let x = 100.5 + if k % 2 == 0 { 1.5 } else { -1.5 };
+                (k as u64 + 1, x, 5.5 + k as f64 * 4.5)
+            })
+            .collect();
+        assert!(cut_line_to_outline(3, &road, &world, &mut 0).is_none());
+
+        // A line that only grazes a corner leaves nothing to drive on.
+        let graze = [(1, 95.5, -8.5), (2, 108.5, 4.5)];
+        assert_eq!(cut_line_to_outline(3, &graze, &world, &mut 0), Some(vec![]));
+
+        // A node just outside before the line leaves: the run ends on the boundary after the
+        // last node inside and drops the stray one.
+        let out = [
+            (1, 50.5, 50.5),
+            (2, 99.5, 50.5),
+            (3, 101.5, 50.5),
+            (4, 160.5, 50.5),
+        ];
+        let runs = cut_line_to_outline(3, &out, &world, &mut 0).unwrap();
+        assert_eq!(runs.len(), 1);
+        let ids: Vec<u64> = runs[0].iter().map(|p| p.0).collect();
+        assert_eq!(&ids[..2], &[1, 2]);
+        let end = runs[0][2];
+        assert!(
+            is_invented_node_id(end.0) && end.1 > 99.5 && end.1 < 101.0,
+            "{end:?}"
+        );
     }
 
     #[test]

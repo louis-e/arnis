@@ -1698,17 +1698,28 @@ $(document).ready(function () {
         return ring.map(function (p) { return [p.lat, p.lng + shift]; });
     }
 
+    // Whether these areas, each on the copy of the map around longitude 0, stay
+    // within half the globe east to west together.
+    function fitOneSide(areas) {
+        var west = Infinity, east = -Infinity;
+        for (var i = 0; i < areas.length; i++) {
+            var ring = normalizedRing(areas[i]);
+            if (!ring) return false;
+            ring.forEach(function (p) { west = Math.min(west, p[1]); east = Math.max(east, p[1]); });
+        }
+        return east - west <= 180;
+    }
+
     // What the parent sends for generation: null for a single rectangle (the
     // plain bbox), otherwise every area as a ring.
     function selectionShapes() {
         var areas = areaLayers();
         if (areas.length === 0 || (areas.length === 1 && areas[0] instanceof L.Rectangle)) return null;
-        var rings = [];
-        for (var i = 0; i < areas.length; i++) {
-            var ring = normalizedRing(areas[i]);
-            if (ring) rings.push(ring);
-        }
-        return rings.length ? rings : null;
+        // A ring across the meridian goes as it is: the backend refuses it, rather than
+        // generating the other areas without a word.
+        return areas.map(function (l) {
+            return normalizedRing(l) || ringOf(l).map(function (p) { return [p.lat, p.lng]; });
+        });
     }
     window.arnisSelectionShapes = selectionShapes;
 
@@ -1858,6 +1869,10 @@ $(document).ready(function () {
         h.polygon.tooltip.cont = mapText('map_shape_continue', 'Click to place the next corner.');
         h.polygon.tooltip.end = mapText('map_shape_end', 'Click the first corner to close the shape.');
         h.polyline.error = mapText('map_shape_cross', 'The outline cannot cross itself.');
+        // The shape tool copied the message when it was made, so it is set there too.
+        var mode = drawControl && drawControl._toolbars && drawControl._toolbars.draw &&
+            drawControl._toolbars.draw._modes.polygon;
+        if (mode) mode.handler.options.drawError.message = h.polyline.error;
         // Read each time a tool starts, so a language change reaches them too.
         var t = L.drawLocal.draw.toolbar;
         t.finish.title = t.finish.text = mapText('map_shape_finish', 'Finish');
@@ -2421,6 +2436,9 @@ $(document).ready(function () {
             bounds.setBounds(new L.LatLngBounds([0.0, 0.0], [0.0, 0.0]));
         }
         styleBoundsFrame(areas);
+        if (selectionShapes() && !fitOneSide(areas)) {
+            showRotationToast(mapText('map_shape_date_line', 'Draw the area on one side of the 180° meridian.'));
+        }
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
         notifyBboxUpdate();
@@ -2553,8 +2571,10 @@ $(document).ready(function () {
         var area = isArea(e.layer);
         var adding = area && _drawing && _addToSelection && !_shapesLocked && areaLayers().length > 0;
 
-        // No single copy of the map holds an area across the 180° meridian.
-        if (area && !(e.layer instanceof L.Rectangle && !adding) && !normalizedRing(e.layer)) {
+        // No single copy of the map holds an area across the 180° meridian, nor two
+        // areas on either side of it.
+        var together = adding ? areaLayers().concat([e.layer]) : [e.layer];
+        if (area && !(e.layer instanceof L.Rectangle && !adding) && !fitOneSide(together)) {
             showRotationToast(mapText('map_shape_date_line', 'Draw the area on one side of the 180° meridian.'));
             return;
         }
