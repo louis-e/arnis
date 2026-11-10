@@ -17,26 +17,27 @@ use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use crate::world_utils::{check_disk_space, estimated_world_bytes, WorldSizeOptions};
 
-use bedrockrs_level::level::db_interface::key_level::KeyTypeTag;
-use bedrockrs_level::level::db_interface::rusty::mcpe_options;
-use bedrockrs_shared::world::dimension::Dimension;
 use byteorder::{LittleEndian, WriteBytesExt};
 use fastnbt::Value;
+use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
+use rusty_leveldb::bulk::{install_tables, level_for_size, BulkTable, TableWriter};
+use rusty_leveldb::compressor::NoneCompressor;
 use rusty_leveldb::env::{Env, FileLock, Logger, RandomAccess};
-use rusty_leveldb::{Options, PosixDiskEnv, DB};
+use rusty_leveldb::{Compressor, CompressorList, Options, PosixDiskEnv};
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap as StdHashMap;
 use std::fs::{self, File};
-use std::io::{Cursor, Write as IoWrite};
+use std::io::{Read as IoRead, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use vek::Vec2;
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 use zip::ZipWriter;
@@ -131,7 +132,8 @@ impl From<rusty_leveldb::Status> for BedrockSaveError {
     }
 }
 
-const DEFAULT_BEDROCK_COMPRESSION_LEVEL: u8 = 6;
+/// Zlib level of the database's blocks.
+const BEDROCK_COMPRESSION_LEVEL: u32 = 6;
 
 /// The chunk format of 1.21.120 and later.
 const CHUNK_VERSION: u8 = 42;
@@ -141,21 +143,87 @@ const SAVED_WITH_VERSION: [i32; 5] = [1, 21, 120, 0, 0];
 const SAVED_WITH_INVENTORY_VERSION: &str = "1.21.120";
 const SAVED_WITH_PROTOCOL: i32 = 859;
 
-/// rusty-leveldb 3.0.3's LRU `remove` leaves the list's tail pointer dangling
-/// when it removes the last node, and the table cache is the only cache that
-/// removes (on every compaction). A table cache of one entry never has a tail
-/// apart from its head, so the dangling pointer is reset by the next insert
-/// before anything reads it. The library reserves 10 handles, so 11 gives 1.
-/// Fixed upstream after 4.0.1; drop this once bedrockrs moves to a fixed release.
-const LEVELDB_MAX_OPEN_FILES: usize = 11;
+/// The id LevelDB stores with each block compressed as a zlib stream; old worlds hold these.
+const ZLIB_COMPRESSOR_ID: u8 = 2;
 
-/// LevelDB options for writing a Bedrock world. `mcpe_options` sets the
-/// compressors; this adds the workarounds for rusty-leveldb panics.
+/// The id of raw deflate, which the game writes and so do we.
+const RAW_DEFLATE_COMPRESSOR_ID: u8 = 4;
+
+/// One of Bedrock's two block compressors: deflate, with or without the zlib header.
+///
+/// The compressor state is built on the first block and kept between blocks: building it,
+/// tables and all, costs more than compressing a small block does, and the zlib variant,
+/// which only reads, never needs one.
+struct DeflateCompressor {
+    zlib_header: bool,
+    state: RefCell<Option<flate2::Compress>>,
+}
+
+impl DeflateCompressor {
+    fn new(zlib_header: bool) -> Self {
+        Self {
+            zlib_header,
+            state: RefCell::new(None),
+        }
+    }
+}
+
+fn compression_error(e: impl std::fmt::Display) -> rusty_leveldb::Status {
+    rusty_leveldb::Status::new(rusty_leveldb::StatusCode::CompressionError, &e.to_string())
+}
+
+impl Compressor for DeflateCompressor {
+    fn encode(&self, block: Vec<u8>) -> rusty_leveldb::Result<Vec<u8>> {
+        let mut state = self.state.borrow_mut();
+        let state = state.get_or_insert_with(|| {
+            let level = flate2::Compression::new(BEDROCK_COMPRESSION_LEVEL);
+            flate2::Compress::new(level, self.zlib_header)
+        });
+        state.reset();
+        // Blocks of chunk data compress to a fraction; one that does not grows the buffer.
+        let mut out = Vec::with_capacity(block.len() / 4 + 64);
+        loop {
+            let consumed = state.total_in() as usize;
+            let before = out.len();
+            let status = state
+                .compress_vec(&block[consumed..], &mut out, flate2::FlushCompress::Finish)
+                .map_err(compression_error)?;
+            if status == flate2::Status::StreamEnd {
+                return Ok(out);
+            }
+            if out.len() == out.capacity() {
+                out.reserve(out.capacity().max(4096));
+            } else if out.len() == before && state.total_in() as usize == consumed {
+                return Err(compression_error("deflate stopped making progress"));
+            }
+        }
+    }
+
+    fn decode(&self, block: Vec<u8>) -> rusty_leveldb::Result<Vec<u8>> {
+        let mut out = Vec::with_capacity(block.len() * 4);
+        let read = if self.zlib_header {
+            flate2::read::ZlibDecoder::new(&block[..]).read_to_end(&mut out)
+        } else {
+            flate2::read::DeflateDecoder::new(&block[..]).read_to_end(&mut out)
+        };
+        read.map_err(compression_error)?;
+        Ok(out)
+    }
+}
+
+/// LevelDB options for a Bedrock world: the game's block compressors, and file access
+/// that waits out a virus scanner. They are not `Send`; each thread builds its own.
 fn bedrock_db_options() -> Options {
-    let mut opts = mcpe_options(DEFAULT_BEDROCK_COMPRESSION_LEVEL);
-    opts.env = Rc::new(Box::new(MonotonicDiskEnv::new()));
-    opts.max_open_files = LEVELDB_MAX_OPEN_FILES;
-    opts
+    let mut compressors = CompressorList::new();
+    compressors.set_with_id(0, NoneCompressor);
+    compressors.set_with_id(ZLIB_COMPRESSOR_ID, DeflateCompressor::new(true));
+    compressors.set_with_id(RAW_DEFLATE_COMPRESSOR_ID, DeflateCompressor::new(false));
+    Options {
+        compressor_list: Rc::new(compressors),
+        compressor: RAW_DEFLATE_COMPRESSOR_ID,
+        env: Rc::new(Box::new(MonotonicDiskEnv::new())),
+        ..Options::default()
+    }
 }
 
 /// Tries at a file that a virus scanner or sync client holds for a moment, about 1.5 s in all.
@@ -199,6 +267,7 @@ fn leveldb_status(method: &str, path: &Path, e: std::io::Error) -> rusty_leveldb
 
 /// The stock disk env with retries on file opens, renames and deletes, and a monotonic
 /// clock, since rusty-leveldb's compaction stats overflow when the wall clock steps back.
+/// Nothing compacts while a world is saved any more, but the databases the tests open do.
 struct MonotonicDiskEnv {
     inner: PosixDiskEnv,
     epoch: Instant,
@@ -815,78 +884,115 @@ impl BedrockWriter {
         Ok(())
     }
 
+    /// Writes every chunk into a new LevelDB under `dir/db`.
+    ///
+    /// The database is bulk loaded: LevelDB keeps its tables sorted by key, so the chunks
+    /// are put in key order, cut into runs, and each run is encoded, compressed and written
+    /// as tables of its own on a worker thread. Nothing goes through a write-ahead log, a
+    /// memtable or a compaction, and only the chunk a thread is encoding is held encoded.
     fn write_chunks_to_db(
         &self,
         dir: &Path,
         world: &WorldToModify,
     ) -> Result<(), BedrockSaveError> {
         let db_path = dir.join("db");
+        retry_transient(|| fs::create_dir_all(&db_path))?;
 
-        // Open LevelDB once for all writes (blocks, entities, block entities)
-        let mut opts = bedrock_db_options();
-        opts.create_if_missing = true;
-        let mut db = DB::open(db_path.into_boxed_path(), opts)?;
+        let chunks = sorted_chunks(world);
 
-        // Chunks per parallel-encode window. Bounds transient memory (only one window of encoded
-        // bytes is held at a time) while giving rayon plenty of work per batch.
-        const ENCODE_BATCH_CHUNKS: usize = 256;
+        let progress = SaveProgress::new(chunks.len());
+        let chunks_per_run = chunks_per_run(chunks.len(), rayon::current_num_threads());
+        let tables = self.write_tables(
+            &db_path,
+            &chunks,
+            chunks_per_run,
+            MAX_TABLE_BYTES,
+            &progress,
+        )?;
 
-        // Flatten to absolute-coord chunk refs (cheap — references only). Iteration order matches
-        // the original nested loop, so LevelDB receives writes in the same order.
-        let chunks: Vec<(i32, i32, &ChunkToModify)> = world
-            .regions
-            .iter()
-            .flat_map(|((region_x, region_z), region)| {
-                region
-                    .chunks
-                    .iter()
-                    .map(move |((local_x, local_z), chunk)| {
-                        (region_x * 32 + local_x, region_z * 32 + local_z, chunk)
-                    })
+        let total_bytes: u64 = tables.iter().map(|table| table.size() as u64).sum();
+        install_tables(
+            &bedrock_db_options(),
+            &db_path,
+            level_for_size(total_bytes),
+            tables,
+        )?;
+        progress
+            .bar
+            .finish_with_message("Chunks written to LevelDB");
+        Ok(())
+    }
+
+    /// Writes `chunks`, which are in key order, as tables under `db_path`, a run of
+    /// `chunks_per_run` to a worker. A table is closed once it holds `max_table_bytes`.
+    fn write_tables(
+        &self,
+        db_path: &Path,
+        chunks: &[(i32, i32, &ChunkToModify)],
+        chunks_per_run: usize,
+        max_table_bytes: usize,
+        progress: &SaveProgress,
+    ) -> Result<Vec<BulkTable>, BedrockSaveError> {
+        let next_table = AtomicU64::new(1);
+        let runs = chunks
+            .par_chunks(chunks_per_run)
+            .enumerate()
+            .map(|(run, chunks)| {
+                // Unique across runs, though nothing needs that of keys that never repeat.
+                let first_sequence = (run * chunks_per_run * SEQUENCES_PER_CHUNK) as u64 + 1;
+                self.write_table_run(
+                    db_path,
+                    chunks,
+                    first_sequence,
+                    max_table_bytes,
+                    &next_table,
+                    progress,
+                )
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(runs.into_iter().flatten().collect())
+    }
 
-        let total_chunks = chunks.len();
-        if total_chunks == 0 {
-            return Ok(());
-        }
+    /// Writes a run of chunks, in key order, as one or more tables and returns them.
+    fn write_table_run(
+        &self,
+        db_path: &Path,
+        chunks: &[(i32, i32, &ChunkToModify)],
+        first_sequence: u64,
+        max_table_bytes: usize,
+        next_table: &AtomicU64,
+        progress: &SaveProgress,
+    ) -> Result<Vec<BulkTable>, BedrockSaveError> {
+        let opts = bedrock_db_options();
+        let mut tables = Vec::new();
+        let mut writer: Option<TableWriter> = None;
+        let mut sequence = first_sequence;
+        for &(abs_x, abs_z, chunk) in chunks {
+            let mut records = self.encode_chunk_records(abs_x, abs_z, chunk)?;
+            records.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-        let progress_bar = ProgressBar::new(total_chunks as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} chunks ({eta})")
-                .unwrap()
-                .progress_chars("█▓░"),
-        );
-
-        // Encode each window's chunk records in parallel (CPU-bound), then write them to LevelDB
-        // sequentially — rusty_leveldb writes aren't concurrent-safe. Records are byte-identical
-        // to the previous serial path; only the encoding is now multi-threaded.
-        let mut chunks_processed: usize = 0;
-        for window in chunks.chunks(ENCODE_BATCH_CHUNKS) {
-            let encoded: Vec<ChunkRecords> = window
-                .par_iter()
-                .map(|&(abs_x, abs_z, chunk)| self.encode_chunk_records(abs_x, abs_z, chunk))
-                .collect::<Result<_, _>>()?;
-
-            for records in &encoded {
-                for (key, value) in records {
-                    db.put(key, value)?;
+            let table = match writer.as_mut() {
+                Some(table) => table,
+                None => {
+                    let number = next_table.fetch_add(1, Ordering::Relaxed);
+                    writer.insert(TableWriter::create(&opts, db_path, number, sequence)?)
                 }
-                chunks_processed += 1;
-                progress_bar.inc(1);
-                // GUI progress spans 92%..97% for chunk writing.
-                if chunks_processed.is_multiple_of(10) || chunks_processed == total_chunks {
-                    let chunk_progress = chunks_processed as f64 / total_chunks as f64;
-                    emit_gui_progress_update(92.0 + chunk_progress * 5.0, "");
+            };
+            for (key, value) in &records {
+                table.add(key, value)?;
+            }
+            sequence += records.len() as u64;
+            if table.size_estimate() >= max_table_bytes {
+                if let Some(full) = writer.take() {
+                    tables.extend(full.finish()?);
                 }
             }
+            progress.chunk_done();
         }
-
-        // Closed here so a failed flush is an error, not missing chunks.
-        db.close()?;
-        progress_bar.finish_with_message("Chunks written to LevelDB");
-        Ok(())
+        if let Some(table) = writer {
+            tables.extend(table.finish()?);
+        }
+        Ok(tables)
     }
 
     /// Encodes every LevelDB record for one chunk: version, Data3D, subchunks, then entities.
@@ -896,27 +1002,22 @@ impl BedrockWriter {
         abs_chunk_z: i32,
         chunk: &ChunkToModify,
     ) -> Result<ChunkRecords, BedrockSaveError> {
-        let chunk_pos = Vec2::new(abs_chunk_x, abs_chunk_z);
+        let chunk_pos = (abs_chunk_x, abs_chunk_z);
         let mut records: ChunkRecords = Vec::with_capacity(chunk.sections.len() + 4);
 
         // Chunk format 42, current since 1.21.120.
         records.push((
-            build_chunk_key_bytes(chunk_pos, Dimension::Overworld, KeyTypeTag::Version, None),
+            build_chunk_key_bytes(chunk_pos, KeyTypeTag::Version, None),
             vec![CHUNK_VERSION],
         ));
         // Fully generated, so the game neither populates nor regenerates the chunk.
         records.push((
-            build_chunk_key_bytes(
-                chunk_pos,
-                Dimension::Overworld,
-                KeyTypeTag::FinalizedState,
-                None,
-            ),
+            build_chunk_key_bytes(chunk_pos, KeyTypeTag::FinalizedState, None),
             2i32.to_le_bytes().to_vec(),
         ));
         // Data3D (heightmap + biomes), required for a valid chunk.
         records.push((
-            build_chunk_key_bytes(chunk_pos, Dimension::Overworld, KeyTypeTag::Data3D, None),
+            build_chunk_key_bytes(chunk_pos, KeyTypeTag::Data3D, None),
             self.create_data3d(abs_chunk_x, abs_chunk_z, chunk),
         ));
         // Bedrock's item frames are blocks, so each needs an empty cell in a stored section;
@@ -955,12 +1056,7 @@ impl BedrockWriter {
                 ((abs_chunk_x * 16 + x, y, abs_chunk_z * 16 + z), plant)
             }));
             records.push((
-                build_chunk_key_bytes(
-                    chunk_pos,
-                    Dimension::Overworld,
-                    KeyTypeTag::SubChunkPrefix,
-                    Some(section_y),
-                ),
+                build_chunk_key_bytes(chunk_pos, KeyTypeTag::SubChunkPrefix, Some(section_y)),
                 bytes,
             ));
         }
@@ -990,12 +1086,7 @@ impl BedrockWriter {
                 data.extend_from_slice(&bytes);
             }
             records.push((
-                build_chunk_key_bytes(
-                    chunk_pos,
-                    Dimension::Overworld,
-                    KeyTypeTag::BlockEntity,
-                    None,
-                ),
+                build_chunk_key_bytes(chunk_pos, KeyTypeTag::BlockEntity, None),
                 data,
             ));
         }
@@ -1044,13 +1135,15 @@ impl BedrockWriter {
         y_index: i8,
         overrides: Option<&StdHashMap<usize, BedrockBlock>>,
     ) -> Result<(Vec<u8>, PottedPlants), BedrockSaveError> {
-        let mut buffer = Cursor::new(Vec::new());
+        let mut buffer = Vec::with_capacity(1024);
         let section = self.build_palette_and_indices(section, overrides);
 
         // Format 9, one or two storage layers, then the Y index.
-        buffer.write_u8(9)?;
-        buffer.write_u8(if section.water.is_some() { 2 } else { 1 })?;
-        buffer.write_i8(y_index)?;
+        buffer.extend_from_slice(&[
+            9,
+            if section.water.is_some() { 2 } else { 1 },
+            y_index as u8,
+        ]);
 
         write_block_storage(&mut buffer, &section.palette, |i| {
             u32::from(section.indices[i])
@@ -1067,7 +1160,7 @@ impl BedrockWriter {
             write_block_storage(&mut buffer, &palette, |i| u32::from(water[i]))?;
         }
 
-        Ok((buffer.into_inner(), section.pots))
+        Ok((buffer, section.pots))
     }
 
     /// Converts a section to Bedrock's XZY order: internal index y*256 + z*16 + x, Bedrock
@@ -1106,8 +1199,18 @@ impl BedrockWriter {
         }
 
         // Identical property compounds share one Arc, so its address stands for the compound.
-        let mut converted: StdHashMap<(Block, usize), (u16, bool, bool)> = StdHashMap::new();
+        let mut converted: FnvHashMap<(Block, usize), (u16, bool, bool)> = FnvHashMap::default();
         converted.insert((AIR, 0), (0, false, false));
+        // Most cells repeat the one before them, which saves the lookup.
+        let mut last = ((AIR, 0usize), (0u16, false, false));
+        // Few cells carry properties, and asking the map about each of the 4096 is a hash
+        // apiece, so the ones that do are marked first.
+        let mut has_properties = [false; 4096];
+        for &index in section.properties.keys() {
+            if let Some(cell) = has_properties.get_mut(index) {
+                *cell = true;
+            }
+        }
         for x in 0..16usize {
             for z in 0..16usize {
                 for y in 0..16usize {
@@ -1119,17 +1222,25 @@ impl BedrockWriter {
                         continue;
                     }
                     let block = section.get_block_at_index(internal_idx);
-                    let properties = section.properties.get(&internal_idx);
+                    let properties = if has_properties[internal_idx] {
+                        section.properties.get(&internal_idx)
+                    } else {
+                        None
+                    };
                     let key = (block, properties.map_or(0, |p| Arc::as_ptr(p) as usize));
-                    let (idx, wet, potted) = *converted.entry(key).or_insert_with(|| {
-                        let properties = properties.map(|p| p.as_ref());
-                        let bedrock_block = to_bedrock_block_with_properties(block, properties);
-                        (
-                            palette_slot(&mut palette, &mut palette_map, bedrock_block),
-                            is_waterlogged(block, properties),
-                            potted_plant(block).is_some(),
-                        )
-                    });
+                    if key != last.0 {
+                        let entry = *converted.entry(key).or_insert_with(|| {
+                            let properties = properties.map(|p| p.as_ref());
+                            let bedrock_block = to_bedrock_block_with_properties(block, properties);
+                            (
+                                palette_slot(&mut palette, &mut palette_map, bedrock_block),
+                                is_waterlogged(block, properties),
+                                potted_plant(block).is_some(),
+                            )
+                        });
+                        last = (key, entry);
+                    }
+                    let (idx, wet, potted) = last.1;
                     indices[bedrock_idx] = idx;
                     water[bedrock_idx] = wet;
                     if potted {
@@ -1297,7 +1408,9 @@ impl BedrockWriter {
         // Add db directory and its contents
         let db_path = dir.join("db");
         if db_path.is_dir() {
-            add_directory_to_zip(&mut writer, &db_path, "db", options)?;
+            // A table's blocks are deflated already; a second pass costs time and gains nothing.
+            let is_table = |path: &Path| path.extension().is_some_and(|ext| ext == "ldb");
+            add_directory_to_zip(&mut writer, &db_path, "db", options, &is_table)?;
         }
 
         writer.finish()?.sync_all()?;
@@ -1325,6 +1438,7 @@ fn add_directory_to_zip(
     dir_path: &std::path::Path,
     zip_prefix: &str,
     options: SimpleFileOptions,
+    stored: &dyn Fn(&Path) -> bool,
 ) -> Result<(), BedrockSaveError> {
     // Add directory entry
     writer.add_directory(format!("{}/", zip_prefix), options)?;
@@ -1340,11 +1454,16 @@ fn add_directory_to_zip(
         let zip_path = format!("{}/{}", zip_prefix, name);
 
         if path.is_file() {
+            let options = if stored(&path) {
+                options.compression_method(CompressionMethod::Stored)
+            } else {
+                options
+            };
             writer.start_file(&zip_path, options)?;
             let contents = retry_transient(|| fs::read(&path))?;
             writer.write_all(&contents)?;
         } else if path.is_dir() {
-            add_directory_to_zip(writer, &path, &zip_path, options)?;
+            add_directory_to_zip(writer, &path, &zip_path, options, stored)?;
         }
     }
 
@@ -1403,8 +1522,7 @@ fn write_biome_storage(buffer: &mut Vec<u8>, ids: &[i32; 16]) {
     let bits = bedrock_bits_per_block(palette.len() as u32);
     buffer.push((bits << 1) | 1);
     // XZY order; the grid cell is (z / 4) * 4 + x / 4.
-    write_packed_indices(buffer, bits, |i| grid[(i >> 4 & 15) / 4 * 4 + (i >> 8) / 4])
-        .expect("writing to a Vec cannot fail");
+    write_packed_indices(buffer, bits, |i| grid[(i >> 4 & 15) / 4 * 4 + (i >> 8) / 4]);
     buffer.extend_from_slice(&(palette.len() as i32).to_le_bytes());
     for id in palette {
         buffer.extend_from_slice(&id.to_le_bytes());
@@ -1473,14 +1591,14 @@ fn bedrock_biome_id(java: &str) -> i32 {
 
 /// One block storage layer: the packed indices, then the palette as NBT states.
 fn write_block_storage(
-    buffer: &mut impl IoWrite,
+    buffer: &mut Vec<u8>,
     palette: &[BedrockBlock],
     index: impl Fn(usize) -> u32,
 ) -> Result<(), BedrockSaveError> {
     let bits_per_block = bedrock_bits_per_block(palette.len() as u32);
-    buffer.write_u8(bits_per_block << 1)?;
-    write_packed_indices(buffer, bits_per_block, index)?;
-    buffer.write_u32::<LittleEndian>(palette.len() as u32)?;
+    buffer.push(bits_per_block << 1);
+    write_packed_indices(buffer, bits_per_block, index);
+    buffer.extend_from_slice(&(palette.len() as u32).to_le_bytes());
     for block in palette {
         let state = BedrockBlockState {
             name: block.name.clone(),
@@ -1494,7 +1612,7 @@ fn write_block_storage(
         let nbt_bytes = nbtx::to_le_bytes(&state).map_err(|e| {
             BedrockSaveError::Nbt(format!("block palette state ({}): {e}", state.name))
         })?;
-        buffer.write_all(&nbt_bytes)?;
+        buffer.extend_from_slice(&nbt_bytes);
     }
     Ok(())
 }
@@ -1515,22 +1633,17 @@ fn palette_slot(
 }
 
 /// Packs 4096 palette indices into words, `32 / bits` to a word and none split across two.
-fn write_packed_indices(
-    buffer: &mut impl IoWrite,
-    bits_per_block: u8,
-    index: impl Fn(usize) -> u32,
-) -> std::io::Result<()> {
-    let blocks_per_word = 32 / u32::from(bits_per_block);
+fn write_packed_indices(buffer: &mut Vec<u8>, bits_per_block: u8, index: impl Fn(usize) -> u32) {
+    let blocks_per_word = 32 / usize::from(bits_per_block);
     let mask = (1u32 << bits_per_block) - 1;
-    for word_start in (0..4096).step_by(blocks_per_word as usize) {
+    buffer.reserve(4096usize.div_ceil(blocks_per_word) * 4);
+    for word_start in (0..4096).step_by(blocks_per_word) {
         let mut word = 0u32;
-        for (slot, i) in (word_start..(word_start + blocks_per_word as usize).min(4096)).enumerate()
-        {
+        for (slot, i) in (word_start..(word_start + blocks_per_word).min(4096)).enumerate() {
             word |= (index(i) & mask) << (u32::from(bits_per_block) * slot as u32);
         }
-        buffer.write_u32::<LittleEndian>(word)?;
+        buffer.extend_from_slice(&word.to_le_bytes());
     }
-    Ok(())
 }
 
 /// Calculate bits per block using valid Bedrock values: {1, 2, 3, 4, 5, 6, 8, 16}
@@ -1545,32 +1658,115 @@ fn bedrock_bits_per_block(palette_count: u32) -> u8 {
     16 // Maximum
 }
 
+/// The record types of a chunk that we write, by the tag byte of their key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum KeyTypeTag {
+    /// Heightmap and biomes.
+    Data3D = 43,
+    /// The chunk format.
+    Version = 44,
+    /// One subchunk; its index follows the tag.
+    SubChunkPrefix = 47,
+    /// Concatenated block entity compounds.
+    BlockEntity = 49,
+    /// How far the chunk is generated.
+    FinalizedState = 54,
+}
+
+/// What every key of a chunk starts with: its position, little-endian.
+fn chunk_key_prefix(chunk_x: i32, chunk_z: i32) -> [u8; 8] {
+    let mut prefix = [0u8; 8];
+    prefix[..4].copy_from_slice(&chunk_x.to_le_bytes());
+    prefix[4..].copy_from_slice(&chunk_z.to_le_bytes());
+    prefix
+}
+
+/// The key of an overworld chunk's record. Other dimensions put their id after the position.
 fn build_chunk_key_bytes(
-    chunk_pos: Vec2<i32>,
-    dimension: Dimension,
+    (chunk_x, chunk_z): (i32, i32),
     key_type: KeyTypeTag,
     y_index: Option<i8>,
 ) -> Vec<u8> {
-    let mut buffer = Vec::with_capacity(
-        9 + if dimension != Dimension::Overworld {
-            4
-        } else {
-            0
-        } + 1,
-    );
-    buffer.extend_from_slice(&chunk_pos.x.to_le_bytes());
-    buffer.extend_from_slice(&chunk_pos.y.to_le_bytes());
-
-    if dimension != Dimension::Overworld {
-        buffer.extend_from_slice(&i32::from(dimension).to_le_bytes());
-    }
-
-    buffer.push(key_type.to_byte());
+    let mut buffer = Vec::with_capacity(10);
+    buffer.extend_from_slice(&chunk_key_prefix(chunk_x, chunk_z));
+    buffer.push(key_type as u8);
     if let Some(y) = y_index {
         buffer.push(y as u8);
     }
-
     buffer
+}
+
+/// Every chunk of the world with its position, in the order of their keys: bytewise, the
+/// position little-endian. LevelDB keeps its tables in that order.
+fn sorted_chunks(world: &WorldToModify) -> Vec<(i32, i32, &ChunkToModify)> {
+    let mut chunks: Vec<(i32, i32, &ChunkToModify)> = world
+        .regions
+        .iter()
+        .flat_map(|((region_x, region_z), region)| {
+            region
+                .chunks
+                .iter()
+                .map(move |((local_x, local_z), chunk)| {
+                    (region_x * 32 + local_x, region_z * 32 + local_z, chunk)
+                })
+        })
+        .collect();
+    chunks.sort_unstable_by_key(|&(x, z, _)| chunk_key_prefix(x, z));
+    chunks
+}
+
+/// Sequence numbers set aside per chunk, more than the records one can have: a subchunk for
+/// each of the 256 section indices and four others.
+const SEQUENCES_PER_CHUNK: usize = 512;
+
+/// Size at which a table is closed and the next one begun, as LevelDB's own tables are.
+const MAX_TABLE_BYTES: usize = 2 << 20;
+
+/// Most chunks a worker writes in one go, about a table's worth in a dense city.
+const MAX_CHUNKS_PER_RUN: usize = 1024;
+
+/// Fewest, so that a small world does not end up as hundreds of tiny tables.
+const MIN_CHUNKS_PER_RUN: usize = 128;
+
+/// Chunks per run: a few runs per thread, so the threads stay busy to the end.
+fn chunks_per_run(chunks: usize, threads: usize) -> usize {
+    (chunks / (threads.max(1) * 4)).clamp(MIN_CHUNKS_PER_RUN, MAX_CHUNKS_PER_RUN)
+}
+
+/// Progress of the chunk writers, which report from several threads.
+struct SaveProgress {
+    bar: ProgressBar,
+    total: usize,
+    done: AtomicUsize,
+}
+
+impl SaveProgress {
+    fn new(total: usize) -> Self {
+        let bar = ProgressBar::new(total as u64);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} chunks ({eta})")
+                .unwrap()
+                .progress_chars("█▓░"),
+        );
+        Self {
+            bar,
+            total,
+            done: AtomicUsize::new(0),
+        }
+    }
+
+    fn chunk_done(&self) {
+        let done = self.done.fetch_add(1, Ordering::Relaxed) + 1;
+        self.bar.inc(1);
+        // GUI progress spans 92%..97% for chunk writing, a step every half percent of it.
+        // Two threads may emit out of order; the emitter never lets the bar move back.
+        let step = (self.total / 200).max(1);
+        if done.is_multiple_of(step) || done == self.total {
+            emit_gui_progress_update(92.0 + done as f64 / self.total as f64 * 5.0, "");
+        }
+    }
 }
 
 /// Leaves out the compound's empty lists, at any depth. nbtx writes an empty list
@@ -1922,23 +2118,11 @@ struct BedrockExperiments {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bedrockrs_level::level::db_interface::bedrock_key::ChunkKey;
+    use rusty_leveldb::DB;
     use serde_json::Value;
     use zip::ZipArchive;
 
-    /// Build a key using the canonical `ChunkKey` path (the source of truth from
-    /// `bedrockrs_level`) so we can compare against `build_chunk_key_bytes`.
-    fn canonical_key(chunk_key: ChunkKey) -> Vec<u8> {
-        // Replicates RustyDBInterface::build_key without needing a DB instance
-        use bedrockrs_level::level::db_interface::db::LevelDBKey;
-        use std::io::Cursor;
-        let mut key_bytes: Vec<u8> = vec![0; chunk_key.estimate_size()];
-        let mut buff: Cursor<&mut [u8]> = Cursor::new(&mut key_bytes);
-        chunk_key.write_key(&mut buff);
-        key_bytes
-    }
-
-    fn test_writer(output_path: PathBuf) -> BedrockWriter {
+    pub(super) fn test_writer(output_path: PathBuf) -> BedrockWriter {
         BedrockWriter::new(
             output_path,
             "Arnis World: Test".to_string(),
@@ -2164,47 +2348,32 @@ mod tests {
     }
 
     #[test]
-    fn build_chunk_key_bytes_matches_canonical_version() {
-        let pos = Vec2::new(5, -3);
-        let ours = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Version, None);
-        let canonical = canonical_key(ChunkKey::chunk_marker(pos, Dimension::Overworld));
-        assert_eq!(ours, canonical, "Version key mismatch");
-    }
-
-    #[test]
-    fn build_chunk_key_bytes_matches_canonical_data3d() {
-        let pos = Vec2::new(-12, 7);
-        let ours = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Data3D, None);
-        let canonical = canonical_key(ChunkKey::data3d(pos, Dimension::Overworld));
-        assert_eq!(ours, canonical, "Data3D key mismatch");
-    }
-
-    #[test]
-    fn build_chunk_key_bytes_matches_canonical_subchunk() {
-        let pos = Vec2::new(100, -50);
-        // Positive y index
-        let ours = build_chunk_key_bytes(
-            pos,
-            Dimension::Overworld,
-            KeyTypeTag::SubChunkPrefix,
-            Some(4),
+    fn chunk_keys_are_the_position_then_the_tag_then_the_subchunk() {
+        assert_eq!(
+            build_chunk_key_bytes((5, -3), KeyTypeTag::Version, None),
+            [5, 0, 0, 0, 0xFD, 0xFF, 0xFF, 0xFF, 44]
         );
-        let canonical = canonical_key(ChunkKey::new_subchunk(pos, Dimension::Overworld, 4));
-        assert_eq!(ours, canonical, "SubChunk y=4 key mismatch");
-    }
-
-    #[test]
-    fn build_chunk_key_bytes_matches_canonical_negative_y() {
-        let pos = Vec2::new(0, 0);
-        // Negative y index (e.g. y = -4 for sections below y=0)
-        let ours = build_chunk_key_bytes(
-            pos,
-            Dimension::Overworld,
-            KeyTypeTag::SubChunkPrefix,
-            Some(-4),
+        assert_eq!(
+            build_chunk_key_bytes((-12, 7), KeyTypeTag::Data3D, None),
+            [0xF4, 0xFF, 0xFF, 0xFF, 7, 0, 0, 0, 43]
         );
-        let canonical = canonical_key(ChunkKey::new_subchunk(pos, Dimension::Overworld, -4));
-        assert_eq!(ours, canonical, "SubChunk y=-4 key mismatch");
+        assert_eq!(
+            build_chunk_key_bytes((100, -50), KeyTypeTag::SubChunkPrefix, Some(4)),
+            [100, 0, 0, 0, 0xCE, 0xFF, 0xFF, 0xFF, 47, 4]
+        );
+        // A section below y=0 keeps its index as a signed byte.
+        assert_eq!(
+            build_chunk_key_bytes((0, 0), KeyTypeTag::SubChunkPrefix, Some(-4)),
+            [0, 0, 0, 0, 0, 0, 0, 0, 47, 0xFC]
+        );
+        assert_eq!(
+            build_chunk_key_bytes((0, 256), KeyTypeTag::BlockEntity, None),
+            [0, 0, 0, 0, 0, 1, 0, 0, 49]
+        );
+        assert_eq!(
+            build_chunk_key_bytes((0, 0), KeyTypeTag::FinalizedState, None),
+            [0, 0, 0, 0, 0, 0, 0, 0, 54]
+        );
     }
 
     #[test]
@@ -2552,19 +2721,18 @@ mod tests {
             .unwrap()
             .into_iter()
             .collect();
-        let pos = Vec2::new(0, 0);
-        let record = |tag, y| {
-            records
-                .get(&build_chunk_key_bytes(pos, Dimension::Overworld, tag, y))
-                .cloned()
-        };
+        let pos = (0, 0);
+        let record = |tag, y| records.get(&build_chunk_key_bytes(pos, tag, y)).cloned();
 
         assert_eq!(record(KeyTypeTag::Version, None), Some(vec![CHUNK_VERSION]));
         assert_eq!(
             record(KeyTypeTag::FinalizedState, None),
             Some(2i32.to_le_bytes().to_vec())
         );
-        assert!(record(KeyTypeTag::Entity, None).is_none());
+        // No entity record (tag 50): the Java entities other than frames have no Bedrock form.
+        let mut entity_key = chunk_key_prefix(pos.0, pos.1).to_vec();
+        entity_key.push(50);
+        assert!(!records.contains_key(&entity_key));
 
         // Heightmap, then one plains storage and 23 "same as below".
         let data3d = record(KeyTypeTag::Data3D, None).unwrap();
@@ -2662,12 +2830,7 @@ mod tests {
                 world.get_or_create_region(0, 0).get_or_create_chunk(0, 0),
             )
             .unwrap();
-        let key = build_chunk_key_bytes(
-            Vec2::new(0, 0),
-            Dimension::Overworld,
-            KeyTypeTag::BlockEntity,
-            None,
-        );
+        let key = build_chunk_key_bytes((0, 0), KeyTypeTag::BlockEntity, None);
         let (_, data) = records.iter().find(|(k, _)| *k == key).unwrap();
         let entities = compounds(data);
         assert_eq!(entities.len(), 2);
@@ -2712,7 +2875,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .collect();
-        let key = |tag, y| build_chunk_key_bytes(Vec2::new(0, 0), Dimension::Overworld, tag, y);
+        let key = |tag, y| build_chunk_key_bytes((0, 0), tag, y);
 
         // Air, kelp and stone in 2 bits, 16 to a word; then the water layer in 1 bit.
         let sub = &records[&key(KeyTypeTag::SubChunkPrefix, Some(2))];
@@ -2801,16 +2964,15 @@ mod tests {
         let mut db = DB::open(staging.join("db").into_boxed_path(), opts).expect("reopen db");
 
         for &(cx, cz) in &chunk_coords {
-            let pos = Vec2::new(cx, cz);
-            let version =
-                build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Version, None);
+            let pos = (cx, cz);
+            let version = build_chunk_key_bytes(pos, KeyTypeTag::Version, None);
             assert_eq!(
                 db.get(&version).as_deref(),
                 Some(&[42u8][..]),
                 "version record missing for chunk ({cx}, {cz})"
             );
 
-            let data3d = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Data3D, None);
+            let data3d = build_chunk_key_bytes(pos, KeyTypeTag::Data3D, None);
             assert!(
                 db.get(&data3d).is_some(),
                 "Data3D record missing for chunk ({cx}, {cz})"
@@ -2818,12 +2980,8 @@ mod tests {
 
             // Every section we populated (positive, zero, negative index) must be written.
             for section_y in [4i8, 0, -2] {
-                let subchunk = build_chunk_key_bytes(
-                    pos,
-                    Dimension::Overworld,
-                    KeyTypeTag::SubChunkPrefix,
-                    Some(section_y),
-                );
+                let subchunk =
+                    build_chunk_key_bytes(pos, KeyTypeTag::SubChunkPrefix, Some(section_y));
                 assert!(
                     db.get(&subchunk).is_some_and(|b| !b.is_empty()),
                     "subchunk {section_y} missing for chunk ({cx}, {cz})"
@@ -2834,12 +2992,192 @@ mod tests {
 }
 
 #[cfg(test)]
-mod leveldb_options_tests {
+mod leveldb_tests {
     use super::*;
+    use rusty_leveldb::LdbIterator;
+    use rusty_leveldb::DB;
 
-    /// Tiny memtables and tables force many flushes and compactions, and so many
-    /// table-cache evictions. Under stock options with a small table cache this
-    /// workload corrupts rusty-leveldb's LRU list and panics in `cache.rs`.
+    fn writer(dir: &Path) -> BedrockWriter {
+        super::tests::test_writer(dir.join("world"))
+    }
+
+    /// A world of 20 x 20 chunks around the origin, each with blocks at three section
+    /// heights, one of them below zero.
+    fn world_around_origin() -> WorldToModify {
+        let mut world = WorldToModify::default();
+        for cx in -10..10 {
+            for cz in -10..10 {
+                for y in [70, 5, -20] {
+                    world.set_block_if_absent(
+                        cx * 16 + 2,
+                        y,
+                        cz * 16 + 3,
+                        crate::block_definitions::STONE,
+                    );
+                }
+            }
+        }
+        world
+    }
+
+    /// Every record of the database under `db_path`, in key order.
+    fn read_all(db_path: &Path) -> Vec<DbRecord> {
+        let mut opts = bedrock_db_options();
+        opts.create_if_missing = false;
+        opts.paranoid_checks = true;
+        let mut db = DB::open(db_path, opts).expect("open db");
+        let mut iter = db.new_iter().expect("iterator");
+        let mut records = Vec::new();
+        while let Some(record) = iter.next() {
+            records.push(record);
+        }
+        records
+    }
+
+    /// What the tables must hold: every chunk's records, in key order.
+    fn expected_records(writer: &BedrockWriter, world: &WorldToModify) -> Vec<DbRecord> {
+        let mut records: Vec<DbRecord> = sorted_chunks(world)
+            .into_iter()
+            .flat_map(|(x, z, chunk)| writer.encode_chunk_records(x, z, chunk).unwrap())
+            .collect();
+        records.sort();
+        records
+    }
+
+    #[test]
+    fn a_bulk_loaded_world_reads_back_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let writer = writer(tmp.path());
+        let world = world_around_origin();
+        writer.write_chunks_to_db(tmp.path(), &world).unwrap();
+
+        let db_path = tmp.path().join("db");
+        // Nothing but the tables, the manifest and the pointer to it.
+        for entry in fs::read_dir(&db_path).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            assert!(
+                name.ends_with(".ldb") || name.starts_with("MANIFEST-") || name == "CURRENT",
+                "unexpected file {name}"
+            );
+        }
+
+        let expected = expected_records(&writer, &world);
+        // Version, finalized state, Data3D and three subchunks per chunk.
+        assert_eq!(expected.len(), 400 * 6);
+        assert_eq!(read_all(&db_path), expected);
+    }
+
+    #[test]
+    fn tables_are_closed_at_the_size_limit_and_runs_split_the_work() {
+        let tmp = tempfile::tempdir().unwrap();
+        let writer = writer(tmp.path());
+        let world = world_around_origin();
+        let chunks = sorted_chunks(&world);
+        let db_path = tmp.path().join("db");
+        fs::create_dir_all(&db_path).unwrap();
+
+        // Seven runs of at most 64 chunks, and a limit that a few chunks reach.
+        let progress = SaveProgress::new(chunks.len());
+        let tables = writer
+            .write_tables(&db_path, &chunks, 64, 2048, &progress)
+            .unwrap();
+        assert!(tables.len() > 7 * 2, "only {} tables", tables.len());
+        assert!(tables.iter().all(|t| t.size() < 64 * 1024));
+        let mut numbers: Vec<u64> = tables.iter().map(|t| t.num()).collect();
+        numbers.sort_unstable();
+        numbers.dedup();
+        assert_eq!(numbers.len(), tables.len());
+        assert_eq!(
+            tables.iter().map(|t| t.entries()).sum::<usize>(),
+            chunks.len() * 6
+        );
+
+        install_tables(&bedrock_db_options(), &db_path, 1, tables).unwrap();
+        assert_eq!(read_all(&db_path), expected_records(&writer, &world));
+    }
+
+    #[test]
+    fn an_empty_world_still_gets_a_database() {
+        let tmp = tempfile::tempdir().unwrap();
+        let writer = writer(tmp.path());
+        writer
+            .write_chunks_to_db(tmp.path(), &WorldToModify::default())
+            .unwrap();
+        assert!(tmp.path().join("db").join("CURRENT").is_file());
+        assert!(read_all(&tmp.path().join("db")).is_empty());
+    }
+
+    #[test]
+    fn chunk_keys_sort_bytewise_not_by_coordinate() {
+        // The low byte of x comes first, so chunk 256 sorts before chunk 1, and a negative
+        // coordinate after every positive one of the same low byte.
+        assert!(chunk_key_prefix(256, 0) < chunk_key_prefix(1, 0));
+        assert!(chunk_key_prefix(1, 5) < chunk_key_prefix(1, -1));
+        assert!(chunk_key_prefix(0, 9) < chunk_key_prefix(-256, 0));
+    }
+
+    #[test]
+    fn runs_are_sized_between_their_bounds() {
+        assert_eq!(chunks_per_run(0, 8), MIN_CHUNKS_PER_RUN);
+        assert_eq!(chunks_per_run(3000, 8), MIN_CHUNKS_PER_RUN);
+        assert_eq!(chunks_per_run(16_000, 8), 500);
+        assert_eq!(chunks_per_run(1_000_000, 8), MAX_CHUNKS_PER_RUN);
+        assert_eq!(chunks_per_run(16_000, 0), MAX_CHUNKS_PER_RUN);
+    }
+
+    #[test]
+    fn the_compressors_round_trip_what_does_and_does_not_compress() {
+        // xorshift noise does not compress, so the output outgrows the first buffer.
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let noise: Vec<u8> = (0..70_000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                x as u8
+            })
+            .collect();
+        for zlib_header in [false, true] {
+            let compressor = DeflateCompressor::new(zlib_header);
+            for block in [Vec::new(), vec![7u8; 5000], noise.clone()] {
+                let packed = compressor.encode(block.clone()).unwrap();
+                // Twice, since the compressor keeps its state between blocks.
+                assert_eq!(compressor.encode(block.clone()).unwrap(), packed);
+                assert_eq!(compressor.decode(packed).unwrap(), block);
+            }
+            assert!(compressor.encode(vec![7u8; 5000]).unwrap().len() < 100);
+            assert!(compressor.decode(vec![0xFF; 16]).is_err());
+        }
+    }
+
+    #[test]
+    fn tables_are_stored_in_the_archive_and_the_rest_is_deflated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut writer = writer(tmp.path());
+        let world = world_around_origin();
+        let bbox = XZBBox::rect_from_xz_lengths(320.0, 320.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 0.01, 0.01).unwrap();
+        writer.write_world(&world, &bbox, &llbbox).unwrap();
+
+        let archive = File::open(tmp.path().join("world.mcworld")).unwrap();
+        let mut zip = zip::ZipArchive::new(archive).unwrap();
+        let mut tables = 0;
+        for i in 0..zip.len() {
+            let file = zip.by_index(i).unwrap();
+            let name = file.name().unwrap().to_string();
+            if name.ends_with(".ldb") {
+                assert_eq!(file.compression(), CompressionMethod::Stored, "{name}");
+                tables += 1;
+            } else if name == "level.dat" {
+                assert_eq!(file.compression(), CompressionMethod::Deflated);
+            }
+        }
+        assert!(tables > 0);
+    }
+
+    /// Tiny memtables and tables force many flushes and compactions, so every block goes
+    /// through our compressors both ways, many times over. This workload also used to
+    /// corrupt the table cache of rusty-leveldb before 4.0.2.
     #[test]
     fn bedrock_db_survives_heavy_compaction() {
         let tmp = tempfile::tempdir().unwrap();
