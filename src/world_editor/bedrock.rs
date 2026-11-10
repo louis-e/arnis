@@ -1203,7 +1203,14 @@ impl BedrockWriter {
         converted.insert((AIR, 0), (0, false, false));
         // Most cells repeat the one before them, which saves the lookup.
         let mut last = ((AIR, 0usize), (0u16, false, false));
-        let has_properties = !section.properties.is_empty();
+        // Few cells carry properties, and asking the map about each of the 4096 is a hash
+        // apiece, so the ones that do are marked first.
+        let mut has_properties = [false; 4096];
+        for &index in section.properties.keys() {
+            if let Some(cell) = has_properties.get_mut(index) {
+                *cell = true;
+            }
+        }
         for x in 0..16usize {
             for z in 0..16usize {
                 for y in 0..16usize {
@@ -1215,8 +1222,7 @@ impl BedrockWriter {
                         continue;
                     }
                     let block = section.get_block_at_index(internal_idx);
-                    // hashbrown hashes the key even when the map is empty.
-                    let properties = if has_properties {
+                    let properties = if has_properties[internal_idx] {
                         section.properties.get(&internal_idx)
                     } else {
                         None
