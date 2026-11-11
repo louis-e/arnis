@@ -144,8 +144,11 @@ let skipKey = '';
 // as typed: the backend parses it with the CLI's own parser and says what is wrong.
 // `plan` is for the plan drawn before a run: it leaves a pending retry for the run itself.
 export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = false, forKey = false }) {
-  if (!on('advanced-meld-features-toggle')) return [];
+  // Rocks and Bushes are regular settings; everything else needs the Advanced switch.
   const f = [];
+  if (on('meld-rocks-toggle')) f.push('--rocks');
+  if (on('meld-bushes-toggle')) f.push('--bushes');
+  if (!on('advanced-meld-features-toggle')) return f;
   // Never for another selection or world than the pieces came from.
   if (!plan) {
     if (retryNext.length && keyOf() === jobKey) f.push(`--only-pieces=${retryNext.join(',')}`);
@@ -182,14 +185,8 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
   if (choice('meld-props-group') !== 'auto') add('--props', choice('meld-props-group'));
 
   // Nature
-  if (on('meld-rocks-toggle')) {
-    f.push('--rocks');
-    if (value('meld-rock-density-input') !== '0.02') add('--rock-density', value('meld-rock-density-input'));
-  }
-  if (on('meld-bushes-toggle')) {
-    f.push('--bushes');
-    if (value('meld-bush-density-input') !== '0.05') add('--bush-density', value('meld-bush-density-input'));
-  }
+  if (on('meld-rocks-toggle') && value('meld-rock-density-input') !== '0.02') add('--rock-density', value('meld-rock-density-input'));
+  if (on('meld-bushes-toggle') && value('meld-bush-density-input') !== '0.05') add('--bush-density', value('meld-bush-density-input'));
   if (value('meld-tree-realm-select') !== 'auto') add('--tree-realm', value('meld-tree-realm-select'));
   if (value('meld-tree-pack-dir-input')) {
     add('--tree-pack-dir', value('meld-tree-pack-dir-input'));
@@ -1483,6 +1480,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       const off = !available();
       const held = Boolean(w.locked || off || busy());
       const job = resume ? projectJob(w) : null;
+      const acts = [];
       if (job && job.total > 0) {
         const lang = (() => { try { return localStorage.getItem('arnis-language') || undefined; } catch (_) { return undefined; } })();
         const n = (x) => { try { return Number(x).toLocaleString(lang); } catch (_) { return String(x); } };
@@ -1503,12 +1501,15 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
           globalThis.arnisHold(b, () => go(true), 1500);
         }
         if (why) b.title = why;
-        kids.push(b);
+        acts.push(b);
       }
-      kids.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
-      kids.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
-      if (off) kids.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position. Java only.'); });
-      row.append(...kids);
+      acts.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
+      acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
+      if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position. Java only.'); });
+      const actions = document.createElement('div');
+      actions.className = 'projects-actions';
+      actions.append(...acts);
+      row.append(...kids, actions);
       return row;
     });
     if (!rows.length) rows.push(text('projects-empty', t('projects_empty', 'No worlds yet. Build one with One World on.')));

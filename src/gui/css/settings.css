@@ -233,22 +233,6 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.settings-topbar-icon {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  flex-shrink: 0;
-  border-radius: 10px;
-  background: var(--ui-accent-soft);
-  color: var(--ui-accent);
-}
-
-.settings-topbar-icon .icon {
-  width: 24px;
-  height: 24px;
-}
-
 .settings-topbar-text {
   min-width: 0;
 }
@@ -969,16 +953,15 @@ label[for].setting-label {
   gap: 10px;
 }
 
-.settings-about-meld {
+/* Version line with the credit right under it */
+.settings-about-id {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px 24px;
-  flex-basis: 100%;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 240px;
 }
 
 .settings-about-credit {
-  flex: 1 1 240px;
   color: var(--ui-muted);
   font-size: 12.5px;
   line-height: 1.45;
@@ -1081,11 +1064,9 @@ body.meld-off .meld-only {
 
 /* Heading of a group of tiles inside one section */
 .settings-page .settings-group-title {
-  margin: 14px 0 -2px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  margin: 22px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--ui-muted);
 }
 
@@ -1134,26 +1115,13 @@ body.meld-off .meld-only {
   display: none;
 }
 
-/* Advanced tiles, and the switch that shows them, carry accent corners with a hard cut. */
-.settings-page .settings-section.meld-only .setting-tile,
+/* The Advanced switch wears the accent, and so does the frame of each section it shows. */
 .settings-page .setting-tile:has(#advanced-meld-features-toggle) {
-  position: relative;
+  border-color: var(--ui-accent);
 }
 
-.settings-page .settings-section.meld-only .setting-tile::after,
-.settings-page .setting-tile:has(#advanced-meld-features-toggle)::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border: 2px solid var(--primary-accent);
-  border-radius: inherit;
-  pointer-events: none;
-  --corner: 14px;
-  mask:
-    linear-gradient(#000 0 0) top left / var(--corner) var(--corner) no-repeat,
-    linear-gradient(#000 0 0) top right / var(--corner) var(--corner) no-repeat,
-    linear-gradient(#000 0 0) bottom left / var(--corner) var(--corner) no-repeat,
-    linear-gradient(#000 0 0) bottom right / var(--corner) var(--corner) no-repeat;
+.settings-section.meld-only {
+  border-color: color-mix(in srgb, var(--ui-accent) 55%, transparent);
 }
 
 .settings-nav-item.meld-only:not(.active) .icon {
@@ -1254,6 +1222,7 @@ body.meld-off .meld-only {
 .settings-page .projects-view .settings-action-button {
   height: 30px;
   padding: 0 12px;
+  border-radius: 6px;
 }
 
 .settings-page .projects-view .settings-action-button[aria-pressed="true"] {
@@ -1303,6 +1272,19 @@ body.meld-off .meld-only {
 
 .settings-page .is-grid .projects-title {
   flex: 1 1 100%;
+}
+
+/* A world's buttons stay together: at the row's end in the list, on their own line in the grid. */
+.settings-page .projects-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.settings-page .is-grid .projects-actions {
+  flex-basis: 100%;
+  margin-left: 0;
 }
 
 .settings-page .projects-meta {

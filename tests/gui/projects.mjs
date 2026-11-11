@@ -20,23 +20,24 @@ const opened = [];
 const refresh = initProjects({ invoke: async () => worlds, savePath: () => 's', scale: () => 1, open: async (n, x) => opened.push([n, x]) });
 await refresh();
 const rows = document.getElementById('projects-list').children;
+const flat = (r) => r.children.flatMap((c) => (c.className === 'projects-actions' ? c.children : [c])); // the buttons sit in one box
 assert.strictEqual(rows.length, 3, 'three entries, three rows');
 const cells = (r) => r.children.map((c) => c.textContent);
 assert.ok(cells(rows[0]).includes('Areas: 3'));
 assert.ok(cells(rows[1]).includes('Scale 1:2'));
 assert.ok(rows[1].children.some((c) => c.className.includes('is-warn')), 'a different scale is flagged');
-assert.ok(cells(rows[2]).includes('In use') && rows[2].children.at(-1).disabled, 'a locked world cannot be opened');
+assert.ok(cells(rows[2]).includes('In use') && flat(rows[2]).at(-1).disabled, 'a locked world cannot be opened');
 
-await rows[1].children.at(-2).listeners.click();
+await flat(rows[1]).at(-2).listeners.click();
 assert.strictEqual(store.get('arnis-one-world-name'), 'Paris');
 assert.deepStrictEqual(opened.at(-1), ['Paris', false]);
-await rows[0].children.at(-1).listeners.click();
+await flat(rows[0]).at(-1).listeners.click();
 assert.deepStrictEqual(opened.at(-1), ['Arnis One World', true], 'Expand opens then expands');
 
 let ok = false;
 const off = initProjects({ invoke: async () => worlds, savePath: () => 's', scale: () => 1, open: async () => {}, available: () => ok });
 await off();
-assert.ok(document.getElementById('projects-list').children[0].children.at(-1).disabled, 'no One World here: Open is disabled');
+assert.ok(flat(document.getElementById('projects-list').children[0]).at(-1).disabled, 'no One World here: Open is disabled');
 
 worlds.length = 0;
 await refresh();

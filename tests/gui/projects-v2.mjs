@@ -109,12 +109,13 @@ let live = false;
 const withJobs = initProjects({ invoke: async (c) => (c === 'gui_list_one_worlds' ? jobs : null), savePath: () => '/s', scale: () => 1, open: async () => {}, busy: () => busy, canRun: () => !live, resume: async (w, j, r) => started.push([w.name, j.settings, r]) });
 await withJobs();
 const cards = list.children;
-const label = (r) => r.children.map((c) => c.textContent);
+const flat = (r) => r.children.flatMap((c) => (c.className === 'projects-actions' ? c.children : [c])); // the buttons sit in one box
+const label = (r) => flat(r).map((c) => c.textContent);
 assert.ok(label(cards[0]).includes('1,204 / 61,747 cells'), 'the count is formatted');
 assert.ok(label(cards[0]).includes('Resume') && !label(cards[0]).includes('Rebuild'));
 assert.ok(label(cards[1]).includes('Rebuild') && !label(cards[1]).includes('Resume') && !label(cards[1]).some((x) => x.includes('cells')));
 assert.deepStrictEqual(label(cards[2]).filter((x) => /Resume|Rebuild/.test(x)), [], 'a plain world has neither');
-const btn = (r, name) => r.children.find((c) => c.textContent === name || c.textContent.startsWith(name));
+const btn = (r, name) => flat(r).find((c) => c.textContent === name || c.textContent.startsWith(name));
 assert.ok(btn(cards[3], 'Resume').disabled && btn(cards[3], 'Resume').title.includes('outline'), 'a job whose outline was not kept is refused, and says why');
 await btn(cards[0], 'Resume').listeners.click();
 assert.deepStrictEqual(started.at(-1), ['Open', ['--threads=2'], false]);
@@ -131,7 +132,7 @@ assert.deepStrictEqual(started.at(-1), ['Done', ['--seed=3'], true], 'held, it r
 // During a run, and in Live, nothing is run from here.
 busy = true;
 await withJobs();
-assert.ok(list.children.every((r) => r.children.filter((c) => c.disabled !== undefined).every((c) => c.disabled)), 'every action waits for the run');
+assert.ok(list.children.every((r) => flat(r).filter((c) => c.disabled !== undefined).every((c) => c.disabled)), 'every action waits for the run');
 busy = false;
 live = true;
 await withJobs();
