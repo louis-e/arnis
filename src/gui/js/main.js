@@ -816,16 +816,16 @@ function setCelestialBody(body) {
   refreshBboxSelectionInfo();
 }
 
-// The last search result used for a selection, and the name the running build keeps for its world.
+// The last search result used for a selection, and { name, path } of the run that builds a One
+// World's first land, taken when it starts.
 let searchedPlace = null;
-let runPlace = '';
+let runPlace = null;
 
-// Once a One World's first area is built, its place name is the search result's.
+// That world is named after the search result once the run is done.
 async function rememberRunPlace() {
-  const place = runPlace;
-  runPlace = '';
-  const path = oneWorldInfo && oneWorldInfo.area_count === 1 ? oneWorldInfo.world_path : '';
-  if (place && path) await invoke('gui_set_place_name', { worldPath: path, placeName: place }).catch(() => {});
+  const run = runPlace;
+  runPlace = null;
+  if (run) await invoke('gui_set_place_name', { worldPath: run.path, placeName: run.name }).catch(() => {});
 }
 
 // Function to register the event listener for bbox updates from iframe
@@ -1302,12 +1302,14 @@ function initSettings() {
   let focusBeforeSettings = null;
 
   let refreshProjects = null;
-  // Open and Expand follow the format, the body and Live while the page is open.
-  redrawProjects = () => { if (refreshProjects && settingsModal.style.display === "flex") refreshProjects(); };
+  // Open and Expand follow the format, the body, Live and a run while the page is open; with
+  // Advanced features off the page is hidden and its list is never read.
+  const projectsShown = () => refreshProjects && document.getElementById('advanced-meld-features-toggle').checked;
+  redrawProjects = () => { if (projectsShown() && settingsModal.style.display === "flex") refreshProjects(); };
 
   // Open the settings page
   function openSettings() {
-    if (refreshProjects) refreshProjects();
+    if (projectsShown()) refreshProjects();
     focusBeforeSettings = document.activeElement;
     settingsModal.style.display = "flex";
     syncSettingsLayout();
@@ -1456,7 +1458,10 @@ function initSettings() {
   const pushMeldToMap = () => postToMap({ type: 'meldFeatures', on: meldToggle.checked, scale: readGenerationSettings(true).worldScale, snap: Boolean(document.querySelector('#meld-snap-group .segment.active:not([data-v="off"])')), mapFirst: document.body.classList.contains('map-first') });
   document.addEventListener('change', pushMeldToMap);
   // Advanced off: a finished One World's name is no longer the world under Start.
-  meldToggle.addEventListener('change', () => { if (!meldToggle.checked && (lastRunOneWorld || oneWorldPicked)) setWorldNameLabel(""); });
+  meldToggle.addEventListener('change', () => {
+    if (!meldToggle.checked && (lastRunOneWorld || oneWorldPicked)) setWorldNameLabel("");
+    redrawProjects();
+  });
   document.getElementById('meld-snap-group')?.addEventListener('click', () => setTimeout(pushMeldToMap));
   document.getElementById('meld-recommended-btn')?.addEventListener('click', () => {
     const [a, b, c, d] = (selectedBBox || '').split(/[\s,]+/).map(Number);
@@ -1493,6 +1498,8 @@ function initSettings() {
     savePath: () => savePath,
     scale: () => readGenerationSettings(true).worldScale,
     available: () => isOneWorldAvailable() && !liveActive(),
+    busy: () => !generationButtonEnabled,
+    canRun: () => !isLiveMode(),
     renamed: (from, to) => worldRenamed(from, to),
     open: async (name, expand) => {
       oneWorldName = name;
@@ -1506,10 +1513,11 @@ function initSettings() {
       closeSettings();
       if (expand) document.getElementById('plan-expand-button').click();
     },
-    // Resume and Rebuild: the job's settings and area go back in, and the same run starts.
+    // Resume and Rebuild: the job's settings and area go back in, and the same run starts. Resume
+    // asks with Start's hold; Rebuild was held already.
     resume: (world, job, rebuild) => resumeJob(job, rebuild, {
       current: () => selectedBBox,
-      start: () => startGeneration(true),
+      start: () => startGeneration(rebuild),
       noArea: () => setBboxSelectionInfo(document.getElementById('bbox-selection-info'), 'select_area_prompt', '#ffffff'),
     }),
   });
@@ -2745,7 +2753,7 @@ function handleBboxInput() {
       customBBoxValid = false;
       bboxInputError = false;
       selectedBBox = mapSelectedBBox;
-      dropStalePieces();
+      dropStalePieces(selectedBBox);
       
       // Clear the info text only if no map selection exists
       if (!mapSelectedBBox) {
@@ -2800,7 +2808,7 @@ function handleBboxInput() {
         customBBoxValid = true;
         bboxInputError = false;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
-        dropStalePieces();
+        dropStalePieces(selectedBBox);
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
 
         // Reset rotation when bbox changes via manual input
@@ -3024,7 +3032,7 @@ function displayBboxInfoText(bboxText, shapes) {
 
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
-  dropStalePieces();
+  dropStalePieces(selectedBBox);
   // Meld features: a single run's preview belongs to that run's area; a new selection drops it
   // (a One World keeps showing its own areas).
   if (document.getElementById('advanced-meld-features-toggle').checked && currentWorldMapData && !lastRunOneWorld) {
@@ -4313,6 +4321,7 @@ function setGenerationButtonEnabled(enabled) {
   generationButtonEnabled = enabled;
   if (!enabled) document.getElementById('run-confirm').hidden = true;
   showRunControls(!enabled);
+  redrawProjects();
   refreshWorldNameEditUI();
   // The two jobs exclude each other in the backend, so the other one greys out.
   refreshPrecomputeButton();
@@ -4460,7 +4469,9 @@ async function startGeneration(confirmed = false, prewarm = false) {
     }
     lastRunOneWorld = oneWorld;
     lastRunPrewarm = prewarm;
-    runPlace = oneWorld && !prewarm ? placeForRun(searchedPlace, selectedBBox) : '';
+    const place = oneWorld && !prewarm && document.getElementById('advanced-meld-features-toggle').checked
+      ? placeForRun(searchedPlace, selectedBBox) : '';
+    runPlace = place && oneWorldInfo && !oneWorldInfo.area_count ? { name: place, path: oneWorldInfo.world_path } : null;
 
     // Auto-create world for Java format (a One World is resolved by the backend)
     if (selectedWorldFormat === 'java' && !oneWorld && !prewarm) {

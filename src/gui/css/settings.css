@@ -1343,6 +1343,21 @@ body.meld-off .meld-only {
   cursor: default;
 }
 
+/* Rebuild fills while held (1.5 s, as the cell menu's hold) */
+.settings-page .projects-row .settings-action-button.projects-hold {
+  background-image: linear-gradient(rgba(254, 204, 68, 0.4), rgba(254, 204, 68, 0.4));
+  background-repeat: no-repeat;
+  background-size: 0 100%;
+  transition: background-size 0.2s;
+  touch-action: none;
+  user-select: none;
+}
+
+.settings-page .projects-row .settings-action-button.projects-hold.is-holding {
+  background-size: 100% 100%;
+  transition: background-size 1.5s linear;
+}
+
 .settings-page .projects-empty {
   opacity: 0.75;
 }

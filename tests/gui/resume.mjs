@@ -52,14 +52,15 @@ console.log('resume ok');
 
 // Resume / Rebuild select the job's own area, [south, west, north, east], then start.
 const { resumeJob } = await import('../../src/gui/js/meld-features.js');
-const run = async (bbox, matches = true) => {
+const run = async (bbox, matches = true, mask) => {
   const log = [];
   let sel = '';
-  await resumeJob({ settings: ['--threads=3'], bbox }, false, {
+  await resumeJob({ settings: ['--threads=3'], bbox, mask }, false, {
     select: (b) => { log.push(['select', b]); if (matches) sel = b.join(' '); },
     current: () => sel,
     start: () => log.push(['start']),
     noArea: () => log.push(['noArea']),
+    mask: (path, area) => log.push(['mask', path, area]),
     wait: async () => {},
   });
   return log;
@@ -67,5 +68,6 @@ const run = async (bbox, matches = true) => {
 assert.deepStrictEqual(await run([44.1, 26.0, 44.5, 26.9]), [['select', [44.1, 26.0, 44.5, 26.9]], ['start']], 'non-square area, S/W/N/E order, then start');
 assert.deepStrictEqual(await run(null), [['noArea']], 'no area: settings restored, said once, nothing starts');
 assert.deepStrictEqual(await run([1, 2, 3]), [['noArea']], 'a malformed area counts as unknown');
-assert.deepStrictEqual(await run([44.1, 26.0, 44.5, 26.9], false), [['select', [44.1, 26.0, 44.5, 26.9]]], 'does not start until the map shows the area');
+assert.deepStrictEqual(await run([44.1, 26.0, 44.5, 26.9], false), [['select', [44.1, 26.0, 44.5, 26.9]], ['noArea']], 'never starts before the map shows the area, and says so when it does not');
+assert.deepStrictEqual(await run([44.1, 26.0, 44.5, 26.9], true, '/w/m.geojson'), [['select', [44.1, 26.0, 44.5, 26.9]], ['mask', '/w/m.geojson', '44.1 26 44.5 26.9'], ['start']], 'a job cut to an outline gets it back, for that area, before it starts');
 assert.deepStrictEqual(out(), ['--threads=3'], 'settings are restored in every case');

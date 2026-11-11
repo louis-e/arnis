@@ -2,12 +2,13 @@
 // Projects v2: List / Grid, thumbnails, a world without any of the new fields.
 import assert from 'node:assert';
 
-const node = () => ({ children: [], listeners: {}, attrs: {}, className: '', textContent: '', setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(e, f) { this.listeners[e] = f; }, append(...c) { this.children.push(...c); }, replaceChildren(...c) { this.children = c; } });
+const node = () => ({ children: [], listeners: {}, attrs: {}, className: '', textContent: '', classList: { add() {}, remove() {} }, closest: () => null, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(e, f) { this.listeners[e] = f; }, append(...c) { this.children.push(...c); }, replaceChildren(...c) { this.children = c; } });
 const nodes = new Map();
 globalThis.document = { createElement: node, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
 const store = new Map();
 globalThis.localStorage = { setItem: (k, v) => store.set(k, v), getItem: (k) => store.get(k) ?? null };
 globalThis.window = {};
+await import('../../src/gui/js/piece-style.js');
 const { initProjects, placeZoom, placeForRun } = await import('../../src/gui/js/meld-features.js');
 
 const calls = [];
@@ -94,15 +95,18 @@ await place(async () => { asked2.push(1); return 'x'; })();
 await settle();
 assert.strictEqual(asked2.length, 0);
 
-// Resume (unfinished job) and Rebuild (finished area, behind a second click).
+// Resume (unfinished job) and Rebuild (finished area, held as the cell menu's Rebuild).
 store.clear();
 const jobs = [
   { name: 'Open', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j1', settings: ['--threads=2'], done: 1204, total: 61747, finished: false, last_run_ms: 5 }] },
   { name: 'Done', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j2', settings: ['--seed=3'], done: 9, total: 9, finished: true, last_run_ms: 5 }] },
   { name: 'Plain', area_count: 1, scale: 1, locked: false, modified_ms: 1 },
+  { name: 'Cut', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j3_m0123456789abcdef', settings: [], done: 1, total: 4, finished: false, last_run_ms: 5, masked: true, mask: null }] },
 ];
 const started = [];
-const withJobs = initProjects({ invoke: async (c) => (c === 'gui_list_one_worlds' ? jobs : null), savePath: () => '/s', scale: () => 1, open: async () => {}, resume: async (w, j, r) => started.push([w.name, j.settings, r]) });
+let busy = false;
+let live = false;
+const withJobs = initProjects({ invoke: async (c) => (c === 'gui_list_one_worlds' ? jobs : null), savePath: () => '/s', scale: () => 1, open: async () => {}, busy: () => busy, canRun: () => !live, resume: async (w, j, r) => started.push([w.name, j.settings, r]) });
 await withJobs();
 const cards = list.children;
 const label = (r) => r.children.map((c) => c.textContent);
@@ -111,15 +115,28 @@ assert.ok(label(cards[0]).includes('Resume') && !label(cards[0]).includes('Rebui
 assert.ok(label(cards[1]).includes('Rebuild') && !label(cards[1]).includes('Resume') && !label(cards[1]).some((x) => x.includes('cells')));
 assert.deepStrictEqual(label(cards[2]).filter((x) => /Resume|Rebuild/.test(x)), [], 'a plain world has neither');
 const btn = (r, name) => r.children.find((c) => c.textContent === name || c.textContent.startsWith(name));
+assert.ok(btn(cards[3], 'Resume').disabled && btn(cards[3], 'Resume').title.includes('outline'), 'a job whose outline was not kept is refused, and says why');
 await btn(cards[0], 'Resume').listeners.click();
 assert.deepStrictEqual(started.at(-1), ['Open', ['--threads=2'], false]);
 assert.strictEqual(store.get('arnis-one-world-name'), 'Open', 'the world is picked first');
 const rebuild = btn(cards[1], 'Rebuild');
-await rebuild.listeners.click();
-assert.strictEqual(started.length, 1, 'the first click only asks');
-assert.strictEqual(rebuild.textContent, 'Rebuild? Click again');
-await rebuild.listeners.click();
-assert.deepStrictEqual(started.at(-1), ['Done', ['--seed=3'], true]);
+await rebuild.listeners.click?.({ detail: 1 });
+assert.strictEqual(started.length, 1, 'a click does not rebuild');
+const realTimeout = globalThis.setTimeout;
+globalThis.setTimeout = (f, ms) => (ms === 1500 ? (f(), 1) : realTimeout(f, ms));
+rebuild.listeners.pointerdown({ button: 0 });
+globalThis.setTimeout = realTimeout;
+await settle();
+assert.deepStrictEqual(started.at(-1), ['Done', ['--seed=3'], true], 'held, it rebuilds');
+// During a run, and in Live, nothing is run from here.
+busy = true;
+await withJobs();
+assert.ok(list.children.every((r) => r.children.filter((c) => c.disabled !== undefined).every((c) => c.disabled)), 'every action waits for the run');
+busy = false;
+live = true;
+await withJobs();
+assert.ok(btn(list.children[0], 'Resume').disabled && !btn(list.children[0], 'Open').disabled, 'Live: no Resume, Open stays');
+live = false;
 
 // Inline rename: the pencil opens the field, Escape leaves it, Enter renames and refreshes.
 store.clear();

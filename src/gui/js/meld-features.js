@@ -304,9 +304,18 @@ export const selectBounds = (bounds) => postToMap({ type: 'setBbox', bounds });
 // job in pieces then builds only the pieces it touches.
 let maskPath = '';
 let maskSeq = 0;
+// The selection a job's kept outline was put back on (Resume, Rebuild); it goes with that selection.
+let maskArea = '';
 export const hasPlanMask = () => Boolean(maskPath);
+export function useJobMask(path, area) {
+  maskSeq++;
+  maskPath = path;
+  maskArea = area;
+  schedulePlan();
+}
 export async function setPlanMask(geojson) {
   const seq = ++maskSeq;
+  maskArea = '';
   let path = '';
   let error = '';
   if (geojson) {
@@ -629,8 +638,13 @@ export function clearPieces() {
   forgetPieces();
 }
 
-// The selection changed under a finished job: its pieces (and Retry) no longer fit it.
-export function dropStalePieces() {
+// The selection changed under a finished job: its pieces (and Retry) no longer fit it, nor
+// does an outline put back for another `area`.
+export function dropStalePieces(area) {
+  if (maskArea && area !== undefined && area !== maskArea) {
+    maskArea = maskPath = '';
+    maskSeq++;
+  }
   schedulePlan();
   if (running || !pieces.size || keyOf() === jobKey) return;
   resetPieces();
@@ -1254,23 +1268,30 @@ export function projectJob(w) {
 }
 
 // Resume / Rebuild after the world is open: the job's settings go back in, its area ([south,
-// west, north, east]) is selected, and the run starts once the map reports the same area. A job
-// without an area (an old one) only restores its settings and tells the user to pick one.
-export async function resumeJob(job, rebuild, { select = selectBounds, current, start, noArea, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+// west, north, east]) is selected, its kept outline put back, and the run starts once the map
+// reports the same area. A job without an area (an old one), or a map that never shows it, only
+// restores the settings and tells the user to pick one.
+export async function resumeJob(job, rebuild, { select = selectBounds, current, start, noArea, mask = useJobMask, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   applyFlags(job.settings, rebuild);
   const b = Array.isArray(job.bbox) ? job.bbox.map(Number) : [];
   if (b.length !== 4 || !b.every(Number.isFinite)) return noArea();
   select(b);
   for (let i = 0; i < 80; i++) {
     const now = (current() || '').split(/[\s,]+/).map(Number);
-    if (now.length === 4 && now.every((v, k) => Math.abs(v - b[k]) < 1e-4)) return start();
+    if (now.length === 4 && now.every((v, k) => Math.abs(v - b[k]) < 1e-4)) {
+      if (job.mask) mask(job.mask, current());
+      return start();
+    }
     await wait(50);
   }
+  noArea();
 }
 
 // `resume(world, job, rebuild)` starts a job again with its settings; without it (or without
 // job data from the engine) only Open and Expand are offered.
-export function initProjects({ invoke, savePath, scale, open, available = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null }) {
+// `busy()`: a run is under way, so no world is picked, renamed or run. `canRun()`: Resume and
+// Rebuild can start a run here (not in Live).
+export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null }) {
   const list = el('projects-list');
   let view = readView();
   const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
@@ -1423,6 +1444,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   async function refresh() {
     let worlds = [];
     try { worlds = savePath() ? (await invoke('gui_list_one_worlds', { savePath: savePath() })) || [] : []; } catch (e) { console.error(e); }
+    // The cards drawn before go: their pending thumbnails with them.
+    seen?.disconnect();
+    loaders.clear();
     const rows = worlds.map((w) => {
       const row = document.createElement('div');
       row.className = 'projects-row';
@@ -1436,8 +1460,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       pencil.innerHTML = PENCIL;
       pencil.title = t('projects_rename', 'Rename');
       pencil.setAttribute('aria-label', t('projects_rename', 'Rename'));
-      pencil.disabled = Boolean(w.locked);
-      const edit = () => { if (!w.locked) renameField(w, title); };
+      pencil.disabled = Boolean(w.locked || busy());
+      const edit = () => { if (!w.locked && !busy()) renameField(w, title); };
       name.addEventListener('click', edit);
       pencil.addEventListener('click', edit);
       title.append(name, pencil);
@@ -1451,29 +1475,34 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       ];
       if (w.modified_ms) kids.push(text('projects-meta', new Date(w.modified_ms).toLocaleDateString()));
       if (w.locked) kids.push(text('projects-meta is-warn', t('projects_in_use', 'In use')));
-      // One World needs Java on Earth: without it the buttons would do nothing.
+      // One World needs Java on Earth; a run holds every world.
       const off = !available();
+      const held = Boolean(w.locked || off || busy());
       const job = resume ? projectJob(w) : null;
       if (job && job.total > 0) {
         const lang = (() => { try { return localStorage.getItem('arnis-language') || undefined; } catch (_) { return undefined; } })();
         const n = (x) => { try { return Number(x).toLocaleString(lang); } catch (_) { return String(x); } };
         if (!job.finished) kids.push(text('projects-meta', t('projects_cells', '{done} / {total} cells', { done: n(job.done), total: n(job.total) })));
         const go = async (rebuild) => { await pick(w.name, false); await resume(w, job, rebuild); };
-        if (!job.finished) kids.push(button('projects_resume', 'Resume', w.locked || off, () => go(false)));
+        // Without its outline the job would run again as a new, larger one.
+        const lost = Boolean(job.masked && !job.mask);
+        const why = lost ? t('projects_mask_lost', 'This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.')
+          : !canRun() ? t('projects_live_off', 'Not while One World is set to Live.') : '';
+        const runOff = held || lost || !canRun();
+        let b;
+        if (!job.finished) b = button('projects_resume', 'Resume', runOff, () => go(false));
         else {
-          // Rebuilding replaces what is built: the first click asks, the second does it.
-          let armed = 0;
-          const b = button('projects_rebuild', 'Rebuild', w.locked || off, () => {
-            if (armed) { clearTimeout(armed); armed = 0; b.textContent = t('projects_rebuild', 'Rebuild'); return go(true); }
-            b.textContent = t('projects_rebuild_sure', 'Rebuild? Click again');
-            armed = setTimeout(() => { armed = 0; b.textContent = t('projects_rebuild', 'Rebuild'); }, 4000);
-            armed.unref?.();
-          });
-          kids.push(b);
+          // Rebuilding replaces what is built: it runs only when held, as the cell menu's Rebuild.
+          b = button('projects_rebuild', 'Rebuild', runOff, () => {});
+          b.classList.add('projects-hold');
+          b.title = t('cell_hold', 'Hold to confirm');
+          globalThis.arnisHold(b, () => go(true), 1500);
         }
+        if (why) b.title = why;
+        kids.push(b);
       }
-      kids.push(button('projects_open', 'Open', w.locked || off, () => pick(w.name, false)));
-      kids.push(button('projects_expand', 'Expand', w.locked || off, () => pick(w.name, true)));
+      kids.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
+      kids.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
       if (off) kids.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position. Java only.'); });
       row.append(...kids);
       return row;

@@ -1462,8 +1462,12 @@ const WORLD_IN_USE: &str = "The world is in use; close it in Minecraft or wait f
 #[tauri::command(async)]
 fn gui_set_place_name(world_path: String, place_name: String) -> Result<(), String> {
     let world = PathBuf::from(world_path);
-    let mut manifest = crate::one_world::Manifest::load(&world)?.ok_or("Not a One World.")?;
+    if !crate::one_world::Manifest::path_in(&world).is_file() {
+        return Err("Not a One World.".to_string());
+    }
+    // Locked before the read, so no run writes the manifest between the read and the save.
     let _lock = SessionLock::acquire(&world).map_err(|_| WORLD_IN_USE.to_string())?;
+    let mut manifest = crate::one_world::Manifest::load(&world)?.ok_or("Not a One World.")?;
     let name = place_name.trim();
     manifest.place_name = (!name.is_empty()).then(|| name.to_string());
     manifest.save(&world)
@@ -1503,6 +1507,48 @@ struct JobEntry {
     total: u32,
     finished: bool,
     last_run_ms: u64,
+    /// The job was cut to an outline; `mask` is the kept copy, null when it was not kept.
+    masked: bool,
+    mask: Option<String>,
+}
+
+/// Outlines jobs were cut to, by the hash their job names end in (`_m<hash>`), so a Resume
+/// or Rebuild runs the same job.
+const MASKS_DIR: &str = "arnis_one_world/masks";
+
+/// Keeps a copy of the outline a job in `world` is cut to.
+fn keep_job_mask(world: &Path, mask: &Path) -> Result<(), String> {
+    let (_, hash) = crate::work_units::Mask::read(mask)?;
+    let dir = world.join(MASKS_DIR);
+    let kept = dir.join(format!("{hash:016x}.geojson"));
+    if kept.is_file() {
+        return Ok(());
+    }
+    fs::create_dir_all(&dir)
+        .and_then(|_| fs::copy(mask, &kept).map(|_| ()))
+        .map_err(|e| format!("{}: {e}", kept.display()))
+}
+
+/// Whether job `name` is cut to an outline, and the kept copy of it.
+fn job_mask(world: &Path, name: &str) -> (bool, Option<String>) {
+    let Some(hash) = name
+        .rsplit_once("_m")
+        .map(|(_, h)| h)
+        .filter(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+    else {
+        return (false, None);
+    };
+    let kept = world.join(MASKS_DIR).join(format!("{hash}.geojson"));
+    (true, kept.is_file().then(|| kept.display().to_string()))
+}
+
+/// Whether a world has an image for its thumbnail, without reading every preview's date.
+fn has_thumbnail(world: &Path) -> bool {
+    world.join("arnis_world_map.png").is_file()
+        || fs::read_dir(world.join(crate::one_world::PREVIEW_DIR)).is_ok_and(|d| {
+            d.flatten()
+                .any(|e| e.path().extension().is_some_and(|x| x == "png"))
+        })
 }
 
 #[derive(serde::Serialize)]
@@ -1554,6 +1600,11 @@ fn gui_list_one_worlds(save_path: String) -> Result<Vec<OneWorldEntry>, String> 
     let mut worlds: Vec<OneWorldEntry> = dir
         .flatten()
         .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            // The window picks a One World by name; one it cannot name it could not open.
+            if crate::world_utils::world_folder_name(&name).as_deref() != Some(name.as_str()) {
+                return None;
+            }
             let manifest = crate::one_world::Manifest::path_in(&e.path());
             let modified_ms = fs::metadata(manifest)
                 .ok()?
@@ -1562,30 +1613,35 @@ fn gui_list_one_worlds(save_path: String) -> Result<Vec<OneWorldEntry>, String> 
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64);
             // A damaged manifest is skipped here; the info command reports it.
-            let info = one_world_info_at(&e.path()).ok()?;
-            let m = crate::one_world::Manifest::load(&e.path()).ok().flatten();
+            let m = crate::one_world::Manifest::load(&e.path()).ok()?;
+            let info = one_world_info_of(&e.path(), m.as_ref());
             let jobs = m.as_ref().map_or_else(Vec::new, |m| {
                 crate::one_world::job_records(&e.path(), m)
                     .into_iter()
-                    .map(|j| JobEntry {
-                        name: j.name,
-                        settings: j.settings,
-                        bbox: j.bbox,
-                        done: j.status.done,
-                        total: j.status.total,
-                        finished: j.status.finished,
-                        last_run_ms: j.status.last_run_ms,
+                    .map(|j| {
+                        let (masked, mask) = job_mask(&e.path(), &j.name);
+                        JobEntry {
+                            name: j.name,
+                            settings: j.settings,
+                            bbox: j.bbox,
+                            done: j.status.done,
+                            total: j.status.total,
+                            finished: j.status.finished,
+                            last_run_ms: j.status.last_run_ms,
+                            masked,
+                            mask,
+                        }
                     })
                     .collect()
             });
             Some(OneWorldEntry {
-                name: e.file_name().to_string_lossy().into_owned(),
+                name,
                 modified_ms,
                 info,
                 bbox: m.as_ref().and_then(|m| m.bounds()),
                 place_name: m.and_then(|m| m.place_name),
                 jobs,
-                preview: thumbnail_source(&e.path()).is_some(),
+                preview: has_thumbnail(&e.path()),
             })
         })
         .collect();
@@ -1595,12 +1651,19 @@ fn gui_list_one_worlds(save_path: String) -> Result<Vec<OneWorldEntry>, String> 
 
 fn one_world_info_at(world_path: &Path) -> Result<OneWorldInfo, String> {
     let manifest = crate::one_world::Manifest::load(world_path)?;
+    Ok(one_world_info_of(world_path, manifest.as_ref()))
+}
+
+fn one_world_info_of(
+    world_path: &Path,
+    manifest: Option<&crate::one_world::Manifest>,
+) -> OneWorldInfo {
     let foreign = manifest.is_none()
         && world_path.exists()
         && fs::read_dir(world_path)
             .map(|mut d| d.next().is_some())
             .unwrap_or(false);
-    Ok(OneWorldInfo {
+    OneWorldInfo {
         world_path: world_path.display().to_string(),
         exists: manifest.is_some(),
         foreign,
@@ -1617,7 +1680,7 @@ fn one_world_info_at(world_path: &Path) -> Result<OneWorldInfo, String> {
             .as_ref()
             .and_then(|m| m.elevation.as_ref()?.soft_top.as_ref().map(|t| t.knee_m)),
         revision: manifest.as_ref().map(|m| m.next_area_id).unwrap_or(0),
-    })
+    }
 }
 
 /// Chunks of the selected area that already exist in the One World.
@@ -1739,7 +1802,7 @@ fn gui_plan_job(
 
 /// An outline picked on the map, as the file `--plan-mask` reads: named by its content in
 /// the temp folder, and read back the way the job reads it.
-#[tauri::command]
+#[tauri::command(async)]
 fn gui_write_plan_mask(geojson: String) -> Result<String, String> {
     use std::hash::Hasher;
     let mut h = fnv::FnvHasher::default();
@@ -2980,6 +3043,11 @@ fn gui_start_generation(
                         argv.push(format!("--spawn-lat={lat}").into());
                         argv.push(format!("--spawn-lng={lng}").into());
                     }
+                    if let Some(mask) = args.units.plan_mask.as_deref().filter(|_| !args.prewarm) {
+                        if let Err(e) = keep_job_mask(&world_path, mask) {
+                            eprintln!("Warning: the job's outline was not kept, so Projects cannot run it again: {e}");
+                        }
+                    }
                     emit_gui_progress_update(progress::MESSAGE_ONLY, "Building cells...");
                     // Unreadable counts as built, so a doubt keeps the world.
                     let areas = || {
@@ -4061,6 +4129,26 @@ mod tests {
         assert_eq!(job.bbox, Some([1.0, 2.0, 3.0, 4.0]));
         assert_eq!((job.name.as_str(), job.settings.clone()), ("j", flags));
         assert_eq!((job.done, job.total, job.finished), (2, 5, false));
+    }
+
+    /// A job cut to an outline keeps a copy of it under the hash its name ends in.
+    #[test]
+    fn a_job_cut_to_an_outline_keeps_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mask = tmp.path().join("m.geojson");
+        fs::write(
+            &mask,
+            r#"{"type":"Polygon","coordinates":[[[13.3,52.5],[13.4,52.5],[13.4,52.6],[13.3,52.5]]]}"#,
+        )
+        .unwrap();
+        let world = tmp.path().join("w");
+        let (_, hash) = crate::work_units::Mask::read(&mask).unwrap();
+        let name = format!("0_0_511_511_n4_merge_m{hash:016x}");
+        assert_eq!(job_mask(&world, &name), (true, None));
+        keep_job_mask(&world, &mask).unwrap();
+        let kept = job_mask(&world, &name).1.unwrap();
+        assert_eq!(fs::read(&kept).unwrap(), fs::read(&mask).unwrap());
+        assert_eq!(job_mask(&world, "0_0_511_511_n4_merge"), (false, None));
     }
 
     #[test]
