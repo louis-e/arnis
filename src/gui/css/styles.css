@@ -1240,7 +1240,7 @@ input[type="range"] {
   cursor: default;
 }
 
-/* Under a size warning (Meld features): a link, centred, as wide as the warning (3.4.0) */
+/* Under a size warning: the way to Advanced features, centred, as wide as the warning */
 #bbox-features-cta {
   display: flex;
   align-items: center;

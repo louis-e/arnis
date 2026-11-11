@@ -199,7 +199,7 @@ pub fn plan(root: &Path, args: &Args, bbox: LLBBox) -> DataPlan {
         out.items
             .push(count("land_cover", Some(files), TYPICAL_LAND_COVER_TILE));
     }
-    // ponytail: the canopy strip table and row blocks are not listed, so it has no item
+    // The canopy strip table and row blocks are not listed, so it has no item
     // (an item with total 0 says nothing); list them to add one.
     if args.overture && !args.skip_objects() {
         let files = crate::overture::tile_cache_files(root, &bbox);

@@ -1786,7 +1786,7 @@ fn gui_plan_job(
     world_scale: f64,
     flags: Vec<String>,
 ) -> Result<serde_json::Value, String> {
-    let mut args = confluence_args(&flags, true, "java", false)?;
+    let mut args = window_flag_args(&flags, true, "java", false)?;
     if !args.units.coordinates() {
         return Err("Only a job built in pieces has a plan.".to_string());
     }
@@ -2145,7 +2145,7 @@ fn check_window_flags(flags: &[String]) -> Result<(), String> {
 /// The "Meld features" settings, parsed by the CLI's own parser so the window accepts exactly
 /// what the flags accept, and checked the way `validate_args` checks them: the window never
 /// runs it. No flags is the stock run.
-fn confluence_args(
+fn window_flag_args(
     flags: &[String],
     one_world: bool,
     world_format: &str,
@@ -2337,7 +2337,7 @@ fn gui_data_plan(
     aws_only_elevation: bool,
     flags: Vec<String>,
 ) -> Result<crate::data_plan::DataPlan, String> {
-    let mut args = confluence_args(&flags, false, "java", false)?;
+    let mut args = window_flag_args(&flags, false, "java", false)?;
     crate::args::validate_scale(world_scale)?;
     args.scale = world_scale;
     args.mode = if skip_osm_objects {
@@ -2440,7 +2440,7 @@ static BAKE_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// generation would get (`flags`), with its progress on the main bar. `Ok(false)` when stopped.
 #[tauri::command(async)]
 fn gui_bake_archive(bbox_text: String, folder: String, flags: Vec<String>) -> Result<bool, String> {
-    let args = confluence_args(&flags, false, "java", false)?;
+    let args = window_flag_args(&flags, false, "java", false)?;
     let cores = crate::transfer::cores();
     let threads = args.thread_count().unwrap_or(cores * 9 / 10).max(1);
     let bbox = LLBBox::from_str(&bbox_text)?;
@@ -2685,7 +2685,7 @@ fn gui_start_generation(
     crate::scale::PAUSE.store(false, std::sync::atomic::Ordering::Release);
     crate::scale::STOP.store(false, std::sync::atomic::Ordering::Release);
 
-    let extra = match confluence_args(&flags, one_world, &world_format, is_new_world) {
+    let extra = match window_flag_args(&flags, one_world, &world_format, is_new_world) {
         Ok(extra) => extra,
         Err(msg) => {
             emit_gui_error(&msg);
@@ -3808,7 +3808,7 @@ mod tests {
         // A fresh session's prewarm: no world, and Lowest Y still accepted.
         let flags = vec!["--prewarm".to_string(), "--min-y=-128".to_string()];
         assert!(
-            confluence_args(&flags, false, "java", false)
+            window_flag_args(&flags, false, "java", false)
                 .unwrap()
                 .prewarm
         );
@@ -3867,13 +3867,13 @@ mod tests {
     #[test]
     fn switch_off_passes_no_new_flags() {
         use clap::Parser;
-        let extra = confluence_args(&[], false, "java", true).unwrap();
+        let extra = window_flag_args(&[], false, "java", true).unwrap();
         let mut stock = Args::try_parse_from(["arnis"]).unwrap();
         // The window never takes these from the environment (ARNIS_OFFLINE, ARNIS_OVERPASS_URL).
         stock.offline = false;
         stock.overpass_url.clear();
         assert_eq!(format!("{extra:?}"), format!("{stock:?}"));
-        let sent = confluence_args(
+        let sent = window_flag_args(
             &["--offline".into(), "--overpass-url=http://x".into()],
             false,
             "java",
@@ -3918,18 +3918,18 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
-        let extra = confluence_args(&flags, false, "java", true).unwrap();
+        let extra = window_flag_args(&flags, false, "java", true).unwrap();
         assert!(!extra.buildings && extra.world_border && extra.disable_height_limit);
         assert!(extra.offline && extra.overpass_url.len() == 2 && extra.osm_pbf.is_some());
         let one = ["--origin=44.4,26.1".to_string()];
-        assert!(confluence_args(&one, true, "java", false)
+        assert!(window_flag_args(&one, true, "java", false)
             .unwrap()
             .origin
             .is_some());
         // Y limits are refused for a world that cannot take them.
         let y = ["--min-y=-64".to_string()];
-        assert!(confluence_args(&y, true, "java", false).is_err());
-        assert!(confluence_args(&y, false, "bedrock", true).is_err());
+        assert!(window_flag_args(&y, true, "java", false).is_err());
+        assert!(window_flag_args(&y, false, "bedrock", true).is_err());
     }
 
     /// The window draws the plan the job would run, from the same flags, and writes nothing.
@@ -4020,10 +4020,10 @@ mod tests {
         ]
         .map(String::from)
         .to_vec();
-        let extra = confluence_args(&flags, true, "java", false).unwrap();
+        let extra = window_flag_args(&flags, true, "java", false).unwrap();
         assert!(extra.units.coordinates() && !extra.buildings && extra.seed == Some(7));
         // Pieces are a One World feature: elsewhere the job flags are dropped.
-        let solo = confluence_args(&flags, false, "java", true).unwrap();
+        let solo = window_flag_args(&flags, false, "java", true).unwrap();
         assert!(!solo.units.coordinates() && solo.units.only_pieces.is_none());
         // A piece asked with the window's settings parses back to them.
         let mut args = Args {

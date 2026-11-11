@@ -448,7 +448,6 @@ pub struct Args {
     #[command(flatten)]
     pub live: LiveArgs,
 
-    // --- confluence:core ---
     /// Also report progress as JSON lines on stdout for programs driving the CLI.
     #[arg(long, value_enum)]
     pub progress: Option<ProgressFormat>,
@@ -482,9 +481,7 @@ pub struct Args {
 
     #[command(flatten)]
     pub units: UnitArgs,
-    // --- end confluence:core ---
 
-    // --- confluence:output ---
     /// EXPERIMENTAL. Java region container; blinear writes Leaf 1.21.11+ and 26.x B_Linear regions (not with --one-world, --voxy-lod or --dh-lod).
     #[arg(long = "region-format", value_enum, default_value_t = crate::output_args::RegionFormat::Mca)]
     pub region_format: crate::output_args::RegionFormat,
@@ -508,8 +505,6 @@ pub struct Args {
     /// Write the Distant Horizons LODs of the One World at --output-dir and --world-name from its region files and exit.
     #[arg(long, default_value_t = false)]
     pub dh_lod_only: bool,
-    // --- end confluence:output ---
-    // --- confluence:terrain ---
     #[command(flatten)]
     pub water: WaterArgs,
 
@@ -553,8 +548,6 @@ pub struct Args {
     /// built with.
     #[arg(long, value_name = "SEED")]
     pub seed: Option<u64>,
-    // --- end confluence:terrain ---
-    // --- confluence:nature ---
     #[command(flatten)]
     pub scatter: ScatterArgs,
 
@@ -612,8 +605,6 @@ pub struct Args {
     /// line continuous across them, and plans pools, rivers and geodes past the run's edge.
     #[arg(long = "cave-datum-y", value_name = "Y", allow_hyphen_values = true)]
     pub cave_datum_y: Option<i32>,
-    // --- end confluence:nature ---
-    // --- confluence:build ---
     /// How much road marking and how many minor ways to build: max, clean or compact.
     #[arg(long, value_enum, default_value_t = RoadDetail::Max)]
     pub road_detail: RoadDetail,
@@ -650,7 +641,6 @@ pub struct Args {
     /// Write the built-in chest loot table to FILE as JSON to start from, and exit.
     #[arg(long, value_name = "FILE")]
     pub dump_loot_table: Option<PathBuf>,
-    // --- end confluence:build ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
     #[arg(long, value_name = "PATH|geofabrik", conflicts_with = "file")]
     pub osm_pbf: Option<String>,
@@ -1617,7 +1607,6 @@ pub fn resolve_shapes(args: &mut Args) -> Result<(), String> {
 }
 
 pub fn validate_args(args: &Args) -> Result<(), String> {
-    // --- confluence:nature ---
     let cave_preview = args.cave_zone_map.is_some();
     if (args.cave_style.is_some() || args.cave_seed.is_some()) && !args.caves && !cave_preview {
         return Err(
@@ -1635,7 +1624,6 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             return Err("--cave-datum-y must be a multiple of 16 from -2032 to 2016.".to_string());
         }
     }
-    // --- end confluence:nature ---
     if !args.one_world
         && (args.units.plan_units.is_some()
             || args.units.unit_regions.is_some()
@@ -1681,10 +1669,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         );
     }
     refuse_live_extras(args)?;
-    // --- confluence:output ---
     crate::output_args::validate(args)?;
-    // --- end confluence:output ---
-    // --- confluence:terrain ---
     if args.climate_map.is_some() && args.bbox.is_none() {
         return Err("--climate-map needs --bbox.".to_string());
     }
@@ -1693,8 +1678,6 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--climate-mode per-position does not support --rotation.".to_string());
     }
     crate::y_bounds::check(args)?;
-    // --- end confluence:terrain ---
-    // --- confluence:data ---
     if args.prewarm_first && !args.units.coordinates() {
         return Err(
             "--prewarm-first only applies to a job built in pieces (--unit-regions).".to_string(),
@@ -1703,7 +1686,6 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     if args.offline && args.mapillary_probe {
         return Err("--mapillary-probe asks Mapillary, so it cannot run --offline.".to_string());
     }
-    // --- end confluence:data ---
     // One World and live mode track their areas as rectangles of whole chunks.
     if args.shapes.is_some() && (args.one_world || args.live.live) {
         return Err(
@@ -3139,7 +3121,7 @@ mod tests {
     }
 
     #[test]
-    fn live_with_confluence_flags_is_refused() {
+    fn live_with_advanced_flags_is_refused() {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
         let parse = |extra: &[&str]| {
