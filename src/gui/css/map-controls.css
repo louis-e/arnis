@@ -120,6 +120,7 @@
 .leaflet-draw-toolbar a.leaflet-draw-draw-rectangle { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='5' width='14' height='14' stroke-width='1.8'/%3E%3Cg fill='black' stroke='none'%3E%3Crect x='2.5' y='2.5' width='5' height='5' rx='1'/%3E%3Crect x='16.5' y='2.5' width='5' height='5' rx='1'/%3E%3Crect x='2.5' y='16.5' width='5' height='5' rx='1'/%3E%3Crect x='16.5' y='16.5' width='5' height='5' rx='1'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"); }
 .leaflet-draw-toolbar a.leaflet-draw-draw-polygon { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 7 14 4.5 19.5 11 15.5 19.5 5.5 17Z' fill='none' stroke='black' stroke-width='1.8' stroke-linejoin='round'/%3E%3Cg fill='black'%3E%3Ccircle cx='5' cy='7' r='2.4'/%3E%3Ccircle cx='14' cy='4.5' r='2.4'/%3E%3Ccircle cx='19.5' cy='11' r='2.4'/%3E%3Ccircle cx='15.5' cy='19.5' r='2.4'/%3E%3Ccircle cx='5.5' cy='17' r='2.4'/%3E%3C/g%3E%3C/svg%3E"); }
 .leaflet-draw-toolbar a.leaflet-draw-draw-polyline { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 19h16'/%3E%3Cpath d='M4 19 15 6'/%3E%3Cpath d='M10.5 19A6.5 6.5 0 0 0 8.2 14.04'/%3E%3C/g%3E%3C/svg%3E"); }
+.leaflet-draw-toolbar a.leaflet-draw-draw-cells { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='8' height='8'/%3E%3Crect x='13' y='3' width='8' height='8'/%3E%3Crect x='3' y='13' width='8' height='8'/%3E%3C/g%3E%3Crect x='13' y='13' width='8' height='8' fill='black'/%3E%3C/svg%3E"); }
 .leaflet-draw-toolbar a.leaflet-draw-draw-marker { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0'/%3E%3Ccircle cx='12' cy='10' r='3'/%3E%3C/g%3E%3C/svg%3E"); }
 .leaflet-draw-toolbar a.leaflet-draw-edit-remove { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6'/%3E%3Cpath d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'/%3E%3Cpath d='M10 11v6'/%3E%3Cpath d='M14 11v6'/%3E%3C/g%3E%3C/svg%3E"); }
 .leaflet-draw-toolbar a.leaflet-draw-edit-preview { --tool-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z'/%3E%3Cpath d='M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12'/%3E%3Cpath d='M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17'/%3E%3C/g%3E%3C/svg%3E"); }
@@ -232,17 +233,101 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
+/* One balance slider: world tiles faded to the left, the cells to the right, both full at the
+   centre tick. */
+.world-preview-slider-container.leaflet-bar,
+.leaflet-touch .world-preview-slider-container.leaflet-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: auto;
+  padding: 5px 8px;
+}
+
 .world-preview-slider-container a {
   display: none;
 }
 
+/* World tiles at one end, the grid at the other (the row follows the page direction) */
+.world-preview-slider-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--map-muted);
+}
+
+.world-preview-slider-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  width: 110px;
+  height: 18px;
+}
+
 .world-preview-slider {
+  position: relative;
   display: block;
-  width: 96px;
-  height: 8px;
+  width: 100%;
+  height: 18px;
   margin: 0;
-  accent-color: var(--map-accent);
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
   cursor: pointer;
+}
+
+.world-preview-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.world-preview-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -5px;
+  border: 2px solid #1c1c1c;
+  border-radius: 50%;
+  background: var(--map-accent);
+}
+
+/* The centre mark, over the track so it shows with the thumb elsewhere */
+.world-preview-slider-tick {
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--map-text);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Clear selection: a fill rises while the button is held (arnisClearHoldMs in piece-style.js) */
+.leaflet-draw-toolbar a.leaflet-draw-edit-remove::before {
+  z-index: 1;
+}
+
+.leaflet-draw-toolbar a.leaflet-draw-edit-remove::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: rgba(250, 120, 120, 0.6);
+  transform: scaleY(0);
+  transform-origin: bottom;
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+
+.leaflet-draw-toolbar a.leaflet-draw-edit-remove.is-holding::after {
+  transform: scaleY(1);
+  transition: transform 0.8s linear;
 }
 
 /* Search */
@@ -382,6 +467,46 @@
 
 .coordinate-context-menu-separator {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* The cell menu: the count, then the actions that fit; one that cannot be used says why */
+.cell-actions-head {
+  padding: 5px 10px 3px;
+  color: var(--map-accent);
+  font-weight: 600;
+}
+
+.cell-actions-none {
+  padding: 5px 10px;
+  color: rgba(236, 236, 236, 0.6);
+}
+
+.coordinate-context-menu-item.is-off {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  cursor: default;
+}
+
+.coordinate-context-menu-item.is-off > span {
+  color: rgba(236, 236, 236, 0.45);
+}
+
+.coordinate-context-menu-item.is-off > small {
+  max-width: 220px;
+  color: rgba(236, 236, 236, 0.6);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.coordinate-context-menu-item.is-off:hover {
+  background: none;
+}
+
+/* The select tool is on: the cursor says a drag draws a box */
+.cell-tool,
+.cell-tool .leaflet-interactive {
+  cursor: crosshair;
 }
 
 @media (prefers-reduced-motion: reduce) {

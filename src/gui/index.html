@@ -12,6 +12,7 @@
   <!-- Not deferred: the map iframe starts posting log messages as soon as it
        parses, so the bridge has to be listening before that element exists. -->
   <script src="./js/logging.js"></script>
+  <script src="./js/piece-style.js"></script>
   <script src="./js/preview3d.js" defer></script>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>
@@ -152,6 +153,8 @@
               <div id="one-world-status" class="one-world-status" style="display: none;" aria-live="polite"></div>
             </div>
             <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
+            <!-- Under a size warning: the way to build it in pieces (Meld features) -->
+            <button type="button" id="bbox-features-cta" hidden data-localize="meld_use_pieces">Use Advanced features to build it in cells</button>
 
             <!-- Mini 3D terrain preview (rendered via the map's terrain button, click to expand) -->
             <div id="preview3d-mini" class="preview3d-mini" style="display: none;" title="Click to expand 3D preview">
@@ -166,12 +169,41 @@
           <div class="progress-section">
             <img src="" alt="" class="secret-parrot" id="secret-parrot">
             <span id="progress-info" class="progress-info-text"></span>
+            <!-- The plan of a job in pieces before it runs (above the bar), and the ring around a One World's built land. -->
+            <div id="job-plan" class="job-plan meld-only" hidden></div>
+            <!-- Before a job in pieces starts: what it asks of the computer, and a hold to start it (main.js) -->
+            <div id="run-confirm" class="run-confirm meld-only" role="alertdialog" aria-labelledby="run-confirm-warn" aria-describedby="run-confirm-overlap" hidden>
+              <p id="run-confirm-warn" data-localize="plan_confirm_warn">This build takes a long time and uses most of the CPU and memory until it ends. Leave other heavy work for later and check there is enough free disk space.</p>
+              <p id="run-confirm-overlap" hidden></p>
+              <a id="run-confirm-docs" href="https://github.com/Teddy563/arnis#readme" data-localize="plan_confirm_docs">Read the docs</a>
+              <div class="run-confirm-row">
+                <button type="button" id="run-confirm-cancel" class="run-button" data-localize="one_world_confirm_cancel">Cancel</button>
+                <button type="button" id="run-confirm-hold" class="run-button run-hold" disabled data-localize="plan_confirm_hold">Hold to start</button>
+              </div>
+            </div>
+            <!-- Before the cell menu rebuilds or removes built cells: what it does, and a hold to confirm (meld-features.js) -->
+            <div id="cells-confirm" class="run-confirm meld-only" role="alertdialog" aria-labelledby="cells-confirm-text" hidden>
+              <p id="cells-confirm-text"></p>
+              <div class="run-confirm-row">
+                <button type="button" id="cells-confirm-cancel" class="run-button" data-localize="one_world_confirm_cancel">Cancel</button>
+                <button type="button" id="cells-confirm-hold" class="run-button run-hold" data-localize="cell_hold">Hold to confirm</button>
+              </div>
+            </div>
             <div class="progress-row">
               <div class="progress-bar-container">
                 <div class="progress-bar" id="progress-bar"></div>
-                <span id="progress-eta" class="progress-eta-overlay" dir="ltr"></span>
+                <span id="progress-eta" class="progress-eta-overlay" dir="ltr"><span class="eta-on" aria-hidden="true"></span><span class="eta-off"></span></span>
               </div>
               <span id="progress-detail">0%</span>
+            </div>
+            <button type="button" id="plan-expand-button" class="run-button plan-expand meld-only" hidden data-localize="plan_expand">Expand around the built land</button>
+            <!-- A job built in pieces: Pause, Stop and Retry. Hidden unless Meld features is on. -->
+            <div id="run-controls" class="run-controls meld-only" hidden>
+              <div id="run-failed" class="run-failed" role="status" aria-live="polite"></div>
+              <button type="button" id="run-pause-button" class="run-button" data-localize="run_pause">Pause</button>
+              <button type="button" id="run-stop-button" class="run-button" data-localize="run_stop">Stop</button>
+              <button type="button" id="run-halo-toggle" class="run-button run-toggle" aria-pressed="false" data-localize="run_halo">Show overlap</button>
+              <button type="button" id="run-retry-button" class="run-button" hidden data-localize="run_retry">Retry cells</button>
             </div>
           </div>
         </div>
@@ -1107,6 +1139,21 @@
                     <input type="text" id="custom-tile-url" name="custom-tile-url" placeholder="https://example.com/{z}/{x}/{y}.png" autocomplete="off" spellcheck="false">
                   </div>
                 </div>
+                <div class="settings-row setting-tile meld-only">
+                  <label for="meld-origin-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-compass"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_origin">World Origin</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_origin_tip" data-tooltip="LAT,LON for the origin of a One World this run creates, instead of the centre of the selection. One World only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_origin_desc">Latitude and longitude of block (0, 0).</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-origin-input" name="meld-origin-input" class="meld-short meld-coords" placeholder="LAT,LON" data-localize="placeholder_meld_origin" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -1267,6 +1314,179 @@
               </header>
 
               <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide">
+                  <label for="advanced-meld-features-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-flask"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="advanced_meld_features">Advanced features</span>
+                        <span class="tooltip-icon" data-tooltip-key="advanced_meld_features_tip" data-tooltip="Shows the Scale settings here and extra settings in Generation, Terrain &amp; Nature, Map &amp; Input and World. Turning it off hides them and sends none of them. Experimental.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="advanced_meld_features_desc">Extra settings for large worlds and finer control. Off, Arnis behaves as before. Ported from the Meld project.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="advanced-meld-features-toggle" name="advanced-meld-features-toggle">
+                  </div>
+                </div>
+
+                <div class="meld-card meld-only" id="meld-scale-card">
+                  <h4 class="meld-card-title" data-localize="meld_scale_title">Scale</h4>
+                  <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-workers-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_workers">Parallel cells</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_workers_tip" data-tooltip="Splits a One World selection into cells of up to 4 × 4 regions and builds several at once, each in its own process. Auto picks 2 to 6 from free RAM and cores. Generating the same area again resumes it. One World only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_workers_desc">Build a One World in cells, several at a time.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <select id="meld-workers-select" name="meld-workers-select" class="settings-select"><option value="" selected data-localize="meld_workers_off">Off</option><option value="auto" data-localize="meld_workers_auto">Auto (recommended)</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select>
+                    <button type="button" class="settings-action-button" id="meld-recommended-btn" data-localize="meld_recommended" data-localize-title="meld_recommended_tip" title="Fastest in the Nov 2026 benchmark on this kind of PC">Use recommended</button>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-frame"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_snap">Snap to Cells</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_snap_tip" data-tooltip="Off builds the selection as drawn. Cover grows it to whole cells, Fit shrinks it to the whole cells inside, Merge keeps its edges but folds a strip thinner than a quarter region into its neighbour. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_snap_desc">How the selection meets the cell grid.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-snap-group"><button type="button" class="segment active" data-default data-v="off" data-localize="meld_snap_off">Off</button><button type="button" class="segment" data-v="cover" data-localize="meld_snap_cover">Cover</button><button type="button" class="segment" data-v="fit" data-localize="meld_snap_fit">Fit</button><button type="button" class="segment" data-v="merge" data-localize="meld_snap_merge">Merge</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-margin-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map-plus"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_margin">Margin Regions</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_margin_tip" data-tooltip="Regions of 512 × 512 blocks added on every side of the selection, after snapping. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_margin_desc">A ring of regions around the selection, from 0 to 4.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="number" id="meld-margin-input" min="0" max="4" step="1" value="0">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-blocks"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_piece_size">Cell Size</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_piece_size_tip" data-tooltip="Largest cell, in regions per side. Auto mixes 8 × 8, 4 × 4 and 2 × 2 cells, as large as fit the selection and the memory. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_piece_size_desc">Regions per side of each cell.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-piece-size-group"><button type="button" class="segment" data-v="auto" data-localize="meld_piece_size_auto">Auto (recommended)</button><button type="button" class="segment" data-v="2">2</button><button type="button" class="segment active" data-default data-v="4">4</button><button type="button" class="segment" data-v="8">8</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-piece-order-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-compass"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_piece_order">Build Order</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_piece_order_tip" data-tooltip="Which cells are built first. Cell numbers stay the same, so a retry still names the same cells. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_piece_order_desc">Where the job starts building.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <select id="meld-piece-order-select" name="meld-piece-order-select" class="settings-select"><option value="centre" selected data-localize="meld_piece_order_centre">Centre out</option><option value="west" data-localize="meld_piece_order_west">West to east</option><option value="east" data-localize="meld_piece_order_east">East to west</option><option value="north" data-localize="meld_piece_order_north">North to south</option><option value="south" data-localize="meld_piece_order_south">South to north</option></select>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-skip-built-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-history"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_skip_built">Skip Built Cells</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_skip_built_tip" data-tooltip="Leaves out the cells whose every chunk is already in the world, say from an earlier job over part of this one. Off rebuilds them. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_skip_built_desc">Build only what the world is missing.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-skip-built-toggle" name="meld-skip-built-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-stitch-map-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_stitch_map">Stitch Map Item</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_stitch_map_tip" data-tooltip="Once every cell is built, redraws the map item in the hotbar over all of them. Off, it shows the first cell only. Needs the map item. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_stitch_map_desc">One map item over the whole job.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-stitch-map-toggle" name="meld-stitch-map-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-stretch-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-ruler"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_stretch">Show Map Stretch</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_stretch_tip" data-tooltip="How much the map is stretched at this latitude against the One World's origin: the ground is wider (+) or narrower (−) than it is tall. Shows a line in the plan, and the 5% and 10% lines on the map. One World only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_stretch_desc">Show the stretch of a One World selection.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-stretch-toggle" name="meld-stretch-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-ram-budget-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_ram_budget">Memory budget</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_ram_budget_tip" data-tooltip="Sizes parallel work to this much memory instead of the free RAM measured, so several runs can share a machine. Empty measures free RAM.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_ram_budget_desc">How much memory a run may use, in MB.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-ram-budget-input" name="meld-ram-budget-input" class="meld-short" placeholder="Auto" data-localize="placeholder_meld_ram_budget" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-threads-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_threads">Threads</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_threads_tip" data-tooltip="Left empty, it uses 90% of the cores. A job in cells splits it between the cells.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_threads_desc">Exact number of worker threads.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-threads-input" name="meld-threads-input" class="meld-short" placeholder="Auto" data-localize="placeholder_meld_threads" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                  </div>
+                </div>
+
                 <div class="settings-row setting-tile">
                   <label for="disable-height-limit-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-arrow-up"></use></svg>

@@ -1005,3 +1005,87 @@ label[for].setting-label {
     transition: none !important;
   }
 }
+
+/* Meld features: everything marked meld-only is hidden while the Advanced switch is off */
+body.meld-off .meld-only {
+  display: none !important;
+}
+
+.settings-page .meld-card {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--ui-tile-border);
+  border-radius: 12px;
+}
+
+.settings-page .meld-card-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ui-muted);
+}
+
+.settings-page input.meld-short,
+.settings-page .meld-card input[type="number"] {
+  width: 120px;
+  text-align: center;
+}
+
+/* LAT,LON needs room for two signed decimals. */
+.settings-page input.meld-coords {
+  width: 170px;
+}
+
+.settings-page .meld-card .setting-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Meld settings (and the switch that shows them) carry gold viewfinder corners: the tile's own
+   rounded border in gold, masked to four corner arcs that fade out along each edge. */
+.settings-page .setting-tile.meld-only,
+.settings-page .meld-card,
+.settings-page .setting-tile:has(#advanced-meld-features-toggle) {
+  position: relative;
+}
+
+.settings-page .setting-tile.meld-only::after,
+.settings-page .meld-card::after,
+.settings-page .setting-tile:has(#advanced-meld-features-toggle)::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px solid var(--primary-accent);
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.85;
+  mask:
+    radial-gradient(circle at 0 0, #000 9px, transparent 22px),
+    radial-gradient(circle at 100% 0, #000 9px, transparent 22px),
+    radial-gradient(circle at 0 100%, #000 9px, transparent 22px),
+    radial-gradient(circle at 100% 100%, #000 9px, transparent 22px);
+}
+
+.settings-page #meld-recommended-btn {
+  height: 34px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.settings-page .projects-row .settings-action-button {
+  height: 30px;
+  padding: 0 10px;
+}
+
+.settings-page .projects-row .settings-action-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-page .projects-empty {
+  opacity: 0.75;
+}
