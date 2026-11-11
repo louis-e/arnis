@@ -1,18 +1,9 @@
-//! Large One World jobs (`--unit-regions N`, `--one-world-workers`): the selection is cut
-//! into region-group pieces (`work_units`) and each piece is built by a run of this
-//! executable on the piece's own bbox (`--one-world-unit <lease>`), several at once.
-//!
-//! The coordinator opens the world like any One World run and holds its lock for the
-//! whole job. A piece owns whole region files, so pieces never write one file together.
-//! The world's elevation mapping is fixed in the manifest at creation, so no two pieces
-//! disagree on Y. The piece that makes the world's extras (map item, settings, spawn) runs
-//! first and alone; the rest follow, side by side. Each finished piece is recorded in the
-//! manifest by the coordinator alone, as an area that names its job and position.
-//!
-//! A job keeps its state in `arnis_one_world/jobs/<x0>_<z0>_<x1>_<z1>_n<N>/` (the rectangle
-//! is the union of the pieces): the ids it reserved and each piece's share of them, one
-//! `done-r<rx>_<rz>_s<n>.json` per finished piece and the piece leases. Running the same
-//! command again resumes it.
+//! Large One World jobs (`--unit-regions`, `--one-world-workers`): the selection is cut into
+//! region-group pieces (`work_units`), each built by a run of this executable
+//! (`--one-world-unit <lease>`), several at once. A piece owns whole region files; the head
+//! piece makes the world's extras alone first; only the coordinator writes the manifest.
+//! State lives in `arnis_one_world/jobs/<x0>_<z0>_<x1>_<z1>_n<N>/`, so the same command
+//! resumes the job.
 
 use crate::args::{Args, UnitSize};
 use crate::coordinate_system::cartesian::XZBBox;

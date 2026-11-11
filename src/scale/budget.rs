@@ -415,7 +415,7 @@ mod tests {
             single_below_break_even(&mut args);
             args.units.coordinates()
         };
-        // S8 (64 km2) in one run, S16 (256 km2) in pieces.
+        // 64 km2 in one run, 256 km2 in pieces.
         assert!(!pieces(s8, "auto", &[]));
         assert!(pieces(s16, "auto", &[]));
         // Another job flag or a fixed count keeps the pieces.

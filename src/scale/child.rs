@@ -1,12 +1,6 @@
-//! Pieces die with their coordinator. A piece writing after the coordinator
-//! is gone would write into a world nobody holds, so this is not left to
-//! cleanup code that a killed process never runs.
-//!
-//! Windows: every piece joins one Job Object with KILL_ON_JOB_CLOSE. Its
-//! handle is never closed, so the kernel closes it when the coordinator ends,
-//! however it ends, and that kills the pieces.
-//! Unix: a piece gets its own process group and a stdin pipe from the
-//! coordinator, and exits when that pipe closes (`watch_parent`).
+//! Pieces die with their coordinator however it ends, or they would write into a world nobody
+//! holds: on Windows through a kill-on-close Job Object whose handle is never closed, on Unix
+//! by exiting when the coordinator's end of their stdin closes (`watch_parent`).
 
 use std::process::{Child, Command};
 

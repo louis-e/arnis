@@ -257,12 +257,15 @@ fn one_world_dir(args: &Args) -> PathBuf {
         );
         exit_failed();
     });
-    let name = args
-        .world_name
+    base_dir.join(one_world_name(args))
+}
+
+/// The One World's folder name: `--world-name`, else the default.
+fn one_world_name(args: &Args) -> String {
+    args.world_name
         .as_deref()
         .and_then(world_utils::world_folder_name)
-        .unwrap_or_else(|| one_world::DEFAULT_WORLD_NAME.to_string());
-    base_dir.join(name)
+        .unwrap_or_else(|| one_world::DEFAULT_WORLD_NAME.to_string())
 }
 
 fn run_cli() {
@@ -458,11 +461,7 @@ fn run_live_cli(args: Args) {
             fail(&e);
         }
     }
-    let world_name = args
-        .world_name
-        .as_deref()
-        .and_then(world_utils::world_folder_name)
-        .unwrap_or_else(|| one_world::DEFAULT_WORLD_NAME.to_string());
+    let world_name = one_world_name(&args);
     let start = match (args.spawn_lat, args.spawn_lng, args.bbox) {
         (Some(lat), Some(lng), _) => Some((lat, lng)),
         (_, _, Some(b)) => Some((
@@ -1357,7 +1356,7 @@ fn main() {
         }
     }
 
-    // ponytail: debug frames exceed the 1 MB Windows main stack
+    // Debug frames exceed the 1 MB Windows main stack.
     let cli = std::thread::Builder::new()
         .stack_size(8 << 20)
         .spawn(run_cli)

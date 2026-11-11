@@ -30,10 +30,8 @@ pub const MANIFEST_VERSION: u32 = 3;
 /// built whole on both sides.
 pub const CLIP_PAD_BLOCKS: i32 = 128;
 
-/// How far past its own chunks a piece of a job builds, writing only its own: what is
-/// rooted in a neighbour's ground (a tree, a building's far wall) reaches across the seam
-/// as it does in a single run.
-// ponytail: fixed reach; something wider than this still loses its far side at a seam.
+/// How far past its own chunks a piece builds, writing only its own, so what is rooted in a
+/// neighbour's ground reaches across the seam. Anything wider still loses its far side there.
 pub const PIECE_HALO_BLOCKS: i32 = 32;
 // Whole chunks, so the piece's own chunk snap gives its build rect back exactly.
 const _: () = assert!(PIECE_HALO_BLOCKS % 16 == 0);
