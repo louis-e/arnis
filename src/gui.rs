@@ -1962,6 +1962,7 @@ const WINDOW_FLAGS: &[&str] = &[
     "max-y",
     "road-detail",
     "surface-patches",
+    "no-buildings",
     "rocks",
     "rock-density",
     "bushes",
@@ -2711,6 +2712,7 @@ fn gui_start_generation(
                 cave_datum_y: None,
                 road_detail: crate::element_processing::road_detail::RoadDetail::Max,
                 surface_patches: false,
+                buildings: true,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3376,6 +3378,7 @@ mod tests {
             "--min-y=-64",
             "--max-y=319",
             "--road-detail=compact",
+            "--no-buildings",
             "--rocks",
             "--bushes",
             "--tree-realm=vanilla-plus",
@@ -3402,7 +3405,7 @@ mod tests {
         .map(String::from)
         .to_vec();
         let extra = confluence_args(&flags, false, "java", true).unwrap();
-        assert!(extra.threads == Some(4) && extra.ram_budget_mb == Some(4096));
+        assert!(!extra.buildings && extra.world_border && extra.disable_height_limit);
         assert!(extra.offline && extra.overpass_url.len() == 2 && extra.osm_pbf.is_some());
         let one = ["--origin=44.4,26.1".to_string()];
         assert!(confluence_args(&one, true, "java", false)

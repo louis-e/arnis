@@ -627,6 +627,11 @@ pub struct Args {
     /// block in their stairs' colour, so no single block stands out as a dot.
     #[arg(long)]
     pub surface_patches: bool,
+
+    /// Leave out buildings: OSM buildings, building parts, doors and entrances, and the
+    /// Overture footprints. Roads, rail, water, land cover and terrain are built as usual.
+    #[arg(long = "no-buildings", default_value_t = true, action = ArgAction::SetFalse)]
+    pub buildings: bool,
     // --- end confluence:build ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -1001,6 +1006,7 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.cave_ores.is_some(), "--cave-ores"),
         (args.road_detail != RoadDetail::Max, "--road-detail"),
         (args.surface_patches, "--surface-patches"),
+        (!args.buildings, "--no-buildings"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
@@ -1483,6 +1489,8 @@ pub const DISASTER_GROUND_LEVEL: i32 = -40;
 /// beside Animals, and need mob griefing for their meteors to crater, so both keep natural
 /// spawning off.
 pub fn apply_feature_needs(args: &mut Args) {
+    // Overture only adds buildings, so --no-buildings has nothing to fetch.
+    args.overture &= args.buildings;
     if args.caves || args.disasters {
         args.fillground = true;
     }
@@ -3099,12 +3107,24 @@ mod tests {
             cmd.extend_from_slice(extra);
             Args::parse_from(cmd.iter())
         };
-        // Flags that act on this process only stay allowed.
-        let plain = parse(&["--no-update-check", "--no-cache-sweep"]);
+        // Harmless or manifest-borne flags stay allowed.
+        let plain = parse(&["--seed", "7", "--cave-seed", "3", "--no-update-check"]);
         assert!(refuse_live_extras(&plain).is_ok());
-        let err =
-            refuse_live_extras(&parse(&["--progress", "json", "--threads", "4"])).unwrap_err();
-        for name in ["--progress", "--threads"] {
+        let err = refuse_live_extras(&parse(&[
+            "--river-bed",
+            "v1",
+            "--no-buildings",
+            "--surface-patches",
+            "--threads",
+            "4",
+        ]))
+        .unwrap_err();
+        for name in [
+            "--river-bed",
+            "--no-buildings",
+            "--surface-patches",
+            "--threads",
+        ] {
             assert!(err.contains(name), "{err}");
         }
         assert!(!err.contains("--offline"), "{err}");
@@ -3114,7 +3134,7 @@ mod tests {
             "{err}"
         );
         // Without --live nothing changes.
-        let off = Args::parse_from(["arnis", "--threads", "4"]);
+        let off = Args::parse_from(["arnis", "--river-bed", "v1"]);
         assert!(refuse_live_extras(&off).is_ok());
     }
 
@@ -3200,6 +3220,17 @@ mod tests {
         );
         let dh_only = Args::parse_from(["arnis", "--one-world", "--dh-lod-only"]);
         assert!(crate::output_args::validate(&dh_only).is_ok());
+    }
+
+    #[test]
+    fn no_buildings_skips_overture_fetch() {
+        let fetched = |extra: &[&str]| {
+            let mut args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter().chain(extra));
+            apply_feature_needs(&mut args);
+            args.overture
+        };
+        assert!(fetched(&[]));
+        assert!(!fetched(&["--no-buildings"]));
     }
 
     #[test]
