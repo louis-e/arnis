@@ -62,14 +62,9 @@ impl SizeWeights {
 }
 
 /// The height band (0 = small .. 4 = giant) for `roll` in 0..1000.
-pub fn band(roll: u64, weights: Option<&SizeWeights>) -> usize {
-    let w = weights.copied().unwrap_or_default().0;
-    let shares = BAND_SHARES.map(f64::from);
-    let weighted: Vec<f64> = shares
-        .iter()
-        .zip(w)
-        .map(|(s, pct)| s * f64::from(pct) / 100.0)
-        .collect();
+pub fn band(roll: u64, weights: &SizeWeights) -> usize {
+    let weighted: [f64; 5] =
+        std::array::from_fn(|i| f64::from(BAND_SHARES[i]) * f64::from(weights.0[i]) / 100.0);
     let sum: f64 = weighted.iter().sum();
     // Exact for the defaults: every share is a whole number and they sum to 1000.
     let target = roll as f64 * sum / 1000.0;
@@ -117,15 +112,14 @@ mod tests {
         };
         let d = SizeWeights::default();
         for roll in 0..1000 {
-            assert_eq!(band(roll, None), old(roll));
-            assert_eq!(band(roll, Some(&d)), old(roll));
+            assert_eq!(band(roll, &d), old(roll));
         }
     }
 
     #[test]
     fn weights_shift_the_mix() {
         let count =
-            |w: &SizeWeights, tier: usize| (0..1000).filter(|&r| band(r, Some(w)) == tier).count();
+            |w: &SizeWeights, tier: usize| (0..1000).filter(|&r| band(r, w) == tier).count();
         let d = SizeWeights::default();
         let w = SizeWeights::parse("small=0,big=200").unwrap();
         assert_eq!(count(&w, 0), 0);

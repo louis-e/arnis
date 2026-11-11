@@ -340,9 +340,17 @@ fn default_height_m(x: i32, z: i32, weights: Option<&SizeWeights>) -> f64 {
     ];
     let roll = coord_hash(x + 101, z + 233) % 1000;
     let t = (coord_hash(x ^ 0x2C61, z ^ 0x5E0B) % 1000) as f64 / 1000.0;
-    // One band per size tier; --tree-size-weights reweights them (defaults leave `roll` as is).
-    let band = crate::trees::size_weights::band(roll, weights);
-    let (lo, hi) = (BANDS[band].1, BANDS[band].2);
+    let (lo, hi) = match weights {
+        // One band per size tier.
+        Some(w) => {
+            let band = crate::trees::size_weights::band(roll, w);
+            (BANDS[band].1, BANDS[band].2)
+        }
+        None => BANDS
+            .iter()
+            .find(|b| roll < b.0)
+            .map_or((7.0, 12.0), |b| (b.1, b.2)),
+    };
     lo + (hi - lo) * t
 }
 
