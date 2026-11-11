@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "Eine Welt generiert nur Rechtecke. Zeichne ein Rechteck oder schalte Eine Welt aus.",
   "map_tool_shape_rectangles_only": "Eine Welt generiert nur Rechtecke.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Einstellungen durchsuchen",
+  "settings_search_empty": "Keine passende Einstellung."
 }

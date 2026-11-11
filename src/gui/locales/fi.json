@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "Yksi maailma generoi suorakulmioita. Piirrä suorakulmio tai poista Yksi maailma käytöstä.",
   "map_tool_shape_rectangles_only": "Yksi maailma generoi vain suorakulmioita.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }

@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "Monde unique génère des rectangles. Dessinez un rectangle ou désactivez Monde unique.",
   "map_tool_shape_rectangles_only": "Monde unique ne génère que des rectangles.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }

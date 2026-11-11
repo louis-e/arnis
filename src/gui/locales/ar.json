@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "وضع عالم واحد يولّد مستطيلات. ارسم مستطيلًا أو أوقف وضع عالم واحد.",
   "map_tool_shape_rectangles_only": "وضع عالم واحد يولّد مستطيلات فقط.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }

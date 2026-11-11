@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "ერთი სამყარო მართკუთხედებს აგენერირებს. დახატეთ მართკუთხედი ან გამორთეთ ერთი სამყარო.",
   "map_tool_shape_rectangles_only": "ერთი სამყარო მხოლოდ მართკუთხედებს აგენერირებს.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }

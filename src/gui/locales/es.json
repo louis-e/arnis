@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "Un solo mundo genera rectángulos. Dibuja un rectángulo o desactiva Un solo mundo.",
   "map_tool_shape_rectangles_only": "Un solo mundo solo genera rectángulos.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }

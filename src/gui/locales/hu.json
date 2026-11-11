@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "Az Egy világ téglalapokat generál. Rajzolj téglalapot, vagy kapcsold ki az Egy világot.",
   "map_tool_shape_rectangles_only": "Az Egy világ csak téglalapokat generál.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }

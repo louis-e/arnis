@@ -152,6 +152,52 @@
   color: rgba(28, 28, 28, 0.72);
 }
 
+/* Search field above the sections; a setting or section it does not match is hidden. */
+.settings-search {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.settings-search input {
+  width: 100%;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 10px 0 32px;
+  border: 1px solid var(--ui-field-border);
+  border-radius: 8px;
+  background: var(--ui-field);
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-search input:focus-visible {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+
+.settings-search .icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: var(--ui-muted);
+  pointer-events: none;
+}
+
+.settings-content .search-miss {
+  display: none !important;
+}
+
+.settings-search-empty {
+  margin: 0;
+  padding: 28px 0;
+  color: var(--ui-muted);
+  text-align: center;
+}
+
 /* Marks a section that holds a setting changed from its default. Out of the
    flow, so it costs the subtitle no width. */
 .settings-nav-dot {

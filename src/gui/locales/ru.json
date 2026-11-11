@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "«Единый мир» создаёт прямоугольники. Нарисуйте прямоугольник или отключите «Единый мир».",
   "map_tool_shape_rectangles_only": "«Единый мир» создаёт только прямоугольники.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }

@@ -142,8 +142,55 @@ function initSelectCards(group) {
   sync();
 }
 
+// What a search can match in a setting: its name, description, choices and tooltip.
+function rowText(row) {
+  const tips = Array.from(row.querySelectorAll('[data-tooltip]'), (t) => t.dataset.tooltip).join(' ');
+  return `${row.textContent} ${tips}`.toLowerCase();
+}
+
+// The search field in the sidebar leaves only the settings that hold every word typed, in the
+// chosen language or in English (the page's text before it is translated).
+function initSearch() {
+  const input = document.getElementById('settings-search');
+  const content = document.querySelector('#settings-modal .settings-content');
+  if (!input || !content) return;
+  const rows = Array.from(content.querySelectorAll('.settings-row'));
+  const english = new Map(rows.map((row) => [row, rowText(row)]));
+  const empty = document.getElementById('settings-search-empty');
+  const apply = () => {
+    const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const searching = words.length > 0;
+    const advancedOff = document.body.classList.contains('meld-off');
+    rows.forEach((row) => {
+      const hay = searching ? `${rowText(row)} ${english.get(row)}` : '';
+      row.classList.toggle('search-miss', searching && !words.every((w) => hay.includes(w)));
+    });
+    let any = false;
+    content.querySelectorAll('.settings-section').forEach((section) => {
+      const hit = !!section.querySelector('.settings-row:not(.search-miss)');
+      section.classList.toggle('search-miss', searching && !hit);
+      if (hit && !(advancedOff && section.classList.contains('meld-only'))) any = true;
+    });
+    content.querySelectorAll('.settings-group-title').forEach((title) => {
+      const grid = title.nextElementSibling;
+      title.classList.toggle('search-miss', searching && !(grid && grid.querySelector('.settings-row:not(.search-miss)')));
+    });
+    if (empty) empty.hidden = !searching || any;
+    if (searching && scroller) scroller.scrollTop = 0;
+  };
+  input.addEventListener('input', apply);
+  // Escape empties the field first; pressed again it closes Settings as usual.
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !input.value) return;
+    input.value = '';
+    apply();
+    e.stopPropagation();
+  });
+}
+
 export function initSettingsLayout() {
   initNav();
+  initSearch();
   document
     .querySelectorAll('#settings-modal .choice-cards[data-select]')
     .forEach(initSelectCards);

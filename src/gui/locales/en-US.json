@@ -797,5 +797,7 @@
   "shapes_rectangles_only": "One World generates rectangles. Draw a rectangle, or turn One World off.",
   "map_tool_shape_rectangles_only": "One World generates rectangles only.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused."
+  "run_paused": "Paused.",
+  "placeholder_settings_search": "Search settings",
+  "settings_search_empty": "No setting matches."
 }
