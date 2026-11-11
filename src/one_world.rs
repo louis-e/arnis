@@ -572,7 +572,7 @@ pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<
         crate::live::recover(world_dir)?;
     }
     let mut owned = false;
-    match resolve(world_dir, requested, args, &mut owned) {
+    match resolve(world_dir, requested, args, &mut owned, None) {
         Ok((created, llbbox)) => Ok(Session {
             created,
             llbbox,
@@ -613,9 +613,8 @@ pub fn prepare_unit(
     crate::map_item::leave_counter_to_coordinator(
         lease.first_map_id + crate::scale::MAP_IDS_PER_PIECE - 1,
     );
-    let (_, llbbox) = resolve(world_dir, requested, args, &mut false)?;
+    let (_, llbbox) = resolve(world_dir, requested, args, &mut false, Some(&lease))?;
     if let Some(run) = args.one_world_run.as_mut() {
-        run.area_id = lease.area_id;
         run.extending = lease.extending;
         run.unit = Some(lease);
     }
@@ -629,6 +628,7 @@ fn resolve(
     requested: &LLBBox,
     args: &mut Args,
     owned: &mut bool,
+    unit: Option<&UnitLease>,
 ) -> Result<(bool, LLBBox), String> {
     let (mut manifest, created) = match Manifest::load(world_dir)? {
         Some(manifest) => {
@@ -762,13 +762,16 @@ fn resolve(
         args.aws_only_elevation = manifest.aws_only_elevation;
     }
 
-    let replaced = if created {
-        0
-    } else {
-        existing_chunks(world_dir, &xzbbox)
+    // A piece builds a halo too but replaces only its own chunks.
+    let replaced = match unit.map(|u| u.rect) {
+        _ if created => 0,
+        Some([x0, z0, x1, z1]) => {
+            XZBBox::rect_from_min_max(x0, z0, x1, z1).map_or(0, |r| existing_chunks(world_dir, &r))
+        }
+        None => existing_chunks(world_dir, &xzbbox),
     };
     let extending = !manifest.areas.is_empty();
-    let area_id = manifest.next_area_id;
+    let area_id = unit.map_or(manifest.next_area_id, |u| u.area_id);
 
     args.one_world_run = Some(RunContext {
         world_dir: world_dir.to_path_buf(),
@@ -1833,6 +1836,42 @@ mod tests {
             None
         );
         assert_eq!(safe_preview_path(w, "arnis_one_world/previews/x.txt"), None);
+    }
+
+    #[test]
+    fn a_piece_counts_only_its_own_chunks_as_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        drop(prepare(&world, &req, &mut args_for(MUNICH, &[])).unwrap());
+        let mut args = args_for(MUNICH, &[]);
+        let (_, all) = resolve(&world, &req, &mut args, &mut false, None).unwrap();
+        let (area, _) =
+            snap_bbox_to_chunks(&Manifest::load(&world).unwrap().unwrap().projection(), &all)
+                .unwrap();
+        // Every chunk of the area's regions exists.
+        let region = crate::world_utils::WorldLayout::of(&world)
+            .overworld_dir(&world)
+            .join("region");
+        std::fs::create_dir_all(&region).unwrap();
+        for rz in area.min_z() >> 9..=area.max_z() >> 9 {
+            for rx in area.min_x() >> 9..=area.max_x() >> 9 {
+                std::fs::write(region.join(format!("r.{rx}.{rz}.mca")), vec![1u8; 4096]).unwrap();
+            }
+        }
+        let (x, z) = (area.min_x(), area.min_z());
+        let lease = UnitLease {
+            piece: 0,
+            area_id: 7,
+            extending: true,
+            first_map_id: 0,
+            rect: [x, z, x + 15, z + 15],
+            job: [x, z, area.max_x(), area.max_z()],
+            tiled: false,
+        };
+        resolve(&world, &req, &mut args, &mut false, Some(&lease)).unwrap();
+        let run = args.one_world_run.unwrap();
+        assert_eq!((run.replaced_chunks, run.area_id), (1, 7));
     }
 
     #[test]
