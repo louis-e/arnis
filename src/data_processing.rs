@@ -1154,9 +1154,10 @@ pub fn generate_world_with_options(
 
     // Build highway connectivity map once before processing
     let mut highway_connectivity = highways::build_highway_connectivity_map(&elements);
-    // Each area clips ways at its own padding, so roads keep level where areas meet.
+    // Each area clips ways at its own padding, so roads keep level where areas meet; a piece
+    // meets its neighbours at its own edge, not its halo's.
     if one_world.is_some() {
-        highway_connectivity.meet_at_edge_of(xzbbox.clone());
+        highway_connectivity.meet_at_edge_of(own_rect.clone());
     }
     let sign_region = crate::decals::region::SignRegion::detect(
         (anchor.min().lat() + anchor.max().lat()) / 2.0,
@@ -1293,7 +1294,7 @@ pub fn generate_world_with_options(
     let mut rail_joins = railways::RailJoins::build(&elements, railways::track_level);
     // Each area clips ways at its own padding, so tracks keep level where areas meet.
     if one_world.is_some() {
-        rail_joins.meet_at_edge_of(xzbbox.clone());
+        rail_joins.meet_at_edge_of(own_rect.clone());
     }
 
     let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
