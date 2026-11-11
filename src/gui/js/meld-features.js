@@ -7,6 +7,7 @@ const choice = (id) => {
   const active = document.querySelector(`#${id} .segment.active`);
   return active ? active.dataset.v : '';
 };
+let defaultArchive = '';
 const on = (id) => Boolean(el(id) && el(id).checked);
 
 // A string from the loaded language, `{name}` placeholders filled in; the English text is the
@@ -153,6 +154,16 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
   if (choice('meld-river-bed-group') !== 'off') add('--river-bed', choice('meld-river-bed-group'));
   if (choice('meld-water-detail-group') !== 'default') add('--water-detail', choice('meld-water-detail-group'));
   if (choice('meld-climate-mode-group') !== 'origin') add('--climate-mode', choice('meld-climate-mode-group'));
+
+  // Data
+  const source = choice('meld-osm-source-group');
+  if (source === 'archive') add('--osm-tiles-url', value('meld-archive-folder-input') || defaultArchive);
+  if (source === 'region') {
+    f.push('--osm-pbf=geofabrik');
+    add('--osm-pbf-url', value('meld-pbf-url-input'));
+  }
+  add('--overpass-url', value('meld-overpass-input'));
+  if (on('meld-offline-toggle')) f.push('--offline');
 
   // Map and World
   if (oneWorld) add('--origin', value('meld-origin-input'));
@@ -998,6 +1009,131 @@ export function refreshStretch() {
   stretchShown = STRETCH_LEVELS.filter(([, color]) => lines.some((l) => l.color === color)).map(([level]) => level);
   postToMap({ type: 'stretchLines', lines });
   showPlan(...shown);
+}
+
+// ---- Data panel: Prepare Countries and the Download Plan ----
+
+// Sizes for the Download Plan; nothing missing prints nothing, anything missing at least 1 MB.
+export const mb = (b) => (b <= 0 ? '0 MB' : b >= 1e12 ? `${(b / 1e12).toFixed(1)} TB` : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`);
+
+function lines(box, rows) {
+  box.replaceChildren(
+    ...rows.map(([a, b]) => {
+      const line = document.createElement('div');
+      line.className = 'meld-data-line';
+      const l = document.createElement('span');
+      l.textContent = a;
+      const r = document.createElement('span');
+      r.textContent = b;
+      line.append(l, r);
+      return line;
+    })
+  );
+  box.hidden = false;
+}
+
+const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints' };
+
+// `area()` is the selected bbox; `plan()` the settings a run's plan depends on.
+export function initDataPanel({ invoke, area, plan, prefetch }) {
+  const needArea = () => t('meld_select_area', 'Select an area on the map first.');
+  const list = el('meld-prepare-list');
+  const out = el('meld-plan-out');
+  const folder = () => value('meld-archive-folder-input');
+  const say = (box, text) => lines(box, [[text, '']]);
+  invoke('gui_default_archive_folder')
+    .then((dir) => { defaultArchive = dir || ''; })
+    .catch(() => {});
+
+  el('meld-prepare-check').addEventListener('click', async () => {
+    if (!area()) return say(list, needArea());
+    say(list, t('meld_asking_geofabrik', 'Asking Geofabrik...'));
+    try {
+      const p = await invoke('gui_prepare_plan', { bboxText: area(), folder: folder() });
+      const rows = p.extracts.map((e) => [e.baked ? t('meld_baked', '{name} (baked)', { name: e.name }) : e.name, t('meld_extract_sizes', '{download} download, {archive} archive', { download: mb(e.bytes), archive: mb(e.archive_bytes) })]);
+      rows.push([t('meld_archive_folder_line', 'Archive folder'), p.folder]);
+      if (p.free_bytes != null) rows.push([t('meld_free_peak', 'Free space / peak during the bake'), `${mb(p.free_bytes)} / ${mb(p.peak_bytes)}`]);
+      if (p.uncovered_points) rows.push([t('meld_uncovered', 'Not covered by any country (open sea)'), t('meld_points', '{n} points', { n: p.uncovered_points })]);
+      lines(list, rows);
+    } catch (e) {
+      say(list, t('plan_error', 'Could not plan this selection: {error}', { error: e }));
+    }
+  });
+
+  const stop = el('meld-prepare-stop');
+  el('meld-prepare-bake').addEventListener('click', async () => {
+    if (!area()) return say(list, needArea());
+    stop.hidden = false;
+    say(list, t('meld_baking', 'Baking: the progress is on the main bar.'));
+    try {
+      const done = await invoke('gui_bake_archive', {
+        bboxText: area(), folder: folder(), flags: plan().flags,
+      });
+      say(list, done ? t('meld_bake_done', 'The local archive is ready. Pick Local Archive as the OSM Data Source to use it.') : t('meld_bake_stopped', 'Stopped. Finished countries are kept.'));
+    } catch (e) {
+      say(list, t('plan_error', 'Could not plan this selection: {error}', { error: e }));
+    }
+    stop.hidden = true;
+  });
+  stop.addEventListener('click', () => invoke('gui_cancel_bake'));
+
+  const where = el('meld-plan-where');
+  let cacheRoot = '';
+  const showPath = () => {
+    el('meld-plan-path').textContent = cacheRoot ? t('meld_cache_path', 'Files are kept in {path}', { path: cacheRoot }) : '';
+    where.hidden = !cacheRoot;
+  };
+  // The path line is built from a stored path, so a language switch only redraws it.
+  window.addEventListener('arnis-localized', showPath);
+  const check = async (ready = false) => {
+    if (!area()) return say(out, needArea());
+    try {
+      const p = await invoke('gui_data_plan', { bboxText: area(), ...plan() });
+      const rows = p.items.map((i) => {
+        const name = t(`data_source_${i.source}`, SOURCE_NAMES[i.source] || i.source);
+        if (!i.total) return [name, t('meld_size_unknown', 'size unknown')];
+        return [t('meld_cached', '{source}: {cached} of {total} cached', { source: name, cached: i.cached, total: i.total }), i.missing_bytes != null ? (i.missing_bytes > 0 ? t('meld_to_download', '{size} to download', { size: mb(i.missing_bytes) }) : '') : t('meld_size_unknown', 'size unknown')];
+      });
+      if (p.free_bytes != null) rows.push([t('meld_free_space', 'Free space'), mb(p.free_bytes)]);
+      if (ready) rows.unshift([t('meld_ready_offline', 'Ready to build offline.'), '']);
+      lines(out, rows.length ? rows : [[t('meld_nothing_to_download', 'Nothing to download.'), '']]);
+      cacheRoot = p.cache_root || '';
+      showPath();
+    } catch (e) {
+      say(out, t('plan_error', 'Could not plan this selection: {error}', { error: e }));
+    }
+  };
+  el('meld-plan-show').addEventListener('click', () => check());
+  el('meld-plan-open').addEventListener('click', () => cacheRoot && invoke('gui_show_in_folder', { path: cacheRoot }).catch(() => {}));
+
+  // Download now: a run with --prewarm fills the caches and writes no world. The run's own
+  // progress lines come through the window's progress-update event.
+  let prefetching = false;
+  const listen = window.__TAURI__?.event?.listen;
+  if (listen) {
+    listen('progress-update', (e) => {
+      const m = e.payload && e.payload.message;
+      if (!prefetching || !m || e.payload.piece) return;
+      // Same text as the main status line (a fallback notice is translated).
+      if (m.startsWith('Done!')) {
+        prefetching = false;
+        check(true);
+      } else {
+        if (/^(Error!|Stopped)/.test(m)) prefetching = false;
+        say(out, progressText(e.payload).text);
+      }
+    });
+  }
+  el('meld-plan-download').addEventListener('click', async () => {
+    if (!area()) return say(out, needArea());
+    // Set before the run starts so its first lines are caught; cleared when Start refused.
+    prefetching = true;
+    say(out, t('meld_downloading', 'Downloading. Progress shows on the main bar.'));
+    if (!(await prefetch())) {
+      prefetching = false;
+      check();
+    }
+  });
 }
 
 // Settings > Projects: the One Worlds in the save folder, as a list or a grid of cards.

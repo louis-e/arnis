@@ -1087,6 +1087,40 @@ body.meld-off .meld-only {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Data panel: Prepare Countries and Download Plan */
+.settings-page .meld-data-row {
+  flex-wrap: wrap;
+}
+
+.settings-page .meld-data-row .settings-control {
+  gap: 8px;
+}
+
+.settings-page .meld-data-row .run-button {
+  flex: none;
+  padding: 0 14px;
+}
+
+.settings-page .meld-data-out {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ui-muted);
+}
+
+.settings-page .meld-data-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ui-muted);
+}
+
+.settings-page .meld-data-line[hidden] {
+  display: none;
+}
+
 /* Meld settings (and the switch that shows them) carry gold viewfinder corners: the tile's own
    rounded border in gold, masked to four corner arcs that fade out along each edge. */
 .settings-page .setting-tile.meld-only,

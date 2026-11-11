@@ -27,7 +27,7 @@ globalThis.window = {};
 const { applyFlags, meldFlags } = await import('../../src/gui/js/meld-features.js');
 const out = () => meldFlags({ oneWorld: true, java: true, caves: true, extendHeight: true, lods: false }).sort();
 
-const job = ['--one-world-workers=4', '--snap-regions=cover', '--margin-regions=1', '--unit-regions=8', '--piece-order=spiral', '--skip-built', '--stitch-map', '--threads=5', '--ram-budget-mb=8000', '--seed=7', '--min-y=-100', '--max-y=500', '--road-detail=low', '--surface-patches', '--no-buildings', '--props=off', '--rocks', '--rock-density=0.05', '--bushes', '--tree-realm=forest', '--cave-style=lush', '--cave-ores=rich', '--river-bed=deep', '--water-detail=high', '--climate-mode=local', '--origin=44.4', '--world-border', '--region-format=blinear', '--blinear-level=7'];
+const job = ['--one-world-workers=4', '--snap-regions=cover', '--margin-regions=1', '--unit-regions=8', '--piece-order=spiral', '--skip-built', '--stitch-map', '--threads=5', '--ram-budget-mb=8000', '--seed=7', '--min-y=-100', '--max-y=500', '--road-detail=low', '--surface-patches', '--no-buildings', '--props=off', '--rocks', '--rock-density=0.05', '--bushes', '--tree-realm=forest', '--cave-style=lush', '--cave-ores=rich', '--river-bed=deep', '--water-detail=high', '--climate-mode=local', '--overpass-url=http://x', '--offline', '--origin=44.4', '--world-border', '--region-format=blinear', '--blinear-level=7', '--osm-pbf=geofabrik', '--osm-pbf-url=http://y'];
 // meldFlags builds a Region Format flag only for a world that is not One World: check it apart.
 reset();
 applyFlags(job);

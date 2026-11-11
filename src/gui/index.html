@@ -534,6 +534,120 @@
                     <input type="number" id="meld-blinear-level-input" min="1" max="22" step="1" value="6">
                   </div>
                 </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-download"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_osm_source">OSM Data Source</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_osm_source_tip" data-tooltip="Default reads Arnis&#x27;s tile archive. Local Archive reads a folder of tiles baked on this computer (Experimental: the bake makes an older archive format, so it is sparser than the public tiles; needs arnis-tiles). Region Download fetches the smallest Geofabrik extract holding the area and cuts it locally.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_osm_source_desc">Where the map data comes from.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-osm-source-group"><button type="button" class="segment active" data-default data-v="default" data-localize="meld_osm_source_default">Default</button><button type="button" class="segment" data-v="archive" data-localize="meld_osm_source_archive">Local Archive (Experimental)</button><button type="button" class="segment" data-v="region" data-localize="meld_osm_source_region">Region Download</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-archive-folder-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_archive_folder">Archive Folder</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_archive_folder_tip" data-tooltip="Experimental. Where Download &amp; Bake writes and Local Archive reads. Empty uses the default folder in the cache.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_archive_folder_desc">Folder of the local tile archive.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-archive-folder-input" name="meld-archive-folder-input" placeholder="Default folder" data-localize="placeholder_meld_archive_folder" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-pbf-url-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-link"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_pbf_url">Extract URL</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_pbf_url_tip" data-tooltip="A .osm.pbf URL for Region Download, instead of the smallest region holding the area.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_pbf_url_desc">Pick the Geofabrik extract yourself.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-pbf-url-input" name="meld-pbf-url-input" placeholder="Chosen for you" data-localize="placeholder_meld_pbf_url" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-overpass-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-link"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_overpass">Overpass Server</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_overpass_tip" data-tooltip="URL of a self-hosted Overpass server, asked in place of Arnis&#x27;s own. Separate several with commas.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_overpass_desc">Your own Overpass instance.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-overpass-input" name="meld-overpass-input" placeholder="Arnis&#x27;s own" data-localize="placeholder_meld_overpass" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-offline-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-off"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_offline">Offline Mode</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_offline_tip" data-tooltip="Never uses the network. A run the caches cannot serve stops and lists what is missing.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_offline_desc">Build only from what is already downloaded.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-offline-toggle" name="meld-offline-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only meld-data-row">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-globe"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_prepare">Prepare Countries</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_prepare_tip" data-tooltip="Experimental. Lists the Geofabrik countries that cover the selected area, then downloads and bakes them into the archive folder with arnis-tiles. The bake makes an older archive format, so it is sparser than the public tiles. Needs arnis-tiles next to Arnis or on PATH.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_prepare_desc">Download and bake the countries your area covers.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <button type="button" id="meld-prepare-check" class="run-button" data-localize="meld_prepare_check">Check</button>
+                    <button type="button" id="meld-prepare-bake" class="run-button" data-localize="meld_prepare_bake">Download &amp; Bake</button>
+                    <button type="button" id="meld-prepare-stop" class="run-button" hidden data-localize="meld_prepare_stop">Stop</button>
+                  </div>
+                  <div id="meld-prepare-list" class="meld-data-out" hidden></div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only meld-data-row">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_plan">Download Plan</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_plan_tip" data-tooltip="Shows, for the selected area and the current settings, which data a run reads and how much of it the caches already hold. Only reads the disk.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_plan_desc">What this area needs and what is already downloaded.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <button type="button" id="meld-plan-show" class="run-button" data-localize="meld_prepare_check">Check</button>
+                    <button type="button" id="meld-plan-download" class="run-button" data-localize="meld_plan_download">Download now</button>
+                  </div>
+                  <div id="meld-plan-out" class="meld-data-out" hidden></div>
+                  <div id="meld-plan-where" class="meld-data-line" hidden>
+                    <span id="meld-plan-path"></span>
+                    <button type="button" id="meld-plan-open" class="run-button" data-localize="meld_open_folder">Open folder</button>
+                  </div>
+                </div>
               </div>
             </section>
 
