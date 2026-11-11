@@ -3,7 +3,7 @@ use crate::bresenham::bresenham_line;
 use crate::element_processing::field_texture::PLOT_PLANTS;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::ProcessedWay;
-use crate::water_depth::{carve_water_column, BigWaterField};
+use crate::water_depth::{at_bore, carve_water_column, BigWaterField};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
@@ -182,7 +182,7 @@ fn create_water_channel(
                     // The river's depth and bed, unless a road or a bore owns the column.
                     if bed.field.is_river(x, z)
                         && !bed.road_mask.contains(x, z)
-                        && !bed.tunnel_footprint.contains(x, z)
+                        && !at_bore(bed.field, bed.tunnel_footprint, x, z)
                         && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
                     {
                         let depth = bed.field.depth_at(x, z);

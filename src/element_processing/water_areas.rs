@@ -833,7 +833,7 @@ fn scanline_fill_water(
                 }
                 // Over a bore, fill down to the terrain but never carve into it: its shell
                 // may not be built yet. The land-cover carve deepens it once it is.
-                if tunnel_footprint.contains(x, z) {
+                if crate::water_depth::at_bore(bwf, tunnel_footprint, x, z) {
                     for y in (ground_y + 1).min(water_y)..=water_y {
                         editor.set_block_absolute(WATER, x, y, z, None, Some(&[]));
                     }

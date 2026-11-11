@@ -627,6 +627,14 @@ pub(crate) const BORE_SHELL: &[Block] = &[
     POLISHED_DEEPSLATE,
 ];
 
+/// Over a bore, or with the opt-in beds also right beside one: they reach down its wall.
+pub(crate) fn at_bore(bwf: &BigWaterField, footprint: &RoadMaskBitmap, x: i32, z: i32) -> bool {
+    footprint.contains(x, z)
+        || (bwf.deeper_than_crust
+            && !footprint.is_empty()
+            && (-1..=1).any(|dx| (-1..=1).any(|dz| footprint.contains(x + dx, z + dz))))
+}
+
 /// The deepest carve up to `depth` that keeps the bed and the block under it on top of a
 /// tunnel shell in the column, or None where the shell reaches up into the bed itself.
 fn depth_over_bore(editor: &WorldEditor, x: i32, z: i32, water_y: i32, depth: i32) -> Option<i32> {
@@ -1097,7 +1105,7 @@ pub fn carve_lc_water_region(
             // A bore runs under the bed wherever the water leaves it room, so the column
             // over it is carved like the rest of the body. Where it cannot, up a portal
             // ramp or on the world's floor, the bed stops on top of the shell instead.
-            if tunnel_footprint.contains(x, z) {
+            if at_bore(bwf, tunnel_footprint, x, z) {
                 match depth_over_bore(editor, x, z, water_y, depth) {
                     Some(fits) => depth = fits,
                     None => continue,
@@ -1137,7 +1145,7 @@ fn deepen_rivers_over_bores(
     const SURFACE_REACH: i32 = 20;
     for z in z0.max(xzbbox.min_z())..=z1.min(xzbbox.max_z()) {
         for x in x0.max(xzbbox.min_x())..=x1.min(xzbbox.max_x()) {
-            if !tunnel_footprint.contains(x, z) || !bwf.is_river(x, z) {
+            if !bwf.is_river(x, z) || !at_bore(bwf, tunnel_footprint, x, z) {
                 continue;
             }
             let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
@@ -1477,8 +1485,7 @@ mod tests {
         }
     }
 
-    /// A river bed is read like any other bed: a tunnel under it keeps its roof, and the
-    /// carve over it matches the carve of a river with no tunnel (7b79565c).
+    /// A tunnel under a river bed keeps its roof, and the carve over it matches a river's.
     #[test]
     fn river_bed_respects_tunnels() {
         use crate::block_definitions::STONE_BRICKS;
