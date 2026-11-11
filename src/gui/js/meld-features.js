@@ -115,7 +115,7 @@ export function initMeldFeatures() {
   const layout = el('layout-select');
   const about = el('layout-about-select');
   const apply = () => {
-    const mode = layout ? layout.value : 'map';
+    const mode = layout ? layout.value : 'classic';
     document.body.classList.toggle('meld-off', !toggle.checked);
     const mapFirst = mode === 'map' || (mode === 'auto' && toggle.checked);
     document.body.classList.toggle('map-first', mapFirst);
@@ -160,7 +160,7 @@ let skipKey = '';
 // The flags for one run, as the CLI takes them (`--name=value`). What a field holds is passed
 // as typed: the backend parses it with the CLI's own parser and says what is wrong.
 // `plan` is for the plan drawn before a run: it leaves a pending retry for the run itself.
-export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = false }) {
+export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = false, forKey = false }) {
   if (!on('advanced-meld-features-toggle')) return [];
   const f = [];
   // Never for another selection or world than the pieces came from.
@@ -180,7 +180,7 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
     if (value('meld-piece-order-select') !== 'centre') add('--piece-order', value('meld-piece-order-select'));
     if (on('meld-skip-built-toggle')) f.push('--skip-built');
     // Cells the menu skipped or included before this run; the run takes them (then the engine keeps them).
-    if (skipCells && skipKey === keyOf()) f.push(globalThis.arnisCells.skipFlag([...skipCells]));
+    if (!forKey && skipCells && skipKey === keyOf()) f.push(globalThis.arnisCells.skipFlag([...skipCells]));
     if (on('meld-stitch-map-toggle')) f.push('--stitch-map');
     add('--plan-mask', maskPath);
   }

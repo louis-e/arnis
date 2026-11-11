@@ -1409,7 +1409,7 @@ function initSettings() {
     start: () => startGeneration(true),
     localize: (element, key) => localizeElement(window.localization, { element }, key),
     // The flags that cut the job into pieces are part of it: --only-pieces numbers its pieces.
-    key: () => `${selectedBBox}|${isOneWorldEnabled() ? oneWorldFolderName() : ''}|${meldFlags({ oneWorld: true, java: true, plan: true }).filter((f) => /^--(unit-regions|margin-regions|snap-regions|plan-mask|origin)=/.test(f))}`,
+    key: () => `${selectedBBox}|${isOneWorldEnabled() ? oneWorldFolderName() : ''}|${meldFlags({ oneWorld: true, java: true, plan: true, forKey: true }).filter((f) => /^--(unit-regions|margin-regions|snap-regions|plan-mask|origin)=/.test(f))}`,
     map: () => getMapFrame()?.contentWindow,
     // Remove and Rebuild in the cell menu work on the open One World, then read it again.
     world: () => oneWorldInfo?.world_path || '',
