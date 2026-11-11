@@ -2208,6 +2208,9 @@ fn generate_highways_internal(
                                 } else {
                                     offset
                                 };
+                                if carriageway_at(set_x, set_z).is_some() {
+                                    editor.register_sparse_road_surface_y(set_x, set_z, cell_y);
+                                }
                                 // Where a ramp stands clear of the ground it is built up in
                                 // stone, so its sides read as walls, and spans what runs below.
                                 let raised_ground = if is_bridge_ramp {

@@ -48,6 +48,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  initWorldPainterSettings();
   // Before the store restores values, so the cards follow the restored ones.
   initSettingsLayout();
   initDialogs();
@@ -64,6 +65,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // The store's restore fired the toggle's change event before the save path
   // and the world name were known; read the world once more with both in hand.
   refreshOneWorldState();
+  refreshWorldPainterAvailability();
   resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
@@ -1787,6 +1789,7 @@ function setWorldFormat(format) {
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
   updateFormatToggleUI(format);
+  refreshWorldPainterAvailability();
 }
 
 function getEffectiveWorldFormat() {
@@ -3142,6 +3145,67 @@ function setSettingsRowAvailable(inputId, available) {
   }
 }
 
+function refreshWorldPainterAvailability() {
+  const available = selectedWorldFormat === 'java' && !liveActive() && !isOneWorldEnabled();
+  setSettingsRowAvailable('worldpainter-mode-toggle', available);
+  const modeToggle = document.getElementById('worldpainter-mode-toggle');
+  const enabled = !!(modeToggle && modeToggle.checked && !modeToggle.disabled);
+  for (const id of [
+    'worldpainter-project-input',
+    'worldpainter-executable-input',
+    'worldpainter-trees-toggle',
+    'worldpainter-keep-export-toggle',
+  ]) {
+    setSettingsRowAvailable(id, enabled);
+  }
+}
+
+function initWorldPainterSettings() {
+  const modeToggle = document.getElementById('worldpainter-mode-toggle');
+  if (!modeToggle) return;
+
+  modeToggle.addEventListener('change', refreshWorldPainterAvailability);
+
+  const browseOptions = [
+    {
+      buttonId: 'worldpainter-project-browse',
+      inputId: 'worldpainter-project-input',
+      command: 'gui_pick_worldpainter_project',
+    },
+    {
+      buttonId: 'worldpainter-executable-browse',
+      inputId: 'worldpainter-executable-input',
+      command: 'gui_pick_worldpainter_executable',
+    },
+  ];
+  for (const { buttonId, inputId, command } of browseOptions) {
+    const button = document.getElementById(buttonId);
+    const input = document.getElementById(inputId);
+    if (!button || !input) continue;
+    button.addEventListener('click', async () => {
+      try {
+        const picked = await invoke(command, { startPath: input.value.trim() });
+        if (typeof picked === 'string' && picked) {
+          input.value = picked;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } catch (error) {
+        console.error(`${command} picker failed:`, error);
+      }
+    });
+  }
+
+  refreshWorldPainterAvailability();
+}
+
+function showWorldPainterValidation(localizationKey) {
+  const progressInfo = document.getElementById('progress-info');
+  if (!progressInfo) return;
+  localizeElement(window.localization, { element: progressInfo }, localizationKey);
+  progressInfo.style.color = '#fa7878';
+}
+
 function readOneWorldRestore() {
   try {
     return JSON.parse(localStorage.getItem(ONE_WORLD_RESTORE_KEY) || '{}') || {};
@@ -3260,6 +3324,7 @@ async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
   refreshLuantiAvailability();
   setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  refreshWorldPainterAvailability();
   refreshLiveRows();
   refreshStartButton();
   if (!isOneWorldEnabled()) {
@@ -3738,6 +3803,7 @@ async function stopLive() {
 function onLiveStatus() {
   renderLiveProgress();
   refreshStartButton();
+  refreshWorldPainterAvailability();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   refreshLiveRows();
   setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
@@ -3986,6 +4052,23 @@ async function startGeneration() {
       return;
     }
 
+    const worldpainterToggle = document.getElementById('worldpainter-mode-toggle');
+    const worldpainterEnabled = !!(worldpainterToggle && worldpainterToggle.checked && !worldpainterToggle.disabled);
+    const worldpainterProject = document.getElementById('worldpainter-project-input').value.trim();
+    const worldpainterExecutable = document.getElementById('worldpainter-executable-input').value.trim();
+    if (worldpainterEnabled && !worldpainterProject) {
+      showWorldPainterValidation('worldpainter_project_required');
+      return;
+    }
+    if (worldpainterEnabled && !worldpainterProject.toLowerCase().endsWith('.world')) {
+      showWorldPainterValidation('worldpainter_project_invalid');
+      return;
+    }
+    if (worldpainterEnabled && !worldpainterExecutable) {
+      showWorldPainterValidation('worldpainter_executable_required');
+      return;
+    }
+
     // Past every synchronous refusal, so from here the click is a real start.
     resetProgressUi(STARTING_MESSAGE);
 
@@ -4070,7 +4153,11 @@ async function startGeneration() {
         bodyGravity: gameplayToggle('body-gravity-toggle'),
         oneWorld: oneWorld,
         oneWorldName: oneWorld ? oneWorldFolderName() : "",
-        selectionShapes: oneWorld ? null : selectedShapes
+        selectionShapes: oneWorld ? null : selectedShapes,
+        worldpainterProject: worldpainterEnabled ? worldpainterProject : "",
+        worldpainterExecutable: worldpainterEnabled ? worldpainterExecutable : "",
+        includeArnisTrees: worldpainterEnabled && document.getElementById('worldpainter-trees-toggle').checked,
+        keepWorldPainterExport: worldpainterEnabled && document.getElementById('worldpainter-keep-export-toggle').checked
     });
 
     console.log("Generation process started.");

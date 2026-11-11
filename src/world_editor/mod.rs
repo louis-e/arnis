@@ -12,6 +12,7 @@
 pub(crate) mod common;
 pub(crate) mod java;
 mod luanti;
+pub(crate) mod region_overlay;
 mod style;
 
 pub mod bedrock;
@@ -273,6 +274,8 @@ pub struct WorldEditor<'a> {
     /// Java: leave every chunk outside the area unwritten for the void generator,
     /// instead of filling it with the flat ground plane.
     void_world: bool,
+    /// Java: write only populated chunks and omit all terrain filler.
+    sparse_features: bool,
     /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
     voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Pre-generated Distant Horizons LOD database, fed the same way. Java only.
@@ -355,6 +358,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
+            sparse_features: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -425,6 +429,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
+            sparse_features: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -495,6 +500,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: game,
             bake_lighting: false,
             void_world: false,
+            sparse_features: false,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -526,6 +532,9 @@ impl<'a> WorldEditor<'a> {
     }
 
     pub(crate) fn region_write_mode(&self) -> java::RegionWriteMode {
+        if self.sparse_features {
+            return java::RegionWriteMode::SparseFeatures;
+        }
         match self.merge_into_existing {
             Some(layout) => java::RegionWriteMode::Merge {
                 min_x: self.xzbbox.min_x(),
@@ -831,6 +840,11 @@ impl<'a> WorldEditor<'a> {
     /// Java: write only the chunks the area touches and leave the rest to a void generator.
     pub fn set_void_world(&mut self, enabled: bool) {
         self.void_world = enabled;
+    }
+
+    /// Write only populated Java chunks, without terrain filler.
+    pub fn set_sparse_features(&mut self, enabled: bool) {
+        self.sparse_features = enabled;
     }
 
     pub fn set_game_settings(
@@ -1489,6 +1503,35 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_road_surface_y(&mut self, x: i32, z: i32, y: i32) {
         self.road_surface_overrides.insert((x, z), y);
+    }
+
+    pub fn register_sparse_road_surface_y(&mut self, x: i32, z: i32, y: i32) {
+        if !self.sparse_features {
+            return;
+        }
+
+        let chunk_x = x.div_euclid(16);
+        let chunk_z = z.div_euclid(16);
+        let region_x = chunk_x.div_euclid(32);
+        let region_z = chunk_z.div_euclid(32);
+        let local_chunk_x = chunk_x.rem_euclid(32);
+        let local_chunk_z = chunk_z.rem_euclid(32);
+        let column = z.rem_euclid(16) as usize * 16 + x.rem_euclid(16) as usize;
+        let chunk = self
+            .world
+            .get_or_create_region(region_x, region_z)
+            .get_or_create_chunk(local_chunk_x, local_chunk_z);
+        let road_heights = chunk
+            .other
+            .entry(crate::world_editor::region_overlay::SPARSE_ROAD_SURFACE_HEIGHTS_KEY.to_string())
+            .or_insert_with(|| Value::IntArray(IntArray::new(vec![i32::MIN; 256])));
+        if !matches!(road_heights, Value::IntArray(heights) if heights.len() == 256) {
+            *road_heights = Value::IntArray(IntArray::new(vec![i32::MIN; 256]));
+        }
+        let Value::IntArray(heights) = road_heights else {
+            unreachable!();
+        };
+        heights[column] = y;
     }
 
     /// The ground Y a road, track or cut has set for this cell, if any.
@@ -3585,6 +3628,32 @@ mod road_override_merge_tests {
     use super::*;
     use crate::coordinate_system::geographic::LLBBox;
     use std::collections::HashSet;
+
+    #[test]
+    fn sparse_road_markers_use_chunk_local_columns() {
+        let xzbbox = XZBBox::rect_from_min_max(-32, -32, 31, 31).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+
+        editor.register_sparse_road_surface_y(-1, -17, 10);
+        assert!(editor.world.regions.is_empty());
+
+        editor.set_sparse_features(true);
+        editor.register_sparse_road_surface_y(-1, -17, 42);
+        let Value::IntArray(heights) = editor
+            .world
+            .get_region(-1, -1)
+            .unwrap()
+            .get_chunk(31, 30)
+            .unwrap()
+            .other
+            .get(crate::world_editor::region_overlay::SPARSE_ROAD_SURFACE_HEIGHTS_KEY)
+            .unwrap()
+        else {
+            panic!("sparse road heights are missing");
+        };
+        assert_eq!(heights[255], 42);
+    }
 
     #[test]
     fn each_cell_keeps_its_owners_road_height_whatever_the_merge_order() {

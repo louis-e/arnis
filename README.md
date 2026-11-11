@@ -19,6 +19,29 @@ Download the [latest release](https://github.com/louis-e/arnis/releases/) or [co
 Choose your area on the map using the rectangle tool, then simply click on <i>Start Generation</i>!
 Additionally, you can customize various generation settings, such as world scale, spawn point, or building interior generation.
 
+### WorldPainter export
+
+For a new Java world, enable **WorldPainter Export** in the Generation settings, then choose a
+WorldPainter `.world` project and the `wpscript` executable. The WorldPainter export becomes the
+main generated world, with Arnis features overlaid onto its terrain; it does not create a separate
+side world. The selected area and scale still control Arnis feature placement, so use values that
+match the WorldPainter project's block layout. This option is not available for Bedrock, Luanti,
+Live, or One World generation.
+
+Arnis-generated trees are off in this mode by default; WorldPainter's trees are left in place.
+Enable **Include Arnis Trees** to add Arnis trees too. **Keep Unmerged WorldPainter Export** is on
+by default and stores the original export in a `WorldPainter Export` folder inside the generated
+world; turn it off to save disk space.
+
+The same workflow is available from the CLI:
+
+```powershell
+arnis.exe --output-dir="C:\Users\you\AppData\Roaming\.minecraft\saves" --bbox="min_lat,min_lng,max_lat,max_lng" --worldpainter-project="C:\maps\project.world" --worldpainter-executable="C:\Program Files\WorldPainter\wpscript.exe"
+```
+
+Use `--worldpainter-include-arnis-trees` to include Arnis trees, or
+`--worldpainter-keep-export=false` to omit the unmerged export copy.
+
 ## 📚 Documentation
 
 <img src="assets/git/documentation.png" width="100%" alt="Banner">
