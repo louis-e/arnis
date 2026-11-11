@@ -614,7 +614,21 @@ export function notePiece(piece) {
     error: piece.state === 'failed' ? piece.error : '',
     log: piece.log || was?.log,
   });
-  postToMap({ type: 'pieceOutlines', pieces: outlines() });
+  sendOutlines();
+}
+
+// A large job sends many records a second: the map gets them at most once a frame (at once
+// where nothing draws frames).
+let outlinesQueued = false;
+function sendOutlines() {
+  const frame = globalThis.requestAnimationFrame;
+  if (!frame) return postToMap({ type: 'pieceOutlines', pieces: outlines() });
+  if (outlinesQueued) return;
+  outlinesQueued = true;
+  frame(() => {
+    outlinesQueued = false;
+    postToMap({ type: 'pieceOutlines', pieces: outlines() });
+  });
 }
 
 // A new run starts clean; a retry keeps the pieces it does not rebuild. `bbox` is the selection

@@ -139,6 +139,20 @@ assert.equal(halo.attrs['aria-pressed'], 'false');
   console.log('piece-overlay G8 ok');
 }
 
+// Many records in one frame reach the map once, with the newest state.
+{
+  const frames = [];
+  globalThis.requestAnimationFrame = (f) => frames.push(f);
+  const before = sent.length;
+  for (let pct = 0; pct < 50; pct++) rec(0, 'start', { worker: 1, pct });
+  assert.equal(sent.length, before, 'nothing before the frame');
+  assert.equal(frames.length, 1, 'one frame asked for');
+  frames.shift()();
+  assert.equal(sent.length, before + 1);
+  assert.equal(last()[0].pct, 49);
+  delete globalThis.requestAnimationFrame;
+}
+
 console.log('piece-overlay: ok');
 // The run line's one-second tick would keep node alive.
 process.exit(0);

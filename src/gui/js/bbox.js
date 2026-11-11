@@ -1718,6 +1718,7 @@ $(document).ready(function () {
     var CELL_CAP = 2000;
     var cellExtent = null;
     var cellShade = null;
+    var cellAreaKey = '';
 
     // The cell select tool: on, the cells picked (plan indexes), a drag in progress, and the button.
     var cellTool = false;
@@ -1756,25 +1757,31 @@ $(document).ready(function () {
         var view = map.getBounds();
         var inView = window.arnisCellsInView(pieces, [view.getSouth(), view.getWest(), view.getNorth(), view.getEast()], CELL_CAP);
         var extent = inView.over ? window.arnisCellsExtent(pieces) : null;
-        if (cellExtent) { pieceLayer.removeLayer(cellExtent); cellExtent = null; }
-        if (extent) {
-            cellExtent = L.rectangle([[extent[0], extent[1]], [extent[2], extent[3]]], {
-                color: PIECE_COLORS.planned, weight: 2, fill: false, interactive: false, pane: 'arnisCells'
-            }).addTo(pieceLayer);
-        }
         // One faint dark fill under the whole plan area, so the cells' colours and numbers read
         // against the map. Below the outlines, gone with the grid.
         var area = window.arnisCellsExtent(pieces);
-        if (cellShade) { pieceLayer.removeLayer(cellShade); cellShade = null; }
-        if (area) {
-            cellShade = L.rectangle([[area[0], area[1]], [area[2], area[3]]], {
-                stroke: false, fillColor: '#000', fillOpacity: 0.15, interactive: false, pane: 'arnisCells'
-            }).addTo(pieceLayer);
-            cellShade.bringToBack();
+        // Both are drawn again only when they move.
+        var areaKey = String(extent) + '/' + String(area);
+        if (areaKey !== cellAreaKey) {
+            cellAreaKey = areaKey;
+            if (cellExtent) { pieceLayer.removeLayer(cellExtent); cellExtent = null; }
+            if (extent) {
+                cellExtent = L.rectangle([[extent[0], extent[1]], [extent[2], extent[3]]], {
+                    color: PIECE_COLORS.planned, weight: 2, fill: false, interactive: false, pane: 'arnisCells'
+                }).addTo(pieceLayer);
+            }
+            if (cellShade) { pieceLayer.removeLayer(cellShade); cellShade = null; }
+            if (area) {
+                cellShade = L.rectangle([[area[0], area[1]], [area[2], area[3]]], {
+                    stroke: false, fillColor: '#000', fillOpacity: 0.15, interactive: false, pane: 'arnisCells'
+                }).addTo(pieceLayer);
+                cellShade.bringToBack();
+            }
         }
         // Past the cap only the job's outline is drawn: a first 2,000 cells would be a patch, not a grid.
         pieces = inView.over ? [] : inView.cells;
         var seen = {};
+        var moved = false;
         pieces.forEach(function(p) {
             seen[p.i] = true;
             var color = PIECE_COLORS[p.state] || '#8a8a8a';
@@ -1783,6 +1790,7 @@ $(document).ready(function () {
             var b = p.bounds;
             var item = pieceLayers[p.i];
             if (!item) {
+                moved = true;
                 item = pieceLayers[p.i] = {};
                 item.rect = L.rectangle([[b[0], b[1]], [b[2], b[3]]], { interactive: true, pane: 'arnisCells' }).addTo(pieceLayer);
                 ensureHatch(item.rect);
@@ -1811,6 +1819,8 @@ $(document).ready(function () {
                     // While the pointer travels to a failed piece's card, a neighbour's card
                     // does not take its place.
                     if (heldCard && heldCard !== item && heldCard.holds()) return closeNow.call(item.rect);
+                    // The card is made as it opens: its clock is not redrawn on every record.
+                    item.rect.setTooltipContent(pieceTip(item.p));
                     if (item.p.text.openLog) heldCard = item;
                     e.tooltip.options.sticky = !item.p.text.openLog;
                     e.tooltip.getElement().onmouseleave = function() { item.leftAt = 0; item.rect.closeTooltip(); };
@@ -1826,8 +1836,16 @@ $(document).ready(function () {
             if (!item.rect.getBounds().equals([[b[0], b[1]], [b[2], b[3]]])) {
                 item.rect.setBounds(L.latLngBounds([b[0], b[1]], [b[2], b[3]]));
                 item.label.setLatLng(item.rect.getBounds().getCenter());
+                item.sig = null;
+                moved = true;
             }
             item.p = p;
+            // A cell drawn as it is now is left alone: a large job sends many records a second.
+            var picked = cellPick.has(p.i);
+            var sig = [p.state, p.pct, p.n, picked, p.ring, pieceHalo && p.halo ? p.halo.join() : '', p.since, p.end,
+                p.text.state, p.text.piece, p.text.size, p.text.worker, p.text.error, p.text.hint, p.text.openLog].join('|');
+            if (sig === item.sig) return;
+            item.sig = sig;
             // A plan's pieces are thin outlines, its ring (margin) fainter and dotted. A job's
             // pieces are empty cups that fill from the bottom.
             // Outside the outline: a plan's piece, greyed, that is not built.
@@ -1836,7 +1854,6 @@ $(document).ready(function () {
             var room = p.state === 'room';
             var planned = p.state === 'planned' || excluded || room;
             // A picked cell: the pick colour, a thick line and a fill. A skipped one is hatched.
-            var picked = cellPick.has(p.i);
             item.rect.setStyle({
                 color: picked ? PIECE_COLORS.picked : color,
                 weight: picked ? 4 : room ? 1.5 : planned ? 1 : p.state === 'failed' ? 3 : 2,
@@ -1877,7 +1894,7 @@ $(document).ready(function () {
             heldCard = window.arnisCardDrop(item, heldCard);
             delete pieceLayers[i];
         });
-        updatePieceLabels();
+        if (moved) updatePieceLabels();
         applyBalance();
         updateSliderVisibility();
     }
