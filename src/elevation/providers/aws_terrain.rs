@@ -266,6 +266,8 @@ fn download_tile(
     zoom: u8,
     tile_path: &Path,
 ) -> Result<TileImage, String> {
+    // Ahead of the retries, whose sleeps would only delay the refusal.
+    crate::net::ensure_online("elevation tiles (AWS Terrain)")?;
     println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from AWS Terrain Tiles");
     let url: String = AWS_TERRARIUM_URL
         .replace("{z}", &zoom.to_string())
@@ -314,7 +316,6 @@ fn download_tile_once(
     url: &str,
     tile_path: &Path,
 ) -> Result<TileImage, String> {
-    crate::net::ensure_online("elevation tiles (AWS Terrain)")?;
     let _permit = crate::net::request_permit();
     let response = client.get(url).send().map_err(|e| e.to_string())?;
     response.error_for_status_ref().map_err(|e| e.to_string())?;

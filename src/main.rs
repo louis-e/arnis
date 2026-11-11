@@ -391,8 +391,8 @@ fn run_cli() {
 }
 
 fn print_banner(args: &Args, planning: bool) {
-    // Clean up old cached elevation tiles on startup
-    if !args.no_cache_sweep && !planning {
+    // Clean up old cached elevation tiles on startup; offline, the cache is all there is.
+    if !args.no_cache_sweep && !planning && !args.offline {
         elevation_data::cleanup_old_cached_tiles();
     }
 

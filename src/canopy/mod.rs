@@ -663,7 +663,10 @@ pub fn fetch_canopy_data(
     }
     // No progress emit, this runs behind the land cover and elevation fetches.
     println!("Fetching canopy height data (Meta/WRI 1m global canopy height)...");
-    prune_row_cache();
+    // Offline, an old block cannot be fetched again.
+    if !crate::net::offline() {
+        prune_row_cache();
+    }
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(90))

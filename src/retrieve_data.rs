@@ -698,6 +698,10 @@ pub fn fetch_data_from_overpass(
 
 /// Fetches a short area name using Nominatim for the given lat/lon
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    // A name is optional, so offline it is simply absent rather than a miss.
+    if crate::net::offline() {
+        return Ok(None);
+    }
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
         .user_agent(OSM_USER_AGENT)

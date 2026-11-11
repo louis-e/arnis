@@ -500,11 +500,13 @@ fn fetch_tile(
 ) -> TileFetch {
     let marker = key.marker_path(cache_dir);
     if let Ok(meta) = std::fs::metadata(&marker) {
-        let fresh = meta
-            .modified()
-            .ok()
-            .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())
-            .is_some_and(|age| age.as_secs() < MISSING_MARKER_MAX_AGE_SECS);
+        // Offline, any marker beats a refused request.
+        let fresh = crate::net::offline()
+            || meta
+                .modified()
+                .ok()
+                .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())
+                .is_some_and(|age| age.as_secs() < MISSING_MARKER_MAX_AGE_SECS);
         if fresh {
             return TileFetch::Missing { cached: true };
         }

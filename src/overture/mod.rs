@@ -1400,7 +1400,9 @@ fn build_release_candidates(discovered: Vec<String>, last_good: Option<String>) 
 /// Record `release` as usable and drop cached data from older ones.
 fn accept_release(release: &str) {
     cache::set_last_good_release(release);
-    cache::prune_releases_older_than(release);
+    if !crate::net::offline() {
+        cache::prune_releases_older_than(release);
+    }
 }
 
 /// The STAC index for one release, from disk if it has been read before.
