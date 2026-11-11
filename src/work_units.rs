@@ -406,7 +406,7 @@ pub fn plan(
         (UnitSize::Auto, max) => {
             let max = max.unwrap_or(AUTO_SIZES[0]);
             // Whole `max` pieces clipped at the edges: smaller edge pieces cost more than they
-            // save (B3, 256 km2: 136 mixed pieces 93 s, 16 of 8 x 8 65 s). An outline still
+            // save (256 km2: 136 mixed pieces 93 s, 16 of 8 x 8 65 s). An outline still
             // splits, larger leaves until the map ids go round.
             let mut cut = Vec::new();
             let leaves = AUTO_SIZES.into_iter().rev();
@@ -427,8 +427,7 @@ pub fn plan(
         rect.max_z()
     );
     if let Some(max) = auto_max {
-        // `w`: whole pieces, not the mixed cut of 3.5.0, whose jobs keep their own folder.
-        name.push_str(&format!("{max}{}", if mask.is_none() { "w" } else { "" }));
+        name.push_str(&max.to_string());
     }
     // Merged edges cut other pieces than a plain job over the same rectangle.
     if merge {
@@ -599,18 +598,15 @@ pub fn plan_line(
     Ok(plan)
 }
 
-/// On-disk KB per chunk, [low, high]. A chunk takes at least one 4,096-byte sector. Measured:
-/// 4.0 on rural preview worlds (Grindelwald, Danube), 4.3 on dense Bucharest, 4.1 on a One
-/// World; the T1 smokes (work/c35/t1-smoke) wrote 4.0 (rural, 16 regions), 4.06 (city,
-/// 64) and 4.14 (parity area, 4). The top leaves room above the densest.
+/// On-disk KB per chunk, [low, high]; a chunk takes at least one 4,096-byte sector. Measured
+/// 4.0 (rural) to 4.3 (dense city); the top leaves room above the densest.
 const DISK_KB_PER_CHUNK: [f64; 2] = [4.0, 4.6];
-/// Previews and map items beside the region files, KB per region, from the same smokes:
-/// 84 (rural), 220 (city) and 249 (parity area, many signage maps).
+/// Previews and map items beside the region files, KB per region: 84 rural to 249 with many
+/// signage maps.
 const EXTRA_KB_PER_REGION: [f64; 2] = [84.0, 249.0];
-/// Wall seconds per 1,000 chunks for one worker. B3 (work/bench22): Auto on 256 km² of
-/// Bucharest, 16 pieces, 4 workers x 5 threads on 24 cores at scale 1, caches warm, built
-/// 1,000,000 chunks in 52.8 s (median of 3): 0.21; the range brackets it, so its middle
-/// lands within 10%. Smaller and rural pieces ran slower per chunk in the T1 smokes.
+/// Wall seconds per 1,000 chunks for one worker. 256 km² of Bucharest in 16 pieces, 4 workers
+/// x 5 threads on 24 cores, warm caches: 1,000,000 chunks in 52.8 s, 0.21. Smaller and rural
+/// pieces run slower per chunk.
 const WORKER_S_PER_KCHUNK: [f64; 2] = [0.18, 0.28];
 
 /// Ranges for some pieces built by `workers` at once.
@@ -662,7 +658,7 @@ fn job_estimate(
     let e = Estimate::of(&all, args.scale, workers);
     let mut basis = format!(
         "disk: chunks x {:?} KB plus {:?} KB per region for previews and map items, measured \
-         on 3.5.0 worlds; ram_mb: per worker, scale::budget's piece estimate; time_min: \
+         on generated worlds; ram_mb: per worker, scale::budget's piece estimate; time_min: \
          {workers} worker(s) at {:?} s per 1,000 chunks for one worker, measured with warm \
          caches on 24 cores at scale 1, so downloads add to it",
         DISK_KB_PER_CHUNK, EXTRA_KB_PER_REGION, WORKER_S_PER_KCHUNK
@@ -741,8 +737,8 @@ mod tests {
 
     #[test]
     fn time_estimate_tracks_measured_s16() {
-        // B3: tuned Auto on S16 (256 km², 1,000,000 chunks, 4 workers) took 52.8 s
-        // (median of 3, work/bench22/results-b3.jsonl); the window shows the range's middle.
+        // Auto on 256 km² (1,000,000 chunks, 4 workers) took 52.8 s; the window shows the
+        // range's middle.
         let (lo, hi) = (WORKER_S_PER_KCHUNK[0], WORKER_S_PER_KCHUNK[1]);
         let shown_s = 1_000.0 * (lo + hi) / 2.0 / 4.0;
         assert!((shown_s / 52.8 - 1.0).abs() <= 0.25, "{shown_s} s");
@@ -790,7 +786,7 @@ mod tests {
         }
     }
 
-    /// Doc 18's example: a new world centred on the request, 2x2-region pieces.
+    /// A new world centred on the request, 2x2-region pieces.
     fn doc18() -> (WebMercatorProjection, LLBBox) {
         let req = LLBBox::new(44.425, 26.08, 44.445, 26.13).unwrap();
         (WebMercatorProjection::new(44.435, 26.105, 1.0), req)
@@ -815,7 +811,7 @@ mod tests {
         let p = plan(&proj, &req, &args, UnitSize::Auto).unwrap();
         // Covered to the 2-region lattice: 8 x 8 regions around block 0.
         assert_eq!(r(&p.rect), [-2048, -2048, 2047, 2047]);
-        assert!(p.name.ends_with("_nauto8w"));
+        assert!(p.name.ends_with("_nauto8"));
         // The 8-lattice lines at x 0 and z 0 cut it into four clipped 8 x 8 pieces.
         assert_eq!(sizes(&p.units), [(2048, 2048); 4]);
         assert!(p.units.iter().all(|u| u.size == 8));
@@ -836,7 +832,7 @@ mod tests {
         args.ram_budget_mb = Some(1500);
         let p = plan(&proj, &wide, &args, UnitSize::Auto).unwrap();
         assert!(p.units.iter().all(|u| u.size == 4));
-        assert!(p.name.ends_with("_nauto4w") && eights.ends_with("_nauto8w"));
+        assert!(p.name.ends_with("_nauto4") && eights.ends_with("_nauto8"));
         // Without snapping, the edges are clipped: four pieces either side of block 0.
         args.units.snap_regions = None;
         args.ram_budget_mb = Some(4000);
@@ -909,8 +905,7 @@ mod tests {
         assert_eq!(p.name, "-2560_-2560_2559_2559_n2");
     }
 
-    /// Doc 21 A2: whatever the snap, margin and size, a plan tiles its rectangle; no two
-    /// pieces share land. (Overlap seen in the window was the overlay, not this.)
+    /// Whatever the snap, margin and size, a plan tiles its rectangle; no two pieces share land.
     #[test]
     fn every_plan_is_a_tiling() {
         use crate::args::{SnapRegions, UnitArgs};

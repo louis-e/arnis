@@ -11,8 +11,8 @@
 //!
 //! A job keeps its state in `arnis_one_world/jobs/<x0>_<z0>_<x1>_<z1>_n<N>/` (the rectangle
 //! is the union of the pieces): the ids it reserved and each piece's share of them, one
-//! `done-r<rx>_<rz>_s<n>.json` per finished piece (a 3.5.0 job's `done-<index>.json` is
-//! read too) and the piece leases. Running the same command again resumes it.
+//! `done-r<rx>_<rz>_s<n>.json` per finished piece and the piece leases. Running the same
+//! command again resumes it.
 
 use crate::args::{Args, UnitSize};
 use crate::coordinate_system::cartesian::XZBBox;
@@ -312,8 +312,7 @@ struct Job {
     dir: PathBuf,
     area_base: u32,
     map_base: i32,
-    /// Each piece's share of the reserved ids, by region key. A 3.5.0 job has none: its
-    /// pieces' shares follow their plan index.
+    /// Each piece's share of the reserved ids, by region key.
     slots: serde_json::Map<String, Value>,
     /// Cells left out, by plan index: `--skip-cells`, kept in `job.json`.
     skip: BTreeSet<usize>,
@@ -338,17 +337,16 @@ impl Job {
         let kept = std::fs::read_to_string(&state)
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok());
-        let (area_base, map_base, slots) = match kept
-            .as_ref()
-            .map(|v| (v["area_base"].as_u64(), v["map_base"].as_i64(), &v["slots"]))
-        {
-            Some((Some(a), Some(m), slots)) => {
-                let slots = slots.as_object().cloned().unwrap_or_default();
-                // Shares are by region key; a 3.5.0 job has none and uses the plan index.
-                if let Some(u) = (!slots.is_empty())
-                    .then(|| units.iter().find(|u| !slots.contains_key(&done_key(u))))
-                    .flatten()
-                {
+        let (area_base, map_base, slots) = match kept.as_ref().map(|v| {
+            (
+                v["area_base"].as_u64(),
+                v["map_base"].as_i64(),
+                v["slots"].as_object(),
+            )
+        }) {
+            Some((Some(a), Some(m), Some(slots))) => {
+                let slots = slots.clone();
+                if let Some(u) = units.iter().find(|u| !slots.contains_key(&done_key(u))) {
                     return Err(format!(
                         "{} was planned with other pieces (none at region {}); delete it or run \
                          the command that started it.",
@@ -442,13 +440,9 @@ impl Job {
         self.dir.join(format!("done-{}.json", done_key(u)))
     }
 
-    /// What the piece reported, if it is built: under its region key, or under its plan
-    /// index in a job folder from 3.5.0.
+    /// What the piece reported, if it is built.
     fn finished(&self, u: &WorkUnit) -> Option<PieceResult> {
-        let old = self.dir.join(format!("done-{}.json", u.index));
-        let text = std::fs::read_to_string(self.done_path(u))
-            .or_else(|_| std::fs::read_to_string(old))
-            .ok()?;
+        let text = std::fs::read_to_string(self.done_path(u)).ok()?;
         serde_json::from_str(&text).ok()
     }
 }
@@ -457,7 +451,6 @@ impl Job {
 pub fn piece_done(world_dir: &Path, name: &str, u: &WorkUnit) -> bool {
     let dir = world_dir.join(one_world::JOBS_DIR).join(name);
     dir.join(format!("done-{}.json", done_key(u))).exists()
-        || dir.join(format!("done-{}.json", u.index)).exists()
 }
 
 fn skip_set(v: &Value) -> BTreeSet<usize> {
@@ -1487,7 +1480,7 @@ second
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join(one_world::JOBS_DIR).join("j");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("job.json"), r#"{"area_base":5,"map_base":100}"#).unwrap();
+        std::fs::write(dir.join("job.json"), job_state(&units).to_string()).unwrap();
         let mut job = Job::open(tmp.path(), "j".into(), &units).unwrap();
         assert!(job.skip.is_empty());
         job.save_skip(BTreeSet::from([1, 3])).unwrap();
@@ -1588,10 +1581,17 @@ second
         assert_eq!(args.unwrap().units.only_pieces, Some(vec![3, 7]));
     }
 
-    /// A job folder from 3.5.0 (`done-<index>.json`, no slots) resumes, and a new one keys
-    /// its pieces by region.
+    /// A job's state as `Job::open` writes it: area ids from 5, map ids from 100.
+    fn job_state(units: &[WorkUnit]) -> Value {
+        let slots: serde_json::Map<String, Value> = units
+            .iter()
+            .map(|u| (done_key(u), json!(u.index)))
+            .collect();
+        json!({"area_base": 5, "map_base": 100, "slots": slots})
+    }
+
     #[test]
-    fn job_folders_resume_by_region_key_and_by_35_index() {
+    fn job_folders_resume_by_region_key() {
         let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
         let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
         let (world, _) = crate::projection::snap_bbox_to_chunks(&proj, &req).unwrap();
@@ -1599,15 +1599,12 @@ second
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join(one_world::JOBS_DIR).join("j");
         std::fs::create_dir_all(&dir).unwrap();
-        // 3.5.0: ids by plan index, piece 0 done.
-        std::fs::write(dir.join("job.json"), r#"{"area_base":5,"map_base":100}"#).unwrap();
-        std::fs::write(dir.join("done-0.json"), r#"{"chunks":7}"#).unwrap();
+        std::fs::write(dir.join("job.json"), job_state(&units).to_string()).unwrap();
         let job = Job::open(tmp.path(), "j".into(), &units).unwrap();
-        assert_eq!(job.finished(&units[0]).map(|r| r.chunks), Some(7));
         assert!(job.finished(&units[1]).is_none());
         assert_eq!(job.area_id(&units[2]), 7);
         assert_eq!(job.first_map_id(&units[2]), 100 + 2 * MAP_IDS_PER_PIECE);
-        // New pieces finish under their region key.
+        // Pieces finish under their region key.
         let key = units[1].region_key();
         let (rx, rest) = key.split_once(',').unwrap();
         let (rz, s) = rest.split_once(',').unwrap();
@@ -1615,6 +1612,7 @@ second
         assert_eq!(job.done_path(&units[1]), want);
         std::fs::write(&want, r#"{"chunks":9}"#).unwrap();
         assert_eq!(job.finished(&units[1]).map(|r| r.chunks), Some(9));
+        assert!(piece_done(tmp.path(), "j", &units[1]) && !piece_done(tmp.path(), "j", &units[0]));
         // `--skip-built`: a piece whose every chunk exists is skipped, unless this job
         // started it. Region (-1, -1) is unit 0's here, every chunk header set.
         let world = tmp.path();
@@ -1628,7 +1626,7 @@ second
         assert!(job.built_before(world, u));
         std::fs::write(job.lease_path(u.index as usize), "{}").unwrap();
         assert!(!job.built_before(world, u));
-        // Slots kept in job.json win over the index.
+        // A piece's share follows its slot, not its plan index.
         let mut slots: serde_json::Map<String, Value> = units
             .iter()
             .map(|u| (done_key(u), json!(u.index)))

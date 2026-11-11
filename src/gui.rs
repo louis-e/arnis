@@ -1641,7 +1641,8 @@ fn gui_list_one_worlds(save_path: String) -> Result<Vec<OneWorldEntry>, String> 
             let m = crate::one_world::Manifest::load(&e.path()).ok()?;
             let info = one_world_info_of(&e.path(), m.as_ref());
             let jobs = m.as_ref().map_or_else(Vec::new, |m| {
-                crate::one_world::job_records(&e.path(), m)
+                m.jobs
+                    .clone()
                     .into_iter()
                     .map(|j| {
                         let (masked, mask) = job_mask(&e.path(), &j.name);

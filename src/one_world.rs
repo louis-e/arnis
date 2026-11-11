@@ -206,49 +206,6 @@ pub fn record_job(
     manifest.save(world_dir)
 }
 
-/// The world's jobs: the recorded ones, then job folders from before jobs were recorded,
-/// counted from their own files.
-pub fn job_records(world_dir: &Path, manifest: &Manifest) -> Vec<JobRecord> {
-    let mut jobs = manifest.jobs.clone();
-    let Ok(dirs) = std::fs::read_dir(world_dir.join(JOBS_DIR)) else {
-        return jobs;
-    };
-    for dir in dirs.flatten().filter(|d| d.path().is_dir()) {
-        let name = dir.file_name().to_string_lossy().into_owned();
-        if jobs.iter().any(|j| j.name == name) {
-            continue;
-        }
-        let state = dir.path().join("job.json");
-        let total = std::fs::read_to_string(&state)
-            .ok()
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-            .and_then(|v| v["slots"].as_object().map(|s| s.len() as u32))
-            .unwrap_or(0);
-        let done = std::fs::read_dir(dir.path()).map_or(0, |d| {
-            d.flatten()
-                .filter(|f| f.file_name().to_string_lossy().starts_with("done-"))
-                .count() as u32
-        });
-        let last_run_ms = std::fs::metadata(&state)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_millis() as u64);
-        jobs.push(JobRecord {
-            name,
-            settings: Vec::new(),
-            bbox: None,
-            status: JobStatus {
-                done,
-                total,
-                finished: false,
-                last_run_ms,
-            },
-        });
-    }
-    jobs
-}
-
 fn real_height() -> f64 {
     1.0
 }
@@ -1218,7 +1175,6 @@ pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<Remove
             delete(path)?;
         }
         // The job's record of the cell, so a resume builds it again.
-        let index = a.piece.as_ref().map_or(0, |p| p.index);
         let key = format!(
             "done-r{}_{}_s",
             a.min_x.div_euclid(512),
@@ -1226,7 +1182,7 @@ pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<Remove
         );
         for f in std::fs::read_dir(&job_dir).into_iter().flatten().flatten() {
             let name = f.file_name().to_string_lossy().into_owned();
-            if name.starts_with(&key) || name == format!("done-{index}.json") {
+            if name.starts_with(&key) {
                 delete(f.path())?;
             }
         }
@@ -1469,9 +1425,9 @@ mod tests {
         assert_eq!(with.bbox, Some([1.0, 2.0, 3.0, 4.0]));
     }
 
-    /// `record_job` keeps one record per job; a job folder from before records lists too.
+    /// `record_job` keeps one record per job.
     #[test]
-    fn jobs_are_recorded_and_old_job_folders_list() {
+    fn jobs_are_recorded() {
         let dir = tempfile::tempdir().unwrap();
         let world = dir.path().join("w");
         let req = LLBBox::from_str(MUNICH).unwrap();
@@ -1480,23 +1436,11 @@ mod tests {
         let bb = [48.1, 11.5, 48.2, 11.6];
         record_job(&world, "a", Some(&flags), Some(bb), 0, 4, false).unwrap();
         record_job(&world, "a", None, None, 4, 4, true).unwrap();
-        let old = world.join(JOBS_DIR).join("old");
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::write(
-            old.join("job.json"),
-            r#"{"area_base":1,"map_base":0,"slots":{"r0_0_s4":0,"r1_0_s4":1}}"#,
-        )
-        .unwrap();
-        std::fs::write(old.join("done-r0_0_s4.json"), "{}").unwrap();
-        let m = Manifest::load(&world).unwrap().unwrap();
-        let jobs = job_records(&world, &m);
-        assert_eq!(jobs.len(), 2);
-        assert_eq!(jobs[0].settings, flags);
-        assert_eq!((jobs[0].bbox, jobs[1].bbox), (Some(bb), None));
+        let jobs = Manifest::load(&world).unwrap().unwrap().jobs;
+        assert_eq!(jobs.len(), 1);
+        assert_eq!((&jobs[0].settings, jobs[0].bbox), (&flags, Some(bb)));
         assert_eq!((jobs[0].status.done, jobs[0].status.finished), (4, true));
         assert!(jobs[0].status.last_run_ms > 0);
-        assert_eq!((jobs[1].name.as_str(), jobs[1].status.done), ("old", 1));
-        assert_eq!((jobs[1].status.total, jobs[1].status.finished), (2, false));
     }
 
     #[test]
