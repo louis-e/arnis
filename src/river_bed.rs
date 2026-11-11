@@ -182,6 +182,9 @@ struct PolyRings {
     edges: PolygonEdges,
     /// (min_x, max_x, min_z, max_z) of the outer rings.
     bounds: (i32, i32, i32, i32),
+    /// Filled x-spans of each row from `z0` on, set by `scan`.
+    z0: i32,
+    rows: Vec<Vec<(i32, i32)>>,
 }
 
 impl PolyRings {
@@ -193,7 +196,20 @@ impl PolyRings {
         Self {
             edges: PolygonEdges::new(&outers, &inners),
             bounds: b,
+            z0: 0,
+            rows: Vec::new(),
         }
+    }
+
+    /// Scan the polygon once inside `bb`; every tile then reads its rows from the spans.
+    fn scan(&mut self, bb: (i32, i32, i32, i32)) {
+        self.z0 = self.bounds.2.max(bb.2);
+        let z1 = self.bounds.3.min(bb.3);
+        let edges = &self.edges;
+        self.rows = (self.z0..=z1)
+            .into_par_iter()
+            .map(|z| edges.row_spans(z, bb.0, bb.1))
+            .collect();
     }
 }
 
@@ -269,17 +285,26 @@ fn build_field_tiled(elements: &[ProcessedElement], inp: &FieldInputs, halo: i32
             }
         }
     }
+    river_polys.iter_mut().for_each(|p| p.scan(bb));
     for (i, p) in river_polys.iter().enumerate() {
-        for t in tiles_of(p.bounds, 0) {
-            work[t].has_river = true;
+        for (z, row) in (p.z0..).zip(&p.rows) {
+            for &(a, b) in row {
+                for t in tiles_of((a, b, z, z), 0) {
+                    work[t].has_river = true;
+                }
+            }
         }
         for t in tiles_of(p.bounds, halo) {
             work[t].rivers.push(i as u32);
         }
     }
-    for (i, p) in nonriver_polys.iter().enumerate() {
-        for t in tiles_of(p.bounds, halo) {
-            work[t].lakes.push(i as u32);
+    // Only a lake near a river is read.
+    for (i, p) in nonriver_polys.iter_mut().enumerate() {
+        if tiles_of(p.bounds, halo).any(|t| work[t].has_river) {
+            p.scan(bb);
+            for t in tiles_of(p.bounds, halo) {
+                work[t].lakes.push(i as u32);
+            }
         }
     }
 
@@ -705,13 +730,16 @@ fn stamp_line(lr: &LineRiver, lat: &Lat, mask: &mut [bool], hw_line: &mut [u8]) 
 }
 
 fn rasterize_poly(p: &PolyRings, lat: &Lat, out: &mut [bool]) {
-    let z0 = p.bounds.2.max(lat.min_z);
-    let z1 = p.bounds.3.min(lat.min_z + lat.h as i32 - 1);
     let (lo_x, hi_x) = (lat.min_x, lat.min_x + lat.w as i32 - 1);
-    for z in z0..=z1 {
+    let first = lat.min_z.max(p.z0);
+    let last = (lat.min_z + lat.h as i32 - 1).min(p.z0 + p.rows.len() as i32 - 1);
+    for z in first..=last {
         let row = (z - lat.min_z) as usize * lat.w;
-        for (s, e) in p.edges.row_spans(z, lo_x, hi_x) {
-            out[row + (s - lo_x) as usize..=row + (e - lo_x) as usize].fill(true);
+        for &(s, e) in &p.rows[(z - p.z0) as usize] {
+            let (s, e) = (s.max(lo_x), e.min(hi_x));
+            if s <= e {
+                out[row + (s - lo_x) as usize..=row + (e - lo_x) as usize].fill(true);
+            }
         }
     }
 }
