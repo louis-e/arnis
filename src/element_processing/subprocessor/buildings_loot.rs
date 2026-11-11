@@ -8,7 +8,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, LazyLock, PoisonError, RwLock};
+use std::sync::{LazyLock, OnceLock};
 
 const CHEST_SLOTS: usize = 27;
 
@@ -81,8 +81,10 @@ impl LootTable {
             return Err("at least one theme is required".to_string());
         }
         for (ti, theme) in self.themes.iter().enumerate() {
-            if theme.items.iter().map(|i| i.weight as u64).sum::<u64>() == 0 {
-                return Err(format!("theme {ti} has no item with a weight above 0"));
+            match u32::try_from(theme.items.iter().map(|i| i.weight as u64).sum::<u64>()) {
+                Ok(0) => return Err(format!("theme {ti} has no item with a weight above 0")),
+                Err(_) => return Err(format!("theme {ti}: item weights add up past 2^32-1")),
+                Ok(_) => {}
             }
             for (ii, item) in theme.items.iter().enumerate() {
                 if !item.id.contains(':') {
@@ -125,12 +127,11 @@ impl LootTable {
     }
 }
 
-static BUILT_IN: LazyLock<Arc<LootTable>> = LazyLock::new(|| {
-    Arc::new(serde_json::from_str(BUILT_IN_JSON).expect("built-in loot table parses"))
-});
+static BUILT_IN: LazyLock<LootTable> =
+    LazyLock::new(|| serde_json::from_str(BUILT_IN_JSON).expect("built-in loot table parses"));
 
-// Replaceable rather than set-once: the GUI runs several generations in one process.
-static ACTIVE: RwLock<Option<Arc<LootTable>>> = RwLock::new(None);
+// Set once at CLI startup; the window always rolls the built-in table.
+static ACTIVE: OnceLock<LootTable> = OnceLock::new();
 
 /// Reads and checks a `--loot-table` file.
 pub fn load_loot_table(path: &Path) -> Result<LootTable, String> {
@@ -140,17 +141,13 @@ pub fn load_loot_table(path: &Path) -> Result<LootTable, String> {
     Ok(table)
 }
 
-/// Sets the table chests roll from for the next generation; `None` restores the built-in one.
-pub fn set_loot_table(table: Option<LootTable>) {
-    *ACTIVE.write().unwrap_or_else(PoisonError::into_inner) = table.map(Arc::new);
+/// Sets the table chests roll from in place of the built-in one, once per process.
+pub fn set_loot_table(table: LootTable) {
+    let _ = ACTIVE.set(table);
 }
 
-fn active_table() -> Arc<LootTable> {
-    ACTIVE
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone()
-        .unwrap_or_else(|| BUILT_IN.clone())
+fn active_table() -> &'static LootTable {
+    ACTIVE.get().unwrap_or(&BUILT_IN)
 }
 
 fn pick_item<'a>(theme: &'a LootGroup, rng: &mut impl Rng) -> &'a LootEntry {
@@ -177,7 +174,7 @@ pub fn themed_chest_loot(
     salt: u32,
     theme: LootTheme,
 ) -> Vec<HashMap<String, Value>> {
-    roll_chest(&active_table(), x, z, salt, theme)
+    roll_chest(active_table(), x, z, salt, theme)
 }
 
 fn roll_chest(
@@ -287,7 +284,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_tables_that_could_panic() {
-        let base = (**BUILT_IN).clone();
+        let base = BUILT_IN.clone();
         let mut t = base.clone();
         t.rolls_min = 9;
         t.rolls_max = 2;
@@ -302,9 +299,13 @@ mod tests {
         t.themes[0].items[0].min = 7;
         t.themes[0].items[0].max = 3;
         assert!(t.validate().is_err());
-        let mut t = base;
+        let mut t = base.clone();
         t.themes[0].items[0].id = "bread".to_string();
         assert!(t.validate().is_err());
+        // Item weights that overflow u32 would panic in `pick_item`.
+        let mut t = base;
+        t.themes[0].items[0].weight = u32::MAX;
+        assert!(t.validate().unwrap_err().contains("2^32-1"));
     }
 
     #[test]
@@ -339,6 +340,6 @@ mod tests {
         std::fs::write(&path, BUILT_IN_JSON).unwrap();
         let loaded = load_loot_table(&path);
         std::fs::remove_file(&path).ok();
-        assert_eq!(&loaded.unwrap(), &**BUILT_IN);
+        assert_eq!(&loaded.unwrap(), &*BUILT_IN);
     }
 }

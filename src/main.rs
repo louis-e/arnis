@@ -300,14 +300,15 @@ fn run_cli() {
     }
     if let Some(path) = &args.loot_table {
         match element_processing::subprocessor::buildings_loot::load_loot_table(path) {
-            Ok(table) => {
-                element_processing::subprocessor::buildings_loot::set_loot_table(Some(table))
+            Ok(table) => element_processing::subprocessor::buildings_loot::set_loot_table(table),
+            Err(e) => {
+                eprintln!(
+                    "{} --loot-table {}: {e}",
+                    "Error:".red().bold(),
+                    path.display()
+                );
+                std::process::exit(1);
             }
-            Err(e) => eprintln!(
-                "{} --loot-table {}: {e}; using the built-in loot table",
-                "Warning:".yellow().bold(),
-                path.display()
-            ),
         }
     }
     // Configure thread pool with 90% CPU cap to keep system responsive

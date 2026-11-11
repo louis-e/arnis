@@ -641,7 +641,7 @@ pub struct Args {
     pub props_min_scale: Option<f64>,
 
     /// Chest loot table (JSON) for --interior, in place of the built-in one. A file that
-    /// cannot be read or fails validation is reported and the built-in table is used.
+    /// cannot be read or fails validation stops the run with an error.
     #[arg(long, value_name = "FILE")]
     pub loot_table: Option<PathBuf>,
 
