@@ -9,6 +9,7 @@ use serde::Deserialize;
 use crate::ecoregion::{EcoBiome, Ecoregion};
 use crate::land_cover::coord_hash;
 use crate::trees::schematic::{load_schem, Schematic};
+use crate::trees::size_weights::SizeWeights;
 use crate::trees::tree_library::{size_for_height, SizeFilter, TreeSize};
 use crate::trees::tree_pack::TreePackSource;
 
@@ -288,6 +289,7 @@ pub struct RegionLibrary {
     ground_level: i32,
     blocks_per_meter: f64,
     sizes: SizeFilter,
+    size_weights: Option<SizeWeights>,
     total_realm: usize,
     total_vanilla: usize,
     /// Palms were left out at load, so mixes leave them out too.
@@ -295,6 +297,8 @@ pub struct RegionLibrary {
     /// Palms where no ecoregion says otherwise, by the area's latitude.
     palms_default: bool,
     mixes: HashMap<u16, EcoMix>,
+    /// The user tree folder, for communities ecoregion mixes load from other packs.
+    pack_dir: Option<std::sync::Arc<crate::trees::pack_dir::PackDir>>,
     /// Mean leaf columns of the models by height, index = height in blocks.
     crowns: Vec<f64>,
     /// Model files parsed so far, for the communities mixes borrow from other packs.
@@ -325,7 +329,7 @@ fn height_slack(want: i32) -> i32 {
 
 /// Crown top in metres for a slot nothing measured: typical of mixed woodland
 /// and parks, where most trees stand 7 to 18 m and few pass 25 m.
-fn default_height_m(x: i32, z: i32) -> f64 {
+fn default_height_m(x: i32, z: i32, weights: Option<&SizeWeights>) -> f64 {
     // (cumulative per mille, low m, high m)
     const BANDS: [(u64, f64, f64); 5] = [
         (150, 4.0, 7.0),
@@ -336,10 +340,9 @@ fn default_height_m(x: i32, z: i32) -> f64 {
     ];
     let roll = coord_hash(x + 101, z + 233) % 1000;
     let t = (coord_hash(x ^ 0x2C61, z ^ 0x5E0B) % 1000) as f64 / 1000.0;
-    let (lo, hi) = BANDS
-        .iter()
-        .find(|b| roll < b.0)
-        .map_or((7.0, 12.0), |b| (b.1, b.2));
+    // One band per size tier; --tree-size-weights reweights them (defaults leave `roll` as is).
+    let band = crate::trees::size_weights::band(roll, weights);
+    let (lo, hi) = (BANDS[band].1, BANDS[band].2);
     lo + (hi - lo) * t
 }
 
@@ -391,7 +394,9 @@ fn preload<'a>(
         .collect();
     for ((rel, wclass), schem) in todo.into_iter().zip(parsed) {
         let idx = schem.map(|schem| {
-            let size = size_for_height(schem.height);
+            // A user file in a size folder takes that size.
+            let size = crate::trees::pack_dir::tier_of(&rel)
+                .unwrap_or_else(|| size_for_height(schem.height));
             entries.push((schem, size, wclass));
             entries.len() - 1
         });
@@ -652,11 +657,13 @@ impl RegionLibrary {
             ground_level,
             blocks_per_meter,
             sizes,
+            size_weights: None,
             total_realm,
             total_vanilla,
             palms_stripped: exclude_palms,
             palms_default: true,
             mixes: HashMap::new(),
+            pack_dir: source.dir(),
             crowns: Vec::new(),
             loaded,
         };
@@ -877,7 +884,7 @@ impl RegionLibrary {
             self.realm_pack.communities.push(derived);
             return Some(self.realm_pack.communities.len() - 1);
         }
-        let source = TreePackSource::embedded(spec.pack);
+        let source = TreePackSource::with_dir(spec.pack, self.pack_dir.clone());
         let manifest = manifests.entry(spec.pack.to_string()).or_insert_with(|| {
             source
                 .realm_manifest()
@@ -920,13 +927,18 @@ impl RegionLibrary {
         f64::from(elev_y - self.ground_level) / per_metre.max(0.001) > MONTANE_METRES
     }
 
+    /// Reweight the height bands per size tier (`--tree-size-weights`).
+    pub fn set_size_weights(&mut self, weights: SizeWeights) {
+        self.size_weights = Some(weights);
+    }
+
     pub fn schem(&self, idx: usize) -> &Schematic {
         &self.entries[idx].0
     }
 
     /// Model height in blocks for a slot nothing measured.
     fn default_height(&self, x: i32, z: i32) -> i32 {
-        ((default_height_m(x, z) * self.scale).round() as i32).max(1)
+        ((default_height_m(x, z, self.size_weights.as_ref()) * self.scale).round() as i32).max(1)
     }
 
     /// `want` held under the size cap and the 1:1 giant gate, so communities are
@@ -1637,7 +1649,9 @@ mod tests {
 
     #[test]
     fn unmeasured_slots_get_plausible_heights() {
-        let mut hs: Vec<f64> = (0..5000).map(|k| default_height_m(k * 13, k * 7)).collect();
+        let mut hs: Vec<f64> = (0..5000)
+            .map(|k| default_height_m(k * 13, k * 7, None))
+            .collect();
         assert!(hs.iter().all(|h| (4.0..=32.0).contains(h)));
         hs.sort_by(f64::total_cmp);
         let (med, p95) = (hs[hs.len() / 2], hs[hs.len() * 95 / 100]);

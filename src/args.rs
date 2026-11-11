@@ -555,6 +555,37 @@ pub struct Args {
     // --- confluence:nature ---
     #[command(flatten)]
     pub scatter: ScatterArgs,
+
+    /// Force a tree realm instead of picking one from the area's location: auto, afr, asn,
+    /// aus, ena, eur, fl, ind, sam, wna or vanilla-plus. A forced realm skips the ecoregion
+    /// mixes and keeps its palms.
+    #[arg(long, value_name = "REALM", value_parser = clap::builder::PossibleValuesParser::new(crate::trees::tree_pack::REALMS))]
+    pub tree_realm: Option<String>,
+
+    /// Relative popularity of the schematic tree sizes, as name=percent pairs
+    /// (small, medium, big, tall, giant; 0-200, omitted ones stay 100). 0 turns a
+    /// size off. Measured canopy heights still pick their own size.
+    /// Example: --tree-size-weights big=150,tall=50,giant=0
+    #[arg(long, value_name = "LIST", value_parser = crate::trees::size_weights::SizeWeights::parse)]
+    pub tree_size_weights: Option<crate::trees::size_weights::SizeWeights>,
+
+    /// Experimental. A folder of your own tree schematics, laid out like the
+    /// bundled packs: <realm>/<community>/<tree type>/[<size>/]<any name>.schem.
+    /// The folders say what a file is; the size folder (small, medium, big,
+    /// tall, giant) is optional and otherwise measured from the height. A file
+    /// that does not load is skipped with a warning.
+    #[arg(long, value_name = "FOLDER")]
+    pub tree_pack_dir: Option<PathBuf>,
+
+    /// With --tree-pack-dir: add the folder's trees to the built-in ones, or
+    /// replace a realm's built-in trees wherever the folder has any for it.
+    #[arg(long, value_enum, default_value_t = crate::trees::pack_dir::TreePackMode::Add)]
+    pub tree_pack_mode: crate::trees::pack_dir::TreePackMode,
+
+    /// Write every bundled tree schematic into the --tree-pack-dir layout in
+    /// FOLDER, to edit or adapt, and exit.
+    #[arg(long, value_name = "FOLDER")]
+    pub export_tree_packs: Option<PathBuf>,
     // --- end confluence:nature ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -917,6 +948,14 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
             sc.bush_density != ScatterArgs::default().bush_density,
             "--bush-density",
         ),
+        (args.tree_realm.is_some(), "--tree-realm"),
+        (args.tree_size_weights.is_some(), "--tree-size-weights"),
+        (args.tree_pack_dir.is_some(), "--tree-pack-dir"),
+        (
+            args.tree_pack_mode != Default::default(),
+            "--tree-pack-mode",
+        ),
+        (args.export_tree_packs.is_some(), "--export-tree-packs"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),

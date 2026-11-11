@@ -1964,6 +1964,9 @@ const WINDOW_FLAGS: &[&str] = &[
     "rock-density",
     "bushes",
     "bush-density",
+    "tree-realm",
+    "tree-pack-dir",
+    "tree-pack-mode",
     "river-bed",
     "water-detail",
     "climate-mode",
@@ -2693,6 +2696,11 @@ fn gui_start_generation(
                 max_y: None,
                 seed: None,
                 scatter: Default::default(),
+                tree_realm: None,
+                tree_size_weights: None,
+                tree_pack_dir: None,
+                tree_pack_mode: Default::default(),
+                export_tree_packs: None,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3359,6 +3367,9 @@ mod tests {
             "--max-y=319",
             "--rocks",
             "--bushes",
+            "--tree-realm=vanilla-plus",
+            "--tree-pack-dir=trees",
+            "--tree-pack-mode=replace",
             "--river-bed=v1",
             "--water-detail=scaled",
             "--climate-mode=per-position",

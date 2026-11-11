@@ -267,6 +267,18 @@ fn run_cli() {
         eprintln!("{}: {}", "Error".red().bold(), e);
         std::process::exit(1);
     }
+    if let Some(dir) = &args.export_tree_packs {
+        match trees::pack_dir::export(dir)
+            .map(|n| format!("{n} tree schematics exported to {}.", dir.display()))
+        {
+            Ok(line) => println!("{line}"),
+            Err(e) => {
+                eprintln!("{} {e}", "Error:".red().bold());
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     // Configure thread pool with 90% CPU cap to keep system responsive
     match args.thread_count() {
         Some(threads) => floodfill_cache::configure_rayon_threads(threads),
