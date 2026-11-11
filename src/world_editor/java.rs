@@ -680,6 +680,8 @@ fn write_region_to_disk(
                         .into());
                     }
                     region.write_chunk(chunk_x as usize, chunk_z as usize, &compressed[..len])?;
+                    crate::progress_json::CHUNKS_WRITTEN
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if merge {
                         written_chunks.push((chunk_x, chunk_z));
                     }

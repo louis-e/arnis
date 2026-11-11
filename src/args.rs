@@ -445,6 +445,19 @@ pub struct Args {
 
     #[command(flatten)]
     pub live: LiveArgs,
+
+    // --- confluence:core ---
+    /// Also report progress as JSON lines on stdout for programs driving the CLI.
+    #[arg(long, value_enum)]
+    pub progress: Option<ProgressFormat>,
+    // --- end confluence:core ---
+}
+
+/// Machine-readable progress formats for `--progress`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum ProgressFormat {
+    /// One JSON object per line.
+    Json,
 }
 
 /// Live mode: the One World on a local Minecraft server, generated around the players.

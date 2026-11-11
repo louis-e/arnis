@@ -126,6 +126,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         return;
     }
     remember_status(message);
+    crate::progress_json::progress(progress, message);
     crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
@@ -148,6 +149,7 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
         return;
     }
     remember_status(message);
+    crate::progress_json::progress(progress, message);
     crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
@@ -162,6 +164,7 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
 }
 
 pub fn emit_gui_error(message: &str) {
+    crate::progress_json::error(message);
     // Truncate by characters (not bytes) to avoid panicking when the GUI
     // status bar receives an error containing multi-byte UTF-8. e.g.
     // localized OS error messages like "Недостаточно системных ресурсов…"

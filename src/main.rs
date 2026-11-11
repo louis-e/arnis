@@ -57,6 +57,7 @@ mod overture;
 mod preview_3d;
 #[cfg(feature = "gui")]
 mod progress;
+mod progress_json;
 mod projection;
 mod retrieve_data;
 mod structures;
@@ -97,9 +98,16 @@ mod progress {
     /// Mirrors the real module's constant so callers outside the GUI feature
     /// still compile; nothing here reads it, the emits below do nothing.
     pub const MESSAGE_ONLY: f64 = -1.0;
-    pub fn emit_gui_error(_message: &str) {}
-    pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
-    pub fn emit_gui_progress_update_ex(_progress: f64, _message: &str, _streaming: bool) {}
+    // `--progress json` is the one consumer left without a window.
+    pub fn emit_gui_error(message: &str) {
+        crate::progress_json::error(message);
+    }
+    pub fn emit_gui_progress_update(progress: f64, message: &str) {
+        crate::progress_json::progress(progress, message);
+    }
+    pub fn emit_gui_progress_update_ex(progress: f64, message: &str, _streaming: bool) {
+        crate::progress_json::progress(progress, message);
+    }
     pub fn while_waiting<T>(_waiting_for: &str, wait: impl FnOnce() -> T) -> T {
         wait()
     }
@@ -151,6 +159,7 @@ fn release_one_world(failed: bool) {
 
 /// `process::exit` skips destructors, so failures go through here.
 fn exit_failed() -> ! {
+    progress_json::error("generation failed, see stderr");
     release_one_world(true);
     std::process::exit(1);
 }
@@ -173,6 +182,9 @@ fn run_cli() {
         std::process::exit(1);
     }
     let asked_mob_spawning = args.mob_spawning;
+    if args.progress == Some(args::ProgressFormat::Json) {
+        progress_json::enable();
+    }
     args::apply_body_defaults(&mut args);
     args::apply_feature_needs(&mut args);
 
@@ -313,6 +325,7 @@ fn run_live_cli(args: Args) {
 }
 
 fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
+    let started = std::time::Instant::now();
     // Cave zone-map mode renders the cave biome layout for --bbox and exits, before any world
     // exists. It uses the same zone picker, seed and --cave-biomes amounts as --caves.
     if args.cave_zone_map.is_some() {
@@ -992,6 +1005,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         }
     }
     release_one_world(false);
+    progress_json::done(started);
 }
 
 fn main() {
