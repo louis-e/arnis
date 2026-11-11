@@ -472,7 +472,11 @@ fn process_element(
                         still_surfaces,
                     );
                 } else {
-                    waterways::generate_waterways(editor, way);
+                    waterways::generate_waterways(
+                        editor,
+                        way,
+                        args.water.water_detail.channel_width_cap(args.scale),
+                    );
                 }
             } else if way.tags.contains_key("railway") {
                 railways::generate_railways(
@@ -1113,9 +1117,23 @@ pub fn generate_world_with_options(
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     // Shared with the editors, so a bore under water keeps its cover under the carved bed.
-    let big_water_field = Arc::new(crate::water_depth::compute_big_water_field(
-        &ground, &xzbbox,
+    let mut big_water_field = crate::water_depth::compute_big_water_field(
+        &ground,
+        &xzbbox,
+        args.water.water_detail,
+        args.scale,
+    );
+    big_water_field.set_river_bed(crate::river_bed::compute_river_bed_field(
+        args.water.river_bed,
+        &elements,
+        &ground,
+        &big_water_field,
+        &xzbbox,
+        &clip_bbox,
+        args.scale,
+        args.water.water_detail.channel_width_cap(args.scale),
     ));
+    let big_water_field = Arc::new(big_water_field);
     // Resolved once here: a body spanning many tiles must not be measured per tile.
     let still_surfaces = water_areas::prescan_still_surfaces(&elements, &ground, &xzbbox);
 
@@ -1174,7 +1192,11 @@ pub fn generate_world_with_options(
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = Arc::new(highways::collect_road_surface_coords(
-        &elements, &editor, &clip_bbox, args.scale,
+        &elements,
+        &editor,
+        &clip_bbox,
+        args.scale,
+        args.water.water_detail,
     ));
     let barrier_clearance =
         barriers::RoadClearance::build(&elements, &editor, args.scale, Arc::clone(&road_mask));

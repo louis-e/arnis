@@ -891,7 +891,13 @@ mod tests {
             1.0,
         );
         let surface = BridgeSurfaceMap::build(elements, &structures, 1.0);
-        let roads = Arc::new(collect_road_surface_coords(elements, &editor, &xzbbox, 1.0));
+        let roads = Arc::new(collect_road_surface_coords(
+            elements,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+        ));
         let clearance = RoadClearance::build(elements, &editor, 1.0, roads);
         let mut buildings = CoordinateBitmap::new(&xzbbox);
         for &(x, z) in building_cells {
@@ -946,7 +952,11 @@ mod tests {
         );
         let surface = BridgeSurfaceMap::build(&elements, &structures, 1.0);
         let roads = Arc::new(collect_road_surface_coords(
-            &elements, &editor, &xzbbox, 1.0,
+            &elements,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
         ));
         let clearance = RoadClearance::build(&elements, &editor, 1.0, roads);
         let buildings = CoordinateBitmap::new_empty();

@@ -64,6 +64,7 @@ mod progress;
 mod progress_json;
 mod projection;
 mod retrieve_data;
+mod river_bed;
 mod scale;
 mod structures;
 #[cfg(feature = "gui")]
@@ -77,6 +78,7 @@ mod trees;
 mod version_check;
 mod voxy;
 mod water_depth;
+mod water_detail;
 mod water_probe;
 mod water_steps;
 mod work_units;

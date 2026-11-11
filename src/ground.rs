@@ -76,6 +76,8 @@ pub struct GroundFrame {
     pub mercator: Option<WebMercatorProjection>,
     pub pad_blocks: usize,
     pub affine: AffinePolicy,
+    /// What the water options add to the land-cover estimate of the deepest carve.
+    pub carve_depth: crate::water_detail::CarveDepth,
 }
 
 impl GroundFrame {
@@ -85,6 +87,7 @@ impl GroundFrame {
             mercator: None,
             pad_blocks: 0,
             affine: AffinePolicy::Fit,
+            carve_depth: Default::default(),
         }
     }
 
@@ -110,12 +113,14 @@ impl GroundFrame {
                     Some(affine) => AffinePolicy::Fixed(affine),
                     None => AffinePolicy::FitWithHeadroom,
                 },
+                carve_depth: Default::default(),
             },
             None => Self {
                 world_dims: Some((world_w, world_h)),
                 mercator: Some(projection),
                 pad_blocks: 0,
                 affine: AffinePolicy::Fit,
+                carve_depth: Default::default(),
             },
         }
     }
@@ -509,9 +514,13 @@ impl Ground {
             bench.mark("elev_landcover_fetch");
 
             // Raise the floor for the deepest water carve (elevation path only).
-            let max_depth = land_cover
-                .as_ref()
-                .map(|lc| crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h));
+            let max_depth = land_cover.as_ref().map(|lc| {
+                frame
+                    .carve_depth
+                    .bound(crate::water_depth::estimate_max_carve_depth(
+                        &lc.grid, world_w, world_h,
+                    ))
+            });
             let band = |h: WorldHeight| {
                 let carve_floor = match max_depth {
                     Some(depth) => h.min_y + depth + 2,
@@ -1483,7 +1492,8 @@ pub fn generate_ground_data(
     // Cleared before the scaler publishes its own: in the GUI a previous run's terrain top
     // would misgrade this world's map preview.
     crate::world_editor::common::set_terrain_top_y(args.ground_level);
-    let frame = GroundFrame::from_args(args, &bbox);
+    let mut frame = GroundFrame::from_args(args, &bbox);
+    frame.carve_depth = args.water.carve_depth(args.scale);
     let auto = auto_height(args);
     let (height, taller) = height_choice(args);
     if args.terrain() {
@@ -2457,6 +2467,7 @@ mod frame_tests {
             mercator: Some(WebMercatorProjection::new(48.1372, 11.5755, 1.0)),
             pad_blocks: pad,
             affine: AffinePolicy::Fit,
+            carve_depth: Default::default(),
         }
     }
 

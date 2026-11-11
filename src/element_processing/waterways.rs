@@ -5,13 +5,21 @@ use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
-pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
+/// `width_cap` narrows every channel (`--water-detail scaled` on small maps).
+pub fn generate_waterways(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    width_cap: Option<i32>,
+) {
     if let Some(waterway_type) = element.tags.get("waterway") {
         // waterway=* structures are not channels; outlining a dam draws canals down it.
         if !is_channel_waterway(waterway_type) {
             return;
         }
-        let waterway_width = waterway_width(waterway_type, &element.tags);
+        let mut waterway_width = waterway_width(waterway_type, &element.tags);
+        if let Some(cap) = width_cap {
+            waterway_width = waterway_width.min(cap);
+        }
 
         // Culverts and pipes are not open water; they would cut channels through banks.
         if is_underground_waterway(&element.tags) {
@@ -235,7 +243,7 @@ mod waterway_profile_tests {
     fn a_dropping_channel_follows_the_terrain_instead_of_pooling_at_the_lower_node() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 16.0, 0.25);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z));
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None);
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);
@@ -257,7 +265,7 @@ mod waterway_profile_tests {
     fn a_flat_channel_sits_at_the_single_shared_level() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z));
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None);
 
         for z in FIRST_Z..=LAST_Z {
             assert_eq!(
@@ -272,7 +280,7 @@ mod waterway_profile_tests {
     fn a_one_block_drop_moves_the_upper_half_by_at_most_one_block() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.02);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z));
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None);
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);

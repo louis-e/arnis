@@ -1957,6 +1957,8 @@ const WINDOW_FLAGS: &[&str] = &[
     "threads",
     "ram-budget-mb",
     "max-downloads",
+    "river-bed",
+    "water-detail",
     "origin",
     "world-border",
     "region-format",
@@ -2664,6 +2666,7 @@ fn gui_start_generation(
                 world_border: false,
                 map_item_only: false,
                 dh_lod_only: false,
+                water: Default::default(),
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3325,6 +3328,8 @@ mod tests {
     #[test]
     fn every_flag_the_window_sends_parses() {
         let flags: Vec<String> = [
+            "--river-bed=v1",
+            "--water-detail=scaled",
             "--world-border",
             "--region-format=blinear",
             "--ram-budget-mb=4096",

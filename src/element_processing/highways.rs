@@ -1877,6 +1877,14 @@ fn generate_highways_internal(
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
 
+            // A road over water on a small map reads as a 1-block causeway; leave water
+            // cells to the carve. The road mask drops the same cells.
+            let drown_over_water = !is_bridge_member
+                && args
+                    .water
+                    .water_detail
+                    .drowns_crossing(scale_factor, &way.tags);
+
             // At-grade lit ways get periodic street lamps alongside, but a blueprint has no furniture.
             if way.tags.get("lit").map(String::as_str) == Some("yes")
                 && args.mode != GenerationMode::Blueprint
@@ -2191,6 +2199,9 @@ fn generate_highways_internal(
                             for dz in -block_range..=block_range {
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
+                                if drown_over_water && editor.is_lc_water(set_x, set_z) {
+                                    continue;
+                                }
 
                                 // Per-cell Y. For wide roads this is the
                                 // perpendicular median at the cell's own
@@ -3544,13 +3555,18 @@ pub(crate) fn highway_block_range(
 ///
 /// This lets `get_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
 /// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
+///
+/// `water_detail` drops the water cells of crossings the renderer drowns.
 pub fn collect_road_surface_coords(
     elements: &[ProcessedElement],
     editor: &WorldEditor,
     xzbbox: &XZBBox,
     scale: f64,
+    water_detail: crate::water_detail::WaterDetail,
 ) -> CoordinateBitmap {
-    collect_highway_surface_coords(elements, Some(editor), xzbbox, scale, |_| true)
+    collect_highway_surface_coords(elements, Some(editor), xzbbox, scale, water_detail, |_| {
+        true
+    })
 }
 
 /// Vehicular carriageways only (no footways, cycleways, paths, steps or pedestrian
@@ -3560,7 +3576,14 @@ pub fn collect_carriageway_coords(
     xzbbox: &XZBBox,
     scale: f64,
 ) -> CoordinateBitmap {
-    collect_highway_surface_coords(elements, None, xzbbox, scale, is_carriageway)
+    collect_highway_surface_coords(
+        elements,
+        None,
+        xzbbox,
+        scale,
+        Default::default(),
+        is_carriageway,
+    )
 }
 
 /// True for highway types that carry vehicles rather than people on foot, bike or horse.
@@ -3631,6 +3654,7 @@ fn collect_highway_surface_coords(
     editor: Option<&WorldEditor>,
     xzbbox: &XZBBox,
     scale: f64,
+    water_detail: crate::water_detail::WaterDetail,
     include: impl Fn(&str) -> bool,
 ) -> CoordinateBitmap {
     let mut bitmap = CoordinateBitmap::new(xzbbox);
@@ -3649,6 +3673,7 @@ fn collect_highway_surface_coords(
 
         // Use the same block_range the renderer uses for this highway type
         let block_range = highway_block_range(highway_type, &way.tags, scale);
+        let drowned = editor.filter(|_| water_detail.drowns_crossing(scale, &way.tags));
 
         for i in 1..way.nodes.len() {
             let prev = way.nodes[i - 1].xz();
@@ -3659,6 +3684,9 @@ fn collect_highway_surface_coords(
             for (bx, _, bz) in &points {
                 for dx in -block_range..=block_range {
                     for dz in -block_range..=block_range {
+                        if drowned.is_some_and(|e| e.is_lc_water(bx + dx, bz + dz)) {
+                            continue;
+                        }
                         bitmap.set(bx + dx, bz + dz);
                     }
                 }
@@ -5437,7 +5465,10 @@ mod tests {
                 (50..150).contains(&x)
             });
         let field = std::sync::Arc::new(crate::water_depth::compute_big_water_field(
-            &ground, &xzbbox,
+            &ground,
+            &xzbbox,
+            Default::default(),
+            1.0,
         ));
         let mut editor = tunnel_editor(&xzbbox, ground.clone());
         editor.set_water_field(std::sync::Arc::clone(&field));
@@ -5809,7 +5840,7 @@ mod tests {
         ]))];
         let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
         let editor = tunnel_editor(&xzbbox, crate::ground::Ground::new_flat(0));
-        let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0);
+        let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0, Default::default());
         assert!(!mask.contains(50, 50), "tunnel is not a surface road");
     }
 
@@ -5825,7 +5856,7 @@ mod tests {
             ),
             line_way(2, &[(10, 40), (50, 40)], &[("highway", "footway")]),
         ];
-        let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0);
+        let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0, Default::default());
         assert!(!mask.contains(30, 20), "a pier is a deck, not a road");
         assert!(mask.contains(30, 40));
     }
@@ -5964,7 +5995,7 @@ mod tests {
         let structures = BridgeStructureMap::build(elems, editor, &connectivity, &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(elems, &structures, 1.0);
         let empty = CoordinateBitmap::new_empty();
-        let road_mask = collect_road_surface_coords(elems, editor, xzbbox, 1.0);
+        let road_mask = collect_road_surface_coords(elems, editor, xzbbox, 1.0, Default::default());
         let mut cells = Vec::new();
         for elem in elems {
             generate_highways(

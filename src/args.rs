@@ -508,6 +508,10 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub dh_lod_only: bool,
     // --- end confluence:output ---
+    // --- confluence:terrain ---
+    #[command(flatten)]
+    pub water: WaterArgs,
+    // --- end confluence:terrain ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
     #[arg(long, value_name = "PATH|geofabrik", conflicts_with = "file")]
@@ -538,6 +542,36 @@ pub struct Args {
     #[arg(long, conflicts_with = "offline")]
     pub prewarm_first: bool,
     // --- end confluence:data ---
+}
+
+/// Water options. Off unless asked for, so the GUI runs on `WaterArgs::default()`.
+#[derive(clap::Args, Debug, Default)]
+pub struct WaterArgs {
+    /// River bed shape. `v1` gives mapped rivers, canals and streams a smooth U-shaped
+    /// bed that deepens with their width; lakes and the sea keep their bed.
+    #[arg(long, value_enum, default_value_t = crate::river_bed::RiverBed::Off)]
+    pub river_bed: crate::river_bed::RiverBed,
+
+    /// Water detail. `scaled` rounds bed depths instead of flooring them and, on small
+    /// maps, carves narrow bodies as bowls, narrows streams and lets water flow over
+    /// roads not tagged as bridges.
+    #[arg(long, value_enum, default_value_t = crate::water_detail::WaterDetail::Default)]
+    pub water_detail: crate::water_detail::WaterDetail,
+}
+
+impl WaterArgs {
+    /// How far these options can carve beyond the land-cover estimate.
+    pub fn carve_depth(&self, scale: f64) -> crate::water_detail::CarveDepth {
+        crate::water_detail::CarveDepth {
+            floor: if self.river_bed == crate::river_bed::RiverBed::Off {
+                0
+            } else {
+                crate::water_depth::MAX_WATER_DEPTH
+            },
+            detail: self.water_detail,
+            scale,
+        }
+    }
 }
 
 /// Large One World jobs cut into region-group pieces.
@@ -752,7 +786,7 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
     if !args.live.live {
         return Ok(());
     }
-    let u = &args.units;
+    let (u, w) = (&args.units, &args.water);
     let used: Vec<&str> = [
         (args.progress.is_some(), "--progress"),
         (args.threads.is_some(), "--threads"),
@@ -782,6 +816,8 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.world_border, "--world-border"),
         (args.map_item_only, "--map-item-only"),
         (args.dh_lod_only, "--dh-lod-only"),
+        (w.river_bed != Default::default(), "--river-bed"),
+        (w.water_detail != Default::default(), "--water-detail"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
