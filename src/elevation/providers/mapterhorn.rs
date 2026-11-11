@@ -82,6 +82,9 @@ impl ElevationProvider for Mapterhorn {
             )
             .into());
         }
+        if outcome.failed_downloads > 0 {
+            crate::net::note_uncached("elevation tiles (Mapterhorn)");
+        }
 
         println!(
             "Sampling {} Mapterhorn tiles into {}x{} grid...",

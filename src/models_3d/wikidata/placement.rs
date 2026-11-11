@@ -179,6 +179,7 @@ pub fn prescan(
         .filter_map(|url| match fetch_model(url) {
             Ok(bytes) => Some((url.clone(), bytes)),
             Err(e) => {
+                crate::net::note_uncached("3D models (Wikimedia)");
                 eprintln!(
                     "{} Wikidata model fetch failed ({url}): {e}",
                     "Warning:".yellow().bold()

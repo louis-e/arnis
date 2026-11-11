@@ -81,7 +81,9 @@ impl PrescanResult {
     pub fn prewarm(&self) {
         let ids: HashSet<u64> = self.placements.iter().map(|p| p.model_id).collect();
         ids.par_iter().for_each(|&id| {
-            let _ = fetch_info(id).and_then(|_| fetch_glb(id));
+            if fetch_info(id).and_then(|_| fetch_glb(id)).is_err() {
+                crate::net::note_uncached("3D models (3DMR)");
+            }
         });
     }
 

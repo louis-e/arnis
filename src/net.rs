@@ -74,6 +74,25 @@ pub fn offline_misses() -> Vec<(String, usize)> {
     misses.iter().map(|(k, v)| (k.clone(), *v)).collect()
 }
 
+/// What a `--prewarm` run fetched and could not cache, or could not fetch at all.
+static UNCACHED: Mutex<std::collections::BTreeSet<String>> =
+    Mutex::new(std::collections::BTreeSet::new());
+
+/// Records that `what` did not reach the cache, so a prewarm does not claim it did.
+pub fn note_uncached(what: &str) {
+    if prewarm() {
+        UNCACHED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(what.to_string());
+    }
+}
+
+pub fn uncached() -> Vec<String> {
+    let uncached = UNCACHED.lock().unwrap_or_else(|e| e.into_inner());
+    uncached.iter().cloned().collect()
+}
+
 static IN_FLIGHT: Mutex<usize> = Mutex::new(0);
 static SLOT_FREED: Condvar = Condvar::new();
 
@@ -179,6 +198,19 @@ mod tests {
         assert!(refused.0.unwrap_err().contains(what));
         assert!(refused.1.is_err());
         assert!(offline_misses().contains(&(what.to_string(), 2)));
+    }
+
+    #[test]
+    fn only_a_prewarm_keeps_what_it_could_not_cache() {
+        let _guard = SERIALIZE.lock().unwrap_or_else(|e| e.into_inner());
+        note_uncached("net test online");
+        set_prewarm(true);
+        note_uncached("net test prewarm");
+        note_uncached("net test prewarm");
+        set_prewarm(false);
+        let got = uncached();
+        assert!(!got.iter().any(|w| w == "net test online"));
+        assert_eq!(got.iter().filter(|w| *w == "net test prewarm").count(), 1);
     }
 
     #[test]

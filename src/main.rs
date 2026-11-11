@@ -966,6 +966,18 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             );
             models_3d::Models3dPipeline::prescan(&elements, &args, &Default::default()).prewarm();
         }
+        let uncached = net::uncached();
+        if !uncached.is_empty() {
+            eprintln!(
+                "{} --prewarm could not cache everything this area needs:",
+                "Error:".red().bold()
+            );
+            for what in uncached {
+                eprintln!("  - {what}");
+            }
+            eprintln!("An --offline run of this area would stop on these.");
+            exit_failed();
+        }
         println!(
             "{} Inputs for this area are cached; no world was written.",
             "Done!".green().bold()
@@ -975,10 +987,10 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         progress_json::done(started);
         return;
     }
-    exit_if_offline_misses(
-        (world_format == world_editor::WorldFormat::JavaAnvil && args.one_world_run.is_none())
-            .then_some(generation_path.as_path()),
-    );
+    let fresh_world = (world_format == world_editor::WorldFormat::JavaAnvil
+        && args.one_world_run.is_none())
+    .then_some(generation_path.as_path());
+    exit_if_offline_misses(fresh_world);
 
     // The terrain fit has settled the build height.
     let mut args = args;
@@ -1278,6 +1290,8 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             exit_failed();
         }
     }
+    // 3D models are fetched while they are placed, after the check above.
+    exit_if_offline_misses(fresh_world);
     release_one_world(false);
     progress_json::done(started);
 }

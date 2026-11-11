@@ -95,6 +95,7 @@ impl ElevationProvider for AwsTerrain {
                     tile_map.insert(key, img);
                 }
                 Err(e) => {
+                    crate::net::note_uncached("elevation tiles (AWS Terrain)");
                     eprintln!("Warning: Failed to download tile: {e}");
                 }
             }

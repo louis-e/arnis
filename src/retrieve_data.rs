@@ -354,6 +354,7 @@ pub fn fetch_osm_data(
                 return Ok(data);
             }
             Err(e) if crate::osm_pbf::fallback_allowed(src, crate::net::offline()) => {
+                crate::net::note_uncached("OpenStreetMap extract (.pbf)");
                 warn_region_download_fallback(&e);
             }
             Err(e) => return Err(e.into()),
@@ -388,6 +389,7 @@ pub fn fetch_osm_data(
             }
         }
     }
+    crate::net::note_uncached("OpenStreetMap data from Overpass (its answers are never cached)");
     fetch_data_from_overpass(bbox, debug, download_method, save_file)
 }
 

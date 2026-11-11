@@ -705,6 +705,9 @@ pub fn fetch_canopy_data(
         }
     }
 
+    if !failures.is_empty() {
+        crate::net::note_uncached("canopy height");
+    }
     let data = CanopyData::from_grid(grid, grid_width, grid_height);
     let (covered, canopy, mean, max) = data.stats();
     if covered == 0 {

@@ -490,6 +490,7 @@ pub fn fetch_land_cover_data(
         ) {
             Ok(()) => {}
             Err(e) => {
+                crate::net::note_uncached("land cover (ESA WorldCover)");
                 eprintln!("Warning: Failed to read ESA tile {tile_url}: {e}");
             }
         }

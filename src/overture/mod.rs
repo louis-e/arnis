@@ -616,6 +616,7 @@ pub fn fetch_overture_buildings(
     match fetch_overture_buildings_inner(bbox, projection, source, debug) {
         Ok(data) => data,
         Err(e) => {
+            crate::net::note_uncached("Overture Maps buildings");
             eprintln!(
                 "{} Failed to fetch Overture Maps data: {e}",
                 "Warning:".yellow().bold()
