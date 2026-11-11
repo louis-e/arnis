@@ -1,5 +1,6 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::field_texture::PLOT_PLANTS;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::ProcessedWay;
@@ -12,6 +13,9 @@ pub struct ChannelBed<'a> {
     pub field: &'a BigWaterField,
     pub road_mask: &'a RoadMaskBitmap,
     pub tunnel_footprint: &'a RoadMaskBitmap,
+    /// Set with a water option on: a channel under a road at grade is then left out, so a
+    /// path along a stream leaves no strips of water on its sides.
+    pub piped_under_roads: Option<&'a BridgeSurfaceMap>,
 }
 
 /// `width_cap` narrows every channel (`--water-detail scaled` on small maps).
@@ -64,6 +68,12 @@ pub fn generate_waterways(
                     y0.min(y1)
                 };
                 let seg_water_y = ramped.min(editor.get_water_level(bx, bz));
+                if bed.piped_under_roads.is_some_and(|decks| {
+                    bed.road_mask.contains(bx, bz)
+                        && (!decks.deck_clears(bx, bz, seg_water_y) || decks.over_grade_way(bx, bz))
+                }) {
+                    continue;
+                }
                 create_water_channel(editor, bx, bz, waterway_width, seg_water_y, bed);
             }
         }
@@ -274,6 +284,7 @@ mod waterway_profile_tests {
             field: &FIELD,
             road_mask: &NONE,
             tunnel_footprint: &NONE,
+            piped_under_roads: None,
         }
     }
 
@@ -318,10 +329,12 @@ mod waterway_profile_tests {
         let mut road_mask = RoadMaskBitmap::new(&bbox);
         road_mask.set(CENTER_X, 30);
         let none = RoadMaskBitmap::new_empty();
+        let decks = BridgeSurfaceMap::empty();
         let bed = ChannelBed {
             field: &field,
             road_mask: &road_mask,
             tunnel_footprint: &none,
+            piped_under_roads: Some(&decks),
         };
         generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &bed);
 

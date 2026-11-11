@@ -480,6 +480,9 @@ fn process_element(
                             field: big_water_field,
                             road_mask,
                             tunnel_footprint,
+                            piped_under_roads: (args.water.river_bed != Default::default()
+                                || args.water.water_detail != Default::default())
+                            .then_some(bridge_surface),
                         },
                     );
                 }
