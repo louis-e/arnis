@@ -339,8 +339,8 @@ fn locate(src: &Source, want: &E7Box) -> Result<PathBuf> {
     Ok(dest)
 }
 
-/// Largest extract `--osm-pbf geofabrik` picks on its own: a bake indexes every node of it in
-/// memory, about twice the file, so Germany (4.4 GB) or Europe (31 GB) would run out.
+/// Largest extract `--osm-pbf geofabrik` picks on its own: a bake peaks near 4.5x the file in
+/// memory, so Germany (4.4 GB) or Europe (31 GB) would run out.
 const MAX_PICKED_EXTRACT_BYTES: u64 = 1_500_000_000;
 
 fn check_extract_size(label: &str, bytes: u64, cap: u64) -> Result<()> {
