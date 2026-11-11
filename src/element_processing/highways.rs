@@ -1878,9 +1878,10 @@ fn generate_highways_internal(
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
 
-            // A road over water on a small map reads as a 1-block causeway; leave water
-            // cells to the carve. The road mask drops the same cells.
-            let drown_over_water = !is_bridge_member
+            // `--water-detail scaled`: the water cells the road mask dropped from a short
+            // crossing are left to the carve.
+            let drown_over_water = !road_mask.is_empty()
+                && surface_highway_type(way).is_some()
                 && args
                     .water
                     .water_detail
@@ -2215,7 +2216,10 @@ fn generate_highways_internal(
                             for dz in -block_range..=block_range {
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
-                                if drown_over_water && editor.is_lc_water(set_x, set_z) {
+                                if drown_over_water
+                                    && !road_mask.contains(set_x, set_z)
+                                    && editor.is_lc_water(set_x, set_z)
+                                {
                                     continue;
                                 }
 
@@ -3585,7 +3589,7 @@ pub(crate) fn highway_block_range(
 /// This lets `get_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
 /// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
 ///
-/// `water_detail` drops the water cells of crossings the renderer drowns.
+/// `water_detail` drops the water cells of short crossings, which the renderer then skips.
 pub fn collect_road_surface_coords(
     elements: &[ProcessedElement],
     editor: &WorldEditor,
@@ -3687,6 +3691,24 @@ fn collect_highway_surface_coords(
     include: impl Fn(&str) -> bool,
 ) -> CoordinateBitmap {
     let mut bitmap = CoordinateBitmap::new(xzbbox);
+    // A way that meets a bridge is its ramp or its approach, and keeps its surface.
+    let drowning = editor.filter(|_| water_detail.drowns_crossing(scale, &HashMap::new()));
+    let bridge_nodes: HashSet<(i32, i32)> = match drowning {
+        Some(_) => elements
+            .iter()
+            .filter_map(|e| match e {
+                ProcessedElement::Way(w)
+                    if w.tags.contains_key("highway")
+                        && w.tags.get("bridge").is_some_and(|b| b != "no") =>
+                {
+                    Some(w.nodes.iter().map(|n| (n.x, n.z)))
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect(),
+        None => HashSet::new(),
+    };
 
     for element in elements {
         let ProcessedElement::Way(way) = element else {
@@ -3702,22 +3724,36 @@ fn collect_highway_surface_coords(
 
         // Use the same block_range the renderer uses for this highway type
         let block_range = highway_block_range(highway_type, &way.tags, scale);
-        let drowned = editor.filter(|_| water_detail.drowns_crossing(scale, &way.tags));
+        let drowned = drowning.filter(|_| {
+            water_detail.drowns_crossing(scale, &way.tags)
+                && !way.nodes.iter().any(|n| bridge_nodes.contains(&(n.x, n.z)))
+        });
 
+        let mut points: Vec<(i32, i32)> = Vec::new();
         for i in 1..way.nodes.len() {
             let prev = way.nodes[i - 1].xz();
             let cur = way.nodes[i].xz();
+            points.extend(
+                bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z)
+                    .into_iter()
+                    .map(|(x, _, z)| (x, z)),
+            );
+        }
+        // Only water the carve fills is given up, so no cell ends as neither road nor water.
+        let fills =
+            |e: &WorldEditor, x: i32, z: i32| e.is_lc_water(x, z) && e.carved_bed(x, z).is_some();
+        let drowned_points = drowned.map(|e| {
+            crate::water_detail::drowned_points(&points, block_range, |x, z| fills(e, x, z))
+        });
 
-            let points = bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z);
-
-            for (bx, _, bz) in &points {
-                for dx in -block_range..=block_range {
-                    for dz in -block_range..=block_range {
-                        if drowned.is_some_and(|e| e.is_lc_water(bx + dx, bz + dz)) {
-                            continue;
-                        }
-                        bitmap.set(bx + dx, bz + dz);
+        for (i, &(bx, bz)) in points.iter().enumerate() {
+            let skip_water = drowned_points.as_ref().is_some_and(|d| d[i]);
+            for dx in -block_range..=block_range {
+                for dz in -block_range..=block_range {
+                    if skip_water && drowned.is_some_and(|e| fills(e, bx + dx, bz + dz)) {
+                        continue;
                     }
+                    bitmap.set(bx + dx, bz + dz);
                 }
             }
         }
