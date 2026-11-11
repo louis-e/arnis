@@ -1518,3 +1518,18 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   }
   return refresh;
 }
+
+// Lowest / Highest Y: what is typed is snapped to a height the world can have (sections are 16 tall).
+function snapY(id, lo, hi, off) {
+  const el = typeof document !== 'undefined' && document.getElementById && document.getElementById(id);
+  if (!el || !el.addEventListener) return;
+  el.addEventListener('change', () => {
+    const v = parseInt(el.value, 10);
+    const s = Number.isFinite(v) ? String(Math.min(hi, Math.max(lo, Math.round((v - off) / 16) * 16 + off))) : '';
+    if (s === el.value) return;
+    el.value = s;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+snapY('meld-min-y-input', -2032, -64, 0);
+snapY('meld-max-y-input', 319, 2031, -1);
