@@ -168,15 +168,33 @@ fn run_cli() {
     // A live tile is one of many runs a live session starts, so it skips the greeting.
     let live_tile = std::env::args().any(|a| a == "--live-tile");
 
+    // Parsed ahead of the banner so `--capabilities` prints its line alone.
+    let mut args: Args = Args::parse();
+    if args.capabilities {
+        println!("{}", args::capabilities_json());
+        return;
+    }
+    // Ahead of the early exits below, which would otherwise skip Live without a word.
+    if let Err(e) = args::refuse_live_extras(&args) {
+        eprintln!("{}: {}", "Error".red().bold(), e);
+        std::process::exit(1);
+    }
     // Configure thread pool with 90% CPU cap to keep system responsive
-    floodfill_cache::configure_rayon_thread_pool(0.9);
-
-    if !live_tile {
-        print_banner();
+    match args.thread_count() {
+        Some(threads) => floodfill_cache::configure_rayon_threads(threads),
+        None => floodfill_cache::configure_rayon_thread_pool(0.9),
+    }
+    if let Some(mb) = args.ram_budget_mb {
+        data_processing::set_ram_budget_mb(mb);
+    }
+    if let Some(n) = args.max_downloads {
+        net::set_max_requests(n as usize);
     }
 
-    // Parse input arguments
-    let mut args: Args = Args::parse();
+    if !live_tile {
+        print_banner(&args);
+    }
+
     if let Err(e) = args::resolve_shapes(&mut args) {
         eprintln!("{}: {}", "Error".red().bold(), e);
         std::process::exit(1);
@@ -201,9 +219,11 @@ fn run_cli() {
     run_generation_cli(args, asked_mob_spawning);
 }
 
-fn print_banner() {
+fn print_banner(args: &Args) {
     // Clean up old cached elevation tiles on startup
-    elevation_data::cleanup_old_cached_tiles();
+    if !args.no_cache_sweep {
+        elevation_data::cleanup_old_cached_tiles();
+    }
 
     let version: &str = env!("CARGO_PKG_VERSION");
     let repository: &str = env!("CARGO_PKG_REPOSITORY");
@@ -227,7 +247,9 @@ fn print_banner() {
     );
 
     // Fire-and-forget update check; prints a one-line notice on a background thread.
-    version_check::check_for_updates_async();
+    if !args.no_update_check {
+        version_check::check_for_updates_async();
+    }
 }
 
 /// Plays the One World live on a local server until Ctrl+C.
@@ -1042,5 +1064,12 @@ fn main() {
         }
     }
 
-    run_cli();
+    // ponytail: debug frames exceed the 1 MB Windows main stack
+    let cli = std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(run_cli)
+        .expect("failed to start the CLI thread");
+    if cli.join().is_err() {
+        std::process::exit(101);
+    }
 }

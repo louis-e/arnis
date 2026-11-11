@@ -1163,6 +1163,14 @@ fn relation_rings(
     closed
 }
 
+/// Builds the global Rayon pool with exactly `threads` workers (`--threads`);
+/// unlike the fraction form, this wins over RAYON_NUM_THREADS.
+pub fn configure_rayon_threads(threads: usize) {
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.max(1))
+        .build_global();
+}
+
 /// Configures the global Rayon thread pool with a CPU usage cap.
 ///
 /// Call this once at startup before any parallel operations.
@@ -1184,7 +1192,8 @@ pub fn configure_rayon_thread_pool(cpu_fraction: f64) {
         .map(|n| n.get())
         .unwrap_or(4);
 
-    let target_threads = ((available_cores as f64) * cpu_fraction).floor() as usize;
+    // Integer percent, as Args::thread_count does, so both round the same way.
+    let target_threads = available_cores * (cpu_fraction * 100.0).round() as usize / 100;
     let target_threads = target_threads.max(1); // At least 1 thread
 
     // Only configure if we haven't already (this can only be called once)

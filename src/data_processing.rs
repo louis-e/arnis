@@ -747,8 +747,19 @@ fn tile_processing_threads(pool_threads: usize, available_mb: u64, fillground: b
     pool_threads.min(usize::try_from(memory_bound).unwrap_or(usize::MAX))
 }
 
-/// Free RAM in MB.
+/// `--ram-budget-mb`: 0 means read the machine.
+static RAM_BUDGET_MB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn set_ram_budget_mb(mb: u64) {
+    RAM_BUDGET_MB.store(mb, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Free RAM in MB, or the `--ram-budget-mb` the caller promised.
 fn available_memory_mb() -> u64 {
+    let budget = RAM_BUDGET_MB.load(std::sync::atomic::Ordering::Relaxed);
+    if budget > 0 {
+        return budget;
+    }
     #[cfg(target_os = "macos")]
     if let Some(mb) = macos_available_memory_mb() {
         return mb;

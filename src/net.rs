@@ -1,12 +1,25 @@
 //! Process-wide ceiling on in-flight HTTP requests, and how a request failed.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
 /// Sits above every per-provider download pool (4-8 threads), so ordinary
 /// fetching never waits on it. It only bounds unrelated fan-outs stacking on
 /// top of each other, which is what exhausts the Windows I/O resource limits
 /// the tokio driver panics on.
-const MAX_CONCURRENT_REQUESTS: usize = 16;
+pub const MAX_CONCURRENT_REQUESTS: usize = 16;
+
+/// The ceiling in force: `MAX_CONCURRENT_REQUESTS` unless `--max-downloads` set another.
+static MAX_REQUESTS: AtomicUsize = AtomicUsize::new(MAX_CONCURRENT_REQUESTS);
+
+/// Changes the ceiling. Call before any download starts.
+pub fn set_max_requests(n: usize) {
+    MAX_REQUESTS.store(n.max(1), Ordering::Relaxed);
+}
+
+pub fn max_requests() -> usize {
+    MAX_REQUESTS.load(Ordering::Relaxed)
+}
 
 static IN_FLIGHT: Mutex<usize> = Mutex::new(0);
 static SLOT_FREED: Condvar = Condvar::new();
@@ -38,7 +51,7 @@ pub static PERMIT_TEST_LOCK: Mutex<()> = Mutex::new(());
 #[must_use]
 pub fn request_permit() -> RequestPermit {
     let mut in_flight = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
-    while *in_flight >= MAX_CONCURRENT_REQUESTS {
+    while *in_flight >= max_requests() {
         in_flight = SLOT_FREED
             .wait(in_flight)
             .unwrap_or_else(|e| e.into_inner());

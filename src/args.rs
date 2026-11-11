@@ -1,4 +1,5 @@
 use crate::coordinate_system::geographic::LLBBox;
+use clap::builder::FalseyValueParser;
 use clap::{ArgAction, Parser};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -450,7 +451,76 @@ pub struct Args {
     /// Also report progress as JSON lines on stdout for programs driving the CLI.
     #[arg(long, value_enum)]
     pub progress: Option<ProgressFormat>,
+
+    /// Worker threads for generation. Defaults to 90% of the cores, or to RAYON_NUM_THREADS
+    /// when that is set; this flag wins over both.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=4096))]
+    pub threads: Option<u32>,
+
+    /// Memory this run may assume it has, in MB, in place of the free-RAM reading when sizing
+    /// its parallel work, so several processes can split one machine.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..=100_000_000))]
+    pub ram_budget_mb: Option<u64>,
+
+    /// Downloads this process keeps in flight at once (default 16).
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub max_downloads: Option<u32>,
+
+    /// Skip the check for a newer release on GitHub.
+    #[arg(long, env = "ARNIS_NO_UPDATE_CHECK", value_parser = FalseyValueParser::new())]
+    pub no_update_check: bool,
+
+    /// Skip the startup sweep that deletes cached elevation tiles older than 30 days.
+    #[arg(long, env = "ARNIS_NO_CACHE_SWEEP", value_parser = FalseyValueParser::new())]
+    pub no_cache_sweep: bool,
+
+    /// Print the flags this build supports as one JSON line and exit, so a program driving the
+    /// CLI can probe before using them.
+    #[arg(long)]
+    pub capabilities: bool,
     // --- end confluence:core ---
+}
+
+impl Args {
+    /// The thread count asked for with --threads, if any.
+    pub fn thread_count(&self) -> Option<usize> {
+        self.threads.map(|n| n as usize)
+    }
+}
+
+/// Live tiles build with upstream's settings only, so `--live` refuses every 3.5 flag that
+/// would be dropped on its tiles. `--no-update-check` and `--no-cache-sweep` act on this
+/// process only.
+pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
+    if !args.live.live {
+        return Ok(());
+    }
+    let used: Vec<&str> = [
+        (args.progress.is_some(), "--progress"),
+        (args.threads.is_some(), "--threads"),
+        (args.ram_budget_mb.is_some(), "--ram-budget-mb"),
+        (args.max_downloads.is_some(), "--max-downloads"),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect();
+    if used.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "--live builds its tiles with the standard settings only, so it cannot take {}.",
+        used.join(", ")
+    ))
+}
+
+/// The line `--capabilities` prints: a JSON array of every long flag.
+pub fn capabilities_json() -> String {
+    use clap::CommandFactory;
+    let flags: Vec<String> = Args::command()
+        .get_arguments()
+        .filter_map(|a| a.get_long().map(str::to_string))
+        .collect();
+    serde_json::to_string(&flags).unwrap_or_default()
 }
 
 /// Machine-readable progress formats for `--progress`.
@@ -1007,6 +1077,9 @@ pub fn resolve_shapes(args: &mut Args) -> Result<(), String> {
 }
 
 pub fn validate_args(args: &Args) -> Result<(), String> {
+    // --- confluence:core ---
+    refuse_live_extras(args)?;
+    // --- end confluence:core ---
     // One World and live mode track their areas as rectangles of whole chunks.
     if args.shapes.is_some() && (args.one_world || args.live.live) {
         return Err(
@@ -1341,6 +1414,29 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capabilities_lists_every_long_flag() {
+        use clap::CommandFactory;
+        let line = capabilities_json();
+        assert!(line.starts_with('[') && !line.contains('\n'));
+        let v: Vec<String> = serde_json::from_str(&line).unwrap();
+        let flags: Vec<&str> = v.iter().map(String::as_str).collect();
+        for a in Args::command().get_arguments() {
+            if let Some(l) = a.get_long() {
+                assert!(flags.contains(&l), "missing --{l}");
+            }
+        }
+        assert!(flags.contains(&"threads") && flags.contains(&"capabilities"));
+    }
+
+    #[test]
+    fn threads_must_be_positive() {
+        let p = |x: &[&str]| Args::try_parse_from(["arnis"].iter().chain(x));
+        assert!(p(&["--threads", "0"]).is_err());
+        assert_eq!(p(&["--threads", "4"]).unwrap().thread_count(), Some(4));
+        assert_eq!(p(&[]).unwrap().thread_count(), None);
+    }
 
     #[test]
     fn gameplay_extras_are_java_only_but_vehicles_and_gravity_needs_another_body() {
@@ -2292,6 +2388,28 @@ mod tests {
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(validate_args(&args).is_err());
+    }
+
+    #[test]
+    fn live_with_confluence_flags_is_refused() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--live", "--one-world"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        // Flags that act on this process only stay allowed.
+        let plain = parse(&["--no-update-check", "--no-cache-sweep"]);
+        assert!(refuse_live_extras(&plain).is_ok());
+        let err =
+            refuse_live_extras(&parse(&["--progress", "json", "--threads", "4"])).unwrap_err();
+        for name in ["--progress", "--threads"] {
+            assert!(err.contains(name), "{err}");
+        }
+        // Without --live nothing changes.
+        let off = Args::parse_from(["arnis", "--threads", "4"]);
+        assert!(refuse_live_extras(&off).is_ok());
     }
 
     #[test]
