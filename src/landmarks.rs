@@ -257,8 +257,9 @@ pub fn prescan(
     let mut placements: Vec<LandmarkPlacement> = Vec::new();
     let mut suppressed: HashSet<(&'static str, u64)> = HashSet::new();
 
-    // --no-3d means OpenStreetMap only, and terrain-only renders no objects.
-    if !args.use_3d || args.skip_objects() {
+    // --no-3d (unless --props says otherwise) means OpenStreetMap only, and terrain-only
+    // renders no objects.
+    if !args.props().has(crate::structures::Prop::Landmark) || args.skip_objects() {
         return LandmarkPrescan {
             placements,
             suppressed,
@@ -584,7 +585,7 @@ impl LandmarkPrescan {
 
     /// Stamp `indices` (ascending), after ground generation so terrain Y is final.
     pub fn place(&self, editor: &mut WorldEditor, args: &Args, indices: &[usize]) {
-        if indices.is_empty() || !editor.place_schematics() {
+        if indices.is_empty() || !editor.place_prop(crate::structures::Prop::Landmark) {
             return;
         }
         for &i in indices {

@@ -1963,6 +1963,7 @@ const WINDOW_FLAGS: &[&str] = &[
     "road-detail",
     "surface-patches",
     "no-buildings",
+    "props",
     "rocks",
     "rock-density",
     "bushes",
@@ -2713,6 +2714,8 @@ fn gui_start_generation(
                 road_detail: crate::element_processing::road_detail::RoadDetail::Max,
                 surface_patches: false,
                 buildings: true,
+                props: None,
+                props_min_scale: None,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3379,6 +3382,7 @@ mod tests {
             "--max-y=319",
             "--road-detail=compact",
             "--no-buildings",
+            "--props=none",
             "--rocks",
             "--bushes",
             "--tree-realm=vanilla-plus",

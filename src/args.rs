@@ -632,6 +632,18 @@ pub struct Args {
     /// Overture footprints. Roads, rail, water, land cover and terrain are built as usual.
     #[arg(long = "no-buildings", default_value_t = true, action = ArgAction::SetFalse)]
     pub buildings: bool,
+
+    /// Which 3D props to place: all, none, or a list of boat, car, crane, excavator,
+    /// fountain, helicopter, jetbridge, landmark, lighthouse, plane, playground, starship,
+    /// tombstone, tractor and windturbine. Given, it decides the props whatever --no-3d
+    /// says; left out, they follow --no-3d.
+    #[arg(long, value_parser = crate::structures::PropSet::parse)]
+    pub props: Option<crate::structures::PropSet>,
+
+    /// Leave out every schematic prop below this world scale. Props keep their block size
+    /// at any scale, so on a small-scale world they tower over the buildings around them.
+    #[arg(long, value_parser = parse_props_min_scale)]
+    pub props_min_scale: Option<f64>,
     // --- end confluence:build ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -1007,6 +1019,8 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.road_detail != RoadDetail::Max, "--road-detail"),
         (args.surface_patches, "--surface-patches"),
         (!args.buildings, "--no-buildings"),
+        (args.props.is_some(), "--props"),
+        (args.props_min_scale.is_some(), "--props-min-scale"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
@@ -1285,6 +1299,20 @@ impl Args {
         self.mode.skip_objects() || self.scale < OBJECT_SKIP_SCALE
     }
 
+    /// The prop families this run places: `--props`, else all or none by `--no-3d`;
+    /// none below `--props-min-scale`.
+    pub fn props(&self) -> crate::structures::PropSet {
+        use crate::structures::PropSet;
+        if self.props_min_scale.is_some_and(|min| self.scale < min) {
+            return PropSet::NONE;
+        }
+        self.props.unwrap_or(if self.use_3d {
+            PropSet::ALL
+        } else {
+            PropSet::NONE
+        })
+    }
+
     /// Whether objects are being skipped only because the scale is below `OBJECT_SKIP_SCALE`.
     pub fn skip_objects_due_to_scale(&self) -> bool {
         !self.mode.skip_objects() && self.scale < OBJECT_SKIP_SCALE
@@ -1499,6 +1527,13 @@ pub fn apply_feature_needs(args: &mut Args) {
     }
     if args.zombie_outbreak || args.disasters {
         args.mob_spawning = MobSpawning::Off;
+    }
+}
+
+fn parse_props_min_scale(s: &str) -> Result<f64, String> {
+    match s.trim().parse::<f64>() {
+        Ok(v) if v.is_finite() && v >= 0.0 => Ok(v),
+        _ => Err(format!("{s}: expected a scale of 0 or more")),
     }
 }
 
@@ -3231,6 +3266,38 @@ mod tests {
         };
         assert!(fetched(&[]));
         assert!(!fetched(&["--no-buildings"]));
+    }
+
+    #[test]
+    fn props_override_no_3d() {
+        use crate::structures::{Prop, PropSet};
+        let parse =
+            |extra: &[&str]| Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter().chain(extra));
+        assert_eq!(parse(&[]).props(), PropSet::ALL);
+        assert_eq!(parse(&["--no-3d"]).props(), PropSet::NONE);
+        let car = parse(&["--no-3d", "--props", "car"]).props();
+        assert!(car.has(Prop::Car) && !car.has(Prop::Boat));
+        assert_eq!(parse(&["--props", "none"]).props(), PropSet::NONE);
+    }
+
+    #[test]
+    fn below_min_scale_no_props() {
+        use crate::structures::PropSet;
+        let at = |scale: &str| {
+            Args::parse_from([
+                "arnis",
+                "--bbox",
+                "1,2,3,4",
+                "--scale",
+                scale,
+                "--props-min-scale",
+                "0.5",
+            ])
+            .props()
+        };
+        assert_eq!(at("0.4"), PropSet::NONE);
+        assert_eq!(at("0.5"), PropSet::ALL);
+        assert!(Args::try_parse_from(["arnis", "--props-min-scale", "-1"]).is_err());
     }
 
     #[test]

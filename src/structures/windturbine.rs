@@ -23,7 +23,7 @@ fn turbine() -> Option<&'static StructureSchematic> {
 
 /// Stamp the wind turbine at (x, z) with a random rotation.
 pub fn place(editor: &mut WorldEditor, x: i32, z: i32) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Windturbine) {
         return;
     }
     let Some(schem) = turbine() else {

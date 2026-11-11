@@ -28,7 +28,7 @@ fn lighthouse() -> Option<&'static StructureSchematic> {
 
 /// Stamp a lighthouse centred at (x, z) on the ground, at a random rotation.
 pub fn place(editor: &mut WorldEditor, x: i32, z: i32) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Lighthouse) {
         return;
     }
     let Some(schem) = lighthouse() else {

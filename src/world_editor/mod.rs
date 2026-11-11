@@ -278,9 +278,9 @@ pub struct WorldEditor<'a> {
     voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Pre-generated Distant Horizons LOD database, fed the same way. Java only.
     dh: Option<Arc<crate::distant_horizons::DhWriter>>,
-    /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
-    /// Driven by the same toggle as external 3D models (`args.use_3d`).
-    place_schematics: bool,
+    /// The bundled schematic prop families (cars, boats, cranes, ...) to place.
+    /// Set from `Args::props`.
+    props: crate::structures::PropSet,
     /// Map preview accumulator, fed as regions are saved/flushed.
     preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
     game_mode: crate::args::GameMode,
@@ -359,7 +359,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             void_world: false,
             blinear_level: None,
-            place_schematics: true,
+            props: crate::structures::PropSet::ALL,
             preview: None,
             voxy: None,
             dh: None,
@@ -431,7 +431,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             void_world: false,
             blinear_level: None,
-            place_schematics: true,
+            props: crate::structures::PropSet::ALL,
             preview: None,
             voxy: None,
             dh: None,
@@ -503,7 +503,7 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             void_world: false,
             blinear_level: None,
-            place_schematics: true,
+            props: crate::structures::PropSet::ALL,
             preview: None,
             voxy: None,
             dh: None,
@@ -1308,14 +1308,14 @@ impl<'a> WorldEditor<'a> {
         out
     }
 
-    /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
-    pub fn set_place_schematics(&mut self, enabled: bool) {
-        self.place_schematics = enabled;
+    /// Choose which bundled schematic props (cars, boats, cranes, ...) are placed.
+    pub fn set_props(&mut self, props: crate::structures::PropSet) {
+        self.props = props;
     }
 
-    /// True if bundled schematic props should be placed (see `set_place_schematics`).
-    pub fn place_schematics(&self) -> bool {
-        self.place_schematics
+    /// True if this family of bundled schematic props should be placed.
+    pub fn place_prop(&self, prop: crate::structures::Prop) -> bool {
+        self.props.has(prop)
     }
 
     /// Returns the current world format
