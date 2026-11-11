@@ -563,6 +563,48 @@ label[for].setting-label {
   color: var(--primary-accent);
 }
 
+/* Picture of what a setting does (preview-popover.js): small, placed beside the hovered control by
+   the script (left/top), no shadow. The image box has a fixed 4:3 size, so nothing moves when the picture
+   loads, and the popover ignores the pointer so it never steals the hover from the control. */
+.preview-popover {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: fit-content;
+  height: fit-content;
+  box-sizing: border-box;
+  padding: 10px 10px 6px;
+  background-color: #2a2a2a;
+  border: 1px solid #fecc44;
+  border-radius: 6px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  z-index: 30000;
+}
+
+.preview-popover.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.preview-popover img {
+  display: block;
+  width: min(340px, 45vw, calc((100vh - 110px) * 4 / 3));
+  height: auto;
+  aspect-ratio: 4 / 3;
+}
+
+.preview-popover-caption {
+  margin-top: 6px;
+  color: #fecc44;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+
 /* Per-setting revert button, next to the setting name. Same 16px round box
    as the tooltip icon so they read as a pair. Hidden with visibility, not
    display, so the heading cannot shift while a slider is dragged. */
