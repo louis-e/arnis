@@ -644,6 +644,8 @@
   "plan_disk_short": "{need} kell, ezen a lemezen csak {free} szabad",
   "plan_minutes": "{m} perc",
   "run_eta": "kb. {time} van hátra",
+  "map_select_area": "Ennek a területnek a kijelölése",
+  "map_use_outline": "Körvonal használata",
   "plan_error": "Nem sikerült megtervezni ezt a kijelölést: {error}",
   "plan_piece_size": "{n} × {m} régió",
   "plan_legend_selection": "Kijelölés",

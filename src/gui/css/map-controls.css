@@ -517,3 +517,52 @@
     transition: none;
   }
 }
+
+/* The map-first page: the search sits bottom-left (clear of the tools above it and of the
+   attribution and 3D card on the right) and its list opens upward, a name and a muted
+   "City · Romania" line per place. The hint pill and toast rise above the window's footer. */
+.map-first #search-container {
+  top: auto;
+  right: auto;
+  bottom: 12px;
+  left: 10px;
+}
+
+.map-first #city-search {
+  width: 260px;
+}
+
+.map-first #search-results {
+  bottom: 100%;
+  max-height: min(360px, 60vh);
+  margin: 0 0 6px;
+}
+
+.map-first .search-result-item {
+  padding: 8px 12px;
+  font-size: 13.5px;
+}
+
+.map-first .search-result-item.is-active {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.map-first .search-result-name {
+  color: var(--map-text);
+}
+
+.map-first .search-result-item.is-active .search-result-name,
+.map-first .search-result-item:hover .search-result-name {
+  color: var(--map-accent);
+}
+
+.map-first .search-result-details {
+  margin-top: 3px;
+  color: var(--map-muted);
+  font-size: 12px;
+}
+
+.map-first .bbox-hint-overlay,
+.map-first .rotation-toast {
+  bottom: 44px;
+}

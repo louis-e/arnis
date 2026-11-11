@@ -644,6 +644,8 @@
   "plan_disk_short": "يحتاج {need}، والمتاح على هذا القرص {free} فقط",
   "plan_minutes": "{m} د",
   "run_eta": "يتبقى نحو {time}",
+  "map_select_area": "تحديد هذه المنطقة",
+  "map_use_outline": "استخدام الحدود",
   "plan_error": "تعذّر تخطيط هذا التحديد: {error}",
   "plan_piece_size": "{n} × {m} مناطق",
   "plan_legend_selection": "التحديد",

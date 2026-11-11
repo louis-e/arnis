@@ -644,6 +644,8 @@
   "plan_disk_short": "Tarvitaan {need}, levyllä on vapaana vain {free}",
   "plan_minutes": "{m} min",
   "run_eta": "noin {time} jäljellä",
+  "map_select_area": "Valitse tämä alue",
+  "map_use_outline": "Käytä ääriviivaa",
   "plan_error": "Tätä valintaa ei voitu suunnitella: {error}",
   "plan_piece_size": "{n} × {m} aluetta",
   "plan_legend_selection": "Valinta",

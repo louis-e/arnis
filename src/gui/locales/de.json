@@ -644,6 +644,8 @@
   "plan_disk_short": "Braucht {need}, auf diesem Laufwerk nur {free} frei",
   "plan_minutes": "{m} min",
   "run_eta": "noch etwa {time}",
+  "map_select_area": "Diesen Bereich auswählen",
+  "map_use_outline": "Umriss verwenden",
   "plan_error": "Diese Auswahl konnte nicht geplant werden: {error}",
   "plan_piece_size": "{n} × {m} Regionen",
   "plan_legend_selection": "Auswahl",

@@ -644,6 +644,8 @@
   "plan_disk_short": "Potrzeba {need}, na tym dysku wolne tylko {free}",
   "plan_minutes": "{m} min",
   "run_eta": "zostało ok. {time}",
+  "map_select_area": "Zaznacz ten obszar",
+  "map_use_outline": "Użyj obrysu",
   "plan_error": "Nie udało się zaplanować tego zaznaczenia: {error}",
   "plan_piece_size": "{n} × {m} regionów",
   "plan_legend_selection": "Zaznaczenie",

@@ -644,6 +644,8 @@
   "plan_disk_short": "{need} 필요, 이 디스크 여유 공간은 {free}뿐",
   "plan_minutes": "{m}분",
   "run_eta": "약 {time} 남음",
+  "map_select_area": "이 영역 선택",
+  "map_use_outline": "윤곽선 사용",
   "plan_error": "이 선택 영역을 계획할 수 없습니다: {error}",
   "plan_piece_size": "{n} × {m} 리전",
   "plan_legend_selection": "선택 영역",

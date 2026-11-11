@@ -644,6 +644,8 @@
   "plan_disk_short": "Necesita {need}, solo hay {free} libres en este disco",
   "plan_minutes": "{m} min",
   "run_eta": "quedan unos {time}",
+  "map_select_area": "Seleccionar esta zona",
+  "map_use_outline": "Usar contorno",
   "plan_error": "No se pudo planificar esta selección: {error}",
   "plan_piece_size": "{n} × {m} regiones",
   "plan_legend_selection": "Selección",

@@ -644,6 +644,8 @@
   "plan_disk_short": "Necesită {need}; pe acest disc sunt liberi doar {free}",
   "plan_minutes": "{m} min",
   "run_eta": "încă aproximativ {time}",
+  "map_select_area": "Selectează această zonă",
+  "map_use_outline": "Folosește conturul",
   "plan_error": "Nu am putut planifica selecția: {error}",
   "plan_piece_size": "{n} × {m} regiuni",
   "plan_legend_selection": "Selecția",

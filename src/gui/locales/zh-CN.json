@@ -644,6 +644,8 @@
   "plan_disk_short": "需要 {need}，此磁盘仅剩 {free}",
   "plan_minutes": "{m} 分钟",
   "run_eta": "约剩 {time}",
+  "map_select_area": "选择此区域",
+  "map_use_outline": "使用轮廓",
   "plan_error": "无法规划此选区：{error}",
   "plan_piece_size": "{n} × {m} 个区域",
   "plan_legend_selection": "选区",

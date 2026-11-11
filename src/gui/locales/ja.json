@@ -644,6 +644,8 @@
   "plan_disk_short": "{need} 必要、このディスクの空きは {free} のみ",
   "plan_minutes": "{m} 分",
   "run_eta": "残り約 {time}",
+  "map_select_area": "この範囲を選択",
+  "map_use_outline": "輪郭を使う",
   "plan_error": "この選択範囲を計画できませんでした: {error}",
   "plan_piece_size": "{n} × {m} リージョン",
   "plan_legend_selection": "選択範囲",

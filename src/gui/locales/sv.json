@@ -644,6 +644,8 @@
   "plan_disk_short": "Behöver {need}, bara {free} ledigt på den här disken",
   "plan_minutes": "{m} min",
   "run_eta": "cirka {time} kvar",
+  "map_select_area": "Markera det här området",
+  "map_use_outline": "Använd kontur",
   "plan_error": "Det gick inte att planera det här urvalet: {error}",
   "plan_piece_size": "{n} × {m} regioner",
   "plan_legend_selection": "Markering",

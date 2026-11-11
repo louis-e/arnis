@@ -644,6 +644,8 @@
   "plan_disk_short": "Нужно {need}, на этом диске свободно только {free}",
   "plan_minutes": "{m} мин",
   "run_eta": "осталось около {time}",
+  "map_select_area": "Выбрать эту область",
+  "map_use_outline": "Использовать контур",
   "plan_error": "Не удалось спланировать это выделение: {error}",
   "plan_piece_size": "{n} × {m} регионов",
   "plan_legend_selection": "Выделение",
