@@ -521,7 +521,6 @@ pub fn fetch_extract(
 ) -> Result<bool> {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     crate::net::ensure_online("OpenStreetMap extract (.pbf)")?;
-    println!("Downloading {url}");
     let client = client()?;
     // One HEAD names the size, the range support and the file a `-latest`
     // link redirects to, so every connection reads the same version.
@@ -537,6 +536,7 @@ pub fn fetch_extract(
     if let Some(cap) = cap {
         check_extract_size(&extract_label(dest), total, cap)?;
     }
+    println!("Downloading {url}");
     let ranges = head
         .headers()
         .get(reqwest::header::ACCEPT_RANGES)
