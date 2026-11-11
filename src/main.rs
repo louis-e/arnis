@@ -216,20 +216,33 @@ fn exit_failed() -> ! {
 
 /// `--dh-lod-only`: LODs from the regions of the One World at `world_dir`.
 fn redraw_dh_lods(args: &mut Args, world_dir: &std::path::Path) -> Result<String, String> {
+    // The world decides the build range its LODs are cut against.
+    let manifest = one_world::Manifest::load(world_dir)?.ok_or_else(|| {
+        format!(
+            "{} is not a One World (no {}).",
+            world_dir.display(),
+            one_world::MANIFEST_FILE
+        )
+    })?;
     let _lock = world_utils::SessionLock::acquire(world_dir)
         .map_err(|_| "the world is open in Minecraft or being generated".to_string())?;
-    // The world decides the build range its LODs are cut against.
-    if let Ok(Some(manifest)) = one_world::Manifest::load(world_dir) {
-        args.disable_height_limit = manifest.disable_height_limit;
-        args.height_multiplier = manifest.height_multiplier;
-    }
+    args.disable_height_limit = manifest.disable_height_limit;
+    args.height_multiplier = manifest.height_multiplier;
     world_editor::set_world_bounds(
         ground::extended_min_y_for(args),
         ground::world_top_y_for(args),
     );
     let s = distant_horizons::from_existing(world_dir).map_err(|e| e.to_string())?;
+    let skipped = if s.skipped_regions + s.skipped_chunks > 0 {
+        format!(
+            " Skipped {} unreadable region file(s) and {} unreadable chunk(s).",
+            s.skipped_regions, s.skipped_chunks
+        )
+    } else {
+        String::new()
+    };
     Ok(format!(
-        "Distant Horizons LODs: {} sections written to {}.",
+        "Distant Horizons LODs: {} sections written to {}.{skipped}",
         s.sections,
         world_dir.display()
     ))
