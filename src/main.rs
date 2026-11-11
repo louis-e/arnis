@@ -342,7 +342,8 @@ fn run_cli() {
     // A plan is a dry run: it neither sweeps the tile cache nor makes the update request.
     let planning = args.units.plan_units.is_some();
 
-    if !live_tile {
+    // A piece of a job is one of many runs too: no banner, update check or cache sweep.
+    if !live_tile && args.units.one_world_unit.is_none() {
         print_banner(&args, planning);
     }
 
@@ -711,7 +712,8 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     }
     deterministic_rng::set_world_seed(args.seed.unwrap_or(0));
     if args.units.coordinates() {
-        // A job built in pieces: this process only runs them.
+        // A job built in pieces: this process only runs them, and each reads `--file` itself.
+        drop(preloaded_osm.take());
         let world_dir = one_world_paths.clone().unwrap_or_default();
         match scale::run(&args, &world_dir) {
             Err(e) if e == scale::PARTIAL => println!("{e}"),

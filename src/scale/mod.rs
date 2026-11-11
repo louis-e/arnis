@@ -1318,11 +1318,7 @@ fn run_piece_until(
     let exe =
         std::env::current_exe().map_err(|e| fail(format!("Cannot find this executable: {e}")))?;
     let mut cmd = Command::new(exe);
-    // Every piece skips the update check and the cache sweep; through the environment, so
-    // a user's own switch for either does not clash.
     cmd.args(argv)
-        .env("ARNIS_NO_UPDATE_CHECK", "1")
-        .env("ARNIS_NO_CACHE_SWEEP", "1")
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
