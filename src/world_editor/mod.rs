@@ -645,6 +645,27 @@ impl<'a> WorldEditor<'a> {
         crate::water_depth::lc_carved_bed(ground, field, coord, x, z, ground.level(coord))
     }
 
+    /// Lowest water the opt-in beds can put next to (x, z), or None.
+    pub fn lowest_water_beside(&self, x: i32, z: i32) -> Option<i32> {
+        self.water_field.as_deref()?.lowest_water_beside(
+            self.ground.as_deref()?,
+            (self.ground_origin_x, self.ground_origin_z),
+            x,
+            z,
+        )
+    }
+
+    /// True where water surfaced at `water_y` stands two blocks or more over a neighbour.
+    pub fn water_stands_over_neighbour(&self, x: i32, z: i32, water_y: i32) -> bool {
+        self.ground.as_deref().is_some_and(|ground| {
+            [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .into_iter()
+                .any(|(dx, dz)| {
+                    ground.water_level(self.ground_point(x + dx, z + dz)) <= water_y - 2
+                })
+        })
+    }
+
     /// The lowest `carved_bed` within `r` of (x, z): the bed a bore that wide has to clear.
     pub fn lowest_carved_bed(&self, x: i32, z: i32, r: i32) -> Option<i32> {
         // Most of a tunnel runs nowhere near the water.

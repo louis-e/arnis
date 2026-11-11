@@ -1486,6 +1486,13 @@ pub fn generate_ground_region(
                         }
                     }
 
+                    // A river or bowl bed next door digs below this column's crust.
+                    if !args.fillground {
+                        if let Some(lowest) = editor.lowest_water_beside(x, z) {
+                            editor.fill_column_absolute(STONE, x, z, lowest, ground_y - 1, true);
+                        }
+                    }
+
                     // Fill underground; column_fill_y_min skips already-Uniform sections.
                     if args.fillground {
                         editor.fill_column_absolute(
