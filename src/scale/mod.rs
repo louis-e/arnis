@@ -656,10 +656,8 @@ pub fn run_with(
                 .unwrap_or(0)
         })
         .and_then(|at| queue.remove(at));
-    let spawn_piece = head.or_else(|| {
-        user_spawn_xz(args, &selection)
-            .and_then(|(x, z)| units.iter().position(|u| contains(&u.rect, x, z)))
-    });
+    // Only the piece that holds the spawn gets it: a run refuses a spawn outside its area.
+    let spawn_piece = spawn_piece(&units, user_spawn_xz(args, &selection));
 
     let largest = units.iter().map(|u| u.regions).max().unwrap_or(1);
     let sizing = budget::sizing(args, queue.len() + usize::from(head.is_some()), largest);
@@ -1104,6 +1102,11 @@ fn bounds(u: &WorkUnit) -> [f64; 4] {
 
 fn contains(r: &XZBBox, x: i32, z: i32) -> bool {
     r.contains(&crate::coordinate_system::cartesian::XZPoint::new(x, z))
+}
+
+fn spawn_piece(units: &[WorkUnit], spawn: Option<(i32, i32)>) -> Option<usize> {
+    let (x, z) = spawn?;
+    units.iter().position(|u| contains(&u.rect, x, z))
 }
 
 const RESUME: &str = "Finished pieces are kept; run the same command again to resume.";
@@ -1650,6 +1653,19 @@ second
         std::fs::write(dir.join("job.json"), state.to_string()).unwrap();
         let err = Job::open(tmp.path(), "j".into(), &units).err().unwrap();
         assert!(err.contains("planned with other pieces"), "{err}");
+    }
+
+    #[test]
+    fn only_the_piece_holding_the_spawn_gets_it() {
+        let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
+        let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
+        let (world, _) = crate::projection::snap_bbox_to_chunks(&proj, &req).unwrap();
+        let units = work_units::plan_units(&proj, &world, 1).unwrap();
+        let r = &units[2].rect;
+        assert_eq!(spawn_piece(&units, Some((r.min_x(), r.min_z()))), Some(2));
+        let far = (world.max_x() + 1000, world.max_z() + 1000);
+        assert_eq!(spawn_piece(&units, Some(far)), None);
+        assert_eq!(spawn_piece(&units, None), None);
     }
 
     #[test]
