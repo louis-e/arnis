@@ -140,6 +140,157 @@ impl Queue {
     fn cancelled(&self, i: usize) -> bool {
         self.cancel.contains(&i)
     }
+
+    /// Applies `action` to `cells`; returns the cells it changed, the rest are ignored.
+    fn apply(&mut self, action: &str, cells: &[usize]) -> Result<Vec<usize>, String> {
+        let mut applied = Vec::new();
+        let pending = |q: &Self, i: usize| q.pending.contains(&i);
+        match action {
+            "hold" => {
+                for &i in cells {
+                    if (pending(self, i) || self.running.contains(&i)) && self.held.insert(i) {
+                        if pending(self, i) {
+                            self.events.push((i, "held"));
+                        }
+                        applied.push(i);
+                    }
+                }
+            }
+            "resume" => {
+                for &i in cells {
+                    if self.held.remove(&i) {
+                        if pending(self, i) {
+                            self.events.push((i, "queued"));
+                        }
+                        applied.push(i);
+                    }
+                }
+            }
+            "front" => {
+                // The given order, first at the front.
+                for &i in cells.iter().rev() {
+                    if let Some(p) = self.pending.iter().position(|&c| c == i) {
+                        self.pending.remove(p);
+                        self.pending.push_front(i);
+                        applied.push(i);
+                    }
+                }
+                applied.reverse();
+            }
+            "cancel" => {
+                for &i in cells {
+                    if self.running.contains(&i) && self.cancel.insert(i) {
+                        applied.push(i);
+                    }
+                }
+            }
+            "skip" => {
+                for &i in cells {
+                    if let Some(p) = self.pending.iter().position(|&c| c == i) {
+                        self.pending.remove(p);
+                        self.held.remove(&i);
+                        self.skipped.insert(i);
+                        self.events.push((i, "skipped"));
+                        applied.push(i);
+                    }
+                }
+                self.skip_changed |= !applied.is_empty();
+            }
+            "include" => {
+                for &i in cells {
+                    if self.skipped.remove(&i) {
+                        self.pending.push_back(i);
+                        self.events.push((i, "queued"));
+                        applied.push(i);
+                    }
+                }
+                self.skip_changed |= !applied.is_empty();
+            }
+            "retry" => {
+                for &i in cells {
+                    if self.failed.remove(&i) {
+                        self.pending.push_back(i);
+                        self.events.push((i, self.waiting_state(i)));
+                        applied.push(i);
+                    }
+                }
+            }
+            _ => {
+                return Err(format!(
+                "{action}: not a cell action (hold, resume, front, cancel, retry, skip, include)."
+            ))
+            }
+        }
+        Ok(applied)
+    }
+}
+
+/// What [`control`] did, and where the job's cells stand after it.
+#[derive(serde::Serialize, Debug)]
+pub struct CellsControlResult {
+    pub applied: Vec<u32>,
+    /// Cells the action does not apply to in their state (say, cancel on a pending cell).
+    pub ignored: Vec<u32>,
+    pub pending: Vec<u32>,
+    pub running: Vec<u32>,
+    pub held: Vec<u32>,
+    pub failed: Vec<u32>,
+    pub skipped: Vec<u32>,
+}
+
+/// The running job's world and cells; one job per process.
+static ACTIVE: Mutex<Option<(PathBuf, Arc<Mutex<Queue>>)>> = Mutex::new(None);
+
+/// Clears [`ACTIVE`] however the job ends.
+struct Active;
+
+impl Active {
+    fn register(world_dir: &Path, queue: &Arc<Mutex<Queue>>) -> Self {
+        *lock(&ACTIVE) = Some((world_dir.to_path_buf(), Arc::clone(queue)));
+        Active
+    }
+}
+
+impl Drop for Active {
+    fn drop(&mut self) {
+        *lock(&ACTIVE) = None;
+    }
+}
+
+/// Whether a job of this process builds the world at `world_dir`.
+pub fn runs_on(world_dir: &Path) -> bool {
+    let same = |a: &Path| {
+        let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        canon(a) == canon(world_dir)
+    };
+    lock(&ACTIVE).as_ref().is_some_and(|(w, _)| same(w))
+}
+
+/// The window's cell actions on the running job: `hold` keeps pending cells from starting
+/// (a running one finishes), `resume` lets them, `front` moves pending cells to the front in
+/// the given order, `cancel` kills running cells and puts them back in pending, `retry`
+/// puts failed cells back in pending, `skip` leaves pending cells out of the job and
+/// `include` puts skipped cells back in pending.
+pub fn control(action: &str, cells: &[u32]) -> Result<CellsControlResult, String> {
+    let active = lock(&ACTIVE);
+    let (_, queue) = active.as_ref().ok_or("No job is running.")?;
+    let mut q = lock(queue);
+    let wanted: Vec<usize> = cells.iter().map(|&c| c as usize).collect();
+    let applied = q.apply(action, &wanted)?;
+    let ids = |s: &mut dyn Iterator<Item = &usize>| s.map(|&i| i as u32).collect::<Vec<_>>();
+    Ok(CellsControlResult {
+        ignored: cells
+            .iter()
+            .copied()
+            .filter(|c| !applied.contains(&(*c as usize)))
+            .collect(),
+        applied: ids(&mut applied.iter()),
+        pending: ids(&mut q.pending.iter()),
+        running: ids(&mut q.running.iter()),
+        held: ids(&mut q.held.iter()),
+        failed: ids(&mut q.failed.iter()),
+        skipped: ids(&mut q.skipped.iter()),
+    })
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -609,6 +760,7 @@ pub fn run_with(
             .collect(),
         ..Default::default()
     }));
+    let _active = Active::register(world_dir, &queue);
 
     // Builds piece `i` on worker slot `w`: Ok(None) when Stop or a cancel ended it or it
     // failed.
@@ -1164,6 +1316,68 @@ second
     }
 
     #[test]
+    fn the_queue_respects_held_front_cancel_and_retry() {
+        let mut q = Queue {
+            pending: VecDeque::from([0, 1, 2, 3, 4]),
+            ..Default::default()
+        };
+        // Held cells wait; the rest go on in order.
+        assert_eq!(q.apply("hold", &[1, 2, 9]).unwrap(), [1, 2]);
+        assert_eq!(q.events, [(1, "held"), (2, "held")]);
+        assert_eq!(q.next(true), Next::Cell(0));
+        assert_eq!(q.next(true), Next::Cell(3));
+        // Front, in the order given; held ones move too but still wait.
+        assert_eq!(q.apply("front", &[4, 1, 0]).unwrap(), [4, 1]);
+        assert_eq!(q.pending, [4, 1, 2]);
+        assert_eq!(q.next(false), Next::Wait);
+        assert_eq!(q.next(true), Next::Cell(4));
+        // Only held pending cells left: the job waits for them.
+        assert_eq!(q.next(true), Next::Wait);
+        // Cancel kills a running cell, which goes back to pending; pending ones are ignored.
+        assert_eq!(q.apply("cancel", &[3, 1]).unwrap(), [3]);
+        assert!(q.cancelled(3) && !q.cancelled(0));
+        assert_eq!(q.finish(3, Outcome::Cancelled), Some("queued"));
+        assert!(!q.cancelled(3) && q.pending.back() == Some(&3));
+        // Resume: back in line where they were.
+        assert_eq!(q.apply("resume", &[2, 1]).unwrap(), [2, 1]);
+        assert_eq!(q.next(true), Next::Cell(1));
+        assert_eq!(q.next(true), Next::Cell(2));
+        assert_eq!(q.next(true), Next::Cell(3));
+        // A failed cell is retried at the back; a held running cell that fails is not held.
+        q.apply("hold", &[0]).unwrap();
+        assert_eq!(q.finish(0, Outcome::Failed), None);
+        assert!(q.held.is_empty() && q.failed.contains(&0));
+        assert_eq!(q.apply("retry", &[0, 1]).unwrap(), [0]);
+        for i in [1, 2, 3, 4] {
+            q.finish(i, Outcome::Built);
+        }
+        assert_eq!(q.next(true), Next::Cell(0));
+        assert_eq!(q.next(true), Next::Wait);
+        q.finish(0, Outcome::Built);
+        assert_eq!(q.next(true), Next::Done);
+        assert!(q.apply("explode", &[0]).is_err());
+    }
+
+    #[test]
+    fn skipped_cells_leave_the_queue_and_come_back() {
+        let mut q = Queue {
+            pending: VecDeque::from([0, 1, 2]),
+            running: BTreeSet::from([3]),
+            ..Default::default()
+        };
+        // Only pending cells can be left out.
+        assert_eq!(q.apply("skip", &[1, 3]).unwrap(), [1]);
+        assert!(q.skip_changed && q.skipped == BTreeSet::from([1]));
+        assert_eq!(q.events, [(1, "skipped")]);
+        assert_eq!(q.next(true), Next::Cell(0));
+        assert_eq!(q.next(true), Next::Cell(2));
+        q.skip_changed = false;
+        assert_eq!(q.apply("include", &[1, 2]).unwrap(), [1]);
+        assert!(q.skip_changed && q.skipped.is_empty());
+        assert_eq!(q.next(true), Next::Cell(1));
+    }
+
+    #[test]
     fn the_skip_set_round_trips_through_the_job_state() {
         let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
         let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
@@ -1199,6 +1413,27 @@ second
         let alone = parse(&["arnis", "--one-world", "--skip-cells", "1"]);
         let err = crate::args::validate_args(&alone).unwrap_err();
         assert!(err.contains("--skip-cells"), "{err}");
+    }
+
+    #[test]
+    fn cell_actions_need_a_running_job() {
+        assert!(control("hold", &[0]).unwrap_err().contains("No job"));
+        let queue = Arc::new(Mutex::new(Queue {
+            pending: VecDeque::from([0, 1]),
+            ..Default::default()
+        }));
+        let tmp = tempfile::tempdir().unwrap();
+        let active = Active::register(tmp.path(), &queue);
+        let r = control("front", &[1, 7]).unwrap();
+        assert_eq!(
+            (r.applied, r.ignored, r.pending),
+            (vec![1], vec![7], vec![1, 0])
+        );
+        // No cells come out of a world a job is building.
+        let err = one_world::remove_cells(tmp.path(), None, &[0]).unwrap_err();
+        assert!(err.contains("job is building"), "{err}");
+        drop(active);
+        assert!(control("hold", &[0]).is_err());
     }
 
     #[test]

@@ -450,6 +450,53 @@ pub fn plan(
     })
 }
 
+/// Whole lattice cells of `n` regions around `rect`, about one `rect` out, whose ground is
+/// stretched at most `max_stretch` (blocks per metre are fixed at the origin's latitude):
+/// where a One World can grow next. At most `cap` cells; none when one ring would pass it.
+pub fn room(
+    proj: &WebMercatorProjection,
+    rect: &XZBBox,
+    n: i32,
+    max_stretch: f64,
+    cap: usize,
+) -> Vec<LLBBox> {
+    let side = REGION_BLOCKS * n.max(1);
+    let (gx0, gx1) = (rect.min_x().div_euclid(side), rect.max_x().div_euclid(side));
+    let (gz0, gz1) = (rect.min_z().div_euclid(side), rect.max_z().div_euclid(side));
+    let (w, h) = (i64::from(gx1 - gx0 + 1), i64::from(gz1 - gz0 + 1));
+    let count = |k: i64| ((w + 2 * k) * (h + 2 * k) - w * h) as usize;
+    let mut k = w.max(h);
+    while k > 0 && count(k) > cap {
+        k -= 1;
+    }
+    let k = k as i32;
+    let cos0 = proj.origin_lat.to_radians().cos();
+    let stretch = |lat: f64| (cos0 / lat.to_radians().cos() - 1.0).abs();
+    let mut out = Vec::new();
+    for gz in gz0 - k..=gz1 + k {
+        for gx in gx0 - k..=gx1 + k {
+            if (gx0..=gx1).contains(&gx) && (gz0..=gz1).contains(&gz) {
+                continue;
+            }
+            let Ok(cell) = XZBBox::rect_from_min_max(
+                gx * side,
+                gz * side,
+                gx * side + side - 1,
+                gz * side + side - 1,
+            ) else {
+                continue;
+            };
+            let Ok(bbox) = llbbox_for_rect(proj, &cell) else {
+                continue;
+            };
+            if stretch(bbox.min().lat()).max(stretch(bbox.max().lat())) <= max_stretch {
+                out.push(bbox);
+            }
+        }
+    }
+    out
+}
+
 /// `--plan-units N`: prints the plan as one JSON line and touches nothing.
 pub fn print_plan(
     world_dir: &std::path::Path,
@@ -648,6 +695,17 @@ fn job_estimate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn room_rings_the_job_within_the_stretch_band() {
+        let proj = WebMercatorProjection::new(44.43, 26.1, 1.0);
+        let one = XZBBox::rect_from_min_max(0, 0, 511, 511).unwrap();
+        assert_eq!(room(&proj, &one, 1, 0.05, 400).len(), 8);
+        assert!(room(&proj, &one, 1, 0.05, 7).is_empty());
+        // 1000 km north of the origin is past 5%: nothing there.
+        let far = XZBBox::rect_from_min_max(0, -1_400_000, 511, -1_399_489).unwrap();
+        assert!(room(&proj, &far, 1, 0.05, 400).is_empty());
+    }
 
     #[test]
     fn estimates_follow_the_measured_rates() {

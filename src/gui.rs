@@ -69,6 +69,7 @@ pub fn run_gui() -> Result<(), String> {
 
     // Clean up old cached elevation tiles on startup
     crate::elevation_data::cleanup_old_cached_tiles();
+    remove_old_plan_masks(&env::temp_dir(), std::time::Duration::from_secs(24 * 3600));
 
     // Launch the UI
     println!("Launching UI...");
@@ -121,6 +122,10 @@ pub fn run_gui() -> Result<(), String> {
             gui_set_save_path,
             gui_pick_save_directory,
             gui_start_generation,
+            gui_pause_generation,
+            gui_stop_generation,
+            gui_cells_control,
+            gui_cells_remove,
             gui_get_version,
             gui_get_update_info,
             gui_get_platform,
@@ -137,8 +142,14 @@ pub fn run_gui() -> Result<(), String> {
             gui_precompute_facades,
             gui_cancel_precompute,
             gui_one_world_info,
+            gui_list_one_worlds,
+            gui_world_thumbnail,
+            gui_set_place_name,
+            gui_rename_world,
             gui_one_world_overlap,
             gui_get_one_world_overlays,
+            gui_plan_job,
+            gui_write_plan_mask,
             gui_log,
             gui_set_telemetry_consent,
             gui_set_discord_status,
@@ -1332,6 +1343,109 @@ struct WorldMapData {
     max_mc_z: i32,
 }
 
+/// The image a world's thumbnail is made from: its map, else its newest area preview.
+fn thumbnail_source(world: &Path) -> Option<PathBuf> {
+    let map = world.join("arnis_world_map.png");
+    if map.is_file() {
+        return Some(map);
+    }
+    fs::read_dir(world.join(crate::one_world::PREVIEW_DIR))
+        .ok()?
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "png"))
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+        .map(|e| e.path())
+}
+
+/// Where a world's thumbnail is kept, so the list need not shrink the image every time.
+const THUMB_FILE: &str = "arnis_one_world/thumb.png";
+const THUMB_WIDTH: u32 = 320;
+
+/// A small PNG of the world as a data URL, or None when it has no image.
+#[tauri::command(async)]
+fn gui_world_thumbnail(world_path: String) -> Result<Option<String>, String> {
+    let world = PathBuf::from(world_path);
+    let Some(source) = thumbnail_source(&world) else {
+        return Ok(None);
+    };
+    let thumb = world.join(THUMB_FILE);
+    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    let kept = modified(&thumb).filter(|t| Some(*t) >= modified(&source));
+    let png = match kept.and_then(|_| fs::read(&thumb).ok()) {
+        Some(png) => png,
+        None => {
+            let img = image::open(&source)
+                .map_err(|e| format!("Failed to read {}: {e}", source.display()))?;
+            let img = if img.width() > THUMB_WIDTH {
+                img.thumbnail(THUMB_WIDTH, u32::MAX)
+            } else {
+                img
+            };
+            let mut png = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .map_err(|e| format!("Failed to make a thumbnail: {e}"))?;
+            // Not kept (a read-only folder, say): made again next time.
+            let _ = fs::create_dir_all(world.join("arnis_one_world"))
+                .and_then(|_| fs::write(&thumb, &png));
+            png
+        }
+    };
+    Ok(Some(format!(
+        "data:image/png;base64,{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png)
+    )))
+}
+
+/// What a world in use is refused with: Minecraft or a generation holds its session.lock.
+const WORLD_IN_USE: &str = "The world is in use; close it in Minecraft or wait for the run.";
+
+/// Stores the place the world shows; an empty name clears it.
+#[tauri::command(async)]
+fn gui_set_place_name(world_path: String, place_name: String) -> Result<(), String> {
+    let world = PathBuf::from(world_path);
+    let mut manifest = crate::one_world::Manifest::load(&world)?.ok_or("Not a One World.")?;
+    let _lock = SessionLock::acquire(&world).map_err(|_| WORLD_IN_USE.to_string())?;
+    let name = place_name.trim();
+    manifest.place_name = (!name.is_empty()).then(|| name.to_string());
+    manifest.save(&world)
+}
+
+/// Renames a world's folder and its LevelName together; returns the new folder name.
+#[tauri::command(async)]
+fn gui_rename_world(
+    save_path: String,
+    old_name: String,
+    new_name: String,
+) -> Result<String, String> {
+    crate::world_utils::rename_world(Path::new(save_path.trim()), &old_name, &new_name)
+}
+
+#[derive(serde::Serialize)]
+struct OneWorldEntry {
+    name: String,
+    modified_ms: Option<u64>,
+    #[serde(flatten)]
+    info: OneWorldInfo,
+    place_name: Option<String>,
+    /// The areas' union, `[south, west, north, east]`; null without areas.
+    bbox: Option<[f64; 4]>,
+    jobs: Vec<JobEntry>,
+    /// A preview image exists, so `gui_world_thumbnail` has something to show.
+    preview: bool,
+}
+
+#[derive(serde::Serialize, Debug, PartialEq)]
+struct JobEntry {
+    name: String,
+    settings: Vec<String>,
+    /// The area the job was started on, `[south, west, north, east]`; null for old jobs.
+    bbox: Option<[f64; 4]>,
+    done: u32,
+    total: u32,
+    finished: bool,
+    last_run_ms: u64,
+}
+
 #[derive(serde::Serialize)]
 struct OneWorldInfo {
     world_path: String,
@@ -1346,6 +1460,10 @@ struct OneWorldInfo {
     terrain: Option<bool>,
     disable_height_limit: Option<bool>,
     aws_only_elevation: Option<bool>,
+    /// Blocks per metre are fixed at this latitude: the map shows how far the world can grow.
+    origin_lat: Option<f64>,
+    /// Land above this height is squashed.
+    knee_m: Option<f64>,
     /// Changes whenever an area is recorded.
     revision: u32,
 }
@@ -1365,18 +1483,69 @@ fn one_world_dir(save_path: &str, world_name: &str) -> PathBuf {
 
 #[tauri::command(async)]
 fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldInfo, String> {
-    let world_path = one_world_dir(&save_path, &world_name);
-    let manifest = crate::one_world::Manifest::load(&world_path)?;
+    one_world_info_at(&one_world_dir(&save_path, &world_name))
+}
+
+/// Every One World directly under the save folder, newest first.
+#[tauri::command(async)]
+fn gui_list_one_worlds(save_path: String) -> Result<Vec<OneWorldEntry>, String> {
+    let Ok(dir) = fs::read_dir(save_path.trim()) else {
+        return Ok(Vec::new());
+    };
+    let mut worlds: Vec<OneWorldEntry> = dir
+        .flatten()
+        .filter_map(|e| {
+            let manifest = crate::one_world::Manifest::path_in(&e.path());
+            let modified_ms = fs::metadata(manifest)
+                .ok()?
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64);
+            // A damaged manifest is skipped here; the info command reports it.
+            let info = one_world_info_at(&e.path()).ok()?;
+            let m = crate::one_world::Manifest::load(&e.path()).ok().flatten();
+            let jobs = m.as_ref().map_or_else(Vec::new, |m| {
+                crate::one_world::job_records(&e.path(), m)
+                    .into_iter()
+                    .map(|j| JobEntry {
+                        name: j.name,
+                        settings: j.settings,
+                        bbox: j.bbox,
+                        done: j.status.done,
+                        total: j.status.total,
+                        finished: j.status.finished,
+                        last_run_ms: j.status.last_run_ms,
+                    })
+                    .collect()
+            });
+            Some(OneWorldEntry {
+                name: e.file_name().to_string_lossy().into_owned(),
+                modified_ms,
+                info,
+                bbox: m.as_ref().and_then(|m| m.bounds()),
+                place_name: m.and_then(|m| m.place_name),
+                jobs,
+                preview: thumbnail_source(&e.path()).is_some(),
+            })
+        })
+        .collect();
+    worlds.sort_by_key(|w| std::cmp::Reverse(w.modified_ms));
+    Ok(worlds)
+}
+
+fn one_world_info_at(world_path: &Path) -> Result<OneWorldInfo, String> {
+    let manifest = crate::one_world::Manifest::load(world_path)?;
     let foreign = manifest.is_none()
         && world_path.exists()
-        && fs::read_dir(&world_path)
+        && fs::read_dir(world_path)
             .map(|mut d| d.next().is_some())
             .unwrap_or(false);
     Ok(OneWorldInfo {
         world_path: world_path.display().to_string(),
         exists: manifest.is_some(),
         foreign,
-        locked: manifest.is_some() && crate::world_utils::world_is_locked(&world_path),
+        locked: manifest.is_some() && crate::world_utils::world_is_locked(world_path),
         area_count: manifest.as_ref().map(|m| m.areas.len()).unwrap_or(0),
         scale: manifest.as_ref().map(|m| m.scale),
         height_multiplier: manifest.as_ref().map(|m| m.height_multiplier),
@@ -1384,6 +1553,10 @@ fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldI
         terrain: manifest.as_ref().map(|m| m.terrain),
         disable_height_limit: manifest.as_ref().map(|m| m.disable_height_limit),
         aws_only_elevation: manifest.as_ref().map(|m| m.aws_only_elevation),
+        origin_lat: manifest.as_ref().map(|m| m.origin_lat),
+        knee_m: manifest
+            .as_ref()
+            .and_then(|m| m.elevation.as_ref()?.soft_top.as_ref().map(|t| t.knee_m)),
         revision: manifest.as_ref().map(|m| m.next_area_id).unwrap_or(0),
     })
 }
@@ -1453,6 +1626,93 @@ fn gui_get_one_world_overlays(world_path: String) -> Result<Option<OneWorldOverl
         scale: manifest.scale,
         areas: out,
     }))
+}
+
+/// How a job in pieces would cut the selection, with its estimates: the line `--plan-units`
+/// prints, from the same plan the job runs. Reads the world, writes nothing.
+#[tauri::command(async)]
+fn gui_plan_job(
+    save_path: String,
+    world_name: String,
+    bbox_text: String,
+    world_scale: f64,
+    flags: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let mut args = confluence_args(&flags, true, "java")?;
+    if !args.units.coordinates() {
+        return Err("Only a job built in pieces has a plan.".to_string());
+    }
+    crate::args::validate_scale(world_scale)?;
+    args.scale = world_scale;
+    let size = args
+        .units
+        .unit_regions
+        .unwrap_or(crate::args::UnitSize::N(crate::scale::DEFAULT_UNIT_REGIONS));
+    let world_dir = one_world_dir(&save_path, &world_name);
+    let bbox = LLBBox::from_str(&bbox_text)?;
+    let mut line = crate::work_units::plan_line(&world_dir, &bbox, &args, size)?;
+    let proj = crate::one_world::frame_for(&world_dir, &bbox, &args)?;
+    // With an outline, the pieces it leaves out too, for the map to grey: the same plan
+    // without it, less the pieces the outline touches.
+    let mask = args.units.plan_mask.take();
+    let all = crate::work_units::plan(&proj, &bbox, &args, size)?;
+    // Pieces around the job still within 5% stretch, drawn faint: room to grow later. Auto
+    // sizes show the job's largest piece.
+    let n = match size {
+        crate::args::UnitSize::N(n) => n,
+        crate::args::UnitSize::Auto => all.units.iter().map(|u| u.size).max().unwrap_or(1),
+    };
+    line["room"] = crate::work_units::room(&proj, &all.rect, n, 0.05, 400)
+        .iter()
+        .map(|b| b.arg())
+        .collect();
+    if let Some(path) = mask {
+        let mask = crate::work_units::Mask::load(&path, &proj, &all.rect)?;
+        line["excluded"] = all
+            .units
+            .iter()
+            .filter(|u| !mask.touches(&u.rect))
+            .map(|u| u.bbox.arg())
+            .collect();
+    }
+    Ok(line)
+}
+
+/// An outline picked on the map, as the file `--plan-mask` reads: named by its content in
+/// the temp folder, and read back the way the job reads it.
+#[tauri::command]
+fn gui_write_plan_mask(geojson: String) -> Result<String, String> {
+    use std::hash::Hasher;
+    let mut h = fnv::FnvHasher::default();
+    h.write(geojson.as_bytes());
+    let path = env::temp_dir().join(format!("arnis-plan-mask-{:016x}.geojson", h.finish()));
+    fs::write(&path, &geojson).map_err(|e| format!("{}: {e}", path.display()))?;
+    crate::work_units::Mask::read(&path)?;
+    // The outline it replaces is read by nothing any more: a job loads its mask as it starts.
+    static LAST: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(old) = last.replace(path.clone()).filter(|old| *old != path) {
+        let _ = fs::remove_file(old);
+    }
+    Ok(path.display().to_string())
+}
+
+/// Removes the outlines [`gui_write_plan_mask`] left in `dir` older than `max_age`.
+fn remove_old_plan_masks(dir: &Path, max_age: std::time::Duration) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > max_age));
+        if old && name.starts_with("arnis-plan-mask-") && name.ends_with(".geojson") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Reveals a file or folder in the system file explorer.
@@ -1672,6 +1932,101 @@ impl Drop for BusySlot {
     fn drop(&mut self) {
         BUSY.store(BUSY_IDLE, std::sync::atomic::Ordering::Release);
     }
+}
+
+/// The long flag names the window sends (`js/meld-features.js`). Anything else in `flags` is
+/// refused: the pieces repeat `flags` verbatim, so a flag the parent ignores would reach them.
+const WINDOW_FLAGS: &[&str] = &[
+    "one-world-workers",
+    "only-pieces",
+    "unit-regions",
+    "snap-regions",
+    "margin-regions",
+    "piece-order",
+    "skip-built",
+    "skip-cells",
+    "stitch-map",
+    "plan-mask",
+    "threads",
+    "ram-budget-mb",
+    "max-downloads",
+];
+
+/// `flags` as the window may send them: `--name` or `--name=value`, the name one of
+/// [`WINDOW_FLAGS`] (all of them `--capabilities` flags).
+fn check_window_flags(flags: &[String]) -> Result<(), String> {
+    for flag in flags {
+        let name = flag.strip_prefix("--").and_then(|f| f.split('=').next());
+        if !name.is_some_and(|n| WINDOW_FLAGS.contains(&n)) {
+            return Err(format!("{flag}: not a setting the window can pass."));
+        }
+    }
+    Ok(())
+}
+
+/// The "Meld features" settings, parsed by the CLI's own parser so the window accepts exactly
+/// what the flags accept, and checked the way `validate_args` checks them: the window never
+/// runs it. No flags is the stock run.
+fn confluence_args(flags: &[String], one_world: bool, world_format: &str) -> Result<Args, String> {
+    use clap::Parser;
+    check_window_flags(flags)?;
+    let mut extra =
+        Args::try_parse_from(std::iter::once("arnis").chain(flags.iter().map(String::as_str)))
+            .map_err(|e| {
+                let text = e.to_string();
+                let line = text.lines().next().unwrap_or_default();
+                line.trim_start_matches("error: ").to_string()
+            })?;
+    // Pieces are a One World feature; anywhere else the fields are inert.
+    if !one_world {
+        extra.units = Default::default();
+    }
+    extra.one_world = one_world;
+    extra.bedrock = world_format == "bedrock";
+    extra.luanti = world_format.starts_with("luanti");
+    if extra.units.only_pieces.is_some() && !extra.units.coordinates() {
+        return Err("Retrying pieces only applies to a job built in pieces.".to_string());
+    }
+    Ok(extra)
+}
+
+/// Pause holds a job's queue: the running pieces finish, none starts until Resume.
+#[tauri::command]
+fn gui_pause_generation(paused: bool) {
+    crate::scale::PAUSE.store(paused, std::sync::atomic::Ordering::Release);
+}
+
+/// Stop: a job kills its running pieces and keeps the finished ones, so starting the same
+/// area again resumes it.
+#[tauri::command]
+fn gui_stop_generation() {
+    crate::scale::STOP.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// A cell action on the running job (`hold`, `resume`, `front`, `cancel`, `retry`, `skip`,
+/// `include`) for the cells given by plan index; an error when no job runs.
+#[tauri::command]
+fn gui_cells_control(
+    action: String,
+    cells: Vec<u32>,
+) -> Result<crate::scale::CellsControlResult, String> {
+    crate::scale::control(&action, &cells)
+}
+
+/// Deletes the region files of the given cells (plan indexes) of `job` (default: the job run
+/// last) and takes them out of the manifest; refused while a job, live mode or Minecraft has
+/// the world.
+#[tauri::command(async)]
+fn gui_cells_remove(
+    world_path: String,
+    cells: Vec<u32>,
+    job: Option<String>,
+) -> Result<crate::one_world::RemoveReport, String> {
+    let world = PathBuf::from(world_path);
+    if live_plays(&world) {
+        return Err("Live mode is playing this world. Stop it first.".to_string());
+    }
+    crate::one_world::remove_cells(&world, job.as_deref(), &cells)
 }
 
 // Everything before the `spawn` below - the spawn point written into level.dat -
@@ -2727,6 +3082,237 @@ mod locale_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Startup removes only plan outlines, and only old ones.
+    #[test]
+    fn old_plan_masks_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = std::time::Duration::from_secs(24 * 3600);
+        let file = |name: &str, age: u32| {
+            let p = dir.path().join(name);
+            let f = fs::File::create(&p).unwrap();
+            f.set_modified(std::time::SystemTime::now() - day * age)
+                .unwrap();
+            p
+        };
+        let old = file("arnis-plan-mask-0000000000000001.geojson", 2);
+        let new = file("arnis-plan-mask-0000000000000002.geojson", 0);
+        let other = file("other.geojson", 2);
+        remove_old_plan_masks(dir.path(), day);
+        assert!(!old.exists() && new.exists() && other.exists());
+    }
+
+    /// The switch off sends no flags, and no flags leave every setting at the stock run's.
+    #[test]
+    fn switch_off_passes_no_new_flags() {
+        use clap::Parser;
+        let extra = confluence_args(&[], false, "java").unwrap();
+        let stock = Args::try_parse_from(["arnis"]).unwrap();
+        assert_eq!(format!("{extra:?}"), format!("{stock:?}"));
+    }
+
+    /// Every flag the window can send is one the CLI parser takes.
+    #[test]
+    fn every_flag_the_window_sends_parses() {
+        let flags: Vec<String> = ["--ram-budget-mb=4096", "--threads=4"]
+            .map(String::from)
+            .to_vec();
+        let extra = confluence_args(&flags, false, "java").unwrap();
+        assert!(extra.threads == Some(4) && extra.ram_budget_mb == Some(4096));
+    }
+
+    /// The window draws the plan the job would run, from the same flags, and writes nothing.
+    #[test]
+    fn the_window_plans_the_job_it_would_run() {
+        let dir = std::env::temp_dir().join(format!("arnis-plan-{}", std::process::id()));
+        let save = dir.display().to_string();
+        let bbox = "44.4450,26.0950,44.4480,26.1030";
+        let plan = |flags: &[&str]| {
+            let flags = flags.iter().map(|f| f.to_string()).collect();
+            gui_plan_job(save.clone(), "W".into(), bbox.into(), 1.0, flags)
+        };
+        assert!(plan(&[]).is_err(), "no pieces, no plan");
+        let bad = gui_plan_job(
+            save.clone(),
+            "W".into(),
+            bbox.into(),
+            f64::NAN,
+            vec!["--one-world-workers=2".into()],
+        );
+        assert!(bad.is_err(), "a scale that is not a number has no plan");
+        let p = plan(&[
+            "--one-world-workers=2",
+            "--unit-regions=1",
+            "--snap-regions=cover",
+        ])
+        .unwrap();
+        let units = p["units"].as_array().unwrap();
+        assert_eq!(units.len(), 4);
+        assert!(units.iter().all(|u| u["size"] == 1 && u["done"] == false));
+        assert_eq!(p["estimate"]["workers"], 2);
+        assert!(units.iter().all(|u| u["ring"] == false));
+        // A margin of one region: 4 pieces inside, a ring of 12 around them.
+        let p = plan(&[
+            "--one-world-workers=2",
+            "--unit-regions=1",
+            "--snap-regions=cover",
+            "--margin-regions=1",
+        ])
+        .unwrap();
+        let units = p["units"].as_array().unwrap();
+        assert_eq!(units.len(), 16);
+        assert_eq!(units.iter().filter(|u| u["ring"] == true).count(), 12);
+        assert!(!dir.exists());
+    }
+
+    /// The names the window may send exist, and nothing else gets through.
+    #[test]
+    fn only_the_windows_own_flags_are_accepted() {
+        let known: Vec<String> = serde_json::from_str(&crate::args::capabilities_json()).unwrap();
+        for name in WINDOW_FLAGS {
+            assert!(known.iter().any(|k| k == name), "--{name} is not a flag");
+        }
+        for bad in [
+            "--output-dir=x",
+            "--path",
+            "--spawn-lat=1",
+            "threads=1",
+            "--world-name=a",
+        ] {
+            assert!(check_window_flags(&[bad.to_string()]).is_err(), "{bad}");
+        }
+        assert!(check_window_flags(&["--threads=1".into(), "--unit-regions=2".into()]).is_ok());
+    }
+
+    #[test]
+    fn lists_only_one_worlds_newest_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save = tmp.path();
+        let manifest = |name: &str| {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&save.join(name), &mut args, 40.0, -74.0).unwrap();
+        };
+        manifest("old");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        manifest("new");
+        fs::create_dir_all(save.join("plain")).unwrap();
+        fs::write(save.join("file.txt"), "x").unwrap();
+        let names: Vec<_> = gui_list_one_worlds(save.display().to_string())
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, ["new", "old"]);
+        let missing = save.join("nope").display().to_string();
+        assert!(gui_list_one_worlds(missing).unwrap().is_empty());
+    }
+
+    /// No image, no thumbnail; with one, a data URL at most 320 px wide, kept beside the world.
+    #[test]
+    fn a_thumbnail_is_made_once_from_a_preview() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = tmp.path().join("w");
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&world, &mut args, 40.0, -74.0).unwrap();
+        }
+        let path = world.display().to_string();
+        assert_eq!(gui_world_thumbnail(path.clone()).unwrap(), None);
+        assert!(!gui_list_one_worlds(tmp.path().display().to_string()).unwrap()[0].preview);
+        let previews = world.join(crate::one_world::PREVIEW_DIR);
+        fs::create_dir_all(&previews).unwrap();
+        image::RgbImage::new(640, 100)
+            .save(previews.join("area-1.png"))
+            .unwrap();
+        assert!(gui_list_one_worlds(tmp.path().display().to_string()).unwrap()[0].preview);
+        let url = gui_world_thumbnail(path.clone()).unwrap().unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+        let thumb = world.join(THUMB_FILE);
+        assert_eq!(image::open(&thumb).unwrap().width(), 320);
+        let made = fs::metadata(&thumb).unwrap().modified().unwrap();
+        assert_eq!(gui_world_thumbnail(path).unwrap().unwrap(), url);
+        assert_eq!(
+            fs::metadata(&thumb).unwrap().modified().unwrap(),
+            made,
+            "kept"
+        );
+    }
+
+    /// A place name is stored, cleared by an empty one, and refused while the world is in use.
+    #[test]
+    fn a_place_name_is_set_and_cleared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = tmp.path().join("w");
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&world, &mut args, 40.0, -74.0).unwrap();
+        }
+        let path = world.display().to_string();
+        let place = || {
+            gui_list_one_worlds(tmp.path().display().to_string()).unwrap()[0]
+                .place_name
+                .clone()
+        };
+        gui_set_place_name(path.clone(), " Bucharest ".into()).unwrap();
+        assert_eq!(place().as_deref(), Some("Bucharest"));
+        let held = SessionLock::acquire(&world).unwrap();
+        assert_eq!(
+            gui_set_place_name(path.clone(), "Paris".into()),
+            Err(WORLD_IN_USE.to_string())
+        );
+        drop(held);
+        gui_set_place_name(path, String::new()).unwrap();
+        assert_eq!(place(), None);
+    }
+
+    /// A renamed One World lists under its new name.
+    #[test]
+    fn a_renamed_world_lists_under_its_new_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&tmp.path().join("w"), &mut args, 40.0, -74.0).unwrap();
+        }
+        let save = tmp.path().display().to_string();
+        let new = gui_rename_world(save.clone(), "w".into(), "Paris".into()).unwrap();
+        let list = gui_list_one_worlds(save).unwrap();
+        assert_eq!((new.as_str(), list[0].name.as_str()), ("Paris", "Paris"));
+        assert!(list[0].info.exists);
+    }
+
+    /// An old world lists with no place and no jobs; a recorded job lists with its settings.
+    #[test]
+    fn listed_worlds_carry_their_jobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = tmp.path().join("w");
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&world, &mut args, 40.0, -74.0).unwrap();
+        }
+        let list = || gui_list_one_worlds(tmp.path().display().to_string()).unwrap();
+        let old = &list()[0];
+        assert!(old.place_name.is_none() && old.jobs.is_empty() && old.bbox.is_none());
+        let flags = vec!["--unit-regions=8".to_string()];
+        crate::one_world::record_job(
+            &world,
+            "j",
+            Some(&flags),
+            Some([1.0, 2.0, 3.0, 4.0]),
+            2,
+            5,
+            false,
+        )
+        .unwrap();
+        let job = &list()[0].jobs[0];
+        assert_eq!(job.bbox, Some([1.0, 2.0, 3.0, 4.0]));
+        assert_eq!((job.name.as_str(), job.settings.clone()), ("j", flags));
+        assert_eq!((job.done, job.total, job.finished), (2, 5, false));
+    }
 
     #[test]
     fn a_one_world_off_java_or_off_earth_is_refused() {

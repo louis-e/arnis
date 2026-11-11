@@ -1203,6 +1203,72 @@ pub fn start_in_survival(world: &Path) -> Result<(), String> {
     write_gzip_nbt(&path, &root)
 }
 
+/// Why `name` cannot name a world folder, if it cannot.
+fn bad_world_name(name: &str) -> Option<&'static str> {
+    const RESERVED: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let stem = name.split('.').next().unwrap_or_default().trim_end();
+    if name.is_empty() {
+        Some("The name is empty.")
+    } else if name.chars().count() > 80 {
+        Some("The name is longer than 80 characters.")
+    } else if name
+        .chars()
+        .any(|c| c.is_control() || r#"<>:"/\|?*"#.contains(c))
+    {
+        Some(r#"The name cannot hold < > : " / \ | ? *"#)
+    } else if name.ends_with(['.', ' ']) || name.starts_with(' ') {
+        Some("The name cannot start with a space or end with a space or dot.")
+    } else if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(stem)) {
+        Some("Windows reserves that name.")
+    } else {
+        None
+    }
+}
+
+/// Renames the world folder `old` in `save` to `new` and sets its `LevelName` to match.
+/// Refused while Minecraft or a run holds the world; returns the new folder name.
+pub fn rename_world(save: &Path, old: &str, new: &str) -> Result<String, String> {
+    let new = new.trim();
+    if let Some(why) = bad_world_name(new) {
+        return Err(why.to_string());
+    }
+    let from = save.join(old);
+    if bad_world_name(old).is_some() || !from.join("level.dat").is_file() {
+        return Err(format!("{old} is not a world in this folder."));
+    }
+    if new == old {
+        return Ok(new.to_string());
+    }
+    let to = save.join(new);
+    // A change of case only is the same folder on Windows and macOS.
+    if to.exists() && new.to_lowercase() != old.to_lowercase() {
+        return Err(format!("A world named {new} already exists."));
+    }
+    drop(SessionLock::acquire(&from).map_err(|_| {
+        "The world is in use; close it in Minecraft or wait for the run.".to_string()
+    })?);
+    let mut level = read_gzip_nbt(&from.join("level.dat"))?;
+    match &mut level {
+        Value::Compound(root) => match root.get_mut("Data") {
+            Some(Value::Compound(data)) => {
+                data.insert("LevelName".to_string(), Value::String(new.to_string()));
+            }
+            _ => return Err("level.dat has no Data compound.".to_string()),
+        },
+        _ => return Err("level.dat root is not a compound.".to_string()),
+    }
+    fs::rename(&from, &to).map_err(|e| format!("Failed to rename the world folder: {e}"))?;
+    if let Err(e) = write_gzip_nbt(&to.join("level.dat"), &level) {
+        // Folder and name change together or not at all.
+        let _ = fs::rename(&to, &from);
+        return Err(e);
+    }
+    Ok(new.to_string())
+}
+
 /// `Data.LevelName` of a world's `level.dat`.
 pub(crate) fn level_name(world: &Path) -> Option<String> {
     let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
@@ -1469,6 +1535,49 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rename moves the folder and the LevelName together, and refuses a clash, path
+    /// characters, reserved names and a world in use.
+    #[test]
+    fn a_world_is_renamed_with_its_level_name() {
+        let save = tempfile::tempdir().unwrap();
+        let world = create_new_world_with_name(save.path(), Some("First")).unwrap();
+        create_new_world_with_name(save.path(), Some("Taken")).unwrap();
+        assert_eq!(
+            rename_world(save.path(), "First", " Second ").unwrap(),
+            "Second"
+        );
+        assert!(!Path::new(&world).exists());
+        assert_eq!(
+            super::level_name(&save.path().join("Second")).as_deref(),
+            Some("Second")
+        );
+        for bad in [
+            "Taken",
+            "a/b",
+            r"a\b",
+            "x:y",
+            "",
+            "CON",
+            "nul.txt",
+            "dot.",
+            &"x".repeat(81),
+        ] {
+            assert!(rename_world(save.path(), "Second", bad).is_err(), "{bad:?}");
+        }
+        assert!(rename_world(save.path(), "..", "Third").is_err());
+        let held = SessionLock::acquire(&save.path().join("Second")).unwrap();
+        assert!(rename_world(save.path(), "Second", "Third").is_err());
+        drop(held);
+        assert_eq!(
+            rename_world(save.path(), "Second", "second").unwrap(),
+            "second"
+        );
+        assert_eq!(
+            super::level_name(&save.path().join("second")).as_deref(),
+            Some("second")
+        );
+    }
 
     /// Disk at the peak of real runs, Oct 2026: 9 km² boxes at scale 1 unless the area says.
     #[test]
