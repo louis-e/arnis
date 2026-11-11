@@ -1,6 +1,7 @@
 // Run: node tests/gui/one-world-shapes.mjs
-// One World not in pieces builds the rectangle around the drawn shapes: Start is not blocked,
-// the run carries the shapes' bbox and no shapes, and the legend names the rectangle.
+// With Advanced features, One World not in pieces builds the rectangle around the drawn shapes:
+// the run carries the shapes' bbox and no shapes, and the legend names the rectangle. Off, One
+// World takes rectangles only, as before.
 import assert from 'node:assert';
 import fs from 'node:fs';
 
@@ -14,11 +15,11 @@ assert.deepStrictEqual(globalThis.arnisShapesRect(shapes), [44.44, 26.09, 44.47,
 assert.strictEqual(generationShapes({ oneWorld: true, shapes }), null, 'One World sends no shapes');
 assert.strictEqual(generationShapes({ oneWorld: false, shapes }), shapes, 'another run keeps them');
 
-// Start no longer refuses shapes under One World or Live, and the tool is never locked.
+// Advanced off: Start refuses shapes under One World or Live, and the map locks the shape tool.
 const main = fs.readFileSync(new URL('../../src/gui/js/main.js', import.meta.url), 'utf8');
-assert.ok(!main.includes('"shapes_one_world", "#fa7878"'), 'the note is not an error');
-assert.ok(!/selectedShapes && \(/.test(main), 'Start does not return early for shapes');
-assert.ok(!fs.readFileSync(new URL('../../src/gui/js/bbox.js', import.meta.url), 'utf8').includes('setShapesLocked'));
+assert.ok(main.includes('if (selectedShapes && (isLiveMode() || isOneWorldEnabled()) && !meldOn())'), 'Start refuses shapes only with Advanced off');
+assert.ok(main.includes("mode: !meld ? 'locked'"), 'the map is told to lock the tool with Advanced off');
+assert.ok(fs.readFileSync(new URL('../../src/gui/js/bbox.js', import.meta.url), 'utf8').includes("setShapesLocked(_shapesMode === 'locked')"));
 
 const rows = legendRows({ cells: [], stretch: [], shape: true, rect: true });
 assert.deepStrictEqual(rows.map((r) => r.key), ['legend_shape_rect'], 'the shape row is for pieces only');

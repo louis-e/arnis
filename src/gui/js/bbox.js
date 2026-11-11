@@ -948,8 +948,10 @@ $(document).ready(function () {
     var sliderControl = null;
     // One World: the user hid the areas, and the world they were hidden for.
     var oneWorldOverlayHidden = false;
-    // Balance slider positions (-100..100, 0 = both layers at their default), per kind.
-    var overlayOpacity = { world: 0, oneWorld: 0 };
+    // Slider positions per kind: the opacity (0..100; a One World opaque by default), and with
+    // Advanced features the balance (-100..100, 0 = both layers at their default).
+    var overlayOpacity = { world: 70, oneWorld: 100 };
+    var overlayBalance = { world: 0, oneWorld: 0 };
     // On the map-first page the world's preview images draw under the selection and the piece
     // outlines (overlayPane is 400); Classic keeps them in overlayPane.
     map.createPane('arnisPreview').style.zIndex = 350;
@@ -1034,31 +1036,58 @@ $(document).ready(function () {
         return slider ? Number(slider.value) : 0;
     }
 
-    // Fade the world overlay (left of centre) or the cell overlay (right of centre).
-    function applyBalance() {
-        var f = window.arnisBalance(balanceValue(), worldBaseOpacity());
-        setWorldOverlayOpacity(f.world);
-        cellsPane.style.opacity = cellLabelsPane.style.opacity = String(f.cells);
-        cellsPane.style.display = cellLabelsPane.style.display = f.cells <= 0 ? 'none' : '';
+    // The slider is the balance with Advanced features on, the plain opacity otherwise.
+    function balanceOn() {
+        return Boolean(window.arnisMeldOn);
     }
 
-    // The slider shows while either layer is on the map.
+    function sliderKind() {
+        return worldOverlayData && worldOverlayData.areas ? 'oneWorld' : 'world';
+    }
+
+    function worldOpacity() {
+        return balanceOn() ? window.arnisBalance(balanceValue(), worldBaseOpacity()).world : balanceValue() / 100;
+    }
+
+    // Fade the world overlay (left of centre) or the cell overlay (right of centre).
+    function applyBalance() {
+        var cells = balanceOn() ? window.arnisBalance(balanceValue(), worldBaseOpacity()).cells : 1;
+        setWorldOverlayOpacity(worldOpacity());
+        cellsPane.style.opacity = cellLabelsPane.style.opacity = String(cells);
+        cellsPane.style.display = cellLabelsPane.style.display = cells <= 0 ? 'none' : '';
+    }
+
+    // The slider shows while the world overlay (or, as the balance, the cells) is on the map.
     function updateSliderVisibility() {
         var box = document.getElementById('world-preview-slider-container');
         if (!box) return;
-        box.style.display = worldOverlay || lastPieces.length ? 'flex' : 'none';
+        var balance = balanceOn();
+        box.style.display = !(worldOverlay || (balance && lastPieces.length)) ? 'none' : balance ? 'flex' : 'block';
         // Read each time, so a language change reaches it.
-        box.title = mapText('map_balance_tip', 'Left fades the world tiles, right fades the cells. Double-click to reset.');
+        box.title = balance ? mapText('map_balance_tip', 'Left fades the world tiles, right fades the cells. Double-click to reset.') : '';
     }
 
-    // Create the balance slider as a proper Leaflet control
+    // The Advanced features switch turns the slider into the balance and back.
+    function syncSliderMode() {
+        var slider = document.getElementById('world-preview-opacity');
+        var box = document.getElementById('world-preview-slider-container');
+        if (!slider || !box) return;
+        var balance = balanceOn();
+        box.classList.toggle('is-balance', balance);
+        slider.min = balance ? '-100' : '0';
+        slider.title = balance ? '' : 'Overlay Opacity';
+        slider.value = String((balance ? overlayBalance : overlayOpacity)[sliderKind()]);
+        applyBalance();
+        updateSliderVisibility();
+    }
+
+    // Create the opacity slider as a proper Leaflet control
     var SliderControl = L.Control.extend({
         options: { position: 'topleft' },
         onAdd: function(map) {
             var container = L.DomUtil.create('div', 'leaflet-bar world-preview-slider-container');
             container.id = 'world-preview-slider-container';
             container.style.display = 'none';
-            container.title = mapText('map_balance_tip', 'Left fades the world tiles, right fades the cells. Double-click to reset.');
 
             // Tiles on the left, the grid on the right: what each end fades.
             var icon = function (paths) {
@@ -1070,20 +1099,21 @@ $(document).ready(function () {
             var track = L.DomUtil.create('span', 'world-preview-slider-track', container);
             var slider = L.DomUtil.create('input', 'world-preview-slider', track);
             slider.type = 'range';
-            slider.min = '-100';
+            slider.min = '0';
             slider.max = '100';
-            slider.value = '0';
+            slider.value = '70';
             slider.id = 'world-preview-opacity';
+            slider.title = 'Overlay Opacity';
             L.DomUtil.create('i', 'world-preview-slider-tick', track);
             icon('<rect x="2" y="2" width="12" height="12"/><path d="M8 2v12M2 8h12"/>');
 
             L.DomEvent.on(slider, 'input', function(e) {
-                var kind = worldOverlayData && worldOverlayData.areas ? 'oneWorld' : 'world';
-                overlayOpacity[kind] = Number(e.target.value);
+                (balanceOn() ? overlayBalance : overlayOpacity)[sliderKind()] = Number(e.target.value);
                 applyBalance();
             });
-            // Double-click puts the thumb back at the centre.
+            // Double-click puts the balance back at the centre.
             L.DomEvent.on(slider, 'dblclick', function() {
+                if (!balanceOn()) return;
                 slider.value = '0';
                 slider.dispatchEvent(new Event('input'));
             });
@@ -1152,7 +1182,7 @@ $(document).ready(function () {
                 map.removeLayer(worldOverlay);
             }
 
-            worldOverlay = buildWorldOverlay(data, window.arnisBalance(balanceValue(), worldBaseOpacity()).world);
+            worldOverlay = buildWorldOverlay(data, worldOpacity());
             worldOverlay.addTo(map);
 
             if (btn) {
@@ -1184,8 +1214,7 @@ $(document).ready(function () {
         worldOverlayData = data;
         worldPreviewAvailable = true;
         var slider = document.getElementById('world-preview-opacity');
-        var kept = overlayOpacity[data.areas ? 'oneWorld' : 'world'];
-        if (slider) slider.value = String(kept || 0);
+        if (slider) slider.value = String((balanceOn() ? overlayBalance : overlayOpacity)[sliderKind()]);
         var btn = document.getElementById('world-preview-btn');
         if (btn) {
             btn.classList.remove('disabled');
@@ -2000,16 +2029,21 @@ $(document).ready(function () {
             window.arnisMapFirst = Boolean(event.data.mapFirst);
             document.body.classList.toggle('map-first', window.arnisMapFirst);
             if (!window.arnisMeldOn && planMask) setPlanMask(null);
-            if (was !== window.arnisMeldOn) refreshBboxHandles();
+            if (was !== window.arnisMeldOn) {
+                refreshBboxHandles();
+                syncSliderMode();
+            }
         }
 
         // One World keeps rotation at 0.
         if (event.data && event.data.type === 'setRotationLocked') {
             setRotationLocked(!!event.data.locked);
         }
-        // One World not built in pieces builds the rectangle around the shapes; in pieces it keeps them.
+        // One World takes rectangles only ('locked'); with Advanced features it builds the
+        // rectangle around the shapes ('rect'), and in pieces keeps them ('pieces').
         if (event.data && event.data.type === 'setShapesMode') {
             _shapesMode = event.data.mode || '';
+            setShapesLocked(_shapesMode === 'locked');
             refreshShapesRect();
         }
 
@@ -2223,6 +2257,8 @@ $(document).ready(function () {
         };
     };
 
+    // One World and live mode generate rectangles only (with Advanced features off).
+    var _shapesLocked = false;
 
     // Custom icon for drawn markers
     var customMarkerIcon = L.icon({
@@ -2348,7 +2384,7 @@ $(document).ready(function () {
         if (c.contains('leaflet-draw-draw-rectangle')) {
             return {
                 name: mapText('map_tool_area', 'Select area'),
-                desc: mapText('map_tool_area_desc', 'Drag over the map to choose what gets generated.') + ' ' + addHint
+                desc: mapText('map_tool_area_desc', 'Drag over the map to choose what gets generated.') + (_shapesLocked ? '' : ' ' + addHint)
             };
         }
         if (c.contains('leaflet-draw-draw-polygon')) {
@@ -2357,7 +2393,8 @@ $(document).ready(function () {
                 desc: (_shapesMode === 'rect' ? '' : (_shapesMode === 'pieces'
                     ? mapText('map_tool_shape_pieces_desc', 'A cell the shape touches is built in full.')
                     : mapText('map_tool_shape_desc', 'Click around the area to generate exactly that outline.')) + ' ') + addHint,
-                note: _shapesMode === 'rect' ? mapText('map_tool_shape_one_world', 'One World builds the rectangle around the shape. Building in cells keeps the shape itself.') : ''
+                note: _shapesLocked ? mapText('map_tool_shape_rectangles_only', 'One World generates rectangles only.')
+                    : _shapesMode === 'rect' ? mapText('map_tool_shape_one_world', 'One World builds the rectangle around the shape. Building in cells keeps the shape itself.') : ''
             };
         }
         if (c.contains('leaflet-draw-draw-polyline')) {
@@ -2384,7 +2421,8 @@ $(document).ready(function () {
             return {
                 name: mapText('map_tool_clear', 'Clear selection'),
                 desc: mapText('map_tool_clear_desc', 'Removes the selected area and the spawn point.'),
-                note: drawnItems.getLayers().length ? mapText('map_tool_clear_hold', 'Hold to clear') : mapText('map_tool_clear_empty', 'Nothing is selected yet.')
+                note: !drawnItems.getLayers().length ? mapText('map_tool_clear_empty', 'Nothing is selected yet.')
+                    : window.arnisMeldOn ? mapText('map_tool_clear_hold', 'Hold to clear') : ''
             };
         }
         if (btn.id === 'world-preview-btn') {
@@ -2639,6 +2677,32 @@ $(document).ready(function () {
 
     var _rotationLocked = false;
 
+    function setShapesLocked(locked) {
+        _shapesLocked = locked;
+        var btn = document.querySelector('.leaflet-draw-toolbar .leaflet-draw-draw-polygon');
+        if (!btn) return;
+        if (locked && drawControl._toolbars.draw._activeMode &&
+            drawControl._toolbars.draw._activeMode.handler.type === 'polygon') {
+            drawControl._toolbars.draw._activeMode.handler.disable();
+        }
+        btn.classList.toggle('leaflet-disabled', locked);
+        btn.setAttribute('aria-disabled', locked ? 'true' : 'false');
+        refreshToolLabel(btn);
+        var rect = document.querySelector('.leaflet-draw-toolbar .leaflet-draw-draw-rectangle');
+        if (rect) refreshToolLabel(rect);
+    }
+
+    // Stops a locked tool before Leaflet.draw's own click handler starts it.
+    (function guardShapeTool() {
+        var btn = document.querySelector('.leaflet-draw-toolbar .leaflet-draw-draw-polygon');
+        if (!btn) return;
+        btn.addEventListener('click', function (e) {
+            if (!_shapesLocked) return;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }, true);
+    })();
+
     function setRotationLocked(locked) {
         _rotationLocked = locked;
         if (locked && _angleToolActive) stopAngleTool();
@@ -2809,19 +2873,23 @@ $(document).ready(function () {
         drawnItems.on('layeradd layerremove', syncState);
         syncState();
 
-        // A click does nothing: clearing needs the button held (CLEAR_HOLD_MS), with a fill
-        // growing on it; letting go early cancels. Space or Enter held works too.
-        L.DomEvent
-            .on(btn, 'mousedown dblclick', L.DomEvent.stopPropagation)
-            .on(btn, 'click', L.DomEvent.stop);
-        window.arnisHold(btn, function () {
+        function clearAll() {
             var removed = L.layerGroup();
             drawnItems.eachLayer(function (l) { removed.addLayer(l); });
             if (removed.getLayers().length === 0) return;
             // The existing draw:deleted handler removes the layers, resets
             // the bounds, notifies the parent and refreshes the handles.
             map.fire('draw:deleted', { layers: removed });
-        }, window.arnisClearHoldMs, function () { return btn.classList.contains('leaflet-disabled'); });
+        }
+        // A click clears; with Advanced features the button has to be held (arnisClearHoldMs),
+        // with a fill growing on it, and letting go early cancels.
+        L.DomEvent
+            .on(btn, 'mousedown dblclick', L.DomEvent.stopPropagation)
+            .on(btn, 'click', L.DomEvent.stop)
+            .on(btn, 'click', function () { if (!window.arnisMeldOn) clearAll(); });
+        window.arnisHold(btn, clearAll, window.arnisClearHoldMs, function () {
+            return !window.arnisMeldOn || btn.classList.contains('leaflet-disabled');
+        });
     })();
 
     // Terrain preview button: usable once the selected bbox fits the 3D
@@ -3219,7 +3287,7 @@ $(document).ready(function () {
 
     map.on('draw:created', function (e) {
         var area = isArea(e.layer);
-        var adding = area && _drawing && _addToSelection && areaLayers().length > 0;
+        var adding = area && _drawing && _addToSelection && !_shapesLocked && areaLayers().length > 0;
 
         // No map copy holds an area across the 180° meridian, nor areas on both sides of it.
         var together = adding ? areaLayers().concat([e.layer]) : [e.layer];
@@ -3401,7 +3469,7 @@ function notifyBboxUpdate() {
 
 // One World not in pieces builds the rectangle around the shapes: shown dashed while it does.
 var shapesRectLayer = null;
-var _shapesMode = ''; // 'rect' (built as that rectangle) | 'pieces' | '' (One World off)
+var _shapesMode = ''; // 'locked' | 'rect' (built as that rectangle) | 'pieces' | '' (One World off)
 function refreshShapesRect() {
     if (shapesRectLayer) map.removeLayer(shapesRectLayer);
     shapesRectLayer = null;

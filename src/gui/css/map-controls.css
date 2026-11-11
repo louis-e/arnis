@@ -233,10 +233,33 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
-/* One balance slider: world tiles faded to the left, the cells to the right, both full at the
-   centre tick. */
-.world-preview-slider-container.leaflet-bar,
-.leaflet-touch .world-preview-slider-container.leaflet-bar {
+.world-preview-slider-container a {
+  display: none;
+}
+
+.world-preview-slider {
+  display: block;
+  width: 96px;
+  height: 8px;
+  margin: 0;
+  accent-color: var(--map-accent);
+  cursor: pointer;
+}
+
+/* The opacity slider alone; the icons and the centre mark are the balance slider's */
+.world-preview-slider-track {
+  display: block;
+}
+
+.world-preview-slider-container:not(.is-balance) .world-preview-slider-icon,
+.world-preview-slider-container:not(.is-balance) .world-preview-slider-tick {
+  display: none;
+}
+
+/* Advanced features: one balance slider, world tiles faded to the left, the cells to the
+   right, both full at the centre tick. */
+.world-preview-slider-container.leaflet-bar.is-balance,
+.leaflet-touch .world-preview-slider-container.leaflet-bar.is-balance {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -245,18 +268,14 @@
   padding: 5px 8px;
 }
 
-.world-preview-slider-container a {
-  display: none;
-}
-
 /* World tiles at one end, the grid at the other (the row follows the page direction) */
-.world-preview-slider-icon {
+.is-balance .world-preview-slider-icon {
   display: inline-flex;
   flex: none;
   color: var(--map-muted);
 }
 
-.world-preview-slider-track {
+.is-balance .world-preview-slider-track {
   position: relative;
   display: flex;
   align-items: center;
@@ -265,25 +284,22 @@
   height: 18px;
 }
 
-.world-preview-slider {
+.is-balance .world-preview-slider {
   position: relative;
-  display: block;
   width: 100%;
   height: 18px;
-  margin: 0;
   background: transparent;
   -webkit-appearance: none;
   appearance: none;
-  cursor: pointer;
 }
 
-.world-preview-slider::-webkit-slider-runnable-track {
+.is-balance .world-preview-slider::-webkit-slider-runnable-track {
   height: 8px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.28);
 }
 
-.world-preview-slider::-webkit-slider-thumb {
+.is-balance .world-preview-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 18px;

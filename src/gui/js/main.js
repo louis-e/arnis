@@ -11,7 +11,7 @@ import {
 } from './settings-store.js';
 import { initPreviews } from './preview-popover.js';
 import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
-import { resumeJob, placeForRun, t as oneWorldText, initMeldFeatures, initRunControls, initCellMenu, initDataPanel, initProjects, initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing, useRecommended, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls, meldFlags, setPlanMask, hasPlanMask, refreshStretch, progressText, etaDuration, holdsNotice, generationTarget, generationShapes } from './meld-features.js';
+import { resumeJob, placeForRun, t as oneWorldText, initMeldFeatures, initRunControls, initCellMenu, initDataPanel, initProjects, initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing, useRecommended, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls, meldFlags, setPlanMask, hasPlanMask, refreshStretch, progressText, holdsNotice, generationTarget, generationShapes } from './meld-features.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -58,6 +58,7 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
 
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
+  applyStoredLayout();
   registerMessageEvent();
   window.startGeneration = startGeneration;
   setupProgressListener();
@@ -92,6 +93,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   initEasterEggs();
   checkForUpdates();
 });
+
+// The stored Main Page Layout, before the first await: the store restores it only later, and a
+// Map first page would show as Classic until then (meld-features.js keeps it from there).
+function applyStoredLayout() {
+  try {
+    const values = JSON.parse(localStorage.getItem('arnis-settings') || '{}').values || {};
+    const mode = values['layout-select'];
+    document.body.classList.toggle('map-first', mode === 'map' || (mode === 'auto' && values['advanced-meld-features-toggle'] === true));
+  } catch (_) { /* the store's own restore sets it */ }
+}
 
 // Expose language functions to window for use by language-selector.js
 window.fetchLanguage = fetchLanguage;
@@ -963,7 +974,18 @@ function resetEta() {
   if (el) {
     el.classList.remove("visible");
     setEtaText(el, "");
+    el.removeAttribute("aria-label");
   }
+}
+
+function formatEtaDuration(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
 }
 
 // The estimate's label is two stacked copies (white over the fill, dark over the track; styles.css).
@@ -978,13 +1000,15 @@ function renderEta() {
   if (!eta || eta.shown == null) {
     el.classList.remove("visible");
     setEtaText(el, "");
+    el.removeAttribute("aria-label");
     return;
   }
   // Floor at 1s so it never reads "0s" before Done.
-  const value = etaDuration(Math.max(1, eta.shown));
-  // Only the estimate is on the bar; the elapsed time is in its tooltip (meld-features.js).
-  const tpl = (window.localization && window.localization.run_eta) || "≈{time} left";
-  setEtaText(el, tpl.replace("{time}", value));
+  const value = formatEtaDuration(Math.max(1, eta.shown));
+  setEtaText(el, value); // duration only on the bar; no "~" prefix
+  // Screen-reader context (the visible pill is just the duration). Hardcoded
+  // English to match the rest of the progress messages, which aren't localized.
+  el.setAttribute("aria-label", `Time remaining: ${value}`);
   el.classList.add("visible");
 }
 
@@ -1119,12 +1143,11 @@ function resetProgressUi(message) {
   resetEta();
 }
 
-// A finished Download now leaves "Done!" and a full bar; they go once the plan underneath changes.
+// A finished Download now leaves "Done!" and a full bar, which say nothing about a new selection
+// or plan; they go once the plan underneath changes. An error stays until the next run.
 let prefetchDone = false;
-// A finished Download now or a failed run says nothing about a new selection or plan.
 function clearPrefetchDone() {
-  const info = document.getElementById("progress-info");
-  if ((prefetchDone || info?.style.color === "rgb(250, 120, 120)") && generationButtonEnabled) resetProgressUi("");
+  if (prefetchDone && generationButtonEnabled) resetProgressUi("");
 }
 
 // When the status line last showed a fallback notice (0: none).
@@ -2187,6 +2210,8 @@ function updateFormatToggleUI(format) {
   refreshWorldNameEditUI();
   // One World is Java-only too: its status and pins follow the format.
   refreshOneWorldState();
+  // The size warning's Advanced features link is Java-only.
+  refreshBboxSelectionInfo();
 }
 
 // Expose to window for onclick handlers
@@ -2927,13 +2952,14 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   } else if (selectedSize > t.extensive) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
     warned = true;
-  } else if (selectedShapes && isOneWorldEnabled()) {
+  } else if (selectedShapes && isOneWorldEnabled() && meldOn()) {
     setBboxSelectionInfo(bboxSelectionElement, "shapes_one_world", "#fecc44");
   } else {
     setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   }
-  // The warning's way out (Meld features off or no pieces yet): build it in pieces.
-  document.getElementById("bbox-features-cta").hidden = !(warned && selectedCelestialBody === "earth");
+  // The warning's way out (Advanced features off or no pieces yet): build it in cells, a One World
+  // so Java on Earth only.
+  document.getElementById("bbox-features-cta").hidden = !(warned && isOneWorldAvailable());
 }
 
 // Turns on Meld features, One World and parallel pieces, and shows the Scale card.
@@ -2993,11 +3019,17 @@ async function noteOutline(geojson) {
   refreshBboxSelectionInfo();
 }
 
+function meldOn() {
+  return Boolean(document.getElementById('advanced-meld-features-toggle')?.checked);
+}
+
 // Drawn shapes are the outline a job in pieces keeps its pieces in (--plan-mask); written when
-// One World is on, cleared when it is off. Called on a new selection and when One World changes.
+// One World and Advanced features are on, cleared otherwise. Called on a new selection and when
+// either changes.
 let shapesWritten = false;
+const wantsShapesMask = () => isOneWorldEnabled() && meldOn();
 function writeShapesMask() {
-  shapesWritten = Boolean(selectedShapes) && isOneWorldEnabled();
+  shapesWritten = Boolean(selectedShapes) && wantsShapesMask();
   if (shapesWritten) {
     setPlanMask({
       type: 'MultiPolygon',
@@ -3651,12 +3683,13 @@ function releaseOneWorldPins() {
   postToMap({ type: 'setShapesMode', mode: '' });
 }
 
-// A One World not built in pieces (Advanced features, workers set) builds the rectangle around
-// the drawn shapes; the map outlines it. In pieces the shapes are the plan mask.
+// A One World takes rectangles only. With Advanced features it builds the rectangle around the
+// drawn shapes (the map outlines it), and in pieces the shapes are the plan mask.
 function syncShapesRect() {
-  const pieces = document.getElementById('advanced-meld-features-toggle').checked &&
-    document.getElementById('meld-workers-select').value;
-  if (oneWorldPinned) postToMap({ type: 'setShapesMode', mode: pieces ? 'pieces' : 'rect' });
+  const meld = meldOn();
+  const pieces = meld && document.getElementById('meld-workers-select').value;
+  if (oneWorldPinned) postToMap({ type: 'setShapesMode', mode: !meld ? 'locked' : pieces ? 'pieces' : 'rect' });
+  if (!outline && selectedShapes && wantsShapesMask() !== shapesWritten) writeShapesMask();
   refreshBboxSelectionInfo();
 }
 document.addEventListener('change', syncShapesRect);
@@ -3693,7 +3726,7 @@ async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
   // An outline picked while One World was off is written once it is on.
   if (outline && isOneWorldEnabled() !== outlineWritten) noteOutline(outline);
-  if (!outline && selectedShapes && isOneWorldEnabled() !== shapesWritten) writeShapesMask();
+  if (!outline && selectedShapes && wantsShapesMask() !== shapesWritten) writeShapesMask();
   refreshLuantiAvailability();
   setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
   redrawProjects();
@@ -4421,6 +4454,12 @@ async function startGeneration(confirmed = false, prewarm = false) {
     return;
   }
   if (generationButtonEnabled === false) {
+    return;
+  }
+  // One World and Live keep their areas as rectangles of whole chunks; Advanced features build
+  // the rectangle around the shapes.
+  if (selectedShapes && (isLiveMode() || isOneWorldEnabled()) && !meldOn()) {
+    setBboxSelectionInfo(document.getElementById('bbox-selection-info'), "shapes_rectangles_only", "#fa7878");
     return;
   }
   if (!prewarm && isLiveMode()) {

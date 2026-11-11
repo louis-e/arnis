@@ -2135,6 +2135,14 @@ fn confluence_args(
                 let line = text.lines().next().unwrap_or_default();
                 line.trim_start_matches("error: ").to_string()
             })?;
+    // The CLI also reads these from the environment; the window passes them only as flags.
+    let sent = |name: &str| flags.iter().any(|f| f.split('=').next() == Some(name));
+    if !sent("--offline") {
+        extra.offline = false;
+    }
+    if !sent("--overpass-url") {
+        extra.overpass_url.clear();
+    }
     // Pieces are a One World feature; anywhere else the fields are inert.
     if !one_world {
         extra.units = Default::default();
@@ -3820,8 +3828,19 @@ mod tests {
     fn switch_off_passes_no_new_flags() {
         use clap::Parser;
         let extra = confluence_args(&[], false, "java", true).unwrap();
-        let stock = Args::try_parse_from(["arnis"]).unwrap();
+        let mut stock = Args::try_parse_from(["arnis"]).unwrap();
+        // The window never takes these from the environment (ARNIS_OFFLINE, ARNIS_OVERPASS_URL).
+        stock.offline = false;
+        stock.overpass_url.clear();
         assert_eq!(format!("{extra:?}"), format!("{stock:?}"));
+        let sent = confluence_args(
+            &["--offline".into(), "--overpass-url=http://x".into()],
+            false,
+            "java",
+            true,
+        )
+        .unwrap();
+        assert!(sent.offline && sent.overpass_url == ["http://x"]);
     }
 
     /// Every flag the window can send is one the CLI parser takes.

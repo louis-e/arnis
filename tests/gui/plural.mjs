@@ -30,11 +30,4 @@ for (const f of fs.readdirSync(new URL('../../src/gui/locales/', import.meta.url
   const l = loc(f.slice(0, -5));
   for (const c of ['one', 'few', 'other']) assert.ok(l[`run_failed_${c}`], `${f} lacks run_failed_${c}`);
 }
-// The bar's estimate: spaced units; EN "≈18 min left", RO "încă aproximativ 18 min".
-const { etaDuration } = await import('../../src/gui/js/meld-features.js');
-assert.deepEqual([45, 18 * 60, 200, 2 * 3600 + 600, 3600].map(etaDuration), ['45 s', '18 min', '3 min 20 s', '2 h 10 min', '1 h']);
-for (const [f, a, b] of [['en-US', '≈18 min left', '≈2 h 10 min left'], ['ro', 'încă aproximativ 18 min', 'încă aproximativ 2 h 10 min']]) {
-  const tpl = loc(f).run_eta;
-  assert.deepEqual([18 * 60, 7800].map((x) => tpl.replace('{time}', etaDuration(x))), [a, b]);
-}
 console.log('plural ok');

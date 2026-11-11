@@ -37,16 +37,6 @@ export const tp = (key, fallback, n, lang) => {
   return t(k || key, fallback, { n });
 };
 
-// The bar's time left: "45 s", "18 min", "2 h 10 min" (units spaced and written the same in every
-// language, as the bar's `run_eta` text is the only thing that differs).
-export function etaDuration(sec) {
-  sec = Math.max(0, Math.round(sec));
-  if (sec < 60) return `${sec} s`;
-  const m = Math.floor(sec / 60);
-  if (m < 60) return sec % 60 ? `${m} min ${sec % 60} s` : `${m} min`;
-  return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 60)} h`;
-}
-
 // What the status line shows for a progress payload. An error that carries `detail` keeps the
 // short `message` on the line and the full text as its tooltip and in the log; a Region Download
 // fallback is a notice in the user's language rather than the raw log line.

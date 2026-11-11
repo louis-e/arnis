@@ -89,9 +89,9 @@ var citySearch = {
             extratags: 1,
             'accept-language': 'en'
         };
-        // Map-first page or Advanced features: each place's outline too (simplified ~500 m),
-        // kept on the result as `geojson` for "Use outline".
-        if (window.arnisMapFirst || window.arnisMeldOn) {
+        // Advanced features: each place's outline too (simplified ~500 m), kept on the result as
+        // `geojson` for "Use outline".
+        if (window.arnisMeldOn) {
             params.polygon_geojson = 1;
             params.polygon_threshold = 0.005;
         }
@@ -164,8 +164,9 @@ var citySearch = {
             html += '<div class="search-result-item" data-index="' + index + '" data-lat="' + result.lat + '" data-lon="' + result.lon + '">';
             html += '<div class="search-result-text"><div class="search-result-name">' + self.escapeHtml(mainName) + '</div>';
             html += '<div class="search-result-details">' + self.escapeHtml(details) + '</div></div>';
-            // A country or region (Meld features): select all of it, not just look there.
-            if (window.arnisMeldOn && !window.arnisMapFirst && result.boundingbox && (result.class === 'boundary' || result.type === 'administrative')) {
+            // A place with an area (Advanced features or the map-first page): its box can be
+            // selected, a click on the result only flies there.
+            if ((window.arnisMeldOn || window.arnisMapFirst) && self.selectable(result)) {
                 html += '<button type="button" class="search-select-area" data-index="' + index + '"></button>';
             }
             // Advanced features: a place with an outline (country, county, city) can be selected by it.
@@ -193,10 +194,6 @@ var citySearch = {
         
         // Bind click events to results
         $('.search-result-item').on('click', function() {
-            // Map-first page: the place becomes the selection.
-            if (window.arnisMapFirst && results[$(this).data('index')].boundingbox) {
-                return self.selectArea(results[$(this).data('index')]);
-            }
             var lat = parseFloat($(this).data('lat'));
             var lon = parseFloat($(this).data('lon'));
             var name = $(this).find('.search-result-name').text();
@@ -221,6 +218,16 @@ var citySearch = {
         }
         $('#city-search').val('');
         this.hideResults();
+    },
+
+    // Whether a result's box is worth selecting: at least 0.05 km² (a park, not a shop or a house).
+    selectable: function(result) {
+        var b = (result.boundingbox || []).map(Number);
+        if (b.length !== 4 || !b.every(isFinite)) return false;
+        var km = 111.32;
+        var h = (b[1] - b[0]) * km;
+        var w = (b[3] - b[2]) * km * Math.cos((b[0] + b[1]) / 2 * Math.PI / 180);
+        return Math.abs(h * w) >= 0.05;
     },
 
     // Tells the window which place the selection came from; it keeps the name for the world a build makes.
