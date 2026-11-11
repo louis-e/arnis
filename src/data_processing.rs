@@ -845,6 +845,11 @@ pub fn generate_world_with_options(
     // A peak's summit cross that is also mapped on its own stands once, as the mapped one.
     man_made::drop_doubled_summit_crosses(&mut elements, args.scale);
 
+    // --road-detail compact leaves the minor ways out before anything sees them.
+    if args.road_detail != road_detail::RoadDetail::Max {
+        elements.retain(|element| !args.road_detail.drops_element(element));
+    }
+
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
         WorldEditor::new_luanti(
@@ -1150,7 +1155,14 @@ pub fn generate_world_with_options(
         (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
         (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
     );
-    let road_markings = road_markings::RoadMarkingIndex::build(&elements, args.scale, sign_region);
+    let road_markings = road_markings::RoadMarkingIndex::build_with(
+        &elements,
+        args.scale,
+        sign_region,
+        args.road_detail.paints_crossings(),
+        // A One World piece sees only its clipped share of the signalised crossings.
+        one_world.is_none() || args.road_detail == road_detail::RoadDetail::Max,
+    );
     // What the world format runs is settled here, so the uses below need no format checks.
     let mut extras = crate::datapack::Extras::from_args(args).for_format(world_format);
 

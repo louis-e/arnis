@@ -1,4 +1,5 @@
 use crate::coordinate_system::geographic::LLBBox;
+use crate::element_processing::road_detail::RoadDetail;
 use clap::builder::FalseyValueParser;
 use clap::{ArgAction, Parser};
 use std::path::PathBuf;
@@ -610,6 +611,17 @@ pub struct Args {
     #[arg(long = "cave-datum-y", value_name = "Y", allow_hyphen_values = true)]
     pub cave_datum_y: Option<i32>,
     // --- end confluence:nature ---
+    // --- confluence:build ---
+    /// How much road marking and how many minor ways to build: max (every marking and
+    /// way, as mapped); clean (removes lane dividers on two-way roads and on one-way roads
+    /// 5 blocks wide or less, every line on service and pedestrian ways, parking aisles and
+    /// roads under 4 blocks wide, and paints zebra and give-way bars 2 blocks apart); or
+    /// compact (clean, plus dashes and gaps of at least 4 blocks, and removes footways,
+    /// paths, cycleways, steps, service roads, tracks, crossings and their paint, so
+    /// sidewalks go at every scale).
+    #[arg(long, value_enum, default_value_t = RoadDetail::Max)]
+    pub road_detail: RoadDetail,
+    // --- end confluence:build ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
     #[arg(long, value_name = "PATH|geofabrik", conflicts_with = "file")]
@@ -981,6 +993,7 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.export_tree_packs.is_some(), "--export-tree-packs"),
         (args.cave_style.is_some(), "--cave-style"),
         (args.cave_ores.is_some(), "--cave-ores"),
+        (args.road_detail != RoadDetail::Max, "--road-detail"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),

@@ -1960,6 +1960,7 @@ const WINDOW_FLAGS: &[&str] = &[
     "seed",
     "min-y",
     "max-y",
+    "road-detail",
     "rocks",
     "rock-density",
     "bushes",
@@ -2707,6 +2708,7 @@ fn gui_start_generation(
                 cave_ores: None,
                 cave_seed: None,
                 cave_datum_y: None,
+                road_detail: crate::element_processing::road_detail::RoadDetail::Max,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3371,6 +3373,7 @@ mod tests {
             "--seed=7",
             "--min-y=-64",
             "--max-y=319",
+            "--road-detail=compact",
             "--rocks",
             "--bushes",
             "--tree-realm=vanilla-plus",

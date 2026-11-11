@@ -34,6 +34,7 @@ pub mod power;
 pub mod raceways;
 pub mod rail_track;
 pub mod railways;
+pub mod road_detail;
 pub mod road_markings;
 pub mod rooftops;
 pub mod ship_bodies;
