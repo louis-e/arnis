@@ -610,7 +610,9 @@ pub fn prepare_unit(
         return Err(format!("{} is not a One World.", world_dir.display()));
     }
     crate::scale::child::fail_for_test(lease.piece as usize);
-    crate::map_item::leave_counter_to_coordinator();
+    crate::map_item::leave_counter_to_coordinator(
+        lease.first_map_id + crate::scale::MAP_IDS_PER_PIECE - 1,
+    );
     let (_, llbbox) = resolve(world_dir, requested, args, &mut false)?;
     if let Some(run) = args.one_world_run.as_mut() {
         run.area_id = lease.area_id;

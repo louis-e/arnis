@@ -66,7 +66,7 @@ impl MapStore {
 
     fn write_counter(&self, last_id: i32) -> Result<(), String> {
         // A piece of a job leaves the shared counter to its coordinator.
-        if COUNTER_IS_COORDINATORS.load(std::sync::atomic::Ordering::Relaxed) {
+        if piece_last_map_id().is_some() {
             return Ok(());
         }
         let name = match self.layout {
@@ -79,13 +79,28 @@ impl MapStore {
     }
 }
 
-static COUNTER_IS_COORDINATORS: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+/// The last map id of this piece's share; 0 outside a piece of a job.
+static PIECE_LAST_MAP_ID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
-/// In a piece of a job: pieces build side by side in id ranges reserved up front, so
-/// none of them writes the counter that the coordinator keeps.
-pub fn leave_counter_to_coordinator() {
-    COUNTER_IS_COORDINATORS.store(true, std::sync::atomic::Ordering::Relaxed);
+/// In a piece of a job: pieces build side by side in id ranges reserved up front, so none of
+/// them writes the counter that the coordinator keeps, and none goes past `last_id`.
+pub fn leave_counter_to_coordinator(last_id: i32) {
+    PIECE_LAST_MAP_ID.store(last_id, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn piece_last_map_id() -> Option<i32> {
+    Some(PIECE_LAST_MAP_ID.load(std::sync::atomic::Ordering::Relaxed)).filter(|&id| id != 0)
+}
+
+/// A piece's maps must stay in its share, or they would overwrite another piece's.
+fn check_share(registry: &DecalRegistry, last_id: Option<i32>) -> Result<(), String> {
+    match last_id {
+        Some(last) if registry.max_id() > last => Err(format!(
+            "this piece needs map ids up to {}, past the end of its share at {last}",
+            registry.max_id()
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// Sets the map id counter, so the next map a run or the game makes gets `last_id + 1`.
@@ -596,6 +611,7 @@ pub fn write_decal_maps(
     if registry.is_empty() {
         return Ok(0);
     }
+    check_share(registry, piece_last_map_id())?;
     let store = MapStore::open(world_path)?;
 
     let preview_img = preview.map(|p| (p.render_image(), p.min_x(), p.min_z(), p.step()));
@@ -851,6 +867,9 @@ mod tests {
         let written = write_decal_maps(&world, &registry, None).unwrap();
         // Two pictograms plus a two-tile fascia.
         assert_eq!(written, 4);
+        // In a piece, past its share is refused.
+        assert!(check_share(&registry, Some(registry.max_id())).is_ok());
+        assert!(check_share(&registry, Some(registry.max_id() - 1)).is_err());
 
         for id in DecalRegistry::FIRST_ID..=registry.max_id() {
             let Value::Compound(root) =

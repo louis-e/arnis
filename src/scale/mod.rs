@@ -32,9 +32,14 @@ pub mod budget;
 pub mod child;
 
 /// Map ids each piece may use. A piece needing more would run into the next one's range.
-const MAP_IDS_PER_PIECE: i32 = 1 << 16;
+pub(crate) const MAP_IDS_PER_PIECE: i32 = 1 << 16;
 /// Pieces one job's map ids have room for.
 pub const MAX_PIECES: usize = (i32::MAX / MAP_IDS_PER_PIECE) as usize;
+
+/// Pieces whose map ids fit from `map_base` up.
+fn pieces_with_map_ids(map_base: i32) -> usize {
+    (i32::MAX.saturating_sub(map_base) / MAP_IDS_PER_PIECE) as usize
+}
 /// Lines of a failed piece's output shown with its error.
 const TAIL_LINES: usize = 40;
 /// Further attempts at a piece that failed for a reason that may pass.
@@ -390,19 +395,19 @@ impl Job {
             _ => {
                 // Reserved once, so a run in between cannot take a piece's ids.
                 let _guard = lock(&MANIFEST);
+                let maps = crate::world_utils::WorldLayout::of(world_dir).maps_dir(world_dir);
+                let map_base = crate::map_item::next_map_id(&maps);
+                let room = pieces_with_map_ids(map_base);
+                if pieces > room {
+                    return Err(format!(
+                        "This world has map ids left for {room} pieces and the job has {pieces}; \
+                         use larger pieces (--unit-regions) or a new One World."
+                    ));
+                }
                 let mut manifest = Manifest::load(world_dir)?.ok_or("The One World vanished.")?;
                 let area_base = manifest.next_area_id;
                 manifest.next_area_id += pieces as u32;
                 manifest.save(world_dir)?;
-                let maps = crate::world_utils::WorldLayout::of(world_dir).maps_dir(world_dir);
-                let map_base = crate::map_item::next_map_id(&maps);
-                if i64::from(map_base) + pieces as i64 * i64::from(MAP_IDS_PER_PIECE)
-                    > i64::from(i32::MAX)
-                {
-                    return Err(format!(
-                        "{pieces} pieces are too many for the map id space; use a larger --unit-regions."
-                    ));
-                }
                 // Before any piece starts: a job interrupted and run again, or another
                 // run, must not hand out these ids to something else.
                 crate::map_item::set_map_counter(
@@ -1783,6 +1788,15 @@ second
         )
         .unwrap();
         assert_eq!(state["argv"], json!(first));
+    }
+
+    #[test]
+    fn map_ids_bound_the_pieces_a_job_reserves() {
+        let first = crate::map_item::FIRST_MAP_ID;
+        assert_eq!(pieces_with_map_ids(first), 32_752);
+        // Earlier jobs' reservations leave less room.
+        assert_eq!(pieces_with_map_ids(i32::MAX - 2 * MAP_IDS_PER_PIECE), 2);
+        assert_eq!(pieces_with_map_ids(i32::MAX), 0);
     }
 
     #[test]
