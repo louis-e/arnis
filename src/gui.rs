@@ -1967,6 +1967,8 @@ const WINDOW_FLAGS: &[&str] = &[
     "tree-realm",
     "tree-pack-dir",
     "tree-pack-mode",
+    "cave-style",
+    "cave-ores",
     "river-bed",
     "water-detail",
     "climate-mode",
@@ -2701,6 +2703,10 @@ fn gui_start_generation(
                 tree_pack_dir: None,
                 tree_pack_mode: Default::default(),
                 export_tree_packs: None,
+                cave_style: None,
+                cave_ores: None,
+                cave_seed: None,
+                cave_datum_y: None,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3370,6 +3376,8 @@ mod tests {
             "--tree-realm=vanilla-plus",
             "--tree-pack-dir=trees",
             "--tree-pack-mode=replace",
+            "--cave-style=more-mix",
+            "--cave-ores=more",
             "--river-bed=v1",
             "--water-detail=scaled",
             "--climate-mode=per-position",

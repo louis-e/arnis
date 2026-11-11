@@ -122,6 +122,12 @@ pub struct Manifest {
     /// Already folded into `elevation`; kept so later areas are told which one applies.
     #[serde(default = "real_height", skip_serializing_if = "is_real_height")]
     pub height_multiplier: f64,
+    /// `--cave-seed` and `--cave-datum-y` of the first area, so every area's caves, ores and
+    /// deepslate line up at the borders. Absent when the first area gave none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cave_seed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cave_datum_y: Option<i32>,
     /// Metre to Y mapping shared by every area. Set at creation; worlds from
     /// before version 3 take it from their first terrain area.
     pub elevation: Option<ElevationAffine>,
@@ -264,6 +270,8 @@ impl Manifest {
             disable_height_limit: args.disable_height_limit,
             aws_only_elevation: args.aws_only_elevation,
             height_multiplier,
+            cave_seed: args.cave_seed,
+            cave_datum_y: args.cave_datum_y,
             // One section up, so water carved at the lowest level stays above the floor.
             elevation: args.terrain().then(|| {
                 let mut e = ElevationAffine::whole_earth(
@@ -515,6 +523,24 @@ fn compatibility_errors(manifest: &Manifest, args: &Args) -> Vec<String> {
             if manifest.terrain { "with" } else { "without" }
         ));
     }
+    if args
+        .cave_seed
+        .is_some_and(|s| manifest.cave_seed != Some(s))
+    {
+        errors.push(match manifest.cave_seed {
+            Some(s) => format!("--cave-seed does not match the world's {s}"),
+            None => "--cave-seed was not used when the world was created".to_string(),
+        });
+    }
+    if args
+        .cave_datum_y
+        .is_some_and(|y| manifest.cave_datum_y != Some(y))
+    {
+        errors.push(match manifest.cave_datum_y {
+            Some(y) => format!("--cave-datum-y does not match the world's {y}"),
+            None => "--cave-datum-y was not used when the world was created".to_string(),
+        });
+    }
     errors
 }
 
@@ -682,6 +708,16 @@ fn resolve(
                     );
                 }
             }
+            if args.caves {
+                if let (None, Some(seed)) = (args.cave_seed, manifest.cave_seed) {
+                    println!("Note: One World keeps the cave seed it was created with ({seed}).");
+                }
+                if let (None, Some(y)) = (args.cave_datum_y, manifest.cave_datum_y) {
+                    println!("Note: One World keeps the cave floor it was created with (Y {y}).");
+                }
+            }
+            args.cave_seed = manifest.cave_seed;
+            args.cave_datum_y = manifest.cave_datum_y;
             (manifest, false)
         }
         None => {
@@ -1628,6 +1664,38 @@ mod tests {
         drop(prepare(&world, &req, &mut args).unwrap());
         assert_eq!(args.height_multiplier, 2.0);
         assert_eq!(args.one_world_run.unwrap().elevation, Some(e));
+    }
+
+    #[test]
+    fn one_world_keeps_first_cave_seed() {
+        let dir = tempfile::tempdir().unwrap();
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let plain = dir.path().join("plain");
+        drop(prepare(&plain, &req, &mut args_for(MUNICH, &["--caves"])).unwrap());
+        let text = std::fs::read_to_string(Manifest::path_in(&plain)).unwrap();
+        assert!(
+            !text.contains("cave_seed") && !text.contains("cave_datum_y"),
+            "{text}"
+        );
+
+        let world = dir.path().join("w");
+        let first = ["--caves", "--cave-seed", "5", "--cave-datum-y", "-64"];
+        drop(prepare(&world, &req, &mut args_for(MUNICH, &first)).unwrap());
+        let manifest = Manifest::load(&world).unwrap().unwrap();
+        assert_eq!(
+            (manifest.cave_seed, manifest.cave_datum_y),
+            (Some(5), Some(-64))
+        );
+
+        // A later area without the flags takes the stored values.
+        let mut args = args_for(MUNICH, &["--caves"]);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        assert_eq!((args.cave_seed, args.cave_datum_y), (Some(5), Some(-64)));
+
+        // A different value is refused.
+        let mut args = args_for(MUNICH, &["--caves", "--cave-seed", "6"]);
+        let err = prepare(&world, &req, &mut args).err().unwrap();
+        assert!(err.contains("--cave-seed does not match"), "{err}");
     }
 
     #[test]
