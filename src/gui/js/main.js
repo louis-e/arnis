@@ -81,6 +81,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initCavesFillCoupling();
   initDisastersCoupling();
   initMobSpawningLockout();
+  initAdvancedRows();
   refreshHeightLimitRow();
   refreshGameplayRows();
   // After initSettings(), so the slider label and rotation handlers exist
@@ -2131,6 +2132,7 @@ function setSegmentedRowAvailable(groupId, available) {
 // there are no roads or places, and gravity only differs there. Blueprint builds no
 // signal heads, so there are no lights to run.
 function refreshGameplayRows(format) {
+  setTimeout(refreshAdvancedRows, 0);
   // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
   const current = format || selectedWorldFormat;
   const pack = current === 'java' && !isOneWorldEnabled();
@@ -3602,6 +3604,43 @@ function setSettingsRowAvailable(inputId, available) {
     row.classList.toggle('settings-row-unavailable', !available);
     row.toggleAttribute('inert', !available);
   }
+}
+
+// Advanced settings that only work with another one grey out while it is off, as the gameplay rows do,
+// so no two settings contradict each other and nothing is set that a run would ignore.
+function refreshAdvancedRows() {
+  const val = (id) => document.getElementById(id)?.value || '';
+  const on = (id) => !!document.getElementById(id)?.checked;
+  const seg = (id) => document.querySelector(`#${id} .segment.active`)?.dataset.v || '';
+  const java = selectedWorldFormat === 'java';
+  const oneWorld = isOneWorldEnabled();
+  const cells = oneWorld && !!val('meld-workers-select');
+  for (const id of ['meld-piece-size-group', 'meld-snap-group', 'meld-margin-input', 'meld-piece-order-select', 'meld-skip-built-toggle', 'meld-stitch-map-toggle']) {
+    setSettingsRowAvailable(id, cells);
+  }
+  setSettingsRowAvailable('meld-origin-input', oneWorld);
+  setSettingsRowAvailable('meld-stretch-toggle', oneWorld);
+  const ownHeight = java && !oneWorld && on('disable-height-limit-toggle');
+  setSettingsRowAvailable('meld-min-y-input', ownHeight);
+  setSettingsRowAvailable('meld-max-y-input', ownHeight);
+  setSettingsRowAvailable('meld-world-border-toggle', java);
+  setSettingsRowAvailable('meld-region-format-group', java && !oneWorld);
+  setSettingsRowAvailable('meld-blinear-level-input', java && !oneWorld && seg('meld-region-format-group') === 'blinear');
+  setSettingsRowAvailable('meld-rock-density-input', on('meld-rocks-toggle'));
+  setSettingsRowAvailable('meld-bush-density-input', on('meld-bushes-toggle'));
+  setSettingsRowAvailable('meld-tree-pack-mode-group', !!val('meld-tree-pack-dir-input').trim());
+  setSettingsRowAvailable('meld-cave-style-select', on('caves-toggle'));
+  setSettingsRowAvailable('meld-cave-ores-group', on('caves-toggle'));
+  setSettingsRowAvailable('meld-archive-folder-input', seg('meld-osm-source-group') === 'archive');
+  setSettingsRowAvailable('meld-pbf-url-input', seg('meld-osm-source-group') === 'region');
+}
+
+function initAdvancedRows() {
+  const modal = document.getElementById('settings-modal');
+  if (!modal) return;
+  // Any change in Settings can be the one a row depends on; the check is cheap.
+  for (const ev of ['change', 'input', 'click']) modal.addEventListener(ev, () => setTimeout(refreshAdvancedRows, 0));
+  refreshAdvancedRows();
 }
 
 function readOneWorldRestore() {
