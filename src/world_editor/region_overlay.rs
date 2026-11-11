@@ -768,8 +768,8 @@ mod tests {
         );
 
         let mut feature_blocks = vec![0; SECTION_BLOCKS];
-        feature_blocks[1 * 256 + 8 * 16 + 8] = 1;
-        feature_blocks[1 * 256 + 8 * 16 + 9] = 2;
+        feature_blocks[392] = 1;
+        feature_blocks[393] = 2;
         let features = chunk(
             0,
             0,
@@ -837,7 +837,7 @@ mod tests {
             vec![section(4, vec![palette_item("stone")], &terrain_blocks)],
         );
         let mut feature_blocks = vec![0; SECTION_BLOCKS];
-        feature_blocks[1 * 256 + 1 * 16 + 1] = 1;
+        feature_blocks[273] = 1;
         let mut features = chunk(
             0,
             0,
@@ -1309,7 +1309,7 @@ mod tests {
         );
 
         let mut feature_blocks = vec![0; SECTION_BLOCKS];
-        feature_blocks[1 * 256 + 1 * 16 + 1] = 1;
+        feature_blocks[273] = 1;
         let mut features = chunk(
             0,
             0,

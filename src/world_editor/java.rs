@@ -631,8 +631,8 @@ fn write_region_to_disk(
                         if let Some(ground) = ground {
                             let heights = (0..256)
                                 .map(|column| {
-                                    let x = (column % 16) as i32;
-                                    let z = (column / 16) as i32;
+                                    let x = column % 16;
+                                    let z = column / 16;
                                     ground.level(XZPoint::new(
                                         abs_chunk_x * 16 + x - ground_origin.0,
                                         abs_chunk_z * 16 + z - ground_origin.1,

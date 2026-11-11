@@ -2179,9 +2179,8 @@ fn gui_start_generation(
             crate::args::apply_feature_needs(&mut args);
             crate::args::apply_worldpainter_defaults(&mut args);
             if worldpainter_enabled {
-                crate::args::validate_args(&args).map_err(|error| {
+                crate::args::validate_args(&args).inspect_err(|error| {
                     emit_gui_error(&error);
-                    error
                 })?;
             }
 
