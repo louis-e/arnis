@@ -60,6 +60,7 @@ mod progress;
 mod progress_json;
 mod projection;
 mod retrieve_data;
+mod scale;
 mod structures;
 #[cfg(feature = "gui")]
 mod telemetry;
@@ -73,6 +74,7 @@ mod voxy;
 mod water_depth;
 mod water_probe;
 mod water_steps;
+mod work_units;
 mod world_editor;
 mod world_utils;
 
@@ -108,6 +110,7 @@ mod progress {
     pub fn emit_gui_progress_update_ex(progress: f64, message: &str, _streaming: bool) {
         crate::progress_json::progress(progress, message);
     }
+    pub fn emit_gui_piece(_piece: &serde_json::Value) {}
     pub fn while_waiting<T>(_waiting_for: &str, wait: impl FnOnce() -> T) -> T {
         wait()
     }
@@ -157,11 +160,40 @@ fn release_one_world(failed: bool) {
     }
 }
 
+/// From here on a failure keeps the world this run created: a job built in
+/// pieces resumes from the pieces it finished.
+fn keep_one_world() {
+    if let Some(run) = ONE_WORLD_RUN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+    {
+        run.created = None;
+    }
+}
+
 /// `process::exit` skips destructors, so failures go through here.
 fn exit_failed() -> ! {
     progress_json::error("generation failed, see stderr");
     release_one_world(true);
     std::process::exit(1);
+}
+
+/// The One World folder: `--world-name` inside the saves folder.
+fn one_world_dir(args: &Args) -> PathBuf {
+    let base_dir = args.path.clone().unwrap_or_else(|| {
+        eprintln!(
+            "{} --one-world needs --output-dir (the saves folder).",
+            "Error:".red().bold()
+        );
+        std::process::exit(1);
+    });
+    let name = args
+        .world_name
+        .as_deref()
+        .and_then(world_utils::world_folder_name)
+        .unwrap_or_else(|| one_world::DEFAULT_WORLD_NAME.to_string());
+    base_dir.join(name)
 }
 
 fn run_cli() {
@@ -191,8 +223,11 @@ fn run_cli() {
         net::set_max_requests(n as usize);
     }
 
+    // A plan is a dry run: it neither sweeps the tile cache nor makes the update request.
+    let planning = args.units.plan_units.is_some();
+
     if !live_tile {
-        print_banner(&args);
+        print_banner(&args, planning);
     }
 
     if let Err(e) = args::resolve_shapes(&mut args) {
@@ -205,6 +240,7 @@ fn run_cli() {
     }
     args::apply_body_defaults(&mut args);
     args::apply_feature_needs(&mut args);
+    scale::budget::single_below_break_even(&mut args);
 
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
@@ -219,9 +255,9 @@ fn run_cli() {
     run_generation_cli(args, asked_mob_spawning);
 }
 
-fn print_banner(args: &Args) {
+fn print_banner(args: &Args, planning: bool) {
     // Clean up old cached elevation tiles on startup
-    if !args.no_cache_sweep {
+    if !args.no_cache_sweep && !planning {
         elevation_data::cleanup_old_cached_tiles();
     }
 
@@ -247,7 +283,7 @@ fn print_banner(args: &Args) {
     );
 
     // Fire-and-forget update check; prints a one-line notice on a background thread.
-    if !args.no_update_check {
+    if !args.no_update_check && !planning {
         version_check::check_for_updates_async();
     }
 }
@@ -345,7 +381,6 @@ fn run_live_cli(args: Args) {
         std::process::exit(1);
     }
 }
-
 fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     let started = std::time::Instant::now();
     // Cave zone-map mode renders the cave biome layout for --bbox and exits, before any world
@@ -471,46 +506,75 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     // One World: snaps the bbox to the world's chunk grid and holds its lock.
     let mut one_world_paths: Option<PathBuf> = None;
     if args.one_world {
-        let base_dir = args.path.clone().unwrap_or_else(|| {
-            eprintln!(
-                "{} --one-world needs --output-dir (the saves folder).",
-                "Error:".red().bold()
+        let world_dir = one_world_dir(&args);
+        if let Some(n) = args.units.plan_units {
+            let planned = work_units::print_plan(&world_dir, &effective_bbox, &args, n);
+            std::process::exit(planned.map_or_else(
+                |e| {
+                    eprintln!("{} {e}", "Error:".red().bold());
+                    1
+                },
+                |()| 0,
+            ));
+        }
+        if let Some(lease) = args.units.one_world_unit.clone() {
+            // A piece of a job: the coordinator holds the world's lock.
+            scale::child::watch_parent();
+            effective_bbox =
+                one_world::prepare_unit(&world_dir, &effective_bbox, &mut args, &lease)
+                    .unwrap_or_else(|e| {
+                        eprintln!("{} {}", "Error:".red().bold(), e);
+                        exit_failed();
+                    });
+            world_editor::set_world_bounds(
+                ground::extended_min_y_for(&args),
+                ground::world_top_y_for(&args),
             );
-            std::process::exit(1);
-        });
-        let name = args
-            .world_name
-            .as_deref()
-            .and_then(world_utils::world_folder_name)
-            .unwrap_or_else(|| one_world::DEFAULT_WORLD_NAME.to_string());
-        let world_dir = base_dir.join(name);
-        let session =
-            one_world::prepare(&world_dir, &effective_bbox, &mut args).unwrap_or_else(|e| {
-                eprintln!("{} {}", "Error:".red().bold(), e);
-                std::process::exit(1);
+            one_world_paths = Some(world_dir);
+        } else {
+            let session = one_world::prepare(&world_dir, &effective_bbox, &mut args)
+                .unwrap_or_else(|e| {
+                    eprintln!("{} {}", "Error:".red().bold(), e);
+                    std::process::exit(1);
+                });
+            effective_bbox = session.llbbox;
+            // The world decides the build height.
+            world_editor::set_world_bounds(
+                ground::extended_min_y_for(&args),
+                ground::world_top_y_for(&args),
+            );
+            *ONE_WORLD_RUN.lock().unwrap_or_else(|e| e.into_inner()) = Some(OneWorldRun {
+                lock: session.lock,
+                created: session.created.then(|| world_dir.clone()),
             });
-        effective_bbox = session.llbbox;
-        // The world decides the build height.
-        world_editor::set_world_bounds(
-            ground::extended_min_y_for(&args),
-            ground::world_top_y_for(&args),
-        );
-        *ONE_WORLD_RUN.lock().unwrap_or_else(|e| e.into_inner()) = Some(OneWorldRun {
-            lock: session.lock,
-            created: session.created.then(|| world_dir.clone()),
-        });
-        if args.disable_height_limit && session.created {
-            let (min_y, max_y) = world_utils::TALL_DATAPACK_FULL_RANGE;
-            if let Err(e) = world_utils::install_tall_datapack(&world_dir, min_y, max_y) {
-                eprintln!(
-                    "{} Failed to install tall-world datapack: {}",
-                    "Error:".red().bold(),
-                    e
-                );
+            if args.disable_height_limit && session.created {
+                let (min_y, max_y) = world_utils::TALL_DATAPACK_FULL_RANGE;
+                if let Err(e) = world_utils::install_tall_datapack(&world_dir, min_y, max_y) {
+                    eprintln!(
+                        "{} Failed to install tall-world datapack: {}",
+                        "Error:".red().bold(),
+                        e
+                    );
+                    exit_failed();
+                }
+            }
+            one_world_paths = Some(world_dir);
+        }
+    }
+    if args.units.coordinates() {
+        // A job built in pieces: this process only runs them.
+        let world_dir = one_world_paths.clone().unwrap_or_default();
+        match scale::run(&args, &world_dir) {
+            Err(e) if e == scale::PARTIAL => println!("{e}"),
+            Err(e) => {
+                eprintln!("{} {}", "Error:".red().bold(), e);
                 exit_failed();
             }
+            Ok(()) => {}
         }
-        one_world_paths = Some(world_dir);
+        release_one_world(false);
+        progress_json::done(started);
+        return;
     }
     let args = args;
 
@@ -923,10 +987,23 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     // Without a spawn given, Java starts at the corner of the area like the GUI does. The
     // level.dat template's own spot lies outside the area: beside it in a flat world, and
     // over nothing at all in a void one.
+    // A piece of a job builds past its own area, so its corner is its own, not its halo's.
+    let (spawn_x, spawn_z) = args
+        .one_world_run
+        .as_ref()
+        .and_then(|r| r.unit.as_ref())
+        .map_or_else(
+            || pre_rotation_bbox.default_spawn(),
+            |u| (u.rect[0] + 1, u.rect[1] + 1),
+        );
     let java_spawn = spawn_point.or_else(|| {
         (world_format == world_editor::WorldFormat::JavaAnvil).then(|| {
-            let (sx, sz) = pre_rotation_bbox.default_spawn();
-            map_transformation::rotate::rotate_xz_point(sx, sz, args.rotation, &pre_rotation_bbox)
+            map_transformation::rotate::rotate_xz_point(
+                spawn_x,
+                spawn_z,
+                args.rotation,
+                &pre_rotation_bbox,
+            )
         })
     });
     let spawn_y_for_java = java_spawn.map(|(sx, sz)| {

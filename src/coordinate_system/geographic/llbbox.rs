@@ -29,6 +29,13 @@ impl LLBBox {
         Ok(Self { min, max })
     }
 
+    /// `min_lat,min_lng,max_lat,max_lng` at full f64 precision, so a child
+    /// parses back the very bbox.
+    pub fn arg(&self) -> String {
+        let (lo, hi) = (self.min, self.max);
+        format!("{},{},{},{}", lo.lat(), lo.lng(), hi.lat(), hi.lng())
+    }
+
     pub fn from_str(s: &str) -> Result<Self, String> {
         // Empty fields are skipped so "a, b, c, d" parses like "a,b,c,d".
         let mut values: Vec<f64> = Vec::with_capacity(4);

@@ -77,10 +77,11 @@ impl<'a> WorldEditor<'a> {
 
         // Compute region bounds from original bbox to skip halo regions.
         // A region at (rx, rz) covers blocks [rx*512 .. rx*512+511] × [rz*512 .. rz*512+511].
-        let min_region_x = self.xzbbox.min_x().div_euclid(512);
-        let max_region_x = self.xzbbox.max_x().div_euclid(512);
-        let min_region_z = self.xzbbox.min_z().div_euclid(512);
-        let max_region_z = self.xzbbox.max_z().div_euclid(512);
+        let bounds = self.write_bounds();
+        let min_region_x = bounds.min_x().div_euclid(512);
+        let max_region_x = bounds.max_x().div_euclid(512);
+        let min_region_z = bounds.min_z().div_euclid(512);
+        let max_region_z = bounds.max_z().div_euclid(512);
 
         let total_regions = self
             .world
@@ -205,6 +206,26 @@ pub(crate) enum RegionWriteMode {
 }
 
 impl RegionWriteMode {
+    /// Whether any chunk of region `(rx, rz)` is written. A piece of a job builds into a
+    /// neighbour's region and must not open its file.
+    fn touches_region(&self, rx: i32, rz: i32) -> bool {
+        match *self {
+            RegionWriteMode::Fresh => true,
+            RegionWriteMode::Merge {
+                min_x,
+                min_z,
+                max_x,
+                max_z,
+                ..
+            } => {
+                rx * 512 + 511 >= min_x
+                    && rx * 512 <= max_x
+                    && rz * 512 + 511 >= min_z
+                    && rz * 512 <= max_z
+            }
+        }
+    }
+
     fn is_merge(&self) -> bool {
         matches!(self, RegionWriteMode::Merge { .. })
     }
@@ -554,6 +575,9 @@ fn write_region_to_disk(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(preview) = preview {
         preview.ingest_region(region_x, region_z, region_to_modify);
+    }
+    if !mode.touches_region(region_x, region_z) {
+        return Ok(());
     }
     // A merge goes where the world keeps its overworld, which 26.1 moves.
     let merge_dir = match *mode {
@@ -2889,5 +2913,25 @@ mod merge_tests {
         assert_eq!(light_opacity("minecraft:light"), 0);
         // Names merely containing "light" keep their own behaviour.
         assert_eq!(light_opacity("minecraft:light_gray_concrete"), 15);
+    }
+}
+
+#[cfg(test)]
+mod write_bounds_tests {
+    use super::*;
+
+    #[test]
+    fn a_region_outside_the_write_bounds_is_left_alone() {
+        let mode = RegionWriteMode::Merge {
+            min_x: 0,
+            min_z: -176,
+            max_x: 319,
+            max_z: -1,
+            layout: crate::world_utils::WorldLayout::Legacy,
+        };
+        assert!(mode.touches_region(0, -1));
+        assert!(!mode.touches_region(-1, -1));
+        assert!(!mode.touches_region(0, 0));
+        assert!(RegionWriteMode::Fresh.touches_region(7, 7));
     }
 }

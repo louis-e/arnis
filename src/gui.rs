@@ -2099,6 +2099,7 @@ fn gui_start_generation(
                 no_update_check: false,
                 no_cache_sweep: false,
                 capabilities: false,
+                units: Default::default(),
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.

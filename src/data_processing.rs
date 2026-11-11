@@ -814,6 +814,13 @@ pub fn generate_world_with_options(
     // first area of a One World.
     let one_world = args.one_world_run.as_ref();
     let extending = one_world.is_some_and(|run| run.extending);
+    // A piece of a job builds `PIECE_HALO_BLOCKS` past its own chunks, so what is rooted
+    // there reaches in as it does in a single run, and writes and previews only its own.
+    let own_rect = match one_world.and_then(|run| run.unit.as_ref()) {
+        Some(u) => XZBBox::rect_from_min_max(u.rect[0], u.rect[1], u.rect[2], u.rect[3])
+            .map_err(|e| format!("piece lease rect {:?} is invalid: {e}", u.rect))?,
+        None => xzbbox.clone(),
+    };
     let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
     if let Some(shape) = xzbbox.outline() {
         let all = shape.rect().total_blocks();
@@ -883,17 +890,23 @@ pub fn generate_world_with_options(
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     if let Some(run) = one_world {
         editor.set_merge_into_existing(crate::world_utils::WorldLayout::of(&run.world_dir));
+        editor.set_write_bounds(own_rect.clone());
         // metadata.json describes the whole world, not this area alone.
         if let Ok(Some(manifest)) = crate::one_world::Manifest::load(&run.world_dir) {
+            // A piece describes its whole job, which the other pieces are still building.
+            let job = run.unit.as_ref().map_or(xzbbox.clone(), |u| {
+                XZBBox::rect_from_min_max(u.job[0], u.job[1], u.job[2], u.job[3])
+                    .unwrap_or_else(|_| xzbbox.clone())
+            });
             let union = match manifest.extent() {
                 Some(ext) => XZBBox::rect_from_min_max(
-                    ext.min_x().min(xzbbox.min_x()),
-                    ext.min_z().min(xzbbox.min_z()),
-                    ext.max_x().max(xzbbox.max_x()),
-                    ext.max_z().max(xzbbox.max_z()),
+                    ext.min_x().min(job.min_x()),
+                    ext.min_z().min(job.min_z()),
+                    ext.max_x().max(job.max_x()),
+                    ext.max_z().max(job.max_z()),
                 )
                 .unwrap_or_else(|_| xzbbox.clone()),
-                None => xzbbox.clone(),
+                None => job,
             };
             if let Ok(ll) = crate::projection::llbbox_for_rect(&manifest.projection(), &union) {
                 editor.set_metadata_extent(union, ll);
@@ -984,7 +997,10 @@ pub fn generate_world_with_options(
     // generated into again after its last. The preview and branding maps come first.
     let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil && !extending;
     let place_branding = world_format == WorldFormat::JavaAnvil && !extending;
-    let first_map_id = if world_format == WorldFormat::JavaAnvil {
+    let first_map_id = if let Some(unit) = one_world.and_then(|run| run.unit.as_ref()) {
+        // A piece of a job has its own range, as pieces build side by side.
+        unit.first_map_id
+    } else if world_format == WorldFormat::JavaAnvil {
         let layout = crate::world_utils::WorldLayout::of(&output_path);
         crate::map_item::next_map_id(&layout.maps_dir(&output_path))
     } else {
@@ -1030,14 +1046,14 @@ pub fn generate_world_with_options(
     let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
         Arc::new(if wants_png && one_world.is_some() {
             // Every area of a One World is sent to the map overlay at once.
-            PreviewAccumulator::new_capped(&xzbbox, 2048)
+            PreviewAccumulator::new_capped(&own_rect, 2048)
         } else if wants_png {
-            PreviewAccumulator::new(&xzbbox)
+            PreviewAccumulator::new(&own_rect)
         } else if wants_local_maps {
             // "You are here" boards crop this, so give them a little more resolution.
-            PreviewAccumulator::new_capped(&xzbbox, 1024)
+            PreviewAccumulator::new_capped(&own_rect, 1024)
         } else {
-            PreviewAccumulator::new_capped(&xzbbox, 512)
+            PreviewAccumulator::new_capped(&own_rect, 512)
         })
     });
     if let Some(p) = &preview {
@@ -1501,7 +1517,11 @@ pub fn generate_world_with_options(
     // Tile editors take the world's format, so what they write that depends on it (a
     // banner's block entity) matches the output. Luanti keeps the sequential path: its
     // editor carries a game and a ground level that the tile editors are not given.
-    let use_parallel_tiles = tiles.len() >= 3
+    // A piece of a job takes the path the whole job would, or its blocks differ from a single run's.
+    let wants_tiles = one_world
+        .and_then(|run| run.unit.as_ref())
+        .map_or(tiles.len() >= 3, |unit| unit.tiled);
+    let use_parallel_tiles = wants_tiles
         && matches!(
             world_format,
             WorldFormat::JavaAnvil | WorldFormat::BedrockMcWorld
@@ -2464,7 +2484,7 @@ pub fn generate_world_with_options(
 
     if wants_map_item {
         if let Some(p) = preview.as_ref() {
-            match crate::map_item::write_map_item(&output_path, p, &xzbbox, first_map_id) {
+            match crate::map_item::write_map_item(&output_path, p, &own_rect, first_map_id) {
                 Ok(()) => println!("World map item added to the player inventory."),
                 Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
             }
@@ -2517,10 +2537,10 @@ pub fn generate_world_with_options(
             max_lat: llbbox.max().lat(),
             min_lon: llbbox.min().lng(),
             max_lon: llbbox.max().lng(),
-            min_mc_x: xzbbox.min_x(),
-            max_mc_x: xzbbox.max_x(),
-            min_mc_z: xzbbox.min_z(),
-            max_mc_z: xzbbox.max_z(),
+            min_mc_x: own_rect.min_x(),
+            max_mc_x: own_rect.max_x(),
+            min_mc_z: own_rect.min_z(),
+            max_mc_z: own_rect.max_z(),
         };
         let finalize = move || {
             // Skip if a newer generation already started.
@@ -2545,7 +2565,8 @@ pub fn generate_world_with_options(
     }
     bench.mark("map_preview");
 
-    if let Some(run) = one_world {
+    // A piece of a job is recorded by its coordinator, once it has seen the piece succeed.
+    if let Some(run) = one_world.filter(|run| run.unit.is_none()) {
         let png = run.preview_path();
         let preview_path = png.is_file().then_some(png.as_path());
         crate::one_world::record_area(
