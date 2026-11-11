@@ -524,6 +524,26 @@ pub struct Args {
     /// `CLIMATEMAP {json}` line with each climate's share.
     #[arg(long = "climate-map", value_name = "PREFIX")]
     pub climate_map: Option<PathBuf>,
+
+    /// Lowest Y of the extended-height world, a multiple of 16 from -2032 to -64. Needs
+    /// --disable-height-limit; the default is the pack's -2032.
+    #[arg(
+        long,
+        value_name = "Y",
+        allow_hyphen_values = true,
+        conflicts_with = "vanilla_height"
+    )]
+    pub min_y: Option<i32>,
+
+    /// Highest Y of the extended-height world, one less than a multiple of 16 from 319 to
+    /// 2031. Needs --disable-height-limit; the default is the pack's 2031.
+    #[arg(
+        long,
+        value_name = "Y",
+        allow_hyphen_values = true,
+        conflicts_with = "vanilla_height"
+    )]
+    pub max_y: Option<i32>,
     // --- end confluence:terrain ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -833,6 +853,8 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (w.water_detail != Default::default(), "--water-detail"),
         (args.climate_mode != Default::default(), "--climate-mode"),
         (args.climate_map.is_some(), "--climate-map"),
+        (args.min_y.is_some(), "--min-y"),
+        (args.max_y.is_some(), "--max-y"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
@@ -1481,6 +1503,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     if args.climate_mode == crate::climate_field::ClimateMode::PerPosition && args.rotation != 0.0 {
         return Err("--climate-mode per-position does not support --rotation.".to_string());
     }
+    crate::y_bounds::check(args)?;
     // --- end confluence:terrain ---
     // --- confluence:data ---
     if args.prewarm_first && !args.units.coordinates() {
