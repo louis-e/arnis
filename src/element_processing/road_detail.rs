@@ -1,32 +1,25 @@
-//! `--road-detail`: how much paint and how many minor ways a road network gets.
-//!
-//! At full detail every lane line, stop line, zebra bar and footway is drawn, as
-//! upstream paints them. Below about 0.7 blocks per metre those features land on
-//! the same few blocks as the carriageway and read as a white checker at
-//! junctions. `clean` keeps every way but simplifies the markings; `compact` also
-//! drops the minor ways and the crossings. Every decision is a pure function of
-//! tags and world position, so a One World piece boundary never changes the result.
+//! `--road-detail`: how much paint and how many minor ways a road network gets. Every
+//! decision is a pure function of tags and position, so One World seams never change it.
 
 use crate::osm_parser::ProcessedElement;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
 pub enum RoadDetail {
-    /// Every highway and marking, as mapped
+    /// Every marking and way, as mapped
     #[default]
     Max,
-    /// Centre lines between opposing traffic and lane dividers on one-way roads
-    /// wider than 5 blocks; no lines on service and pedestrian ways or roads under 4
-    /// blocks wide; 2-block zebra and give-way bars
+    /// Removes lane dividers except on one-way roads wider than 5 blocks, and every line on
+    /// service and pedestrian ways, parking aisles and roads under 4 blocks wide. Paints zebra
+    /// and give-way bars 2 blocks apart
     Clean,
-    /// Clean markings with dashes and gaps of at least 4 blocks, and no footways
-    /// (sidewalks included, at every scale), paths, cycleways, steps, service roads,
-    /// tracks or crossings
+    /// Clean with dashes and gaps of at least 4 blocks and no crossing paint. Also leaves out
+    /// footways and sidewalks, paths, cycleways, steps, tracks, crossings, parking aisles,
+    /// driveways, alleys and drive-throughs
     Compact,
 }
 
-/// Ways for people rather than traffic. They never get lane dividers outside
-/// `max`, and `compact` leaves them out together with service roads and tracks.
+/// Ways for people rather than traffic; no lane dividers outside `max`.
 fn is_pedestrian_grade(highway: &str) -> bool {
     matches!(
         highway,
@@ -42,34 +35,42 @@ fn is_pedestrian_grade(highway: &str) -> bool {
     )
 }
 
+/// Service roads `compact` leaves out; an untagged one is usually a real access road.
+fn is_minor_service(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("service").map(String::as_str),
+        Some("parking_aisle" | "driveway" | "alley" | "drive-through" | "drive_through")
+    )
+}
+
 impl RoadDetail {
-    /// Whether `compact` leaves this highway out: minor ways and every
-    /// crossing marker, which sit on top of the carriageway.
+    /// Whether `compact` leaves this highway out. Signals stay; only their crossing paint goes.
     pub fn skips_highway(self, tags: &HashMap<String, String>) -> bool {
         let Some(highway) = tags.get("highway") else {
             return false;
         };
         self == RoadDetail::Compact
-            && (is_pedestrian_grade(highway)
-                || matches!(highway.as_str(), "service" | "crossing")
-                || tags.contains_key("crossing")
-                || tags.get("footway").map(String::as_str) == Some("crossing"))
+            && match highway.as_str() {
+                "footway" | "path" | "cycleway" | "steps" | "track" | "crossing" => true,
+                "service" => is_minor_service(tags),
+                _ => false,
+            }
     }
 
-    /// Whether to drop the element before generation. Only elements that would
-    /// reach the highway generator go: one that also carries a building,
-    /// amenity, barrier and so on is still built by that handler. Dropping them
-    /// up front keeps the road mask, junctions and signage in step with the
-    /// roads actually drawn.
+    /// Whether to drop the element before generation, so the road mask, junctions and
+    /// signage match the roads drawn. One another handler builds first is kept.
     pub fn drops_element(self, element: &ProcessedElement) -> bool {
         let tags = element.tags();
         !matches!(element, ProcessedElement::Relation(_))
             && self.skips_highway(tags)
+            && tags.get("man_made").map(String::as_str) != Some("pier")
             && ![
                 "building",
                 "building:part",
+                "aerialway",
                 "aeroway",
                 "amenity",
+                "attraction",
                 "barrier",
                 "door",
                 "entrance",
@@ -79,12 +80,8 @@ impl RoadDetail {
             .any(|key| tags.contains_key(*key))
     }
 
-    /// Whether a lane line upstream paints stays. `max` keeps every one; the
-    /// others keep the centre line(s) between opposing traffic and, on one-way
-    /// roads wider than 5 blocks, the lane dividers (`lane_lines` gives a road
-    /// under 2 lanes none).
-    /// None on service and pedestrian ways, parking aisles or roads under 4
-    /// blocks wide, where a stripe leaves no asphalt beside it.
+    /// Whether a lane line upstream paints stays: outside `max`, centre lines and, on one-way
+    /// roads wider than 5 blocks, lane dividers; none where a stripe leaves no asphalt beside it.
     pub fn keeps_lane_line(
         self,
         highway: &str,
@@ -103,9 +100,8 @@ impl RoadDetail {
         (centre || (oneway && road_width > 5)) && !unmarked
     }
 
-    /// Dash and period of broken lane lines, from upstream's `(dash, period)` in
-    /// path cells. `compact` keeps dashes and gaps at least 4 long so short dashes
-    /// do not merge into a checker.
+    /// Upstream's `(dash, period)` in path cells; `compact` keeps dashes and gaps at least 4
+    /// long so short dashes do not merge into a checker.
     pub fn dash_pattern(self, (dash, period): (u32, u32)) -> (u32, u32) {
         if self != RoadDetail::Compact {
             return (dash, period);
@@ -114,9 +110,8 @@ impl RoadDetail {
         (on, on + period.saturating_sub(dash).max(4))
     }
 
-    /// Whether bar `i` of a zebra, a give-way line or a broken crossing edge line
-    /// is white. `max` paints every other cell, as upstream does; the others paint
-    /// 2-on/2-off bars, which stay apart when seen from above.
+    /// Whether bar `i` of a zebra, give-way line or broken crossing edge is white: every
+    /// other cell at `max`, as upstream; 2-on/2-off otherwise, which stays apart from above.
     pub fn bar(self, i: i32) -> bool {
         if self == RoadDetail::Max {
             i.rem_euclid(2) == 0
@@ -125,9 +120,7 @@ impl RoadDetail {
         }
     }
 
-    /// Whether pedestrian crossings are painted across roads. `compact` drops the
-    /// crossing ways and nodes, so their paint, and the lane-line gaps and stop lines
-    /// kept for them, go too.
+    /// Whether crossings get paint, lane-line gaps and stop lines.
     pub fn paints_crossings(self) -> bool {
         self != RoadDetail::Compact
     }
@@ -146,14 +139,13 @@ mod tests {
         assert!(!RoadDetail::Clean.skips_highway(&footway));
         assert!(RoadDetail::Compact.skips_highway(&footway));
         for skipped in [
-            &[("highway", "service")][..],
+            &[("highway", "service"), ("service", "parking_aisle")][..],
+            &[("highway", "service"), ("service", "driveway")],
+            &[("highway", "service"), ("service", "alley")],
+            &[("highway", "service"), ("service", "drive-through")],
             &[("highway", "track")],
             &[("highway", "crossing")],
-            &[
-                ("highway", "traffic_signals"),
-                ("crossing", "traffic_signals"),
-            ],
-            &[("highway", "residential"), ("footway", "crossing")],
+            &[("highway", "footway"), ("footway", "sidewalk")],
         ] {
             assert!(
                 RoadDetail::Compact.skips_highway(&tags(skipped)),
@@ -165,6 +157,18 @@ mod tests {
             &[("highway", "primary"), ("footway", "no")],
             &[("highway", "street_lamp")],
             &[("building", "yes")],
+            &[("highway", "service")],
+            &[("highway", "service"), ("service", "emergency_access")],
+            &[("highway", "pedestrian")],
+            &[("highway", "pedestrian"), ("area", "yes")],
+            &[("highway", "platform")],
+            &[("highway", "bus_stop")],
+            &[("highway", "corridor")],
+            &[
+                ("highway", "traffic_signals"),
+                ("crossing", "traffic_signals"),
+            ],
+            &[("highway", "residential"), ("footway", "crossing")],
         ] {
             assert!(!RoadDetail::Compact.skips_highway(&tags(kept)), "{kept:?}");
         }
@@ -196,6 +200,12 @@ mod tests {
             .drops_element(&node(&[("highway", "bus_stop"), ("amenity", "shelter")])));
         assert!(!RoadDetail::Compact
             .drops_element(&node(&[("highway", "crossing"), ("barrier", "kerb")])));
+        assert!(!RoadDetail::Compact
+            .drops_element(&way(&[("highway", "footway"), ("man_made", "pier")])));
+        assert!(!RoadDetail::Compact.drops_element(&node(&[
+            ("highway", "traffic_signals"),
+            ("crossing", "traffic_signals")
+        ])));
     }
 
     #[test]

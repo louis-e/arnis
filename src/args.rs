@@ -612,13 +612,7 @@ pub struct Args {
     pub cave_datum_y: Option<i32>,
     // --- end confluence:nature ---
     // --- confluence:build ---
-    /// How much road marking and how many minor ways to build: max (every marking and
-    /// way, as mapped); clean (removes lane dividers on two-way roads and on one-way roads
-    /// 5 blocks wide or less, every line on service and pedestrian ways, parking aisles and
-    /// roads under 4 blocks wide, and paints zebra and give-way bars 2 blocks apart); or
-    /// compact (clean, plus dashes and gaps of at least 4 blocks, and removes footways,
-    /// paths, cycleways, steps, service roads, tracks, crossings and their paint, so
-    /// sidewalks go at every scale).
+    /// How much road marking and how many minor ways to build: max, clean or compact.
     #[arg(long, value_enum, default_value_t = RoadDetail::Max)]
     pub road_detail: RoadDetail,
 
