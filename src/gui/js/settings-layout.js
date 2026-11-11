@@ -199,6 +199,12 @@ export function initSettingsLayout() {
 // Called when the page opens: the scroll position survives a close, so the
 // highlight has to be read from it again rather than trusted.
 export function syncSettingsLayout() {
+  // A search left from last time would hide most of the page.
+  const search = document.getElementById('settings-search');
+  if (search && search.value) {
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+  }
   if (!scroller) return;
   pinned = null;
   setActive(currentSectionIndex());
