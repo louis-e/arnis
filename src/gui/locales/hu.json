@@ -791,5 +791,7 @@
   "cell_hold": "Tartsd lenyomva a megerősítéshez",
   "run_state_held": "Szünetel",
   "run_state_omitted": "Kihagyva",
-  "legend_picked": "Kijelölt cellák"
+  "legend_picked": "Kijelölt cellák",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

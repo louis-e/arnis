@@ -791,5 +791,7 @@
   "cell_hold": "Håll in för att bekräfta",
   "run_state_held": "Pausad",
   "run_state_omitted": "Överhoppad",
-  "legend_picked": "Valda celler"
+  "legend_picked": "Valda celler",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

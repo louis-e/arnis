@@ -1123,15 +1123,11 @@ fn area_regions(a: &GeneratedArea) -> impl Iterator<Item = (i32, i32)> {
     (z0..=z1).flat_map(move |z| (x0..=x1).map(move |x| (x, z)))
 }
 
-/// Takes `cells` (plan indexes) of `job` (default: the job run last) out of the world: their
-/// region files, with the `entities/` and `poi/` files beside them, and their previews are
-/// deleted, their areas leave the manifest and the job counts them as not built. A region
-/// file another area also lies in is kept. Refused while a job or Minecraft has the world.
-pub fn remove_cells(
-    world_dir: &Path,
-    job: Option<&str>,
-    cells: &[u32],
-) -> Result<RemoveReport, String> {
+/// Takes `cells` (plan indexes) of `job` out of the world: their region files, with the
+/// `entities/` and `poi/` files beside them, and their previews are deleted, their areas leave
+/// the manifest and the job counts them as not built. A region file another area also lies in
+/// is kept. Refused for a job the world does not know, and while a job or Minecraft has it.
+pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<RemoveReport, String> {
     if crate::scale::runs_on(world_dir) {
         return Err("A job is building this world; stop it first.".to_string());
     }
@@ -1141,22 +1137,15 @@ pub fn remove_cells(
     })?;
     let mut manifest = Manifest::load(world_dir)?
         .ok_or_else(|| format!("{} is not a One World.", world_dir.display()))?;
-    let job = match job {
-        Some(j) => j.to_string(),
-        None => manifest
-            .jobs
+    let known = manifest.jobs.iter().any(|j| j.name == job)
+        || manifest
+            .areas
             .iter()
-            .max_by_key(|j| j.status.last_run_ms)
-            .map(|j| j.name.clone())
-            .or_else(|| {
-                manifest
-                    .areas
-                    .iter()
-                    .rev()
-                    .find_map(|a| Some(a.piece.as_ref()?.job.clone()))
-            })
-            .ok_or("This world has no job built in cells.")?,
-    };
+            .any(|a| a.piece.as_ref().is_some_and(|p| p.job == job));
+    if !known {
+        return Err("These cells belong to a job this world does not have.".to_string());
+    }
+    let job = job.to_string();
     let (gone, kept): (Vec<_>, Vec<_>) =
         std::mem::take(&mut manifest.areas)
             .into_iter()
@@ -1350,11 +1339,16 @@ mod tests {
 
         // Refused while the world is locked.
         let held = SessionLock::acquire(world).unwrap();
-        let err = remove_cells(world, None, &[4, 0]).unwrap_err();
+        let err = remove_cells(world, "J", &[4, 0]).unwrap_err();
         assert!(err.contains("in use"), "{err}");
         drop(held);
 
-        let report = remove_cells(world, None, &[4, 0, 0, 12]).unwrap();
+        // Another job's cells by the same indexes are never touched.
+        let err = remove_cells(world, "K", &[4, 0]).unwrap_err();
+        assert!(err.contains("does not have"), "{err}");
+        assert_eq!(Manifest::load(world).unwrap().unwrap().areas.len(), 10);
+
+        let report = remove_cells(world, "J", &[4, 0, 0, 12]).unwrap();
         assert_eq!(report.job, "J");
         assert_eq!(report.removed, [0, 4]);
         assert_eq!(report.not_built, [12]);

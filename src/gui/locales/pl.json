@@ -791,5 +791,7 @@
   "cell_hold": "Przytrzymaj, aby potwierdzić",
   "run_state_held": "Wstrzymana",
   "run_state_omitted": "Pominięta",
-  "legend_picked": "Zaznaczone komórki"
+  "legend_picked": "Zaznaczone komórki",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

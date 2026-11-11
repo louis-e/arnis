@@ -1535,7 +1535,7 @@ second
             (vec![1], vec![7], vec![1, 0])
         );
         // No cells come out of a world a job is building.
-        let err = one_world::remove_cells(tmp.path(), None, &[0]).unwrap_err();
+        let err = one_world::remove_cells(tmp.path(), "J", &[0]).unwrap_err();
         assert!(err.contains("job is building"), "{err}");
         drop(active);
         assert!(control("hold", &[0]).is_err());

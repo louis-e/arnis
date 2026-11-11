@@ -791,5 +791,7 @@
   "cell_hold": "長押しで確定",
   "run_state_held": "保留中",
   "run_state_omitted": "スキップ済み",
-  "legend_picked": "選択中のセル"
+  "legend_picked": "選択中のセル",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

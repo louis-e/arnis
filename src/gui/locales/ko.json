@@ -791,5 +791,7 @@
   "cell_hold": "길게 눌러 확인",
   "run_state_held": "보류됨",
   "run_state_omitted": "건너뜀",
-  "legend_picked": "선택한 셀"
+  "legend_picked": "선택한 셀",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

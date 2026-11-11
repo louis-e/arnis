@@ -791,5 +791,7 @@
   "cell_hold": "Vahvista pitämällä painettuna",
   "run_state_held": "Pidossa",
   "run_state_omitted": "Ohitettu",
-  "legend_picked": "Valitut ruudut"
+  "legend_picked": "Valitut ruudut",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

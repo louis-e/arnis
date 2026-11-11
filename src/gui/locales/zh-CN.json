@@ -791,5 +791,7 @@
   "cell_hold": "长按以确认",
   "run_state_held": "已搁置",
   "run_state_omitted": "已跳过",
-  "legend_picked": "所选单元格"
+  "legend_picked": "所选单元格",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

@@ -791,5 +791,7 @@
   "cell_hold": "Pridržite za potrditev",
   "run_state_held": "Zadržana",
   "run_state_omitted": "Preskočena",
-  "legend_picked": "Izbrane celice"
+  "legend_picked": "Izbrane celice",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

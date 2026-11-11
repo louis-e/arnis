@@ -791,5 +791,7 @@
   "cell_hold": "Mantén pulsado para confirmar",
   "run_state_held": "En pausa",
   "run_state_omitted": "Omitida",
-  "legend_picked": "Celdas seleccionadas"
+  "legend_picked": "Celdas seleccionadas",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

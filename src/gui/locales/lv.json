@@ -791,5 +791,7 @@
   "cell_hold": "Turi nospiestu, lai apstiprinātu",
   "run_state_held": "Aizturēta",
   "run_state_omitted": "Izlaista",
-  "legend_picked": "Atlasītās šūnas"
+  "legend_picked": "Atlasītās šūnas",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

@@ -5,7 +5,7 @@ import assert from 'node:assert';
 globalThis.document = { querySelector: () => null, addEventListener() {}, getElementById: () => null };
 globalThis.window = { addEventListener() {} };
 await import('../../src/gui/js/piece-style.js');
-const { cellAction, legendRows } = await import('../../src/gui/js/meld-features.js');
+const { cellAction, legendRows, removedLine } = await import('../../src/gui/js/meld-features.js');
 const C = globalThis.arnisCells;
 
 // A 10 x 10 grid of cells, 1 degree each, index = row * 10 + col; two grey ones beside it.
@@ -64,20 +64,22 @@ assert.ok(C.actions([{ state: 'queued' }, { state: 'start', head: true }], true)
 assert.deepStrictEqual(C.calls('pause', [1, 2], 'w'), [['gui_cells_control', { action: 'hold', cells: [1, 2] }]]);
 assert.deepStrictEqual(C.calls('next', [3], 'w'), [['gui_cells_control', { action: 'front', cells: [3] }]]);
 assert.deepStrictEqual(C.calls('pausenow', [4], 'w').map(([, a]) => a.action), ['hold', 'cancel']);
-assert.deepStrictEqual(C.calls('remove', [5, 6], 'C:/w'), [['gui_cells_remove', { worldPath: 'C:/w', cells: [5, 6], job: null }]]);
+assert.deepStrictEqual(C.calls('remove', [5, 6], 'C:/w', 'J'), [['gui_cells_remove', { worldPath: 'C:/w', cells: [5, 6], job: 'J' }]]);
 assert.strictEqual(C.skipFlag([7, 2, 7, 10, 1]), '--skip-cells=1,2,7,10');
 assert.strictEqual(C.skipFlag([]), '--skip-cells=');
 
 // Remove asks first, and sends the world and the sorted cells only when held.
 const sent = [];
-const call = async (command, args) => (sent.push([command, args]), { removed: args.cells });
+const call = async (command, args) => (sent.push([command, args]), { removed: [3], not_built: [9] });
 let after = 0;
-await cellAction('remove', [9, 3, 3], { call, ask: async () => false, live: false, world: () => 'W', after: () => after++ });
+await cellAction('remove', [9, 3, 3], { call, ask: async () => false, live: false, world: () => 'W', job: () => 'J', after: () => after++ });
 assert.deepStrictEqual(sent, [], 'no hold, no call');
 const ask = async (action, list) => (assert.deepStrictEqual([action, list], ['remove', [3, 9]]), true);
-await cellAction('remove', [9, 3, 3], { call, ask, live: false, world: () => 'W', after: () => after++ });
-assert.deepStrictEqual(sent, [['gui_cells_remove', { worldPath: 'W', cells: [3, 9], job: null }]]);
+await cellAction('remove', [9, 3, 3], { call, ask, live: false, world: () => 'W', job: () => 'J', after: () => after++ });
+assert.deepStrictEqual(sent, [['gui_cells_remove', { worldPath: 'W', cells: [3, 9], job: 'J' }]], 'the job the cells belong to goes with them');
 assert.strictEqual(after, 1);
+assert.strictEqual(removedLine({ removed: [3], not_built: [9] }), 'Cells removed: 1. Not built, so not removed: 1.');
+assert.strictEqual(removedLine({ removed: [3, 4], not_built: [] }), 'Cells removed: 2.');
 // An engine refusal is shown, not thrown, and nothing refreshes.
 await cellAction('remove', [1], { call: async () => { throw 'A job is building this world; stop it first.'; }, ask: async () => true, live: false, after: () => after++ });
 assert.strictEqual(after, 1);

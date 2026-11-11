@@ -791,5 +791,7 @@
   "cell_hold": "Hold to confirm",
   "run_state_held": "Held",
   "run_state_omitted": "Skipped",
-  "legend_picked": "Selected cells"
+  "legend_picked": "Selected cells",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

@@ -791,5 +791,7 @@
   "cell_hold": "Zum Bestätigen gedrückt halten",
   "run_state_held": "Angehalten",
   "run_state_omitted": "Übersprungen",
-  "legend_picked": "Ausgewählte Zellen"
+  "legend_picked": "Ausgewählte Zellen",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

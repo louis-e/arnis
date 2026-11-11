@@ -791,5 +791,7 @@
   "cell_hold": "Laikykite nuspaudę, kad patvirtintumėte",
   "run_state_held": "Sulaikytas",
   "run_state_omitted": "Praleistas",
-  "legend_picked": "Pasirinkti langeliai"
+  "legend_picked": "Pasirinkti langeliai",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

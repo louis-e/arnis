@@ -791,5 +791,7 @@
   "cell_hold": "Ține apăsat ca să confirmi",
   "run_state_held": "Pe pauză",
   "run_state_omitted": "Omisă",
-  "legend_picked": "Celule selectate"
+  "legend_picked": "Celule selectate",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

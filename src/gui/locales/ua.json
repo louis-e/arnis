@@ -791,5 +791,7 @@
   "cell_hold": "Утримуйте, щоб підтвердити",
   "run_state_held": "Призупинена",
   "run_state_omitted": "Пропущена",
-  "legend_picked": "Вибрані комірки"
+  "legend_picked": "Вибрані комірки",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

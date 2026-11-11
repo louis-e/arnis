@@ -182,9 +182,9 @@ globalThis.arnisCells = {
     // `--skip-cells=` with sorted, unique indexes (empty clears the saved set).
     skipFlag: (list) => `--skip-cells=${[...new Set(list)].sort((a, b) => a - b).join(',')}`,
     // The engine calls (command, arguments) of a menu action on a running job, or of Remove.
-    calls(action, cells, world) {
+    calls(action, cells, world, job) {
         const control = (a) => ['gui_cells_control', { action: a, cells }];
-        if (action === 'remove') return [['gui_cells_remove', { worldPath: world, cells, job: null }]];
+        if (action === 'remove') return [['gui_cells_remove', { worldPath: world, cells, job }]];
         if (action === 'pausenow') return [control('hold'), control('cancel')];
         return [control({ pause: 'hold', next: 'front' }[action] || action)];
     }

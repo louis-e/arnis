@@ -791,5 +791,7 @@
   "cell_hold": "اضغط مطولًا للتأكيد",
   "run_state_held": "معلّقة",
   "run_state_omitted": "متخطّاة",
-  "legend_picked": "الخلايا المحددة"
+  "legend_picked": "الخلايا المحددة",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

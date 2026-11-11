@@ -578,6 +578,8 @@ pub fn plan_line(
     let mut plan = serde_json::json!({
         "v": 1,
         "type": "plan",
+        // The job's folder name, which Remove and Rebuild name their cells by.
+        "job": name,
         "unit_regions": match size {
             UnitSize::N(n) => serde_json::json!(n),
             UnitSize::Auto => serde_json::json!("auto"),

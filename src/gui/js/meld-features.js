@@ -526,12 +526,16 @@ function skipLocal(list, include) {
   schedulePlan();
 }
 
+// The job the cells on the map belong to: the run's, else the plan's.
+let pieceJob = '';
+const cellsJob = () => (pieces.size ? pieceJob : lastPlan?.job) || '';
+
 // A menu action on `cells` (plan indexes). A running job takes it through the engine; between
 // runs Skip, Include and Retry are the next run's, and Rebuild and Remove delete built land
 // first, after the hold. `deps` are for tests.
 export async function cellAction(action, cells, deps = {}) {
   const list = [...new Set(cells)].sort((a, b) => a - b);
-  const { call: invoke = call, ask = askCells, live = running, world: worldPath = world, after = afterRemove } = deps;
+  const { call: invoke = call, ask = askCells, live = running, world: worldPath = world, job = cellsJob, after = afterRemove } = deps;
   if (!list.length) return;
   try {
     if (globalThis.arnisCells.confirm.has(action) && !(await ask(action, list))) return;
@@ -545,14 +549,21 @@ export async function cellAction(action, cells, deps = {}) {
     } else if (action === 'retry') {
       retry(list.map((i) => i + 1));
     } else {
-      const [command, args] = globalThis.arnisCells.calls('remove', list, worldPath())[0];
-      await invoke(command, args);
+      const [command, args] = globalThis.arnisCells.calls('remove', list, worldPath(), job())[0];
+      const report = await invoke(command, args);
+      say(removedLine(report), false);
       after(list, action === 'rebuild');
     }
   } catch (e) {
     say(String(e));
   }
 }
+
+// "Cells removed: 3. Not built: 1." from the engine's report.
+export const removedLine = (r) => [
+  t('cell_removed', 'Cells removed: {n}.', { n: (r?.removed || []).length }),
+  ...((r?.not_built || []).length ? [t('cell_not_built', 'Not built, so not removed: {n}.', { n: r.not_built.length })] : []),
+].join(' ');
 
 // The cells' land is gone: the plan is read again; a Rebuild builds just those cells now.
 function afterRemove(list, rebuild) {
@@ -561,6 +572,7 @@ function afterRemove(list, rebuild) {
     if (!pieces.size) {
       drawn.filter(globalThis.arnisCells.pickable).forEach((p) => pieces.set(p.i, { state: p.state, bounds: p.bounds }));
       jobKey = keyOf();
+      pieceJob = lastPlan?.job || '';
     }
     list.forEach((i) => pieces.has(i) && (pieces.get(i).state = 'planned'));
     postToMap({ type: 'pieceOutlines', pieces: outlines() });
@@ -613,6 +625,7 @@ export function clearPieces() {
   headCell = -1;
   if (retryNext.length) return;
   jobKey = keyOf();
+  pieceJob = lastPlan?.job || '';
   forgetPieces();
 }
 
@@ -959,7 +972,7 @@ async function updatePlan() {
   // leaves those out, so then it is 0).
   const overlap = on('meld-skip-built-toggle') ? 0 : units.filter((u) => u.existing_chunks > 0).length;
   planAnswered = key;
-  lastPlan = { n: units.length, w: e.workers, done, overlap, single: plan.single === true };
+  lastPlan = { n: units.length, w: e.workers, done, overlap, single: plan.single === true, job: plan.job };
   onPlan();
   planSizes.clear();
   units.forEach((u) => planSizes.set(u.index, u.size));

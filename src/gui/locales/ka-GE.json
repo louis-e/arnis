@@ -791,5 +791,7 @@
   "cell_hold": "დასადასტურებლად დააჭირეთ და გეჭიროთ",
   "run_state_held": "შეჩერებულია",
   "run_state_omitted": "გამოტოვებულია",
-  "legend_picked": "არჩეული უჯრედები"
+  "legend_picked": "არჩეული უჯრედები",
+  "cell_removed": "Cells removed: {n}.",
+  "cell_not_built": "Not built, so not removed: {n}."
 }

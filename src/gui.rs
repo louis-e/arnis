@@ -2435,20 +2435,19 @@ fn gui_cells_control(
     crate::scale::control(&action, &cells)
 }
 
-/// Deletes the region files of the given cells (plan indexes) of `job` (default: the job run
-/// last) and takes them out of the manifest; refused while a job, live mode or Minecraft has
-/// the world.
+/// Deletes the region files of the given cells (plan indexes) of `job` and takes them out of the
+/// manifest; refused while a job, live mode or Minecraft has the world.
 #[tauri::command(async)]
 fn gui_cells_remove(
     world_path: String,
     cells: Vec<u32>,
-    job: Option<String>,
+    job: String,
 ) -> Result<crate::one_world::RemoveReport, String> {
     let world = PathBuf::from(world_path);
     if live_plays(&world) {
         return Err("Live mode is playing this world. Stop it first.".to_string());
     }
-    crate::one_world::remove_cells(&world, job.as_deref(), &cells)
+    crate::one_world::remove_cells(&world, &job, &cells)
 }
 
 // Everything before the `spawn` below - the spawn point written into level.dat -
