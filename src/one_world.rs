@@ -134,6 +134,9 @@ pub struct Manifest {
     /// `--seed` of the first area; later areas and pieces build with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
+    /// Set once `--world-border` put the border around the world; later areas widen it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub world_border: bool,
     pub next_area_id: u32,
     pub areas: Vec<GeneratedArea>,
     /// The place the world shows, set by the window.
@@ -287,6 +290,7 @@ impl Manifest {
                 e
             }),
             seed: args.seed,
+            world_border: false,
             next_area_id: 1,
             areas: Vec::new(),
             place_name: None,
@@ -755,6 +759,11 @@ fn resolve(
 
     args.scale = manifest.scale;
     keep_seed(&manifest, args);
+    // Live tiles leave the border to the live session.
+    if manifest.world_border && !args.world_border && !args.live.tile {
+        println!("Note: One World keeps its world border around all its areas.");
+        args.world_border = true;
+    }
     let (xzbbox, llbbox) = snap_bbox_to_chunks(&manifest.projection(), requested)?;
 
     if created {
@@ -948,19 +957,26 @@ pub fn record_area(
 /// One World around every area it holds. A failure is a warning: the world
 /// itself is written.
 pub fn apply_world_border(world_dir: &Path, rect: &XZBBox) {
-    let all = Manifest::load(world_dir)
-        .ok()
-        .flatten()
-        .and_then(|m| m.extent());
+    let manifest = Manifest::load(world_dir).ok().flatten();
+    let all = manifest.as_ref().and_then(Manifest::extent);
     let rect = all.as_ref().unwrap_or(rect);
     match crate::world_utils::set_world_border(world_dir, rect) {
-        Ok(()) => println!(
-            "World border set around {},{} to {},{}.",
-            rect.min_x(),
-            rect.min_z(),
-            rect.max_x(),
-            rect.max_z()
-        ),
+        Ok(()) => {
+            // Remembered, so a later area without the flag still widens it.
+            if let Some(mut m) = manifest.filter(|m| !m.world_border) {
+                m.world_border = true;
+                if let Err(e) = m.save(world_dir) {
+                    eprintln!("Warning: Failed to record the world border: {e}");
+                }
+            }
+            println!(
+                "World border set around {},{} to {},{}.",
+                rect.min_x(),
+                rect.min_z(),
+                rect.max_x(),
+                rect.max_z()
+            );
+        }
         Err(e) => eprintln!("Warning: Failed to set the world border: {e}"),
     }
 }
@@ -2015,6 +2031,13 @@ mod tests {
         assert_eq!(b["BorderCenterX"], f64::from(x0 + x1 + 1) / 2.0);
         assert_eq!(b["BorderCenterZ"], f64::from(z0 + z1 + 1) / 2.0);
         assert_eq!(b["BorderSize"], f64::from((x1 + 1 - x0).max(z1 + 1 - z0)));
+
+        // Remembered: a later area re-fits it without the flag.
+        assert!(!args2.world_border);
+        assert!(Manifest::load(&world).unwrap().unwrap().world_border);
+        let mut args3 = args_for(east, &[]);
+        drop(prepare(&world, &LLBBox::from_str(east).unwrap(), &mut args3).unwrap());
+        assert!(args3.world_border);
     }
 
     /// `--origin` pins block (0, 0) of a new world; an existing world keeps its own.
