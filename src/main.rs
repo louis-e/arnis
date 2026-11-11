@@ -848,7 +848,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     // are the longest thing in a run that uses it, so it starts here and is
     // collected inside `generate_world_with_options`, just before the buildings.
     let facade_job = if args.prewarm || net::offline() {
-        if net::offline() {
+        if net::offline() && args.mapillary_pipeline_on() && !args.skip_objects() {
             println!("--offline: skipping Mapillary street-level imagery");
         }
         mapillary::FacadeJob::default()

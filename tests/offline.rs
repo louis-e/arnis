@@ -7,6 +7,18 @@ fn offline_with_empty_cache_fails_fast() {
     let tmp = tempfile::tempdir().unwrap();
     let (cache, out) = (tmp.path().join("cache"), tmp.path().join("out"));
     std::fs::create_dir_all(&out).unwrap();
+    // A tile past the sweep's age: offline, the cache is all there is, so it must stay.
+    let tiles = cache.join("arnis-tile-cache");
+    std::fs::create_dir_all(&tiles).unwrap();
+    let old = tiles.join("old.webp");
+    std::fs::write(&old, b"x").unwrap();
+    let year_ago = std::time::SystemTime::now() - Duration::from_secs(365 * 86_400);
+    std::fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(year_ago)
+        .unwrap();
     let started = Instant::now();
     let run = Command::new(env!("CARGO_BIN_EXE_arnis"))
         .env("ARNIS_CACHE_ROOT", &cache)
@@ -27,6 +39,9 @@ fn offline_with_empty_cache_fails_fast() {
         stderr.contains("OSM") || stderr.contains("elevation"),
         "stderr names nothing: {stderr}"
     );
+    // No sweep started, and Mapillary goes unmentioned when the run never asked for it.
+    assert!(old.exists() && !tiles.join(".last-cleanup").exists());
+    assert!(!String::from_utf8_lossy(&run.stdout).contains("Mapillary"));
     // No region file was written, and the world made for the run is gone.
     let mut stack = vec![out];
     while let Some(dir) = stack.pop() {

@@ -206,17 +206,33 @@ pub(crate) fn cache_files(
     grid_height: usize,
 ) -> Vec<PathBuf> {
     let zoom = choose_zoom(bbox, grid_width, grid_height);
-    covering_tile_keys(bbox, zoom)
+    let keys = covering_tile_keys(bbox, zoom);
+    // A level the probe found empty has markers on the probed tiles only; the fetch read the
+    // rest from coarser tiles, which stand in for them.
+    let probed_empty = keys.iter().any(|k| k.marker_path(dir).exists());
+    let mut files: Vec<PathBuf> = keys
         .into_iter()
         .map(|k| {
             let marker = k.marker_path(dir);
             if marker.exists() {
-                marker
-            } else {
-                k.cache_path(dir)
+                return marker;
             }
+            let tile = k.cache_path(dir);
+            if probed_empty && !tile.exists() {
+                let coarser = std::iter::successors(k.parent(), TileKey::parent)
+                    .take_while(|a| a.z >= MIN_ZOOM)
+                    .map(|a| a.cache_path(dir))
+                    .find(|p| p.exists());
+                if let Some(coarser) = coarser {
+                    return coarser;
+                }
+            }
+            tile
         })
-        .collect()
+        .collect();
+    files.sort_unstable();
+    files.dedup();
+    files
 }
 
 /// Tile containing the given normalized mercator coords at a zoom level.
@@ -880,6 +896,28 @@ mod tests {
     use super::super::tile_math::bbox_dimensions_m;
     use super::*;
     use crate::elevation::providers::tile_math::TERRARIUM_OFFSET;
+
+    #[test]
+    fn a_level_the_probe_found_empty_counts_its_coarser_tiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let bbox = LLBBox::new(44.40, 26.00, 44.50, 26.15).unwrap();
+        let (w, h) = (1200, 1100);
+        let keys = covering_tile_keys(&bbox, choose_zoom(&bbox, w, h));
+        assert!(keys.len() > 1);
+        let touch = |p: PathBuf| std::fs::write(p, b"").unwrap();
+        // Coarser tiles alone could be another scale's; nothing is claimed.
+        for k in &keys {
+            touch(k.parent().unwrap().cache_path(dir));
+        }
+        let files = cache_files(dir, &bbox, w, h);
+        assert!(files.iter().all(|f| !f.exists()), "{files:?}");
+        // With one probed tile marked absent, the rest come from the coarser level.
+        touch(keys[0].marker_path(dir));
+        let files = cache_files(dir, &bbox, w, h);
+        assert!(files.iter().all(|f| f.exists()), "{files:?}");
+        assert!(files.len() < keys.len());
+    }
 
     fn flat_tile(height_m: f64) -> TileImage {
         let raw = (height_m + TERRARIUM_OFFSET).round() as u32;

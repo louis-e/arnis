@@ -395,6 +395,8 @@ pub fn tile_y_to_lat(z: u8, tile_y: u32, fraction: f64) -> f64 {
 /// directories have been read so far.
 pub struct Archive {
     url: String,
+    /// What an offline miss is listed as.
+    what: &'static str,
     header: Header,
     root: Vec<Entry>,
     leaves: HashMap<(u64, u32), Vec<Entry>>,
@@ -420,6 +422,11 @@ impl Archive {
         cache_dir: Option<PathBuf>,
         allowed: &[u8],
     ) -> Result<Archive> {
+        let what = if allowed.contains(&TILE_TYPE_MVT) {
+            "Overture Maps tiles"
+        } else {
+            "OSM tile archive"
+        };
         let header_path = cache_dir.as_ref().map(|d| d.join("header.bin"));
         let root_path = cache_dir.as_ref().map(|d| d.join("root.bin"));
 
@@ -434,7 +441,7 @@ impl Archive {
                 (header_bytes, root_bytes)
             }
             None => {
-                let probe = fetch_range(client, url, 0, HEADER_PROBE_LEN)?;
+                let probe = fetch_range(client, url, what, 0, HEADER_PROBE_LEN)?;
                 let header = Header::parse_allowing(&probe, allowed)?;
                 let root_end = header
                     .root_offset
@@ -444,7 +451,7 @@ impl Archive {
                 let root_bytes = if root_end <= probe.len() as u64 {
                     probe[header.root_offset as usize..root_end as usize].to_vec()
                 } else {
-                    fetch_range(client, url, header.root_offset, header.root_length)?
+                    fetch_range(client, url, what, header.root_offset, header.root_length)?
                 };
                 let header_bytes = probe[..HEADER_LEN].to_vec();
 
@@ -464,6 +471,7 @@ impl Archive {
         )?)?;
         Ok(Archive {
             url: url.to_string(),
+            what,
             header,
             root,
             leaves: HashMap::new(),
@@ -624,7 +632,7 @@ impl Archive {
                 }
             }
         }
-        let bytes = fetch_range(client, &self.url, offset, length)?;
+        let bytes = fetch_range(client, &self.url, self.what, offset, length)?;
         if let Some(path) = &path {
             cache::write_atomic(path, &bytes);
         }
@@ -649,7 +657,13 @@ pub fn local_path(url: &str) -> Option<PathBuf> {
 const RANGE_ATTEMPTS: u32 = 3;
 
 /// Fetch `[offset, offset + length)` over HTTP, retrying transient failures.
-fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<Vec<u8>> {
+fn fetch_range(
+    client: &Client,
+    url: &str,
+    what: &str,
+    offset: u64,
+    length: u64,
+) -> Result<Vec<u8>> {
     if length == 0 {
         return Ok(Vec::new());
     }
@@ -669,7 +683,7 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
             .map_err(|e| format!("{}: {e}", path.display()))?;
         return Ok(bytes);
     }
-    crate::net::ensure_online(url)?;
+    crate::net::ensure_online(what)?;
     let mut last_error = String::new();
 
     for attempt in 0..RANGE_ATTEMPTS {
@@ -745,15 +759,21 @@ mod tests {
         std::fs::write(&path, (0u8..100).collect::<Vec<_>>()).unwrap();
         let client = Client::new();
         let url = path.to_str().unwrap();
-        assert_eq!(fetch_range(&client, url, 10, 3).unwrap(), vec![10, 11, 12]);
+        assert_eq!(
+            fetch_range(&client, url, "test", 10, 3).unwrap(),
+            vec![10, 11, 12]
+        );
         // Past the end comes back short, as a 206 would.
-        assert_eq!(fetch_range(&client, url, 98, 16).unwrap(), vec![98, 99]);
+        assert_eq!(
+            fetch_range(&client, url, "test", 98, 16).unwrap(),
+            vec![98, 99]
+        );
         let file_url = reqwest::Url::from_file_path(&path).unwrap();
         assert_eq!(
-            fetch_range(&client, file_url.as_str(), 0, 2).unwrap(),
+            fetch_range(&client, file_url.as_str(), "test", 0, 2).unwrap(),
             vec![0, 1]
         );
-        assert!(fetch_range(&client, &format!("{url}.missing"), 0, 2).is_err());
+        assert!(fetch_range(&client, &format!("{url}.missing"), "test", 0, 2).is_err());
     }
 
     fn varint(mut v: u64) -> Vec<u8> {
