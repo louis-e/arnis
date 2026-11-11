@@ -283,7 +283,6 @@ pub fn generate_ground_region(
     let tree_spacing = editor.tree_slot_spacing();
     let tree_pack = editor.tree_pack();
     let terrain_enabled = ground.elevation_enabled;
-    let climate = ground.climate();
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -328,7 +327,7 @@ pub fn generate_ground_region(
     // Share of forest-floor grass that grows as ferns, by the habitat the forest is in.
     // Undergrowth thins out with dryness: sparse in deserts, thinner on steppe,
     // full in savanna, temperate and boreal country.
-    let climate_sward = match climate {
+    let climate_sward = |climate| match climate {
         crate::climate::Climate::HotDesert => 0.25,
         crate::climate::Climate::ColdDesert => 0.3,
         crate::climate::Climate::IceCap => 0.3,
@@ -340,16 +339,19 @@ pub fn generate_ground_region(
         crate::climate::Climate::Temperate | crate::climate::Climate::TropicalSavanna => 1.0,
     };
     // Read per chunk, as the ecoregion under the forest can change across the area.
-    let fern_share_at = |x: i32, z: i32| match crate::ground_decoration::habitat(
-        land_cover::LC_TREE_COVER,
-        climate,
-        center_lat.abs(),
-        false,
-        ground.ecoregion(XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z())),
-    ) {
-        Some(crate::ground_decoration::Habitat::Taiga) => 0.45,
-        Some(crate::ground_decoration::Habitat::Jungle) => 0.3,
-        _ => 0.12,
+    let fern_share_at = |x: i32, z: i32| {
+        let point = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
+        match crate::ground_decoration::habitat(
+            land_cover::LC_TREE_COVER,
+            ground.climate_at(point),
+            ground.local_lat(point).unwrap_or(center_lat).abs(),
+            false,
+            ground.ecoregion(point),
+        ) {
+            Some(crate::ground_decoration::Habitat::Taiga) => 0.45,
+            Some(crate::ground_decoration::Habitat::Jungle) => 0.3,
+            _ => 0.12,
+        }
     };
 
     // A flat world fills columns the outline leaves out, so a cut chunk's edge is no trench;
@@ -491,6 +493,7 @@ pub fn generate_ground_region(
                     };
 
                     let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
+                    let climate = ground.climate_at(coord);
                     // Slope once per column (used for surface selection and depth), from
                     // unrounded heights so a contour doesn't flicker between tiers.
                     let (slope_f, gradient) = if terrain_enabled {
@@ -1110,7 +1113,7 @@ pub fn generate_ground_region(
                                     Some(&[COARSE_DIRT]),
                                     None,
                                 );
-                                let sward = climate_sward * if worn { 0.5 } else { 1.0 };
+                                let sward = climate_sward(climate) * if worn { 0.5 } else { 1.0 };
 
                                 match cover {
                                     land_cover::LC_TREE_COVER

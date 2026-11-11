@@ -295,7 +295,7 @@ impl EcoMap {
     }
 }
 
-fn warped_cell(grid: &TiledGrid, lat: f64, lon: f64) -> (usize, usize) {
+pub(crate) fn warped_cell(grid: &TiledGrid, lat: f64, lon: f64) -> (usize, usize) {
     let (col, row) = grid.position(lat, lon);
     let (dc, dr) = warp(col, row);
     grid.cell(col + dc, row + dr)

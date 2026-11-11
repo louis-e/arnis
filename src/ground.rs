@@ -57,6 +57,8 @@ pub struct Ground {
     snow_threshold_y: i32,
     /// Climate at the bbox center, driving arid/polar surface palettes and biomes.
     climate: crate::climate::Climate,
+    /// Set by `--climate-mode per-position`; `None` reads `climate` everywhere.
+    climate_field: Option<Arc<crate::climate_field::ClimateField>>,
     /// Earth unless this is a Moon/Mars world, which take their own surface palette.
     body: CelestialBody,
     ecoregions: Option<Arc<EcoMap>>,
@@ -301,6 +303,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
@@ -359,6 +362,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::classify(bbox),
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
             winter: false,
@@ -384,6 +388,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
@@ -409,6 +414,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
@@ -462,6 +468,7 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
@@ -606,6 +613,7 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y,
                         climate: crate::climate::Climate::classify(&requested_bbox),
+                        climate_field: None,
                         body,
                         ecoregions: body
                             .is_earth()
@@ -642,6 +650,7 @@ impl Ground {
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
                         climate: crate::climate::Climate::classify(&requested_bbox),
+                        climate_field: None,
                         body,
                         ecoregions: body
                             .is_earth()
@@ -666,6 +675,38 @@ impl Ground {
     #[inline(always)]
     pub fn climate(&self) -> crate::climate::Climate {
         self.climate
+    }
+
+    /// Reads climate per position (`--climate-mode per-position`) instead of at
+    /// the origin. Earth only.
+    pub fn apply_climate_mode(
+        &mut self,
+        mode: crate::climate_field::ClimateMode,
+        frame: &GroundFrame,
+        bbox: &LLBBox,
+    ) {
+        if mode == crate::climate_field::ClimateMode::PerPosition && self.body.is_earth() {
+            let field = crate::climate_field::ClimateField::new(frame, bbox, self.world_dims());
+            self.climate_field = Some(Arc::new(field));
+        }
+    }
+
+    /// Climate under a ground coordinate when it is read per position.
+    #[inline]
+    pub fn local_climate(&self, coord: XZPoint) -> Option<crate::climate::Climate> {
+        Some(self.climate_field.as_ref()?.climate(coord))
+    }
+
+    /// Climate under a ground coordinate: the local one, or the origin's.
+    #[inline]
+    pub fn climate_at(&self, coord: XZPoint) -> crate::climate::Climate {
+        self.local_climate(coord).unwrap_or(self.climate)
+    }
+
+    /// Latitude under a ground coordinate when climate is read per position.
+    #[inline]
+    pub fn local_lat(&self, coord: XZPoint) -> Option<f64> {
+        Some(self.climate_field.as_ref()?.lat(coord))
     }
 
     /// Body this world is on; Earth keeps every existing behaviour.
@@ -1524,6 +1565,7 @@ pub fn generate_ground_data(
             extend_world_bounds(args, ground.base_level(), raised_for);
         }
         ground.set_winter(args.winter);
+        ground.apply_climate_mode(args.climate_mode, &frame, &bbox);
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
         let floor = area_floor_for(&ground, args);
@@ -1555,6 +1597,7 @@ pub fn generate_ground_data(
         extend_world_bounds(args, ground.base_level(), raised_for);
     }
     ground.set_winter(args.winter);
+    ground.apply_climate_mode(args.climate_mode, &frame, &bbox);
     crate::world_editor::set_base_chunk_y(ground.base_level());
     crate::world_editor::set_terrain_floor_y(ground.base_level());
     crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
@@ -1916,6 +1959,7 @@ mod tests {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
@@ -2448,6 +2492,7 @@ pub(crate) mod test_support {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,

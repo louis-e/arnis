@@ -1439,6 +1439,11 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
+    /// Climate under a block when `--climate-mode per-position` reads it per block.
+    pub fn local_climate(&self, x: i32, z: i32) -> Option<crate::climate::Climate> {
+        self.ground.as_ref()?.local_climate(self.ground_point(x, z))
+    }
+
     /// Köppen climate class of the generated area, taken at the bbox centre.
     pub fn climate(&self) -> crate::climate::Climate {
         crate::climate::Climate::classify(&self.llbbox)

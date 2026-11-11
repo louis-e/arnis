@@ -511,6 +511,19 @@ pub struct Args {
     // --- confluence:terrain ---
     #[command(flatten)]
     pub water: WaterArgs,
+
+    /// Experimental. Where the Köppen climate behind surfaces and biomes is read:
+    /// origin (once, at the bbox centre or the One World origin, default) or
+    /// per-position (at every block, with organic borders, so a large world
+    /// crosses climate zones; biome latitude follows each block too).
+    #[arg(long, value_enum, default_value_t = crate::climate_field::ClimateMode::Origin)]
+    pub climate_mode: crate::climate_field::ClimateMode,
+
+    /// Experimental. Render the per-position Köppen climate layout for --bbox to
+    /// `<PREFIX>.png` and exit without generating a world; prints a
+    /// `CLIMATEMAP {json}` line with each climate's share.
+    #[arg(long = "climate-map", value_name = "PREFIX")]
+    pub climate_map: Option<PathBuf>,
     // --- end confluence:terrain ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -818,6 +831,8 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.dh_lod_only, "--dh-lod-only"),
         (w.river_bed != Default::default(), "--river-bed"),
         (w.water_detail != Default::default(), "--water-detail"),
+        (args.climate_mode != Default::default(), "--climate-mode"),
+        (args.climate_map.is_some(), "--climate-map"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
@@ -1458,6 +1473,15 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     // --- confluence:output ---
     crate::output_args::validate(args)?;
     // --- end confluence:output ---
+    // --- confluence:terrain ---
+    if args.climate_map.is_some() && args.bbox.is_none() {
+        return Err("--climate-map needs --bbox.".to_string());
+    }
+    // Rotation resamples the ground grids, which the per-position climate does not follow.
+    if args.climate_mode == crate::climate_field::ClimateMode::PerPosition && args.rotation != 0.0 {
+        return Err("--climate-mode per-position does not support --rotation.".to_string());
+    }
+    // --- end confluence:terrain ---
     // --- confluence:data ---
     if args.prewarm_first && !args.units.coordinates() {
         return Err(
@@ -1713,9 +1737,9 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 return Err(format!("Path is not a directory: {}", path.display()));
             }
         }
-    } else if args.mapillary_probe || cave_preview || args.prewarm {
-        // The probe, the cave preview and a prewarm write no world, so they need no output
-        // directory.
+    } else if args.mapillary_probe || cave_preview || args.climate_map.is_some() || args.prewarm {
+        // The probe, the cave preview, the climate map and a prewarm write no world, so they need
+        // no output directory.
     } else {
         // Java: path is required. If it exists, it must be a directory.
         // If it doesn't exist, create_new_world will create it.

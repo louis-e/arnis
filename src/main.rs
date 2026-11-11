@@ -14,6 +14,7 @@ mod canopy;
 mod caves;
 mod celestial;
 mod climate;
+mod climate_field;
 mod clipping;
 mod colors;
 mod coordinate_system;
@@ -325,6 +326,14 @@ fn run_cli() {
     if let Err(e) = args::validate_args(&args) {
         eprintln!("{}: {}", "Error".red().bold(), e);
         std::process::exit(1);
+    }
+
+    if args.climate_map.is_some() {
+        if let Err(e) = climate_field::render(&args) {
+            eprintln!("{}: {}", "Error".red().bold(), e);
+            std::process::exit(1);
+        }
+        return;
     }
 
     if args.live.live {

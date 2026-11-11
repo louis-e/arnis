@@ -1959,6 +1959,7 @@ const WINDOW_FLAGS: &[&str] = &[
     "max-downloads",
     "river-bed",
     "water-detail",
+    "climate-mode",
     "origin",
     "world-border",
     "region-format",
@@ -2667,6 +2668,8 @@ fn gui_start_generation(
                 map_item_only: false,
                 dh_lod_only: false,
                 water: Default::default(),
+                climate_mode: Default::default(),
+                climate_map: None,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3330,6 +3333,7 @@ mod tests {
         let flags: Vec<String> = [
             "--river-bed=v1",
             "--water-detail=scaled",
+            "--climate-mode=per-position",
             "--world-border",
             "--region-format=blinear",
             "--ram-budget-mb=4096",
