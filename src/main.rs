@@ -930,6 +930,13 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                     return osm_parser::OsmData::empty();
                 }
                 eprintln!("{} Failed to fetch data: {e}", "Error:".red().bold());
+                // A download may pass on another try; a local extract or a box too large will not.
+                if osm_pbf::Source::from_args(&args).is_none()
+                    && !net::offline()
+                    && e.to_string() != retrieve_data::AREA_TOO_LARGE
+                {
+                    progress_json::set_error_kind(progress_json::NETWORK);
+                }
                 exit_failed();
             })
         };

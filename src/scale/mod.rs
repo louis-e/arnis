@@ -1216,34 +1216,12 @@ struct PieceFailure {
     transient: bool,
 }
 
-/// Network trouble, or a piece that died without saying why (killed, out of memory), may
-/// pass; a reported error, a panic or a stop will not.
-fn is_transient(code: Option<i32>, tail: &[String]) -> bool {
-    const NETWORK: &[&str] = &[
-        "timed out",
-        "timeout",
-        "connection",
-        "network",
-        "dns",
-        "429",
-        "502",
-        "503",
-        "504",
-        "too many requests",
-        "rate limit",
-        "temporarily",
-    ];
-    // 101 is a panic; 0xC000013A a Ctrl-C on Windows; no code is a signal.
-    let Some(code) = code.filter(|&c| c != 101 && c != 0xC000_013Au32 as i32) else {
-        return false;
-    };
-    let text = tail.join("\n").to_lowercase();
-    let reported = text.contains("error");
-    code != 0 && (!reported || NETWORK.iter().any(|w| text.contains(w)))
+/// Only a failed download, as the piece's own error record says, may pass on another try.
+/// A crash (a panic, a signal, a Windows exception code) is not retried.
+fn is_transient(code: Option<i32>, kind: Option<&str>) -> bool {
+    code == Some(1) && kind == Some(progress_json::NETWORK)
 }
 
-/// Runs one piece to the end, or kills it as soon as `cancel` says so. `progress` gets the
-/// piece's own fraction done. Its output lines are also written to `log`.
 /// A piece's log, appended to so a retry (or the build after a prewarm) keeps the
 /// first failure; each build try opens with a `--- try N ---` line, the warm step with
 /// `--- warm ---`, which is not a try.
@@ -1264,6 +1242,8 @@ fn open_piece_log(path: &Path, warm: bool) -> Option<std::fs::File> {
     Some(f)
 }
 
+/// Runs one piece to the end, or kills it as soon as `cancel` says so. `progress` gets the
+/// piece's own fraction done. Its output lines are also written to `log`.
 fn run_piece_until(
     argv: &[OsString],
     env: &[(&str, String)],
@@ -1324,6 +1304,7 @@ fn run_piece_until(
         })
     });
     let mut result = PieceResult::default();
+    let mut kind = None;
     let stdout = child.stdout.take();
     let child = Mutex::new(child);
     let finished = AtomicBool::new(false);
@@ -1369,7 +1350,10 @@ fn run_piece_until(
                     result.wall_s = record["wall_s"].as_f64();
                     result.chunks = record["chunks"].as_u64().unwrap_or(0);
                 }
-                Some("error") => push(&tail, &log, line),
+                Some("error") => {
+                    kind = record["kind"].as_str().map(str::to_owned);
+                    push(&tail, &log, line)
+                }
                 _ => {}
             }
         }
@@ -1384,7 +1368,7 @@ fn run_piece_until(
     }
     let tail: Vec<String> = lock(&tail).iter().cloned().collect();
     Err(PieceFailure {
-        transient: is_transient(status.code(), &tail),
+        transient: is_transient(status.code(), kind.as_deref()),
         message: format!("{status}; last output:\n{}", tail.join("\n")),
     })
 }
@@ -1791,20 +1775,14 @@ second
 
     #[test]
     fn only_failures_that_may_pass_are_retried() {
-        let lines = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        // Killed or crashed without a word: worth another go.
-        assert!(is_transient(Some(1), &lines(&["Processing data..."])));
-        assert!(is_transient(
-            Some(1),
-            &lines(&["Error: Failed to fetch data: operation timed out"])
-        ));
-        assert!(!is_transient(
-            Some(1),
-            &lines(&["Error: This area cannot be added to the One World"])
-        ));
-        assert!(!is_transient(Some(101), &lines(&["thread panicked"])));
-        assert!(!is_transient(Some(0xC000_013Au32 as i32), &[]));
-        assert!(!is_transient(None, &[]));
+        let net = Some(progress_json::NETWORK);
+        assert!(is_transient(Some(1), net));
+        // A reported error, whatever its words, and any crash are not retried.
+        assert!(!is_transient(Some(1), None));
+        assert!(!is_transient(Some(1), Some("other")));
+        assert!(!is_transient(Some(101), net));
+        assert!(!is_transient(None, net));
+        assert!(!is_transient(Some(0xC000_0005u32 as i32), net));
     }
 
     /// Builds the parity area as a job, kills one piece, resumes, and compares with an

@@ -4,12 +4,13 @@
 //! ```text
 //! {"v":1,"type":"phase","name":"Generating area...","progress":20.0}
 //! {"v":1,"type":"progress","progress":35.5}
-//! {"v":1,"type":"error","message":"..."}
+//! {"v":1,"type":"error","message":"...","kind":"network"}
 //! {"v":1,"type":"done","chunks":880,"cpu_s":388.0,"peak_rss_mb":2310,"wall_s":41.2}
 //! ```
 //!
 //! `phase` marks a new status message (`progress` is null for one that leaves
 //! the bar alone), `progress` a new percentage (monotonic, two decimals).
+//! An `error` has `kind` `network` when a download failed, which another try may pass.
 //! `done` closes a successful run: wall and CPU seconds, peak resident memory
 //! and the Java/Bedrock chunks written. The usual human-readable lines still
 //! go to stdout around these, so a reader keeps the lines starting `{"v":`.
@@ -95,10 +96,27 @@ pub fn record(kind: &str, body: Value) {
     }
 }
 
+pub const NETWORK: &str = "network";
+
+static ERROR_KIND: Mutex<Option<&'static str>> = Mutex::new(None);
+
+/// Tags the `error` records from here on with `kind`.
+pub fn set_error_kind(kind: &'static str) {
+    *ERROR_KIND.lock().unwrap_or_else(|e| e.into_inner()) = Some(kind);
+}
+
 pub fn error(message: &str) {
-    if enabled() {
-        emit("error", json!({ "message": message }));
+    if let Some(line) = enabled().then(|| error_line(message)).flatten() {
+        println!("{line}");
     }
+}
+
+fn error_line(message: &str) -> Option<String> {
+    let mut body = json!({ "message": message });
+    if let Some(kind) = *ERROR_KIND.lock().unwrap_or_else(|e| e.into_inner()) {
+        body["kind"] = json!(kind);
+    }
+    line("error", body)
 }
 
 fn done_body(started: Instant) -> Value {
@@ -183,6 +201,19 @@ mod tests {
         let (cpu_s, peak_mb) = process_usage().expect("usage");
         assert!(cpu_s >= 0.0);
         assert!(peak_mb > 0);
+    }
+
+    #[test]
+    fn an_error_carries_its_kind_once_set() {
+        let read = |m: &str| serde_json::from_str::<Value>(&error_line(m).unwrap()).unwrap();
+        assert!(read("bad flag").get("kind").is_none());
+        set_error_kind(NETWORK);
+        let v = read("timed out");
+        *ERROR_KIND.lock().unwrap() = None;
+        assert_eq!(
+            (v["type"].as_str(), v["kind"].as_str()),
+            (Some("error"), Some(NETWORK))
+        );
     }
 
     #[test]
