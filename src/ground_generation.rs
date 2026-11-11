@@ -1522,7 +1522,11 @@ pub fn generate_ground_region(
         // at the end of generation for maximum throughput.
     }
 
-    // Plant patches need every column of the region finished first.
+    // Plant patches need every column of the region finished first, and grow
+    // around any rocks and bushes scattered there.
+    crate::ground_scatter::scatter_region(
+        editor, ground, args, xzbbox, iter_min_x, iter_max_x, iter_min_z, iter_max_z,
+    );
     crate::ground_decoration::decorate_region(
         editor, ground, args, xzbbox, iter_min_x, iter_max_x, iter_min_z, iter_max_z,
     );

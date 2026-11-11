@@ -1960,6 +1960,10 @@ const WINDOW_FLAGS: &[&str] = &[
     "seed",
     "min-y",
     "max-y",
+    "rocks",
+    "rock-density",
+    "bushes",
+    "bush-density",
     "river-bed",
     "water-detail",
     "climate-mode",
@@ -2688,6 +2692,7 @@ fn gui_start_generation(
                 min_y: None,
                 max_y: None,
                 seed: None,
+                scatter: Default::default(),
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3352,6 +3357,8 @@ mod tests {
             "--seed=7",
             "--min-y=-64",
             "--max-y=319",
+            "--rocks",
+            "--bushes",
             "--river-bed=v1",
             "--water-detail=scaled",
             "--climate-mode=per-position",
@@ -3359,6 +3366,8 @@ mod tests {
             "--region-format=blinear",
             "--ram-budget-mb=4096",
             "--threads=4",
+            "--rock-density=0.1",
+            "--bush-density=0.2",
             "--blinear-level=9",
             "--osm-pbf=geofabrik",
             "--osm-pbf-url=https://example.org/x.osm.pbf",

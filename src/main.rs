@@ -38,6 +38,7 @@ mod grid_ops;
 mod ground;
 mod ground_decoration;
 mod ground_generation;
+mod ground_scatter;
 mod land_cover;
 mod landmarks;
 mod live;

@@ -552,6 +552,10 @@ pub struct Args {
     #[arg(long, value_name = "SEED")]
     pub seed: Option<u64>,
     // --- end confluence:terrain ---
+    // --- confluence:nature ---
+    #[command(flatten)]
+    pub scatter: ScatterArgs,
+    // --- end confluence:nature ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
     #[arg(long, value_name = "PATH|geofabrik", conflicts_with = "file")]
@@ -611,6 +615,47 @@ impl WaterArgs {
             detail: self.water_detail,
             scale,
         }
+    }
+}
+
+/// Rocks and bushes on open land. Off unless asked for.
+#[derive(clap::Args, Debug)]
+pub struct ScatterArgs {
+    /// Scatter small andesite and tuff rocks over open grassland and cropland.
+    /// Needs land cover.
+    #[arg(long)]
+    pub rocks: bool,
+
+    /// Share of 16x16 chunks that get a rock with --rocks, from 0.0 to 1.0.
+    #[arg(long, default_value_t = 0.02, value_parser = parse_density)]
+    pub rock_density: f64,
+
+    /// Scatter small bushes of ten species over open grassland and cropland.
+    /// Needs land cover.
+    #[arg(long)]
+    pub bushes: bool,
+
+    /// Share of 16x16 chunks that get a bush with --bushes, from 0.0 to 1.0.
+    /// Where a chunk rolls both, the rock wins.
+    #[arg(long, default_value_t = 0.05, value_parser = parse_density)]
+    pub bush_density: f64,
+}
+
+impl Default for ScatterArgs {
+    fn default() -> Self {
+        Self {
+            rocks: false,
+            rock_density: 0.02,
+            bushes: false,
+            bush_density: 0.05,
+        }
+    }
+}
+
+fn parse_density(s: &str) -> Result<f64, String> {
+    match s.trim().parse::<f64>() {
+        Ok(v) if (0.0..=1.0).contains(&v) => Ok(v),
+        _ => Err(format!("{s}: expected a share from 0.0 to 1.0")),
     }
 }
 
@@ -826,7 +871,7 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
     if !args.live.live {
         return Ok(());
     }
-    let (u, w) = (&args.units, &args.water);
+    let (u, w, sc) = (&args.units, &args.water, &args.scatter);
     let used: Vec<&str> = [
         (args.progress.is_some(), "--progress"),
         (args.threads.is_some(), "--threads"),
@@ -862,6 +907,16 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.climate_map.is_some(), "--climate-map"),
         (args.min_y.is_some(), "--min-y"),
         (args.max_y.is_some(), "--max-y"),
+        (sc.rocks, "--rocks"),
+        (
+            sc.rock_density != ScatterArgs::default().rock_density,
+            "--rock-density",
+        ),
+        (sc.bushes, "--bushes"),
+        (
+            sc.bush_density != ScatterArgs::default().bush_density,
+            "--bush-density",
+        ),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
