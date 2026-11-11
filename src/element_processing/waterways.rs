@@ -305,6 +305,37 @@ mod waterway_profile_tests {
         }
     }
 
+    /// With a river bed field a line-only channel is dug to the field's depth and gets a
+    /// bed, except under a road.
+    #[test]
+    fn a_line_channel_is_dug_to_the_river_bed() {
+        let bbox = world_bbox();
+        let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
+        let mut field = BigWaterField::empty();
+        field.set_river_bed(crate::river_bed::RiverBedField::uniform(
+            0, 0, SIDE, SIDE, 2,
+        ));
+        let mut road_mask = RoadMaskBitmap::new(&bbox);
+        road_mask.set(CENTER_X, 30);
+        let none = RoadMaskBitmap::new_empty();
+        let bed = ChannelBed {
+            field: &field,
+            road_mask: &road_mask,
+            tunnel_footprint: &none,
+        };
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &bed);
+
+        // Two blocks deeper; the lowest may hold seagrass instead of plain water.
+        assert!(water_ys(&editor, CENTER_X, 20).ends_with(&[7, 8]));
+        assert!(editor.block_exists_absolute(CENTER_X, 6, 20), "not dug");
+        assert!(
+            !editor.check_for_block_absolute(CENTER_X, 5, 20, Some(&[WATER]), None)
+                && editor.block_exists_absolute(CENTER_X, 5, 20),
+            "no bed"
+        );
+        assert_eq!(water_ys(&editor, CENTER_X, 30), vec![8], "dug under a road");
+    }
+
     #[test]
     fn a_flat_channel_sits_at_the_single_shared_level() {
         let bbox = world_bbox();

@@ -1537,6 +1537,20 @@ mod tests {
         }
     }
 
+    /// Beside a river dug four deep the bank is backed down to the river's lowest water;
+    /// without the options nothing is asked for.
+    #[test]
+    fn a_bank_is_backed_down_to_the_river_bed() {
+        let (_, ground) = lake();
+        let mut bwf = BigWaterField::empty();
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 39, 60), None);
+        bwf.set_river_bed(crate::river_bed::RiverBedField::uniform(40, 40, 20, 40, 4));
+        // The lake fixture is flat at Y 0, so the river's water reaches down to -4.
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 39, 60), Some(-4));
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 60, 60), Some(-4));
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 38, 60), None);
+    }
+
     /// Up a portal ramp or on the world's floor a bore cannot get under the bed; the bed
     /// then stops on top of its shell, never in it.
     #[test]

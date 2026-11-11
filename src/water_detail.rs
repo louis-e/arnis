@@ -19,7 +19,7 @@ pub const BOWL_MAX_DEPTH: i32 = 5;
 const DROWN_AT_OR_BELOW_SCALE: f64 = 0.5;
 
 /// Longest drowned crossing, in blocks; a longer one is a dam, a causeway or a shore road.
-const MAX_DROWNED_RUN: usize = 16;
+const MAX_DROWNED_RUN: usize = 12;
 
 /// Dry road a crossing needs on each end, in centre points.
 const DRY_ENDS: usize = 2;
