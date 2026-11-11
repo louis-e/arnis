@@ -575,7 +575,7 @@ pub struct Args {
     /// bundled packs: <realm>/<community>/<tree type>/[<size>/]<any name>.schem.
     /// The folders say what a file is; the size folder (small, medium, big,
     /// tall, giant) is optional and otherwise measured from the height. A file
-    /// that does not load, is over 8 MB, wider than 128 blocks or taller than 256
+    /// that does not load, is over 8 MB, wider than 64 blocks or taller than 256
     /// is skipped with a warning.
     #[arg(long, value_name = "FOLDER")]
     pub tree_pack_dir: Option<PathBuf>,

@@ -27,8 +27,8 @@ pub const USER: &str = "user:";
 
 /// Bigger files are skipped: a tree model is a few KB, the largest bundled one 0.2 MB.
 const MAX_FILE_BYTES: u64 = 8 << 20;
-/// Widest model: a tree stamps around its middle, so a tile's halo must hold half of it.
-const MAX_SIDE: i32 = 2 * crate::tile::TILE_EDITOR_HALO;
+/// Widest model: a tree stamps around its middle, so the halo of a One World piece must hold half of it.
+const MAX_SIDE: i32 = 2 * crate::one_world::PIECE_HALO_BLOCKS;
 const MAX_HEIGHT: i32 = 256;
 
 struct UserTree {
@@ -277,7 +277,7 @@ Put your own tree schematics (Sponge .schem files) here, one folder per kind:
 
 File names are free. Files are read in path order, so every machine places the
 same trees. A file that does not load, has no leaves, is over 8 MB, more than
-128 blocks wide or more than 256 tall is skipped with one warning line.
+64 blocks wide or more than 256 tall is skipped with one warning line.
 
 Mode (--tree-pack-mode, or Mode in the window):
 - add (default): your trees join the built-in ones.

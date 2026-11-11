@@ -1500,7 +1500,7 @@
                   </label>
                   <div class="settings-control">
                     <select id="meld-workers-select" name="meld-workers-select" class="settings-select"><option value="" selected data-localize="meld_workers_off">Off</option><option value="auto" data-localize="meld_workers_auto">Auto (recommended)</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select>
-                    <button type="button" class="settings-action-button" id="meld-recommended-btn" data-localize="meld_recommended" data-localize-title="meld_recommended_tip" title="Fastest in the Nov 2026 benchmark on this kind of PC">Use recommended</button>
+                    <button type="button" class="settings-action-button" id="meld-recommended-btn" data-localize="meld_recommended" data-localize-title="meld_recommended_tip" title="Sets the cell size and worker count that suit this computer.">Use recommended</button>
                   </div>
                 </div>
                 <div class="settings-row setting-tile is-wide">
@@ -1718,7 +1718,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="meld_overpass">Overpass Server</span>
-                        <span class="tooltip-icon" data-tooltip-key="meld_overpass_tip" data-tooltip="URL of a self-hosted Overpass server, asked in place of Arnis&#x27;s own. Separate several with commas.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_overpass_tip" data-tooltip="URL of a self-hosted Overpass server. Arnis&#x27;s tile archive is read first; this server is asked where the archive has no data. Separate several with commas.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="meld_overpass_desc">Your own Overpass instance.</span>
                     </span>
@@ -1895,7 +1895,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="meld_road_detail">Road Detail</span>
-                        <span class="tooltip-icon" data-preview-seg="road-detail" data-tooltip-key="meld_road_detail_tip" data-tooltip="Max builds every marking and way as mapped. Clean removes lane dividers except on one-way roads wider than 5 blocks, every line on service and pedestrian ways and roads under 4 blocks wide, and paints crossing bars 2 blocks apart. Compact is Clean with longer dashes, and also removes footways and sidewalks (at every scale), paths, cycleways, steps, service roads, tracks and crossings.">?</span>
+                        <span class="tooltip-icon" data-preview-seg="road-detail" data-tooltip-key="meld_road_detail_tip" data-tooltip="Max builds every marking and way as mapped. Clean removes lane dividers except on one-way roads wider than 5 blocks, every line on service and pedestrian ways and roads under 4 blocks wide, and paints crossing bars 2 blocks apart. Compact is Clean with longer dashes, and also leaves out footways, paths, cycleways, steps, tracks, crossings and minor service roads such as parking aisles and driveways.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="meld_road_detail_desc">How many road markings and minor roads to build.</span>
                     </span>
