@@ -131,6 +131,19 @@ pub struct CarveDepth {
 }
 
 impl CarveDepth {
+    pub const NONE: Self = Self {
+        floor: 0,
+        detail: WaterDetail::Default,
+        scale: 1.0,
+    };
+
+    /// Deepest carve where a tunnel crosses water the default bed digs `estimate` deep.
+    pub fn crossing(self, estimate: i32) -> i32 {
+        self.detail
+            .max_carve_depth(estimate, self.scale)
+            .max(self.floor)
+    }
+
     pub fn bound(self, estimate: i32) -> i32 {
         // No water in the land cover, nothing to carve: the datum stays where flags-off puts it.
         if estimate == 0 {
@@ -176,6 +189,7 @@ mod tests {
             assert_eq!(d.max_carve_depth(3, scale), 3);
         }
         assert_eq!(CarveDepth::default().bound(3), 3);
+        assert_eq!(CarveDepth::NONE.crossing(3), 3);
     }
 
     #[test]
@@ -251,13 +265,16 @@ mod tests {
                 }
             }
         }
-        // With water the floor and the +1 still apply.
+        // With water the floor and the +1 still apply, and a tunnel counts with them.
         let c = CarveDepth {
             floor: 6,
             detail: WaterDetail::Scaled,
             scale: 1.0,
         };
         assert_eq!(c.bound(2), 6);
+        assert_eq!(c.crossing(0), 6);
+        let rounded = CarveDepth { floor: 0, ..c };
+        assert_eq!(rounded.crossing(3), 4);
     }
 
     #[test]

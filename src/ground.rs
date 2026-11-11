@@ -1582,6 +1582,7 @@ pub fn generate_ground_data(
     crate::world_editor::common::set_terrain_top_y(args.ground_level);
     let mut frame = GroundFrame::from_args(args, &bbox);
     frame.carve_depth = args.water.carve_depth(args.scale);
+    crate::water_depth::set_crossing_carve(frame.carve_depth);
     let auto = auto_height(args);
     let (height, taller) = height_choice(args);
     if args.terrain() {

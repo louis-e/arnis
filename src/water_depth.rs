@@ -477,6 +477,14 @@ pub fn estimate_max_carve_depth(
     depth_from_dt(block_max_dt + 2.0, comp_max, false)
 }
 
+/// The run's water options for `bore_crossings`, which the elevation fetch calls without them.
+static CROSSING_CARVE: std::sync::RwLock<crate::water_detail::CarveDepth> =
+    std::sync::RwLock::new(crate::water_detail::CarveDepth::NONE);
+
+pub fn set_crossing_carve(carve: crate::water_detail::CarveDepth) {
+    *CROSSING_CARVE.write().unwrap_or_else(|p| p.into_inner()) = carve;
+}
+
 /// Water a tunnel crosses: how deep the carve can dig there, and the lowest terrain of the
 /// body it crosses, whose surface stands no lower.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -551,6 +559,7 @@ pub fn bore_crossings(
         }
     }
 
+    let carve = *CROSSING_CARVE.read().unwrap_or_else(|p| p.into_inner());
     cells
         .iter()
         .zip(lowest)
@@ -569,6 +578,7 @@ pub fn bore_crossings(
                 .map(|size| depth_from_dt(dt_eff, size, false))
                 .max()
                 .unwrap_or(0);
+            let depth = carve.crossing(depth);
             BoreCrossing { depth, lowest_m }
         })
         .collect()
