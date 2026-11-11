@@ -194,6 +194,28 @@ fn covering_tile_keys(bbox: &LLBBox, zoom: u8) -> Vec<TileKey> {
     keys
 }
 
+/// The files a fetch of `bbox` at the grid's zoom reads from `dir`: each tile's cache file, or
+/// its 404 marker where one stands in for a tile known to be absent.
+pub(crate) fn cache_files(
+    dir: &Path,
+    bbox: &LLBBox,
+    grid_width: usize,
+    grid_height: usize,
+) -> Vec<PathBuf> {
+    let zoom = choose_zoom(bbox, grid_width, grid_height);
+    covering_tile_keys(bbox, zoom)
+        .into_iter()
+        .map(|k| {
+            let marker = k.marker_path(dir);
+            if marker.exists() {
+                marker
+            } else {
+                k.cache_path(dir)
+            }
+        })
+        .collect()
+}
+
 /// Tile containing the given normalized mercator coords at a zoom level.
 fn tile_key_at(z: u8, norm_x: f64, norm_y: f64) -> TileKey {
     let n = 2.0_f64.powi(z as i32);

@@ -493,6 +493,7 @@ pub fn check_run_size(
     let from_archive = !args.skip_osm()
         && args.file.is_none()
         && !args.no_tile_archive
+        && args.osm_pbf.is_none()
         && !args.osm_tiles_url.is_empty();
     if from_archive {
         if let Err(e) = crate::osm_tiles::check_size(bbox, args.scale) {

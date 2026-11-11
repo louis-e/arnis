@@ -139,6 +139,26 @@ fn archive_cache_dir(release: &str) -> Option<std::path::PathBuf> {
     cache::release_dir(release).map(|d| d.join("tiles").join(TILES_THEME))
 }
 
+/// The tile files a read of `bbox` takes from the Overture cache under `root`, for the last
+/// release that served data; `None` with no release on record or past the tile cap.
+pub(crate) fn cache_files(
+    root: &std::path::Path,
+    bbox: &LLBBox,
+) -> Option<Vec<std::path::PathBuf>> {
+    if !covers_area(bbox) {
+        return None;
+    }
+    let overture = cache::cache_root_in(root);
+    let release = cache::last_good_release_in(&overture)?;
+    let dir = overture.join(release).join("tiles").join(TILES_THEME);
+    Some(
+        tiles_for_bbox(bbox)
+            .into_iter()
+            .map(|(x, y)| pmtiles::tile_cache_path(&dir, QUERY_ZOOM, x, y))
+            .collect(),
+    )
+}
+
 /// Every z14 tile the bounding box touches. Call [`covers_area`] first: this
 /// allocates one entry per tile.
 fn tiles_for_bbox(bbox: &LLBBox) -> Vec<(u32, u32)> {

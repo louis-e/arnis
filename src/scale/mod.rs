@@ -527,6 +527,12 @@ pub fn run_with(
         .ok_or_else(|| format!("{} is not a One World.", world_dir.display()))?;
     let proj = manifest.projection();
     let plan = work_units::plan(&proj, &selection, args, size)?;
+    // A snapped job reaches past the selection, and its data must too.
+    let bake_area = if corners(&plan.rect) == corners(&plan.requested) {
+        selection
+    } else {
+        crate::projection::llbbox_for_rect(&proj, &plan.rect)?
+    };
     let (rect, units) = (plan.rect, plan.units);
     let of = units.len();
     // `--only-pieces`: these are built, the job's other missing pieces wait.
@@ -568,6 +574,17 @@ pub fn run_with(
     match size {
         UnitSize::N(n) => println!("One World: building {of} piece(s) of up to {n}x{n} regions"),
         UnitSize::Auto => println!("One World: building {of} piece(s) of up to 8x8 regions"),
+    }
+    // The extract is read once, here; each piece then cuts its own area from the bake.
+    let mut argv = argv;
+    if let Some(src) = crate::osm_pbf::Source::from_args(args).filter(|_| !args.skip_osm()) {
+        match crate::osm_pbf::bake_for_job(&src, bake_area) {
+            Err(e) if crate::osm_pbf::fallback_allowed(&src, crate::net::offline()) => {
+                crate::retrieve_data::warn_region_download_fallback(&e);
+                argv = without_options(argv, &["--osm-pbf", "--osm-pbf-url"], &[]);
+            }
+            r => r?,
+        }
     }
     let results: Mutex<Vec<Option<PieceResult>>> = Mutex::new(vec![None; of]);
     let mut queue = VecDeque::new();
@@ -1325,6 +1342,12 @@ fn run_piece_until(
                     if let Some(p) = record["progress"].as_f64() {
                         progress(p / 100.0);
                     }
+                    if let Some(notice) = forwarded_notice(&record) {
+                        crate::progress::emit_gui_progress_update(
+                            crate::progress::MESSAGE_ONLY,
+                            notice,
+                        );
+                    }
                 }
                 Some("done") => {
                     result.peak_rss_mb = record["peak_rss_mb"].as_u64();
@@ -1349,6 +1372,13 @@ fn run_piece_until(
         transient: is_transient(status.code(), &tail),
         message: format!("{status}; last output:\n{}", tail.join("\n")),
     })
+}
+
+/// A piece's `phase` the job passes on as its own: a Region Download fallback notice.
+fn forwarded_notice(record: &Value) -> Option<&str> {
+    let name = record["name"].as_str()?;
+    (record["type"] == "phase" && name.starts_with(crate::retrieve_data::REGION_DOWNLOAD_FALLBACK))
+        .then_some(name)
 }
 
 /// The job's percentage: every piece is an equal share, so it reads n/N as "n/N done"
@@ -1630,6 +1660,35 @@ second
         assert!((job_percent(&d) - 2.75 / 16.0 * 100.0).abs() < 1e-9);
         assert_eq!(job_percent(&[1.0; 16]), 100.0);
         assert_eq!(job_percent(&[]), 0.0);
+    }
+
+    #[test]
+    fn a_piece_region_download_notice_is_forwarded() {
+        let rec = |line: &str| serde_json::from_str::<Value>(line).unwrap();
+        let notice = rec(
+            r#"{"v":1,"type":"phase","name":"region_download_fallback: network","progress":null}"#,
+        );
+        assert_eq!(
+            forwarded_notice(&notice),
+            Some("region_download_fallback: network")
+        );
+        let step = rec(r#"{"v":1,"type":"phase","name":"Generating area...","progress":20.0}"#);
+        assert_eq!(forwarded_notice(&step), None);
+        assert_eq!(
+            forwarded_notice(&rec(r#"{"v":1,"type":"progress","progress":3.0}"#)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_region_download_fallback_drops_the_pbf_options() {
+        let argv = ["--osm-pbf", "geofabrik", "--osm-pbf-url=u", "--scale", "1"];
+        let got = without_options(
+            argv.map(OsString::from).to_vec(),
+            &["--osm-pbf", "--osm-pbf-url"],
+            &[],
+        );
+        assert_eq!(got, ["--scale", "1"].map(OsString::from));
     }
 
     #[test]

@@ -29,6 +29,7 @@ mod cache;
 mod mvt;
 pub(crate) mod pmtiles;
 mod tiles;
+pub(crate) use tiles::cache_files as tile_cache_files;
 
 pub use cache::{cache_root, clear_overture_cache};
 

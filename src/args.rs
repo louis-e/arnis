@@ -484,6 +484,14 @@ pub struct Args {
     // --- end confluence:core ---
 
     // --- confluence:data ---
+    /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
+    #[arg(long, value_name = "PATH|geofabrik", conflicts_with = "file")]
+    pub osm_pbf: Option<String>,
+
+    /// The extract to download for `--osm-pbf geofabrik`, instead of picking one.
+    #[arg(long, value_name = "URL", requires = "osm_pbf")]
+    pub osm_pbf_url: Option<String>,
+
     /// Self-hosted Overpass instance(s) to ask in place of Arnis's own, tried in order; repeat the flag or separate with commas.
     #[arg(
         long,
@@ -740,6 +748,8 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (u.plan_mask.is_some(), "--plan-mask"),
         (u.stitch_map, "--stitch-map"),
         (u.skip_cells.is_some(), "--skip-cells"),
+        (args.osm_pbf.is_some(), "--osm-pbf"),
+        (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
         (args.offline, "--offline"),
         (args.prewarm, "--prewarm"),

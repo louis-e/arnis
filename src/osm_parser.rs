@@ -130,14 +130,14 @@ fn is_landform(natural: &str) -> bool {
 
 // Raw data from OSM
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OsmMember {
     pub r#type: String,
     pub r#ref: u64,
     pub r#role: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OsmElement {
     pub r#type: String,
     pub id: u64,

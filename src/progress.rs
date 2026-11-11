@@ -173,6 +173,28 @@ pub fn emit_gui_piece(piece: &serde_json::Value) {
     }
 }
 
+/// A progress emit that also says where a download or bake is, for the bar in
+/// the OSM Data Source panel (`transfer` in the payload). Also sent on
+/// `--progress json` as a `transfer` record, so a child's reaches the window.
+pub fn emit_gui_transfer(progress: f64, message: &str, transfer: &crate::transfer::Transfer) {
+    if emits_suppressed(progress, message) {
+        return;
+    }
+    remember_status(message);
+    crate::progress_json::progress(progress, message);
+    crate::progress_json::record("transfer", json!(transfer));
+    if let Some(window) = get_main_window() {
+        let payload = json!({
+            "progress": clamp_progress(progress),
+            "message": message,
+            "transfer": transfer
+        });
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
+}
+
 /// The `progress-update` payload for an error: `message` is cut to fit the
 /// status bar, `detail` keeps the full text for the window to show.
 fn error_payload(message: &str) -> serde_json::Value {

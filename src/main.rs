@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod arnis_tiles;
 mod bedrock_addon;
 mod bedrock_block_map;
 mod bench;
@@ -16,6 +17,7 @@ mod climate;
 mod clipping;
 mod colors;
 mod coordinate_system;
+mod data_plan;
 mod data_processing;
 mod datapack;
 mod decals;
@@ -51,6 +53,7 @@ mod net;
 mod one_world;
 mod ore_generation;
 mod osm_parser;
+mod osm_pbf;
 mod osm_tiles;
 mod overture;
 #[cfg(feature = "gui")]
@@ -68,6 +71,7 @@ mod terrain_surface;
 #[cfg(test)]
 mod test_utilities;
 mod tile;
+mod transfer;
 mod trees;
 mod version_check;
 mod voxy;
@@ -111,6 +115,10 @@ mod progress {
         crate::progress_json::progress(progress, message);
     }
     pub fn emit_gui_piece(_piece: &serde_json::Value) {}
+    pub fn emit_gui_transfer(progress: f64, message: &str, transfer: &crate::transfer::Transfer) {
+        crate::progress_json::progress(progress, message);
+        crate::progress_json::record("transfer", serde_json::json!(transfer));
+    }
     pub fn while_waiting<T>(_waiting_for: &str, wait: impl FnOnce() -> T) -> T {
         wait()
     }
@@ -796,10 +804,11 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                 args.save_json_file.as_deref(),
                 &args.osm_tiles_url,
                 !args.no_tile_archive,
+                osm_pbf::Source::from_args(&args).as_ref(),
             )
             .unwrap_or_else(|e| {
                 // Offline, the other fetches finish first so the error lists all that is missing;
-                // a failure that is not a cache miss still stops here.
+                // a failure that is not a cache miss (a bad .pbf or archive) still stops here.
                 if net::offline() && !net::offline_misses().is_empty() {
                     return osm_parser::OsmData::empty();
                 }

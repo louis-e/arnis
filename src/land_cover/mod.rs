@@ -542,6 +542,42 @@ pub fn fetch_land_cover_data(
 
 // ─── Cache helpers ────────────────────────────────────────────────────────
 
+/// The files a read of `bbox` takes from the land cover cache under `root`: each ESA tile's
+/// header and the 1024 px blocks of it the box touches.
+pub(crate) fn cache_files(root: &Path, bbox: &LLBBox) -> Vec<PathBuf> {
+    // ponytail: the product's fixed layout (36000 px tiles cut in 1024 px COG tiles), not
+    // read from each header; parse the header if ESA ever re-cuts it.
+    const PPD: f64 = 12_000.0;
+    const COG_TILE: i64 = 1024;
+    let dir = root.join(LAND_COVER_CACHE_DIR);
+    let px = |deg: f64| (deg * PPD).floor() as i64;
+    let (x0, x1) = (px(bbox.min().lng() + 180.0), px(bbox.max().lng() + 180.0));
+    let (y0, y1) = (px(90.0 - bbox.max().lat()), px(90.0 - bbox.min().lat()));
+    let side = (ESA_TILE_DEGREES * PPD) as i64;
+    let mut out = Vec::new();
+    for (lat, lng, url) in get_esa_tile_specs(bbox) {
+        let tx = ((lng + 180.0) * PPD).round() as i64;
+        let ty = ((90.0 - lat - ESA_TILE_DEGREES) * PPD).round() as i64;
+        let (lx0, lx1) = ((x0 - tx).max(0), (x1 + 1 - tx).min(side));
+        let (ly0, ly1) = ((y0 - ty).max(0), (y1 + 1 - ty).min(side));
+        if lx0 >= lx1 || ly0 >= ly1 {
+            continue;
+        }
+        let name = url
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .replace(".tif", "");
+        out.push(dir.join(format!("{name}_header.bin")));
+        for ity in ly0 / COG_TILE..=(ly1 - 1) / COG_TILE {
+            for itx in lx0 / COG_TILE..=(lx1 - 1) / COG_TILE {
+                out.push(dir.join(format!("{name}_tile_{itx}_{ity}.bin")));
+            }
+        }
+    }
+    out
+}
+
 fn get_cache_dir() -> PathBuf {
     if let Some(cache_dir) = crate::elevation::cache::user_cache_dir() {
         cache_dir.join(LAND_COVER_CACHE_DIR)

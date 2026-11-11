@@ -304,6 +304,29 @@ fn failure_kind(e: &str) -> Option<String> {
     (digits == 3 && (b'1'..=b'5').contains(&code.as_bytes()[0])).then(|| format!("http_{code}"))
 }
 
+/// Says a Region Download failed and the run goes on with the default source.
+pub fn warn_region_download_fallback(e: &str) {
+    eprintln!(
+        "{}",
+        format!("Warning: Region Download unavailable ({e}); falling back to the default source.")
+            .yellow()
+            .bold()
+    );
+    let notice = region_download_fallback_notice(e);
+    #[cfg(feature = "gui")]
+    send_log(LogLevel::Warning, &notice);
+    // The window shows it as a notice; `--progress json` carries it as a `phase`, which a job
+    // forwards from its pieces.
+    emit_gui_progress_update(crate::progress::MESSAGE_ONLY, &notice);
+}
+
+/// The status message for a Region Download fallback; the window picks it out by this prefix.
+pub const REGION_DOWNLOAD_FALLBACK: &str = "region_download_fallback:";
+
+fn region_download_fallback_notice(e: &str) -> String {
+    format!("{REGION_DOWNLOAD_FALLBACK} {}", fallback_reason(e))
+}
+
 /// What a run shows for a box too large to fetch; the GUI's status line holds 35 characters.
 pub const AREA_TOO_LARGE: &str = "Area too large, try a smaller one.";
 
@@ -311,6 +334,7 @@ pub const AREA_TOO_LARGE: &str = "Area too large, try a smaller one.";
 ///
 /// Both front-ends go through here; deciding separately is how the GUI kept querying Overpass
 /// after the CLI had moved to the archive.
+#[allow(clippy::too_many_arguments)]
 pub fn fetch_osm_data(
     bbox: LLBBox,
     scale: f64,
@@ -319,7 +343,22 @@ pub fn fetch_osm_data(
     save_file: Option<&str>,
     tiles_url: &str,
     use_tile_archive: bool,
+    pbf: Option<&crate::osm_pbf::Source>,
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
+    if let Some(src) = pbf {
+        match crate::osm_pbf::fetch_data_from_pbf(src, bbox) {
+            Ok(mut data) => {
+                if let Some(path) = save_file {
+                    save_osm_json(&mut data, &bbox, path)?;
+                }
+                return Ok(data);
+            }
+            Err(e) if crate::osm_pbf::fallback_allowed(src, crate::net::offline()) => {
+                warn_region_download_fallback(&e);
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
     if use_tile_archive && !tiles_url.is_empty() {
         // Overpass turns away what the archive does for size, after a long wait.
         if let Err(e) = crate::osm_tiles::check_size(&bbox, scale) {
@@ -984,6 +1023,12 @@ mod tests {
         ] {
             assert_eq!(fallback_reason(err), want, "for {err:?}");
         }
+    }
+
+    #[test]
+    fn region_download_fallback_notice_has_the_window_prefix() {
+        let n = region_download_fallback_notice("http://127.0.0.1:9/x.osm.pbf: HTTP 503");
+        assert_eq!(n, "region_download_fallback: other/http_503");
     }
 
     // A bucket must never carry the tile coordinates the error text holds.

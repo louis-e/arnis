@@ -46,6 +46,7 @@ itertools = "0.15.0"
 log = "0.4.27"
 mimalloc = "0.1"
 once_cell = "1.21.3"
+osmpbf = { version = "0.3.8", default-features = false }
 rand = { version = "0.9.3", features = ["std", "std_rng"] }
 rand_chacha = "0.9"
 rayon = "1.10.0"

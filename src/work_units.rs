@@ -224,7 +224,7 @@ impl Mask {
 
 /// Rings of an Osmosis `.poly` file: a name line, then sections of `lon lat` lines each
 /// closed by `END` (a `!` section is a hole, which even-odd handles alike), then `END`.
-fn poly_rings(text: &str) -> Vec<Vec<(f64, f64)>> {
+fn poly_rings(text: &str) -> Vec<crate::osm_pbf::Ring> {
     let mut rings = Vec::new();
     let mut ring = Vec::new();
     for line in text.lines() {
@@ -671,14 +671,21 @@ fn job_estimate(
     let mut out = serde_json::json!({
         "disk_mb": e.disk_mb, "ram_mb": e.ram_mb, "time_min": e.time_min, "workers": workers,
     });
-    basis.push_str("; downloads not estimated (Overpass and elevation sizes are not known)");
+    // A local extract is what the job reads; Overpass and downloaded extracts are not known.
+    let pbf = args
+        .osm_pbf
+        .as_deref()
+        .filter(|p| *p != "geofabrik")
+        .and_then(|p| std::fs::metadata(p).ok());
+    if let Some(meta) = pbf {
+        let mb = (meta.len() as f64 / 1_048_576.0 * 10.0).round() / 10.0;
+        out["downloads_mb"] = serde_json::json!([mb, mb]);
+        basis.push_str("; downloads_mb: the --osm-pbf file, elevation tiles not counted");
+    } else {
+        basis.push_str("; downloads not estimated (Overpass and elevation sizes are not known)");
+    }
     let mut warnings = Vec::new();
-    // The disk holding the world, or its nearest existing parent.
-    let free = world_dir
-        .ancestors()
-        .find(|p| p.exists())
-        .and_then(|p| fs2::available_space(p).ok());
-    if let Some(free) = free {
+    if let Some(free) = crate::data_plan::free_bytes(world_dir) {
         let free_mb = (free / 1_048_576) as f64;
         out["free_disk_mb"] = serde_json::json!(free_mb);
         if e.disk_mb[1] > free_mb {
