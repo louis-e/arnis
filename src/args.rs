@@ -623,8 +623,9 @@ pub struct Args {
     #[arg(long)]
     pub surface_patches: bool,
 
-    /// Leave out buildings: OSM buildings, building parts, doors and entrances, and the
-    /// Overture footprints. Roads, rail, water, land cover and terrain are built as usual.
+    /// Leave out buildings: OSM buildings, building parts, doors and entrances, the
+    /// Overture footprints, landmarks and Mapillary facades. Roads, rail, water, land cover
+    /// and terrain are built as usual.
     #[arg(long = "no-buildings", default_value_t = true, action = ArgAction::SetFalse)]
     pub buildings: bool,
 
@@ -1523,8 +1524,12 @@ pub const DISASTER_GROUND_LEVEL: i32 = -40;
 /// beside Animals, and need mob griefing for their meteors to crater, so both keep natural
 /// spawning off.
 pub fn apply_feature_needs(args: &mut Args) {
-    // Overture only adds buildings, so --no-buildings has nothing to fetch.
+    // Overture only adds buildings and Mapillary only dresses them, so --no-buildings has
+    // nothing to fetch.
     args.overture &= args.buildings;
+    if !args.buildings {
+        args.mapillary_facades = Some(false);
+    }
     if args.caves || args.disasters {
         args.fillground = true;
     }
@@ -3266,12 +3271,16 @@ mod tests {
     #[test]
     fn no_buildings_skips_overture_fetch() {
         let fetched = |extra: &[&str]| {
-            let mut args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter().chain(extra));
+            let mut args = Args::parse_from(
+                ["arnis", "--bbox", "1,2,3,4", "--mapillary-token", "t"]
+                    .iter()
+                    .chain(extra),
+            );
             apply_feature_needs(&mut args);
-            args.overture
+            (args.overture, args.mapillary_pipeline_on())
         };
-        assert!(fetched(&[]));
-        assert!(!fetched(&["--no-buildings"]));
+        assert_eq!(fetched(&[]), (true, true));
+        assert_eq!(fetched(&["--no-buildings"]), (false, false));
     }
 
     #[test]

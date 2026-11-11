@@ -1071,7 +1071,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     bench.mark("landcover_osm_repair");
 
     // The overrides above still read roads and buildings as land; now the mode drops them.
-    mode_filter::retain_for_mode(&mut parsed_elements, args.mode);
+    mode_filter::retain_for_mode(&mut parsed_elements, args.mode, args.buildings);
     let outline_suppression =
         mode_filter::outline_suppression_for_mode(outline_suppression, args.mode);
 

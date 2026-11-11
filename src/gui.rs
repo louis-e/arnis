@@ -3392,7 +3392,11 @@ fn gui_start_generation(
                     ground.finish_land_cover(args.mode);
 
                     // Matches run_cli: the overrides read roads as land, then the mode drops them.
-                    crate::mode_filter::retain_for_mode(&mut parsed_elements, args.mode);
+                    crate::mode_filter::retain_for_mode(
+                        &mut parsed_elements,
+                        args.mode,
+                        args.buildings,
+                    );
                     let outline_suppression = crate::mode_filter::outline_suppression_for_mode(
                         outline_suppression,
                         args.mode,

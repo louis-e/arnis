@@ -60,20 +60,6 @@ fn ring_area(nodes: &[ProcessedNode]) -> f64 {
     (twice_area / 2.0).abs()
 }
 
-/// Whether `--no-buildings` leaves this element out: building ways and relations, and the
-/// door and entrance nodes that open into them.
-fn is_building_element(element: &ProcessedElement) -> bool {
-    let tags = element.tags();
-    match element {
-        ProcessedElement::Node(_) => tags.contains_key("door") || tags.contains_key("entrance"),
-        _ => {
-            tags.contains_key("building")
-                || tags.contains_key("building:part")
-                || tags.get("type").map(String::as_str) == Some("building")
-        }
-    }
-}
-
 /// Footprint of a ground-filling way, or `None` if it does not reach a ground-fill handler.
 /// Mirrors the landuse/natural/leisure/place arms of `process_element`; keep both in sync.
 fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
@@ -847,11 +833,6 @@ pub fn generate_world_with_options(
             "  Area shape covers {inside} of the {all} columns around it ({:.0}%)",
             inside as f64 * 100.0 / all.max(1) as f64
         );
-    }
-
-    // Before anything reads a footprint, so the ground under them stays open.
-    if !args.buildings {
-        elements.retain(|e| !is_building_element(e));
     }
 
     // Before anything reads a footprint: nothing is built on a runway.
@@ -2998,37 +2979,6 @@ mod tests {
 
     fn ids(elements: &[ProcessedElement]) -> Vec<u64> {
         elements.iter().map(|e| e.id()).collect()
-    }
-
-    #[test]
-    fn no_buildings_keeps_roads_and_water() {
-        let node = |id, tags: &[(&str, &str)]| {
-            ProcessedElement::Node(ProcessedNode {
-                id,
-                tags: tags
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
-                x: 0,
-                z: 0,
-            })
-        };
-        let mut elements = vec![
-            way(1, 10, &[("building", "yes")]),
-            way(2, 10, &[("building:part", "yes")]),
-            relation(3, 10, &[("type", "building")]),
-            relation(4, 10, &[("type", "multipolygon"), ("building", "house")]),
-            node(5, &[("entrance", "main")]),
-            node(6, &[("door", "hinged")]),
-            way(7, 10, &[("highway", "residential")]),
-            way(8, 10, &[("railway", "rail")]),
-            way(9, 10, &[("natural", "water")]),
-            relation(10, 10, &[("type", "multipolygon"), ("landuse", "grass")]),
-            node(11, &[("amenity", "bench")]),
-            node(12, &[("natural", "tree")]),
-        ];
-        elements.retain(|e| !is_building_element(e));
-        assert_eq!(ids(&elements), vec![7, 8, 9, 10, 11, 12]);
     }
 
     #[test]
