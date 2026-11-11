@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis nie mógł wygenerować wybranego miejsca.",
   "map_copy_coordinates": "Kopiuj współrzędne",
   "advanced_meld_features": "Funkcje zaawansowane",
-  "advanced_meld_features_desc": "Dodatkowe ustawienia dla dużych światów i dokładniejszej kontroli. Wyłączone: Arnis działa jak dotąd.",
+  "advanced_meld_features_desc": "Dodatkowe ustawienia dla dużych światów i dokładniejszej kontroli.",
   "advanced_meld_credit_pre": "Przeniesione z projektu ",
   "advanced_meld_credit_post": ".",
   "meld_workers": "Równoległe komórki",

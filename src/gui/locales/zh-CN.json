@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis 无法生成你选择的地点。",
   "map_copy_coordinates": "复制坐标",
   "advanced_meld_features": "高级功能",
-  "advanced_meld_features_desc": "为大型世界和更精细的控制提供额外设置。关闭时，Arnis 保持原有行为。",
+  "advanced_meld_features_desc": "为大型世界和更精细的控制提供额外设置。",
   "advanced_meld_credit_pre": "移植自 ",
   "advanced_meld_credit_post": " 项目。",
   "meld_workers": "并行单元格",

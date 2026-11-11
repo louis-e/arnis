@@ -457,11 +457,8 @@ label[for].setting-label {
 }
 
 /* Inline, so the tooltip and revert icons follow the last word when a long name wraps. */
-/* A row, so the tooltip and revert icons stay beside the name when it wraps. */
 .setting-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
+  display: block;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
@@ -469,13 +466,32 @@ label[for].setting-label {
 
 /* A long compound word, as in German or Finnish, breaks rather than overflowing. */
 .setting-heading > [data-localize] {
-  min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.setting-heading > .tooltip-icon,
-.setting-heading > .setting-revert {
-  margin-top: 1px;
+/* The icons after a name never wrap alone: the name's last line keeps room for them, and they sit in it. */
+.setting-heading > [data-localize]:has(+ .tooltip-icon) {
+  padding-right: 22px;
+}
+
+.setting-heading > [data-localize]:has(+ .tooltip-icon + .setting-revert) {
+  padding-right: 50px;
+}
+
+.setting-heading > [data-localize]:has(+ .setting-revert) {
+  padding-right: 28px;
+}
+
+.setting-heading > [data-localize] + .tooltip-icon {
+  margin-left: -20px;
+}
+
+.setting-heading > [data-localize]:has(+ .tooltip-icon + .setting-revert) + .tooltip-icon {
+  margin-left: -48px;
+}
+
+.setting-heading > [data-localize] + .setting-revert {
+  margin-left: -22px;
 }
 
 .setting-heading > .tooltip-icon,
@@ -1161,9 +1177,9 @@ body.meld-off .meld-only {
   display: none;
 }
 
-/* The Advanced switch wears the accent, and so does the frame of each section it shows. */
+/* The Advanced switch stands out by a soft accent tint; the sections it shows have an accent frame. */
 .settings-page .setting-tile:has(#advanced-meld-features-toggle) {
-  border-color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 9%, var(--ui-tile));
 }
 
 .settings-section.meld-only {
@@ -1254,6 +1270,7 @@ body.meld-off .meld-only {
 }
 
 .settings-page .projects-place {
+  flex-basis: 100%;
   font-size: 12.5px;
   opacity: 0.7;
   overflow-wrap: anywhere;

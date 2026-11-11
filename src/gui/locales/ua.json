@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis не вдалося згенерувати вибране місце.",
   "map_copy_coordinates": "Копіювати координати",
   "advanced_meld_features": "Розширені функції",
-  "advanced_meld_features_desc": "Додаткові налаштування для великих світів і точнішого контролю. Якщо вимкнено, Arnis працює як раніше.",
+  "advanced_meld_features_desc": "Додаткові налаштування для великих світів і точнішого контролю.",
   "advanced_meld_credit_pre": "Перенесено з проєкту ",
   "advanced_meld_credit_post": ".",
   "meld_workers": "Паралельні комірки",

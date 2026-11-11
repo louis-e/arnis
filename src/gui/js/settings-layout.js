@@ -142,10 +142,46 @@ function initSelectCards(group) {
   sync();
 }
 
-// What a search can match in a setting: its name, description, choices and tooltip.
+// Words people type that a setting's own text does not hold, by the id of its control.
+const SEARCH_WORDS = {
+  'fillground-toggle': 'underground stone ores mining survival',
+  'caves-toggle': 'underground mining',
+  'height-multiplier-slider': 'mountains elevation exaggeration flat',
+  'canopy-height-toggle': 'forest trees',
+  'winter-toggle': 'snow ice christmas',
+  'voxy-lod-toggle': 'render distance far view',
+  'dh-lod-toggle': 'render distance far view',
+  'disable-height-limit-toggle': 'tall mountains y limit',
+  'scale-value-slider': 'size smaller bigger',
+  'language-select': 'sprache langue idioma translation',
+  'clear-cache-button': 'disk space storage delete',
+  'meld-rocks-toggle': 'stones boulders',
+  'meld-bushes-toggle': 'shrubs plants',
+  'meld-workers-select': 'workers processes performance speed faster ram memory large big',
+  'meld-piece-size-group': 'pieces regions',
+  'meld-ram-budget-input': 'ram limit',
+  'meld-threads-input': 'cpu cores performance',
+  'meld-seed-input': 'random variation',
+  'meld-world-border-toggle': 'wall edge limit',
+  'meld-min-y-input': 'height depth bottom',
+  'meld-max-y-input': 'height top',
+  'meld-road-detail-group': 'markings lines sidewalks footways',
+  'meld-surface-patches-toggle': 'asphalt paving texture',
+  'meld-buildings-toggle': 'houses terrain only',
+  'meld-river-bed-group': 'water depth rivers canals',
+  'meld-water-detail-group': 'rivers streams depth',
+  'meld-climate-mode-group': 'biomes desert snow',
+  'meld-offline-toggle': 'no internet network cache',
+  'meld-overpass-input': 'server osm',
+  'meld-osm-source-group': 'openstreetmap data geofabrik',
+  'meld-origin-input': 'coordinates latitude longitude',
+};
+
+// What a search can match in a setting: its name, description, choices, tooltip and extra words.
 function rowText(row) {
   const tips = Array.from(row.querySelectorAll('[data-tooltip]'), (t) => t.dataset.tooltip).join(' ');
-  return `${row.textContent} ${tips}`.toLowerCase();
+  const extra = Array.from(row.querySelectorAll('[id]'), (el) => SEARCH_WORDS[el.id] || '').join(' ');
+  return `${row.textContent} ${tips} ${extra}`.toLowerCase();
 }
 
 // The search field in the sidebar leaves only the settings that hold every word typed, in the

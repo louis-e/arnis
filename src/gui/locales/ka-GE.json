@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis-მა ვერ შეძლო არჩეული ადგილის გენერირება.",
   "map_copy_coordinates": "კოორდინატების კოპირება",
   "advanced_meld_features": "გაფართოებული ფუნქციები",
-  "advanced_meld_features_desc": "დამატებითი პარამეტრები დიდი სამყაროებისა და უფრო ზუსტი კონტროლისთვის. გამორთულია: Arnis იმუშავებს როგორც ადრე.",
+  "advanced_meld_features_desc": "დამატებითი პარამეტრები დიდი სამყაროებისა და უფრო ზუსტი კონტროლისთვის.",
   "advanced_meld_credit_pre": "გადმოტანილია ",
   "advanced_meld_credit_post": " პროექტიდან.",
   "meld_workers": "პარალელური უჯრედები",

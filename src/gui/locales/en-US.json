@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis could not generate the place you picked.",
   "map_copy_coordinates": "Copy coordinates",
   "advanced_meld_features": "Advanced features",
-  "advanced_meld_features_desc": "Extra settings for large worlds and finer control. Off, Arnis behaves as before.",
+  "advanced_meld_features_desc": "Extra settings for large worlds and finer control.",
   "advanced_meld_credit_pre": "Ported from the ",
   "advanced_meld_credit_post": " project.",
   "meld_workers": "Parallel cells",

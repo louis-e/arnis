@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis가 선택한 장소를 생성하지 못했습니다.",
   "map_copy_coordinates": "좌표 복사",
   "advanced_meld_features": "고급 기능",
-  "advanced_meld_features_desc": "대형 월드와 더 세밀한 제어를 위한 추가 설정입니다. 끄면 Arnis가 이전과 같이 동작합니다.",
+  "advanced_meld_features_desc": "대형 월드와 더 세밀한 제어를 위한 추가 설정입니다.",
   "advanced_meld_credit_pre": "​",
   "advanced_meld_credit_post": " 프로젝트에서 가져왔습니다.",
   "meld_workers": "병렬 셀",

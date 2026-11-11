@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Az Arnis nem tudta létrehozni a kiválasztott helyet.",
   "map_copy_coordinates": "Koordináták másolása",
   "advanced_meld_features": "Speciális funkciók",
-  "advanced_meld_features_desc": "Extra beállítások nagy világokhoz és finomabb vezérléshez. Kikapcsolva az Arnis a régi módon működik.",
+  "advanced_meld_features_desc": "Extra beállítások nagy világokhoz és finomabb vezérléshez.",
   "advanced_meld_credit_pre": "A ",
   "advanced_meld_credit_post": " projektből átvéve.",
   "meld_workers": "Párhuzamos cellák",

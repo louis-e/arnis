@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis は選んだ場所を生成できませんでした。",
   "map_copy_coordinates": "座標をコピー",
   "advanced_meld_features": "高度な機能",
-  "advanced_meld_features_desc": "大規模なワールドとより細かい制御のための追加設定です。オフの場合、Arnis は従来どおり動作します。",
+  "advanced_meld_features_desc": "大規模なワールドとより細かい制御のための追加設定です。",
   "advanced_meld_credit_pre": "​",
   "advanced_meld_credit_post": " プロジェクトから移植。",
   "meld_workers": "並列セル",

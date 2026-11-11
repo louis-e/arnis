@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "تعذّر على Arnis توليد المكان الذي اخترته.",
   "map_copy_coordinates": "نسخ الإحداثيات",
   "advanced_meld_features": "الميزات المتقدمة",
-  "advanced_meld_features_desc": "إعدادات إضافية للعوالم الكبيرة والتحكم الأدق. عند الإيقاف، يعمل Arnis كما كان من قبل.",
+  "advanced_meld_features_desc": "إعدادات إضافية للعوالم الكبيرة والتحكم الأدق.",
   "advanced_meld_credit_pre": "منقولة من مشروع ",
   "advanced_meld_credit_post": ".",
   "meld_workers": "خلايا متوازية",

@@ -1033,7 +1033,7 @@ input[type="range"] {
 
 /* Before a job in pieces: its warnings and a button held to start it (main.js holdToConfirm) */
 .run-confirm {
-  margin-top: 8px;
+  margin: 8px 0 12px;
   padding: 8px 10px;
   border: 1px solid rgba(254, 204, 68, 0.45);
   border-radius: 8px;

@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis nepavyko sugeneruoti pasirinktos vietos.",
   "map_copy_coordinates": "Kopijuoti koordinates",
   "advanced_meld_features": "Išplėstinės funkcijos",
-  "advanced_meld_features_desc": "Papildomi nustatymai dideliems pasauliams ir tikslesniam valdymui. Išjungta: Arnis veikia kaip anksčiau.",
+  "advanced_meld_features_desc": "Papildomi nustatymai dideliems pasauliams ir tikslesniam valdymui.",
   "advanced_meld_credit_pre": "Perkelta iš ",
   "advanced_meld_credit_post": " projekto.",
   "meld_workers": "Lygiagretūs langeliai",

@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis ni mogel ustvariti izbranega kraja.",
   "map_copy_coordinates": "Kopiraj koordinate",
   "advanced_meld_features": "Napredne funkcije",
-  "advanced_meld_features_desc": "Dodatne nastavitve za velike svetove in natančnejši nadzor. Izklopljeno: Arnis deluje kot prej.",
+  "advanced_meld_features_desc": "Dodatne nastavitve za velike svetove in natančnejši nadzor.",
   "advanced_meld_credit_pre": "Preneseno iz projekta ",
   "advanced_meld_credit_post": ".",
   "meld_workers": "Vzporedne celice",

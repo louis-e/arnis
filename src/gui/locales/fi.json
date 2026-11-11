@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis ei voinut luoda valitsemaasi paikkaa.",
   "map_copy_coordinates": "Kopioi koordinaatit",
   "advanced_meld_features": "Lisäominaisuudet",
-  "advanced_meld_features_desc": "Lisäasetuksia suurille maailmoille ja tarkempaan hallintaan. Pois päältä: Arnis toimii kuten ennen.",
+  "advanced_meld_features_desc": "Lisäasetuksia suurille maailmoille ja tarkempaan hallintaan.",
   "advanced_meld_credit_pre": "Siirretty ",
   "advanced_meld_credit_post": "-projektista.",
   "meld_workers": "Rinnakkaiset ruudut",

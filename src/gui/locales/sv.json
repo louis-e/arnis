@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis kunde inte generera platsen du valde.",
   "map_copy_coordinates": "Kopiera koordinater",
   "advanced_meld_features": "Avancerade funktioner",
-  "advanced_meld_features_desc": "Extra inställningar för stora världar och finare kontroll. Av: Arnis beter sig som tidigare.",
+  "advanced_meld_features_desc": "Extra inställningar för stora världar och finare kontroll.",
   "advanced_meld_credit_pre": "Hämtat från ",
   "advanced_meld_credit_post": "-projektet.",
   "meld_workers": "Parallella celler",

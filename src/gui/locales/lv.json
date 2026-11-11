@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis neizdevās ģenerēt izvēlēto vietu.",
   "map_copy_coordinates": "Kopēt koordinātas",
   "advanced_meld_features": "Papildu funkcijas",
-  "advanced_meld_features_desc": "Papildu iestatījumi lielām pasaulēm un precīzākai vadībai. Izslēgts: Arnis darbojas kā iepriekš.",
+  "advanced_meld_features_desc": "Papildu iestatījumi lielām pasaulēm un precīzākai vadībai.",
   "advanced_meld_credit_pre": "Pārņemts no ",
   "advanced_meld_credit_post": " projekta.",
   "meld_workers": "Paralēlās šūnas",

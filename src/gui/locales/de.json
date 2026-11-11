@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis konnte den gewählten Ort nicht generieren.",
   "map_copy_coordinates": "Koordinaten kopieren",
   "advanced_meld_features": "Erweiterte Funktionen",
-  "advanced_meld_features_desc": "Zusätzliche Einstellungen für große Welten und feinere Kontrolle. Aus: Arnis verhält sich wie bisher.",
+  "advanced_meld_features_desc": "Zusätzliche Einstellungen für große Welten und feinere Kontrolle.",
   "advanced_meld_credit_pre": "Aus dem ",
   "advanced_meld_credit_post": "-Projekt übernommen.",
   "meld_workers": "Parallele Zellen",

@@ -333,7 +333,7 @@
   "live_game_teleport_failed": "Arnis no pudo generar el lugar que elegiste.",
   "map_copy_coordinates": "Copiar coordenadas",
   "advanced_meld_features": "Funciones avanzadas",
-  "advanced_meld_features_desc": "Ajustes extra para mundos grandes y control más fino. Desactivado, Arnis funciona como antes.",
+  "advanced_meld_features_desc": "Ajustes extra para mundos grandes y control más fino.",
   "advanced_meld_credit_pre": "Portado del proyecto ",
   "advanced_meld_credit_post": ".",
   "meld_workers": "Celdas en paralelo",
