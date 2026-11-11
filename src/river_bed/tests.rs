@@ -368,12 +368,12 @@ fn a_width_cap_narrows_the_line_mask() {
 }
 
 #[test]
-fn the_profile_is_flat_at_both_ends_and_never_steps_more_than_a_block() {
+fn the_profile_drops_at_the_bank_flattens_at_the_bottom_and_never_steps_more_than_a_block() {
     let hw = 30.0;
     let p = |d: f64| river_profile_depth(d, hw);
     let mid = p(hw * 0.55) - p(hw * 0.45);
-    assert!(p(hw * 0.1) - p(0.0) < mid);
-    assert!(p(hw) - p(hw * 0.9) < mid);
+    assert!(p(hw * 0.1) - p(0.0) > mid, "the bank is the steepest part");
+    assert!(p(hw) - p(hw * 0.9) < mid, "the bottom is flat");
     let worst = (0..120)
         .map(|i| p(f64::from(i) * 0.25 + 1.0) - p(f64::from(i) * 0.25))
         .fold(0.0, f64::max);

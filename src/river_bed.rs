@@ -532,7 +532,7 @@ const SALT_SILT: u32 = 0x5256_0008;
 /// Pools along the river and a ripple that bends the depth contours off the bank lines.
 fn natural_depth(d: f64, x: i32, z: i32) -> f64 {
     let pool = 0.88 + 0.24 * ground_noise(x, z, 36, SALT_POOL);
-    let ripple = (ground_noise(x, z, 5, SALT_RIPPLE) - 0.5) * 0.8;
+    let ripple = (ground_noise(x, z, 5, SALT_RIPPLE) - 0.5) * 0.5;
     d * pool + ripple * d.min(1.0)
 }
 
@@ -584,12 +584,14 @@ fn river_depth_cap_for_hw(hw: f64) -> f64 {
     (6.0 * (hw / 30.0).powf(0.7)).clamp(1.0, f64::from(MAX_WATER_DEPTH))
 }
 
-/// Bed depth `d_blocks` from the bank: half smoothstep, half parabola, so the bank drops
-/// within a few blocks to a broad bottom. Peak slope `1.33 * D / hw`, under a block a column.
+/// Bed depth `d_blocks` from the bank: an ease-out, so the water is one block deep at the bank,
+/// goes down from the next column on and flattens into a broad bottom. A stream keeps a parabola,
+/// a river gets a cubic; steepest at the bank, at most `3 * D / hw`, under a block a column.
 fn river_profile_depth(d_blocks: f64, hw: f64) -> f64 {
-    let t = (d_blocks / hw.max(1.0)).clamp(0.0, 1.0);
-    let u = 0.5 * smoothstep(t) + 0.5 * (1.0 - (1.0 - t) * (1.0 - t));
-    river_depth_cap_for_hw(hw) * u
+    // The bank column itself stays one deep; a narrow stream has less room for that.
+    let t = ((d_blocks - (hw / 4.0).min(1.0)) / hw.max(1.0)).clamp(0.0, 1.0);
+    let power = 2.0 + ((hw - 3.0) / 7.0).clamp(0.0, 1.0);
+    river_depth_cap_for_hw(hw) * (1.0 - (1.0 - t).powf(power))
 }
 
 fn tag<'a>(tags: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
