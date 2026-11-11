@@ -78,9 +78,33 @@ globalThis.arnisCellsExtent = (pieces) => {
 // A button that acts only when held for `ms` (pointer, or Space/Enter); letting go earlier does
 // nothing. `.is-holding` is on while it is held, for the fill (CSS, timed to the same `ms`). Used
 // by Start's hold (main.js) and the map's Clear selection (bbox.js). `blocked()` says the button
-// cannot be used now; a hidden panel starts nothing either.
+// cannot be used now; a hidden panel starts nothing either. Without a hold (a short key press, or
+// a click from assistive technology), a second activation within 4 s confirms.
 globalThis.arnisHold = (button, done, ms, blocked = () => button.disabled) => {
     let timer = 0;
+    let armed = 0;
+    let label = null;
+    const disarm = () => {
+        if (!armed) return;
+        clearTimeout(armed);
+        armed = 0;
+        button.classList.remove('is-armed');
+        if (label !== null) button.setAttribute('aria-label', label);
+        else button.removeAttribute('aria-label');
+    };
+    const fire = () => {
+        disarm();
+        if (!blocked() && !button.closest('[hidden]')) done();
+    };
+    const tap = () => {
+        if (blocked()) return;
+        if (armed) return fire();
+        const loc = globalThis.localization || globalThis.parent?.localization || {};
+        label = button.getAttribute('aria-label');
+        button.setAttribute('aria-label', loc.hold_again || 'Press again to confirm');
+        button.classList.add('is-armed');
+        armed = setTimeout(disarm, 4000);
+    };
     const stop = () => {
         clearTimeout(timer);
         timer = 0;
@@ -91,13 +115,16 @@ globalThis.arnisHold = (button, done, ms, blocked = () => button.disabled) => {
         if (blocked() || timer || (e && e.button)) return;
         button.classList.add('is-holding');
         timer = setTimeout(() => {
+            timer = 0;
             stop();
-            if (!blocked() && !button.closest('[hidden]')) done();
+            fire();
         }, ms);
     };
     const isKey = (e) => e.key === ' ' || e.key === 'Enter';
     button.addEventListener('pointerdown', start);
     ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach((type) => button.addEventListener(type, stop));
+    // A click with no pointer behind it (detail 0) is a screen reader's or a switch's.
+    button.addEventListener('click', (e) => { if (e.detail === 0) tap(); });
     button.addEventListener('keydown', (e) => {
         if (!isKey(e)) return;
         e.preventDefault();
@@ -106,7 +133,10 @@ globalThis.arnisHold = (button, done, ms, blocked = () => button.disabled) => {
     button.addEventListener('keyup', (e) => {
         if (!isKey(e)) return;
         e.preventDefault();
+        // Let go before the hold filled: a press, which arms or confirms.
+        const short = Boolean(timer);
         stop();
+        if (short) tap();
     });
 };
 

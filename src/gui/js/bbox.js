@@ -1350,6 +1350,9 @@ $(document).ready(function () {
         // Store the latLng for copying
         menu.dataset.lat = latLng.lat;
         menu.dataset.lng = latLng.lng;
+        // The keyboard starts on the first cell action.
+        var first = menu.querySelector('.cell-actions [role="menuitem"]');
+        if (first) first.focus();
     }
 
     // The cell actions at the top of the menu: the count, then what fits every picked cell. An action
@@ -1370,6 +1373,13 @@ $(document).ready(function () {
             var item = document.createElement('div');
             item.className = 'coordinate-context-menu-item' + (a.why ? ' is-off' : '');
             item.setAttribute('role', 'menuitem');
+            // Reached with Tab and taken with Enter or Space, as a button.
+            item.tabIndex = 0;
+            item.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                item.click();
+            });
             var label = document.createElement('span');
             label.textContent = mapText(a.label[0], a.label[1]);
             item.appendChild(label);

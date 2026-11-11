@@ -797,5 +797,6 @@
   "projects_mask_lost": "This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.",
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "O Mundo único gera retângulos. Desenhe um retângulo ou desative o Mundo único.",
-  "map_tool_shape_rectangles_only": "O Mundo único gera apenas retângulos."
+  "map_tool_shape_rectangles_only": "O Mundo único gera apenas retângulos.",
+  "hold_again": "Press again to confirm"
 }

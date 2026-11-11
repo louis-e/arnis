@@ -341,6 +341,10 @@
   pointer-events: none;
 }
 
+.leaflet-draw-toolbar a.leaflet-draw-edit-remove.is-armed::after {
+  transform: scaleY(0.5);
+}
+
 .leaflet-draw-toolbar a.leaflet-draw-edit-remove.is-holding::after {
   transform: scaleY(1);
   transition: transform 0.8s linear;

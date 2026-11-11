@@ -797,5 +797,6 @@
   "projects_mask_lost": "This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.",
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "하나의 월드는 직사각형만 생성합니다. 직사각형을 그리거나 하나의 월드를 끄세요.",
-  "map_tool_shape_rectangles_only": "하나의 월드는 직사각형만 생성합니다."
+  "map_tool_shape_rectangles_only": "하나의 월드는 직사각형만 생성합니다.",
+  "hold_again": "Press again to confirm"
 }

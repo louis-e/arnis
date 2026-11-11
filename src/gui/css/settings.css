@@ -1358,6 +1358,10 @@ body.meld-off .meld-only {
   transition: background-size 1.5s linear;
 }
 
+.settings-page .projects-row .settings-action-button.projects-hold.is-armed {
+  background-size: 50% 100%;
+}
+
 .settings-page .projects-empty {
   opacity: 0.75;
 }

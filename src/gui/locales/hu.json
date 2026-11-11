@@ -797,5 +797,6 @@
   "projects_mask_lost": "This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.",
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "Az Egy világ téglalapokat generál. Rajzolj téglalapot, vagy kapcsold ki az Egy világot.",
-  "map_tool_shape_rectangles_only": "Az Egy világ csak téglalapokat generál."
+  "map_tool_shape_rectangles_only": "Az Egy világ csak téglalapokat generál.",
+  "hold_again": "Press again to confirm"
 }

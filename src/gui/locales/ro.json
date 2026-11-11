@@ -797,5 +797,6 @@
   "projects_mask_lost": "This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.",
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "O singură lume generează dreptunghiuri. Desenează un dreptunghi sau dezactivează O singură lume.",
-  "map_tool_shape_rectangles_only": "O singură lume generează doar dreptunghiuri."
+  "map_tool_shape_rectangles_only": "O singură lume generează doar dreptunghiuri.",
+  "hold_again": "Press again to confirm"
 }

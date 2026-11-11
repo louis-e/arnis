@@ -797,5 +797,6 @@
   "projects_mask_lost": "This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.",
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "Viena pasaule ģenerē taisnstūrus. Uzzīmējiet taisnstūri vai izslēdziet Vienas pasaules režīmu.",
-  "map_tool_shape_rectangles_only": "Viena pasaule ģenerē tikai taisnstūrus."
+  "map_tool_shape_rectangles_only": "Viena pasaule ģenerē tikai taisnstūrus.",
+  "hold_again": "Press again to confirm"
 }

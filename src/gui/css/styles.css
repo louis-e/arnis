@@ -1231,6 +1231,11 @@ input[type="range"] {
   transition: background-size 1.5s linear;
 }
 
+/* Pressed once without holding: half full until the second press (arnisHold) */
+.run-button.run-hold.is-armed {
+  background-size: 50% 100%;
+}
+
 .run-button.run-hold:disabled {
   opacity: 0.5;
   cursor: default;
