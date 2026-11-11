@@ -141,8 +141,7 @@ fn landuse_area(
             element.tags.get("military").map(String::as_str),
             Some("training_area" | "range" | "danger_area" | "trench")
         );
-    let climate = editor.climate();
-    let site_arid = construction_site::is_arid(climate);
+    let area_climate = editor.climate();
 
     let field_layout = (landuse_tag == "farmland")
         .then(|| FieldLayout::new(args.fields, args.scale, element.id, &element.nodes))
@@ -163,6 +162,7 @@ fn landuse_area(
             continue;
         }
         let plot = field_layout.as_ref().map(|l| l.plot_at(x, z));
+        let climate = editor.local_climate(x, z).unwrap_or(area_climate);
 
         // Apply per-block randomness for certain landuse types
         let actual_block = if let Some(p) = &plot {
@@ -225,7 +225,8 @@ fn landuse_area(
         } else if landuse_tag == "construction" {
             // Roads, paved yards and water in the site keep their surface.
             if !is_protected {
-                let ground = construction_site::ground_block(x, z, site_arid);
+                let ground =
+                    construction_site::ground_block(x, z, construction_site::is_arid(climate));
                 editor.set_block(ground, x, 0, z, None, Some(&[SPONGE]));
             }
         } else if landuse_tag == "railway" {

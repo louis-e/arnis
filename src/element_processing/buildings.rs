@@ -12694,7 +12694,21 @@ pub fn generate_buildings(
     // Resolve style with deterministic RNG
     let mut rng = element_rng(group_seed);
     let has_multiple_floors = building_height > floor_cycle + 2;
-    let climate = editor.climate();
+    // Parts of one building take the district and climate at the centre of the whole
+    // group, so a cell seam never splits one building's materials.
+    let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    let group_cells = group_other_cells.iter().copied();
+    for (x, z) in element.nodes.iter().map(|n| (n.x, n.z)).chain(group_cells) {
+        (min_x, max_x) = (min_x.min(x), max_x.max(x));
+        (min_z, max_z) = (min_z.min(z), max_z.max(z));
+    }
+    let (centre_x, centre_z) = (
+        min_x.saturating_add(max_x) / 2,
+        min_z.saturating_add(max_z) / 2,
+    );
+    let climate = editor
+        .local_climate(centre_x, centre_z)
+        .unwrap_or_else(|| editor.climate());
     let roof_ctx = {
         let (lat, lon) = editor.geo_anchor();
         let (mut party, mut total) = (0, 0);
@@ -12703,14 +12717,6 @@ pub fn generate_buildings(
             if seg.class == FacadeClass::Party {
                 party += seg.len;
             }
-        }
-        // Parts of one building take the district at the centre of the whole
-        // group, so a cell seam never splits one building's materials.
-        let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
-        let group_cells = group_other_cells.iter().copied();
-        for (x, z) in element.nodes.iter().map(|n| (n.x, n.z)).chain(group_cells) {
-            (min_x, max_x) = (min_x.min(x), max_x.max(x));
-            (min_z, max_z) = (min_z.min(z), max_z.max(z));
         }
         let (mut ring, mut walled) = (0usize, 0usize);
         for &(x, z) in cached_floor_area.iter() {
@@ -12729,11 +12735,7 @@ pub fn generate_buildings(
             attached: party >= 4 && party * 100 >= total * 15,
             scale: scale_factor,
             materials: MaterialRegion::at(lat, lon),
-            district: district_seed(
-                min_x.saturating_add(max_x) / 2,
-                min_z.saturating_add(max_z) / 2,
-                scale_factor,
-            ),
+            district: district_seed(centre_x, centre_z, scale_factor),
         }
     };
     let style = BuildingStyle::resolve(

@@ -215,21 +215,11 @@ fn natural_area(
                 ];
 
                 let mut wetland_puddles: Vec<(i32, i32)> = Vec::new();
-                let arid = natural_type == "sand"
-                    && matches!(
-                        editor.climate(),
-                        Climate::HotDesert
-                            | Climate::HotSteppe
-                            | Climate::ColdDesert
-                            | Climate::ColdSteppe
-                    );
-
+                let area_climate = editor.climate();
+                let is_sand = natural_type == "sand";
                 // Scrub and grassland in dry country keep the region's own ground, not a lawn.
-                let dry_ground = matches!(natural_type.as_str(), "scrub" | "grassland" | "heath")
-                    && editor.climate().is_dry();
-
+                let dry_kind = matches!(natural_type.as_str(), "scrub" | "grassland" | "heath");
                 let bare_rock = matches!(natural_type.as_str(), "bare_rock" | "rock" | "stone");
-                let needs_rock = dry_ground || bare_rock || block_type == SAND;
 
                 let mut shrubbery_species: Option<Block> = None;
                 for &(x, z) in filled_area.iter() {
@@ -242,9 +232,20 @@ fn natural_area(
                     if !editor.in_bounds(x, z) && !editor.owns(x, z) {
                         continue;
                     }
+                    let climate = editor.local_climate(x, z).unwrap_or(area_climate);
+                    let arid = is_sand
+                        && matches!(
+                            climate,
+                            Climate::HotDesert
+                                | Climate::HotSteppe
+                                | Climate::ColdDesert
+                                | Climate::ColdSteppe
+                        );
+                    let dry_ground = dry_kind && climate.is_dry();
+                    let needs_rock = dry_ground || bare_rock || block_type == SAND;
                     // Per cell, so an area on the red earth border matches the ground beside it.
                     let rock = if needs_rock {
-                        Rock::at(editor.climate(), x, z, |sx, sz| editor.ecoregion(sx, sz))
+                        Rock::at(climate, x, z, |sx, sz| editor.ecoregion(sx, sz))
                     } else {
                         Rock::Grey
                     };
@@ -258,7 +259,7 @@ fn natural_area(
                     let sealed = editor.surface_is_sealed(x, z);
                     if !sealed && !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
                         let b = if dry_ground {
-                            dry_ground_block(editor, x, z, rock).unwrap_or(block_type)
+                            dry_ground_block(editor, climate, x, z, rock).unwrap_or(block_type)
                         } else if bare_rock {
                             rock.bare(x, z).0
                         } else if rock_variation {
@@ -770,8 +771,13 @@ fn beach_block(surface: Option<&String>) -> Block {
 }
 
 /// Ground of an arid region under its scrub or grassland, from the land cover there.
-fn dry_ground_block(editor: &WorldEditor, x: i32, z: i32, rock: Rock) -> Option<Block> {
-    let climate = editor.climate();
+fn dry_ground_block(
+    editor: &WorldEditor,
+    climate: Climate,
+    x: i32,
+    z: i32,
+    rock: Rock,
+) -> Option<Block> {
     let red = rock == Rock::Red;
     climate
         .surface_palette(editor.cover_class(x, z), x, z, red)
@@ -896,6 +902,14 @@ mod tests {
 
     /// Renders one natural area over x/z 5..=54 at the given place and returns the editor.
     fn render_natural(llbbox: LLBBox, tags: &[(&str, &str)]) -> WorldEditor<'static> {
+        render_natural_on(llbbox, None, tags)
+    }
+
+    fn render_natural_on(
+        llbbox: LLBBox,
+        ground: Option<crate::ground::Ground>,
+        tags: &[(&str, &str)],
+    ) -> WorldEditor<'static> {
         use crate::element_processing::bridge_styles::BridgeOutlineIndex;
         use crate::element_processing::bridges::BridgeStructureMap;
         use crate::element_processing::building_test_support::rect_way;
@@ -903,6 +917,9 @@ mod tests {
 
         let xzbbox = Box::leak(Box::new(XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap()));
         let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, llbbox);
+        if let Some(ground) = ground {
+            editor.set_ground(std::sync::Arc::new(ground));
+        }
         let outlines = BridgeOutlineIndex::build(&[]);
         let structures =
             BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
@@ -1045,5 +1062,16 @@ mod tests {
         let sahara = LLBBox::new(25.0, 25.0, 25.01, 25.01).unwrap();
         let desert = render_natural(sahara, &[("natural", "sand")]);
         assert!(count(&desert, 1, &[DEAD_BUSH]) > 0);
+
+        // Per position, a Baltic area whose ground reads the Sahara grows them too.
+        let mut ground = crate::ground::Ground::new_flat(0);
+        let mut frame = crate::ground::GroundFrame::local();
+        frame.mercator = Some(crate::projection::WebMercatorProjection::new(
+            25.0, 25.0, 1.0,
+        ));
+        let per_position = crate::climate_field::ClimateMode::PerPosition;
+        ground.apply_climate_mode(per_position, &frame, &sahara);
+        let local = render_natural_on(baltic, Some(ground), &[("natural", "sand")]);
+        assert!(count(&local, 1, &[DEAD_BUSH]) > 0);
     }
 }
