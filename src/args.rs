@@ -544,6 +544,13 @@ pub struct Args {
         conflicts_with = "vanilla_height"
     )]
     pub max_y: Option<i32>,
+
+    /// EXPERIMENTAL. World seed mixed into every per-element and per-block random choice
+    /// (trees, rocks, flowers, building variety), so the same area can be rebuilt with a
+    /// different but repeatable look. Omitted or 0 keeps the default look. A One World
+    /// keeps the seed its first area was built with.
+    #[arg(long, value_name = "SEED")]
+    pub seed: Option<u64>,
     // --- end confluence:terrain ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -813,8 +820,8 @@ pub fn refuse_extras_in_pieces(args: &Args) -> Result<(), String> {
 }
 
 /// Live tiles build with upstream's settings only, so `--live` refuses every 3.5 flag that
-/// would be dropped on its tiles. `--no-update-check` and `--no-cache-sweep` act on this
-/// process only.
+/// would be dropped on its tiles. `--seed` travels in the world's manifest;
+/// `--no-update-check` and `--no-cache-sweep` act on this process only.
 pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
     if !args.live.live {
         return Ok(());

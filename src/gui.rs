@@ -1957,6 +1957,7 @@ const WINDOW_FLAGS: &[&str] = &[
     "threads",
     "ram-budget-mb",
     "max-downloads",
+    "seed",
     "min-y",
     "max-y",
     "river-bed",
@@ -2686,6 +2687,7 @@ fn gui_start_generation(
                 climate_map: None,
                 min_y: None,
                 max_y: None,
+                seed: None,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3347,6 +3349,7 @@ mod tests {
     #[test]
     fn every_flag_the_window_sends_parses() {
         let flags: Vec<String> = [
+            "--seed=7",
             "--min-y=-64",
             "--max-y=319",
             "--river-bed=v1",
@@ -3434,12 +3437,12 @@ mod tests {
             "--output-dir=x",
             "--path",
             "--spawn-lat=1",
-            "threads=1",
+            "seed=1",
             "--world-name=a",
         ] {
             assert!(check_window_flags(&[bad.to_string()]).is_err(), "{bad}");
         }
-        assert!(check_window_flags(&["--threads=1".into(), "--offline".into()]).is_ok());
+        assert!(check_window_flags(&["--seed=1".into(), "--offline".into()]).is_ok());
     }
 
     #[test]

@@ -125,6 +125,9 @@ pub struct Manifest {
     /// Metre to Y mapping shared by every area. Set at creation; worlds from
     /// before version 3 take it from their first terrain area.
     pub elevation: Option<ElevationAffine>,
+    /// `--seed` of the first area; later areas and pieces build with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
     pub next_area_id: u32,
     pub areas: Vec<GeneratedArea>,
     /// The place the world shows, set by the window.
@@ -275,6 +278,7 @@ impl Manifest {
                 }
                 e
             }),
+            seed: args.seed,
             next_area_id: 1,
             areas: Vec::new(),
             place_name: None,
@@ -521,6 +525,16 @@ fn open_in_minecraft(world_dir: &Path) -> String {
     )
 }
 
+/// A world's looks are a pure function of the seed, so it keeps its first area's: a later
+/// area or piece with another would not match its neighbours at the seam.
+fn keep_seed(manifest: &Manifest, args: &mut Args) {
+    if args.seed.is_some() && args.seed != manifest.seed {
+        let kept = manifest.seed.map_or("none".into(), |s| s.to_string());
+        println!("Note: One World keeps the seed it was created with ({kept}).");
+    }
+    args.seed = manifest.seed;
+}
+
 /// Opens or creates the One World at `world_dir`, locks it, and points `args`
 /// at the world's frame.
 pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<Session, String> {
@@ -703,6 +717,7 @@ fn resolve(
     };
 
     args.scale = manifest.scale;
+    keep_seed(&manifest, args);
     let (xzbbox, llbbox) = snap_bbox_to_chunks(&manifest.projection(), requested)?;
 
     if created {
@@ -1524,6 +1539,30 @@ mod tests {
             .err()
             .unwrap();
         assert!(err.contains("with terrain"), "{err}");
+    }
+
+    #[test]
+    fn one_world_keeps_first_seed() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let mut first = args_for(MUNICH, &["--seed", "7"]);
+        drop(prepare(&world, &req, &mut first).unwrap());
+        assert_eq!(first.seed, Some(7));
+        assert_eq!(Manifest::load(&world).unwrap().unwrap().seed, Some(7));
+        // A later area asks for another, or none, and gets the world's.
+        for later in [&["--seed", "9"][..], &[]] {
+            let mut args = args_for(MUNICH, later);
+            drop(prepare(&world, &req, &mut args).unwrap());
+            assert_eq!(args.seed, Some(7), "{later:?}");
+        }
+        // A world made without a seed stays without one.
+        let plain = dir.path().join("p");
+        let mut none = args_for(MUNICH, &[]);
+        drop(prepare(&plain, &req, &mut none).unwrap());
+        let mut asks = args_for(MUNICH, &["--seed", "9"]);
+        drop(prepare(&plain, &req, &mut asks).unwrap());
+        assert_eq!(asks.seed, None);
     }
 
     #[test]
