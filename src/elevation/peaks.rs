@@ -65,12 +65,16 @@ impl TerrainHints {
         let (bores, graded) = terrain_ways(data, graded);
         Self {
             peaks: peaks_in(data),
-            tall_models: if args.use_3d && !args.skip_objects() {
-                let mut models = crate::models_3d::wikidata::tall_models_in(data);
-                models.extend(crate::landmarks::tall_models_in(data, args.bbox.as_ref()));
+            tall_models: {
+                let mut models = if args.use_3d && !args.skip_objects() {
+                    crate::models_3d::wikidata::tall_models_in(data)
+                } else {
+                    Vec::new()
+                };
+                if crate::landmarks::placed(args) {
+                    models.extend(crate::landmarks::tall_models_in(data, args.bbox.as_ref()));
+                }
                 models
-            } else {
-                Vec::new()
             },
             tall_structures: if wants_structures(args) {
                 tall_structures_in(data, args.scale, None)
@@ -1338,6 +1342,30 @@ mod tests {
             &["--disable-height-limit"][..],
         ] {
             assert!(hints(none).is_empty(), "{none:?}");
+        }
+    }
+
+    #[test]
+    fn landmark_headroom_follows_where_landmarks_are_placed() {
+        use clap::Parser;
+        let empty: crate::osm_parser::OsmData =
+            serde_json::from_str(r#"{"elements": []}"#).unwrap();
+        // Beside the Olympiaturm, which `landmarks` places from its anchor.
+        let models = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--bbox", "48.1740,11.5530,48.1743,11.5536"];
+            cmd.extend_from_slice(extra);
+            let args = crate::args::Args::parse_from(cmd);
+            TerrainHints::from_osm(&empty, &args).tall_models.len()
+        };
+        assert!(models(&[]) > 0);
+        assert!(models(&["--no-3d", "--props", "landmark"]) > 0);
+        for none in [
+            &["--no-3d"][..],
+            &["--props", "none"],
+            &["--props", "car"],
+            &["--no-buildings"],
+        ] {
+            assert_eq!(models(none), 0, "{none:?}");
         }
     }
 
