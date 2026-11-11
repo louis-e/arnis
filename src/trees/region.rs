@@ -388,7 +388,14 @@ fn preload<'a>(
         .par_iter()
         .map(|(rel, _)| {
             read_file(rel)
-                .and_then(|bytes| load_schem(&bytes).ok())
+                .and_then(|bytes| {
+                    // A user file is held to the limits its scan checked.
+                    if rel.starts_with(crate::trees::pack_dir::USER) {
+                        crate::trees::pack_dir::load_user(&bytes).ok()
+                    } else {
+                        load_schem(&bytes).ok()
+                    }
+                })
                 .filter(Schematic::has_leaves)
         })
         .collect();

@@ -1,16 +1,13 @@
-//! A tree-pack folder of the user's own schematics (`--tree-pack-dir`).
-//!
-//! Laid out like the bundled packs: `<realm>/<community>/<tree type>/[<size>/]<file>.schem`.
-//! The folders say what a file is, so file names are free. The size folder
-//! (small, medium, big, tall, giant) is optional; without one the size is
-//! measured from the schematic's height, as for the bundled trees.
+//! `--tree-pack-dir`: the user's own schematics, laid out like the bundled packs as
+//! `<realm>/<community>/<tree type>/[<size>/]<file>.schem`.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use crate::trees::schematic::load_schem;
+use crate::trees::schematic::{load_schem, load_schem_within, Schematic};
 use crate::trees::size_weights::NAMES;
 use crate::trees::tree_library::{size_for_height, TreeSize};
 use crate::trees::tree_pack::{embedded_read, REALMS};
@@ -30,8 +27,9 @@ pub const USER: &str = "user:";
 
 /// Bigger files are skipped: a tree model is a few KB, the largest bundled one 0.2 MB.
 const MAX_FILE_BYTES: u64 = 8 << 20;
-/// No model side may exceed this many blocks.
-const MAX_SIDE: i32 = 256;
+/// Widest model: a tree stamps around its middle, so a tile's halo must hold half of it.
+const MAX_SIDE: i32 = 2 * crate::tile::TILE_EDITOR_HALO;
+const MAX_HEIGHT: i32 = 256;
 
 struct UserTree {
     realm: String,
@@ -92,16 +90,26 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// A user file's bytes, refused past `MAX_FILE_BYTES`.
+fn read_capped(path: &Path) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .and_then(|f| f.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(format!("over the {} MB limit", MAX_FILE_BYTES >> 20));
+    }
+    Ok(bytes)
+}
+
+/// A user tree, within the size limits.
+pub fn load_user(bytes: &[u8]) -> Result<Schematic, String> {
+    load_schem_within(bytes, MAX_SIDE, MAX_HEIGHT)
+}
+
 /// Why a schematic file cannot be used, or the size tier its height gives.
 fn check(path: &Path) -> Result<TreeSize, String> {
-    let len = fs::metadata(path).map_err(|e| e.to_string())?.len();
-    if len > MAX_FILE_BYTES {
-        return Err(format!("{len} bytes, over the {MAX_FILE_BYTES} limit"));
-    }
-    let schem = load_schem(&fs::read(path).map_err(|e| e.to_string())?)?;
-    if schem.width.max(schem.height).max(schem.length) > MAX_SIDE {
-        return Err(format!("larger than {MAX_SIDE} blocks"));
-    }
+    let schem = load_user(&read_capped(path)?)?;
     if !schem.has_leaves() {
         return Err("no leaves".into());
     }
@@ -246,7 +254,7 @@ impl PackDir {
         self.trees
             .binary_search_by(|t| t.rel.as_str().cmp(rel))
             .ok()
-            .and_then(|_| fs::read(self.root.join(rel)).ok())
+            .and_then(|_| read_capped(&self.root.join(rel)).ok())
     }
 }
 
@@ -268,8 +276,8 @@ Put your own tree schematics (Sponge .schem files) here, one folder per kind:
   its height gives.
 
 File names are free. Files are read in path order, so every machine places the
-same trees. A file that does not load, has no leaves, is over 8 MB or more than
-256 blocks on a side is skipped with one warning line.
+same trees. A file that does not load, has no leaves, is over 8 MB, more than
+128 blocks wide or more than 256 tall is skipped with one warning line.
 
 Mode (--tree-pack-mode, or Mode in the window):
 - add (default): your trees join the built-in ones.
@@ -277,8 +285,9 @@ Mode (--tree-pack-mode, or Mode in the window):
   none keep the built-in trees.
 
 Export Built-in Trees (--export-tree-packs) writes the built-in trees into this
-layout to edit. Exported trees all count as narrow-trunked, so in add mode
-they double the built-in ones; use replace mode, or delete what you keep as is.
+layout to edit, leaving files already there as they are. Exported trees all count
+as narrow-trunked, so in add mode they double the built-in ones; use replace
+mode, or delete what you keep as is.
 ";
 
 fn realm_readme(realm: &str, communities: &[&str]) -> String {
@@ -329,11 +338,11 @@ pub fn init(root: &Path) -> Result<usize, String> {
     Ok(types)
 }
 
-/// Writes every bundled schematic into the layout under `root`, each in the
-/// size folder its height gives, and returns how many files it wrote.
-pub fn export(root: &Path) -> Result<usize, String> {
+/// Writes every bundled schematic into the layout under `root`, each in the size folder
+/// its height gives, and returns how many it wrote and how many it left as they were.
+pub fn export(root: &Path) -> Result<(usize, usize), String> {
     init(root)?;
-    let mut written = 0;
+    let (mut written, mut kept) = (0, 0);
     for realm in &REALMS[1..] {
         let Some(m) = manifest(realm) else { continue };
         for c in communities(&m) {
@@ -356,13 +365,18 @@ pub fn export(root: &Path) -> Result<usize, String> {
                     let tier = NAMES[size_for_height(schem.height) as usize];
                     let name = rel.rsplit('/').next().unwrap_or(rel);
                     let dest = sdir.join(tier).join(name);
+                    // The user may have edited it.
+                    if dest.exists() {
+                        kept += 1;
+                        continue;
+                    }
                     fs::write(&dest, &bytes).map_err(|e| format!("{}: {e}", dest.display()))?;
                     written += 1;
                 }
             }
         }
     }
-    Ok(written)
+    Ok((written, kept))
 }
 
 #[cfg(test)]
@@ -381,8 +395,8 @@ mod tests {
     fn export_then_init_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let written = export(root).unwrap();
-        assert!(written > 2400, "{written}");
+        let (written, kept) = export(root).unwrap();
+        assert!(written > 2400 && kept == 0, "{written} {kept}");
         let all = PackDir::scan(root, TreePackMode::Add);
         assert_eq!(
             all.found(),
@@ -391,9 +405,12 @@ mod tests {
             &all.skipped[..all.skipped.len().min(5)]
         );
         assert!(all.skipped.is_empty());
-        // Init on a filled folder keeps every file.
+        // Init and a second export on a filled folder keep every file, edited ones included.
         init(root).unwrap();
-        assert_eq!(PackDir::scan(root, TreePackMode::Add).found(), written);
+        let edited = root.join(&all.trees[0].rel);
+        fs::write(&edited, b"edited").unwrap();
+        assert_eq!(export(root).unwrap(), (0, written));
+        assert_eq!(fs::read(&edited).unwrap(), b"edited");
     }
 
     #[test]

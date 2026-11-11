@@ -268,9 +268,14 @@ fn run_cli() {
         std::process::exit(1);
     }
     if let Some(dir) = &args.export_tree_packs {
-        match trees::pack_dir::export(dir)
-            .map(|n| format!("{n} tree schematics exported to {}.", dir.display()))
-        {
+        match trees::pack_dir::export(dir).map(|(n, kept)| {
+            let skipped = match kept {
+                0 => String::new(),
+                k => format!(" Skipped {k} already there, so your edits stay."),
+            };
+            let dir = dir.display();
+            format!("{n} tree schematics exported to {dir}.{skipped}")
+        }) {
             Ok(line) => println!("{line}"),
             Err(e) => {
                 eprintln!("{} {e}", "Error:".red().bold());
