@@ -1,14 +1,6 @@
-//! Small rocks and bushes from bundled schematics, scattered over open land.
-//!
-//! Each 16x16 chunk rolls once for a rock and once for a bush; a rock wins when
-//! both land. The piece, its rotation and its spot are drawn from the chunk's
-//! coordinates, and the spot is chosen so the rotated piece stays inside its
-//! chunk. Tiles are region-aligned, so a piece always lies within one pass's
-//! bounds and comes out the same whichever tile or One World piece builds it.
-//!
-//! Pieces only go on natural dry ground under ESA cropland or grassland, never
-//! on sealed (paved or built) ground or over anything but loose plants and
-//! crops. Rocks also keep off tilled farmland.
+//! Small rocks and bushes from bundled schematics on natural dry cropland and grassland.
+//! Each chunk rolls once for each, seeded by its coordinates, and keeps its piece inside
+//! itself, so any tile or One World piece builds the same.
 
 use std::sync::OnceLock;
 
