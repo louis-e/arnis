@@ -482,6 +482,29 @@ pub struct Args {
     #[command(flatten)]
     pub units: UnitArgs,
     // --- end confluence:core ---
+
+    // --- confluence:data ---
+    /// Self-hosted Overpass instance(s) to ask in place of Arnis's own, tried in order; repeat the flag or separate with commas.
+    #[arg(
+        long,
+        env = "ARNIS_OVERPASS_URL",
+        value_name = "URL",
+        value_delimiter = ','
+    )]
+    pub overpass_url: Vec<String>,
+
+    /// Never use the network: read everything from the caches and stop with a list of what they lack.
+    #[arg(long, env = "ARNIS_OFFLINE", value_parser = FalseyValueParser::new())]
+    pub offline: bool,
+
+    /// Download and cache every input this command would read for --bbox, then exit without writing a world.
+    #[arg(long, conflicts_with = "offline")]
+    pub prewarm: bool,
+
+    /// With --unit-regions, warm the caches for every piece, one at a time, before the pieces start building.
+    #[arg(long, conflicts_with = "offline")]
+    pub prewarm_first: bool,
+    // --- end confluence:data ---
 }
 
 /// Large One World jobs cut into region-group pieces.
@@ -717,6 +740,10 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (u.plan_mask.is_some(), "--plan-mask"),
         (u.stitch_map, "--stitch-map"),
         (u.skip_cells.is_some(), "--skip-cells"),
+        (!args.overpass_url.is_empty(), "--overpass-url"),
+        (args.offline, "--offline"),
+        (args.prewarm, "--prewarm"),
+        (args.prewarm_first, "--prewarm-first"),
     ]
     .into_iter()
     .filter_map(|(on, name)| on.then_some(name))
@@ -724,10 +751,16 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
     if used.is_empty() {
         return Ok(());
     }
-    Err(format!(
+    let mut msg = format!(
         "--live builds its tiles with the standard settings only, so it cannot take {}.",
         used.join(", ")
-    ))
+    );
+    if args.offline {
+        msg.push_str(
+            " --offline is not supported in Live mode: the tiles and the server download need the network.",
+        );
+    }
+    Err(msg)
 }
 
 /// The line `--capabilities` prints: a JSON array of every long flag.
@@ -1342,6 +1375,16 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     refuse_live_extras(args)?;
     refuse_extras_in_pieces(args)?;
     // --- end confluence:core ---
+    // --- confluence:data ---
+    if args.prewarm_first && !args.units.coordinates() {
+        return Err(
+            "--prewarm-first only applies to a job built in pieces (--unit-regions).".to_string(),
+        );
+    }
+    if args.offline && args.mapillary_probe {
+        return Err("--mapillary-probe asks Mapillary, so it cannot run --offline.".to_string());
+    }
+    // --- end confluence:data ---
     // One World and live mode track their areas as rectangles of whole chunks.
     if args.shapes.is_some() && (args.one_world || args.live.live) {
         return Err(
@@ -1587,8 +1630,9 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 return Err(format!("Path is not a directory: {}", path.display()));
             }
         }
-    } else if args.mapillary_probe || cave_preview {
-        // The probe and the cave preview write no world, so they need no output directory.
+    } else if args.mapillary_probe || cave_preview || args.prewarm {
+        // The probe, the cave preview and a prewarm write no world, so they need no output
+        // directory.
     } else {
         // Java: path is required. If it exists, it must be a directory.
         // If it doesn't exist, create_new_world will create it.
@@ -2768,6 +2812,12 @@ mod tests {
         for name in ["--progress", "--threads"] {
             assert!(err.contains(name), "{err}");
         }
+        assert!(!err.contains("--offline"), "{err}");
+        let err = validate_args(&parse(&["--offline"])).unwrap_err();
+        assert!(
+            err.contains("--offline is not supported in Live mode"),
+            "{err}"
+        );
         // Without --live nothing changes.
         let off = Args::parse_from(["arnis", "--threads", "4"]);
         assert!(refuse_live_extras(&off).is_ok());

@@ -208,7 +208,8 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
                 .ok()
                 .and_then(|t| t.elapsed().ok())
                 .is_some_and(|age| age < Duration::from_secs(86_400));
-            if fresh {
+            // Offline, any copy beats none: archives it names stay published.
+            if fresh || crate::net::offline() {
                 if let Ok(body) = std::fs::read(p) {
                     if let Ok(m) = serde_json::from_slice::<Manifest>(&body) {
                         return Ok(m);
@@ -217,6 +218,7 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
             }
         }
     }
+    crate::net::ensure_online("OSM tile archive index")?;
     let body = client
         .get(&url)
         .send()

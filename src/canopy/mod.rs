@@ -162,7 +162,7 @@ fn quadkey_of(xt: i64, yt: i64) -> String {
 }
 
 fn cache_dir() -> PathBuf {
-    match dirs::cache_dir() {
+    match crate::elevation::cache::user_cache_dir() {
         Some(d) => d.join(CACHE_DIR),
         None => PathBuf::from(format!("./{CACHE_DIR}")),
     }
@@ -217,6 +217,7 @@ fn fetch_range(
         return Ok(Vec::new());
     }
     let end = start + length - 1;
+    crate::net::ensure_online("canopy height")?;
     let response = client
         .get(url)
         .header("Range", format!("bytes={start}-{end}"))

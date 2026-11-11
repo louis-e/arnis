@@ -644,6 +644,7 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
     let end = offset
         .checked_add(length - 1)
         .ok_or_else(|| format!("range {offset}+{length} overflows the archive"))?;
+    crate::net::ensure_online(url)?;
     let mut last_error = String::new();
 
     for attempt in 0..RANGE_ATTEMPTS {

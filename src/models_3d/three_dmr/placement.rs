@@ -77,6 +77,14 @@ impl PrescanResult {
         self.placements.len()
     }
 
+    /// Downloads what placing these models would, so `--prewarm` caches it.
+    pub fn prewarm(&self) {
+        let ids: HashSet<u64> = self.placements.iter().map(|p| p.model_id).collect();
+        ids.par_iter().for_each(|&id| {
+            let _ = fetch_info(id).and_then(|_| fetch_glb(id));
+        });
+    }
+
     /// Regions each placement may write to (stream-to-disk deferral); see ASSUMED_HALF_EXTENT_M.
     pub fn placement_regions(&self, scale: f64) -> Vec<Vec<(i32, i32)>> {
         let r = (ASSUMED_HALF_EXTENT_M * scale).ceil() as i32;

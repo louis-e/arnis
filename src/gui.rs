@@ -1950,6 +1950,9 @@ const WINDOW_FLAGS: &[&str] = &[
     "threads",
     "ram-budget-mb",
     "max-downloads",
+    "overpass-url",
+    "offline",
+    "prewarm",
 ];
 
 /// `flags` as the window may send them: `--name` or `--name=value`, the name one of
@@ -2455,6 +2458,10 @@ fn gui_start_generation(
                 no_cache_sweep: false,
                 capabilities: false,
                 units: Default::default(),
+                overpass_url: Vec::new(),
+                offline: false,
+                prewarm: false,
+                prewarm_first: false,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3114,11 +3121,17 @@ mod tests {
     /// Every flag the window can send is one the CLI parser takes.
     #[test]
     fn every_flag_the_window_sends_parses() {
-        let flags: Vec<String> = ["--ram-budget-mb=4096", "--threads=4"]
-            .map(String::from)
-            .to_vec();
+        let flags: Vec<String> = [
+            "--ram-budget-mb=4096",
+            "--threads=4",
+            "--overpass-url=https://a.example,https://b.example",
+            "--offline",
+        ]
+        .map(String::from)
+        .to_vec();
         let extra = confluence_args(&flags, false, "java").unwrap();
         assert!(extra.threads == Some(4) && extra.ram_budget_mb == Some(4096));
+        assert!(extra.offline && extra.overpass_url.len() == 2);
     }
 
     /// The window draws the plan the job would run, from the same flags, and writes nothing.
@@ -3181,7 +3194,7 @@ mod tests {
         ] {
             assert!(check_window_flags(&[bad.to_string()]).is_err(), "{bad}");
         }
-        assert!(check_window_flags(&["--threads=1".into(), "--unit-regions=2".into()]).is_ok());
+        assert!(check_window_flags(&["--threads=1".into(), "--offline".into()]).is_ok());
     }
 
     #[test]

@@ -305,6 +305,7 @@ fn download_tile_once(
     url: &str,
     tile_path: &Path,
 ) -> Result<TileImage, String> {
+    crate::net::ensure_online("elevation tiles (AWS Terrain)")?;
     let _permit = crate::net::request_permit();
     let response = client.get(url).send().map_err(|e| e.to_string())?;
     response.error_for_status_ref().map_err(|e| e.to_string())?;

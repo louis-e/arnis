@@ -24,8 +24,25 @@ fn url_host(url: &str) -> String {
         .to_string()
 }
 
-/// The only Overpass instance Arnis queries.
+/// The only Overpass instance Arnis queries, unless `--overpass-url` names others.
 pub const ARNIS_OVERPASS_URL: &str = "https://api.arnismc.com/overpass/api/interpreter";
+
+/// `--overpass-url`: self-hosted instances asked, in order, in place of ours.
+static OVERPASS_URLS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_overpass_urls(urls: Vec<String>) {
+    *OVERPASS_URLS.lock().unwrap_or_else(|e| e.into_inner()) = urls;
+}
+
+/// The Overpass instances a run asks: `--overpass-url`'s, else Arnis's own.
+pub fn overpass_urls() -> Vec<String> {
+    let urls = OVERPASS_URLS.lock().unwrap_or_else(|e| e.into_inner());
+    if urls.is_empty() {
+        vec![ARNIS_OVERPASS_URL.to_string()]
+    } else {
+        urls.clone()
+    }
+}
 
 /// User agent for OSM-facing requests (Overpass, Nominatim).
 ///
@@ -358,12 +375,14 @@ pub fn fetch_data_from_overpass(
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
     println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Downloading data...");
+    crate::net::ensure_online("OpenStreetMap data (Overpass)")?;
 
     // Arnis's own instance, and only that one. Data comes from the tile archive now; this is
     // the fallback. The public instances are deliberately gone: arnis was blocked from
     // overpass-api.de for using more than its share (#1347), and failing over to the small
-    // volunteer instances would only move the problem onto someone else.
-    let arnis_api_server = ARNIS_OVERPASS_URL;
+    // volunteer instances would only move the problem onto someone else. A self-hosted
+    // instance given with --overpass-url takes its place.
+    let arnis_api_servers = overpass_urls();
     let api_servers: Vec<&str> = vec![];
     let fallback_api_servers: Vec<&str> = vec![];
 
@@ -448,7 +467,11 @@ pub fn fetch_data_from_overpass(
         let mut request_plan: Vec<(&str, ServerKind)> = Vec::new();
         let probed_server: Option<&str> = None;
 
-        request_plan.push((arnis_api_server, ServerKind::Primary));
+        request_plan.extend(
+            arnis_api_servers
+                .iter()
+                .map(|url| (url.as_str(), ServerKind::Primary)),
+        );
 
         let mut shuffled_primary_servers = api_servers.clone();
         shuffled_primary_servers.shuffle(&mut rng);
@@ -901,6 +924,16 @@ mod fetch_from_file_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overpass_url_replaces_the_arnis_instance() {
+        assert_eq!(overpass_urls(), [ARNIS_OVERPASS_URL]);
+        set_overpass_urls(vec!["http://a/api".into(), "http://b/api".into()]);
+        let got = overpass_urls();
+        set_overpass_urls(Vec::new());
+        assert_eq!(got, ["http://a/api", "http://b/api"]);
+        assert_eq!(overpass_urls(), [ARNIS_OVERPASS_URL]);
+    }
 
     #[test]
     fn fallback_reasons_bucket_real_errors() {

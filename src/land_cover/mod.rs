@@ -543,7 +543,7 @@ pub fn fetch_land_cover_data(
 // ─── Cache helpers ────────────────────────────────────────────────────────
 
 fn get_cache_dir() -> PathBuf {
-    if let Some(cache_dir) = dirs::cache_dir() {
+    if let Some(cache_dir) = crate::elevation::cache::user_cache_dir() {
         cache_dir.join(LAND_COVER_CACHE_DIR)
     } else {
         PathBuf::from(format!("./{LAND_COVER_CACHE_DIR}"))
@@ -959,6 +959,7 @@ fn fetch_range(
     length: u64,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let end = start + length - 1;
+    crate::net::ensure_online("land cover (ESA WorldCover)")?;
     let response = client
         .get(url)
         .header("Range", format!("bytes={start}-{end}"))

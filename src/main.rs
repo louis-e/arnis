@@ -172,6 +172,27 @@ fn keep_one_world() {
     }
 }
 
+/// `--offline` stops here rather than build a world with holes where the cache had nothing.
+/// `fresh_world` is the folder this run made for it, removed again.
+fn exit_if_offline_misses(fresh_world: Option<&std::path::Path>) {
+    let missing = net::offline_misses();
+    if missing.is_empty() {
+        return;
+    }
+    eprintln!(
+        "{} --offline, and the cache lacks data this area needs:",
+        "Error:".red().bold()
+    );
+    for (what, refused) in missing {
+        eprintln!("  - {what} ({refused} request(s) refused)");
+    }
+    eprintln!("Run the same command once with --prewarm in place of --offline to fetch it.");
+    if let Some(dir) = fresh_world {
+        let _ = fs::remove_dir_all(dir);
+    }
+    exit_failed();
+}
+
 /// `process::exit` skips destructors, so failures go through here.
 fn exit_failed() -> ! {
     progress_json::error("generation failed, see stderr");
@@ -222,6 +243,9 @@ fn run_cli() {
     if let Some(n) = args.max_downloads {
         net::set_max_requests(n as usize);
     }
+    retrieve_data::set_overpass_urls(args.overpass_url.clone());
+    net::set_offline(args.offline);
+    net::set_prewarm(args.prewarm);
 
     // A plan is a dry run: it neither sweeps the tile cache nor makes the update request.
     let planning = args.units.plan_units.is_some();
@@ -283,7 +307,7 @@ fn print_banner(args: &Args, planning: bool) {
     );
 
     // Fire-and-forget update check; prints a one-line notice on a background thread.
-    if !args.no_update_check && !planning {
+    if !args.no_update_check && !planning && !args.offline {
         version_check::check_for_updates_async();
     }
 }
@@ -572,7 +596,8 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             }
             Ok(()) => {}
         }
-        release_one_world(false);
+        // A prewarm leaves no world it created behind.
+        release_one_world(args.prewarm);
         progress_json::done(started);
         return;
     }
@@ -630,9 +655,9 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     }
 
     // Build the generation output path and level name
-    let (generation_path, level_name) = if args.mapillary_probe {
-        // The probe reports coverage and exits, so it must not allocate (and
-        // leave behind) an empty world directory on the way there.
+    let (generation_path, level_name) = if args.mapillary_probe || args.prewarm {
+        // The probe reports coverage and exits, and so does a prewarm, so neither may allocate
+        // (and leave behind) an empty world directory on the way there.
         (PathBuf::new(), None)
     } else if args.bedrock {
         // Bedrock: generate .mcworld file in user-specified path or Desktop
@@ -710,7 +735,14 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     // The Mapillary facade pipeline needs only the bbox too, and its downloads
     // are the longest thing in a run that uses it, so it starts here and is
     // collected inside `generate_world_with_options`, just before the buildings.
-    let facade_job = mapillary::FacadeJob::start(&args, effective_bbox);
+    let facade_job = if args.prewarm || net::offline() {
+        if net::offline() {
+            println!("--offline: skipping Mapillary street-level imagery");
+        }
+        mapillary::FacadeJob::default()
+    } else {
+        mapillary::FacadeJob::start(&args, effective_bbox)
+    };
     if facade_job.is_running() {
         println!(
             "{} Fetching Mapillary street-level imagery...",
@@ -766,6 +798,11 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                 !args.no_tile_archive,
             )
             .unwrap_or_else(|e| {
+                // Offline, the other fetches finish first so the error lists all that is missing;
+                // a failure that is not a cache miss still stops here.
+                if net::offline() && !net::offline_misses().is_empty() {
+                    return osm_parser::OsmData::empty();
+                }
                 eprintln!("{} Failed to fetch data: {e}", "Error:".red().bold());
                 exit_failed();
             })
@@ -804,6 +841,31 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     });
     bench.report("fetch_total", fetch_start.elapsed());
     bench.reset();
+
+    if args.prewarm {
+        // 3D models download while they are placed, so their prescan runs here to fetch them.
+        if args.use_3d && !skip_objects {
+            let (elements, ..) = osm_parser::parse_osm_data(
+                raw_data,
+                effective_bbox,
+                args.debug,
+                &projection::ProjectionSpec::from_args(&args),
+            );
+            models_3d::Models3dPipeline::prescan(&elements, &args, &Default::default()).prewarm();
+        }
+        println!(
+            "{} Inputs for this area are cached; no world was written.",
+            "Done!".green().bold()
+        );
+        // A prewarm leaves no world it created behind.
+        release_one_world(true);
+        progress_json::done(started);
+        return;
+    }
+    exit_if_offline_misses(
+        (world_format == world_editor::WorldFormat::JavaAnvil && args.one_world_run.is_none())
+            .then_some(generation_path.as_path()),
+    );
 
     // The terrain fit has settled the build height.
     let mut args = args;

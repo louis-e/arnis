@@ -437,7 +437,22 @@ fn fetch_tile_pyramid(
         }
     }
 
-    // Persist 404 markers only when this run saw at least one good download.
+    // Persist 404 markers only when this run saw at least one good download. Under --prewarm, when every tile it
+    // found came from disk, one live known-land request gives that proof, since --offline can
+    // only replay the 404s that were stored.
+    if crate::net::prewarm()
+        && !state.pending_markers.is_empty()
+        && !state
+            .saw_network_success
+            .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        let _ = download_tile(
+            &client,
+            &KNOWN_LAND_TILE,
+            &KNOWN_LAND_TILE.cache_path(cache_dir),
+            &state.saw_network_success,
+        );
+    }
     if state
         .saw_network_success
         .load(std::sync::atomic::Ordering::Relaxed)
@@ -499,6 +514,9 @@ fn download_tile(
     tile_path: &Path,
     net_ok: &std::sync::atomic::AtomicBool,
 ) -> TileFetch {
+    if let Err(e) = crate::net::ensure_online("elevation tiles (Mapterhorn)") {
+        return TileFetch::Failed(e);
+    }
     let url = key.url();
     let mut last_error = String::new();
 

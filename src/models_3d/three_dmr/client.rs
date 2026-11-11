@@ -52,7 +52,7 @@ fn deserialize_license<'de, D: Deserializer<'de>>(de: D) -> Result<Option<String
 }
 
 pub(crate) fn cache_root() -> PathBuf {
-    if let Some(dir) = dirs::cache_dir() {
+    if let Some(dir) = crate::elevation::cache::user_cache_dir() {
         dir.join(CACHE_SUBDIR)
     } else {
         PathBuf::from("./.arnis_3dmr_cache")
@@ -107,6 +107,7 @@ pub fn fetch_info(id: u64) -> Result<ModelInfo, String> {
 
     let client = client()?;
     let url = format!("{API_BASE}/info/{id}");
+    crate::net::ensure_online("3D models (3DMR)")?;
     let _permit = crate::net::request_permit();
     let resp = client.get(&url).send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
@@ -135,6 +136,7 @@ pub fn fetch_glb(id: u64) -> Result<Vec<u8>, String> {
 
     let client = client()?;
     let url = format!("{API_BASE}/model/{id}");
+    crate::net::ensure_online("3D models (3DMR)")?;
     let _permit = crate::net::request_permit();
     let resp = client.get(&url).send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {

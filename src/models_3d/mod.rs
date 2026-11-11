@@ -127,7 +127,7 @@ pub(crate) fn region_keys_around(cx: i32, cz: i32, r: i32) -> Vec<(i32, i32)> {
 
 /// Where the retired stadium model was cached; still listed so the panel can clear it.
 fn retired_archetype_cache_root() -> std::path::PathBuf {
-    dirs::cache_dir()
+    crate::elevation::cache::user_cache_dir()
         .map(|d| d.join("arnis/custom_models"))
         .unwrap_or_else(|| std::path::PathBuf::from("./.arnis_custom_cache"))
 }

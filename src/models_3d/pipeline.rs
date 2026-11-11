@@ -33,6 +33,11 @@ impl Models3dPipeline {
         }
     }
 
+    /// Wikidata and stadium models download in `prescan`; 3DMR only when placed.
+    pub fn prewarm(&self) {
+        self.three_dmr.prewarm();
+    }
+
     pub fn suppressed(&self) -> &HashSet<(&'static str, u64)> {
         &self.union_suppressed
     }

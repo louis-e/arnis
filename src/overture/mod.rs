@@ -1304,6 +1304,10 @@ fn parse_release_listing(body: &str) -> Result<Vec<String>, Box<dyn std::error::
 
 /// Release names currently published in the bucket, newest first.
 fn discover_releases(client: &Client) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    // Offline the remembered release is the answer; not data the run is missing.
+    if crate::net::offline() {
+        return Err("offline".into());
+    }
     if let Some(releases) = shared_listing(std::env::var(SHARED_RELEASES_ENV).ok().as_deref()) {
         return Ok(releases);
     }
@@ -1421,6 +1425,7 @@ fn stac_index_for(
     }
 
     let url = format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet");
+    crate::net::ensure_online("Overture STAC index")?;
     stats::record_request();
     let response = client.get(&url).send()?;
     if !response.status().is_success() {
@@ -2582,6 +2587,7 @@ fn partition_size_cached(
         return Ok(size);
     }
 
+    crate::net::ensure_online("Overture GeoParquet")?;
     stats::record_request();
     let head_resp = client.head(url).send()?;
     if !head_resp.status().is_success() {
@@ -2657,6 +2663,7 @@ fn fetch_range_with_attempts(
     if length == 0 {
         return Err("fetch_range called with length 0".into());
     }
+    crate::net::ensure_online("Overture GeoParquet")?;
     // Row-group offsets and lengths come from the partition footer, which is
     // network data. Wrapping would turn a bad range into a plausible small one.
     let end = start

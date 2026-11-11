@@ -33,10 +33,12 @@ const LAST_GOOD_RELEASE_FILE: &str = "last_good_release";
 /// Cache root. Falls back to a relative directory when the OS has no cache dir,
 /// matching every other Arnis cache.
 pub fn cache_root() -> PathBuf {
-    match dirs::cache_dir() {
-        Some(dir) => dir.join(OVERTURE_CACHE_DIR),
-        None => PathBuf::from(format!("./{OVERTURE_CACHE_DIR}")),
-    }
+    cache_root_in(&crate::elevation::cache::user_cache_dir().unwrap_or_else(|| PathBuf::from(".")))
+}
+
+/// The Overture cache under the cache root `root`.
+pub fn cache_root_in(root: &Path) -> PathBuf {
+    root.join(OVERTURE_CACHE_DIR)
 }
 
 /// Clear every cached Overture artefact. Entry point for the GUI cache-clean
@@ -117,7 +119,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) {
 /// The release that last served data on this machine, if it is still a
 /// well-formed name.
 pub fn last_good_release() -> Option<String> {
-    let raw = std::fs::read_to_string(cache_root().join(LAST_GOOD_RELEASE_FILE)).ok()?;
+    last_good_release_in(&cache_root())
+}
+
+/// [`last_good_release`] from the Overture cache `overture`.
+pub fn last_good_release_in(overture: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(overture.join(LAST_GOOD_RELEASE_FILE)).ok()?;
     let release = raw.trim().to_string();
     is_valid_release(&release).then_some(release)
 }

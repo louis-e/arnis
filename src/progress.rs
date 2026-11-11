@@ -173,15 +173,33 @@ pub fn emit_gui_piece(piece: &serde_json::Value) {
     }
 }
 
-pub fn emit_gui_error(message: &str) {
-    crate::progress_json::error(message);
+/// The `progress-update` payload for an error: `message` is cut to fit the
+/// status bar, `detail` keeps the full text for the window to show.
+fn error_payload(message: &str) -> serde_json::Value {
     // Truncate by characters (not bytes) to avoid panicking when the GUI
     // status bar receives an error containing multi-byte UTF-8. e.g.
     // localized OS error messages like "Недостаточно системных ресурсов…"
     // where byte 35 lands inside a Cyrillic character.
     const MAX_CHARS: usize = 35;
     let truncated: String = message.chars().take(MAX_CHARS).collect();
-    emit_gui_progress_update(0.0, &format!("Error! {truncated}"));
+    json!({ "progress": 0.0, "message": format!("Error! {truncated}"), "detail": message })
+}
+
+pub fn emit_gui_error(message: &str) {
+    crate::progress_json::error(message);
+    let payload = error_payload(message);
+    let shown = payload["message"].as_str().unwrap_or_default();
+    if emits_suppressed(0.0, shown) {
+        return;
+    }
+    remember_status(shown);
+    crate::progress_json::progress(0.0, shown);
+    crate::discord::progress(shown);
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
 }
 
 /// Emits the final in-game level name (including localized area suffix for Java,
@@ -243,5 +261,17 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    #[test]
+    fn error_payload_keeps_full_text() {
+        let full = "Недостаточно системных ресурсов для завершения операции. ".repeat(4)[..]
+            .chars()
+            .take(200)
+            .collect::<String>();
+        assert_eq!(full.chars().count(), 200);
+        let p = error_payload(&full);
+        assert!(p["message"].as_str().unwrap().chars().count() <= 42);
+        assert_eq!(p["detail"].as_str().unwrap(), full);
     }
 }

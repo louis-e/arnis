@@ -76,6 +76,8 @@ pub fn builds_single(args: &Args, km2: f64) -> bool {
         && u.piece_order.is_none()
         && !u.skip_built
         && !u.stitch_map
+        && !args.prewarm
+        && !args.prewarm_first
         && km2 < AUTO_SINGLE_BELOW_KM2
 }
 
@@ -412,6 +414,7 @@ mod tests {
         assert!(pieces(s16, "auto", &[]));
         // Another job flag or a fixed count keeps the pieces.
         assert!(pieces(s8, "auto", &["--margin-regions", "1"]));
+        assert!(pieces(s8, "auto", &["--prewarm-first"]));
         assert!(pieces(s8, "4", &[]));
     }
 
