@@ -743,14 +743,6 @@ export function schedulePlan(fresh = false) {
   planTimer = setTimeout(updatePlan, 250);
 }
 
-// Auto is the recommendation: it fits the cell size and the worker count to this computer.
-export function useRecommended() {
-  const workers = el('meld-workers-select');
-  workers.value = 'auto';
-  workers.dispatchEvent(new Event('change', { bubbles: true }));
-  document.querySelector('#meld-piece-size-group .segment[data-v="auto"]')?.click();
-}
-
 // Selects `bounds` ([south, west, north, east]) with a ring of regions around it: a job in
 // pieces with a margin of at least one region. `skipBuilt` leaves out what the world has.
 // Returns the names of the settings it changed: they stay so, and the caller says it.

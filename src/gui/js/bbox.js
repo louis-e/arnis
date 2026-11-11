@@ -1667,9 +1667,7 @@ $(document).ready(function () {
     var PIECE_COLORS = window.arnisPieceStyle.colors;
     // How full each state's cup is: a running piece fills to its percent, a finished one to the top.
     var PIECE_FULL = { done: 1, skipped: 1, failed: 1, stopped: 1 };
-    // Colour is never the only sign of a state: an icon in the label, and the line's pattern.
-    // The cell's colour says its state; no symbols on the map.
-    var PIECE_ICONS = {};
+    // A cell's colour and line pattern say its state; its label is the number alone.
     var PIECE_DASH = window.arnisPieceStyle.dash;
     var lastPieces = [];
     var pieceHalo = false;
@@ -1889,8 +1887,7 @@ $(document).ready(function () {
                 path.classList.toggle('piece-retryable', retryable);
             }
             item.rect.setTooltipContent(pieceTip(p));
-            item.label.setContent((PIECE_ICONS[p.state] ? '<span class="piece-icon-' + p.state + '">' + PIECE_ICONS[p.state] + '</span> ' : '') + p.n +
-                (running && p.pct != null ? ' ' + p.pct + '%' : ''));
+            item.label.setContent(p.n + (running && p.pct != null ? ' ' + p.pct + '%' : ''));
             if (item.halo) { pieceLayer.removeLayer(item.halo); item.halo = null; }
             if (pieceHalo && p.halo) {
                 item.halo = L.rectangle([[p.halo[0], p.halo[1]], [p.halo[2], p.halo[3]]], {

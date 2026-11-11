@@ -159,6 +159,8 @@
 }
 
 .settings-search input {
+  appearance: none;
+  -webkit-appearance: none;
   width: 100%;
   height: 34px;
   box-sizing: border-box;
@@ -169,6 +171,11 @@
   color: var(--ui-text);
   font: inherit;
   font-size: 13px;
+}
+
+.settings-search input::-webkit-search-decoration,
+.settings-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
 }
 
 .settings-search input:focus-visible {
@@ -482,7 +489,7 @@ label[for].setting-label {
   padding-right: 28px;
 }
 
-.setting-heading > [data-localize] + .tooltip-icon {
+.setting-heading > [data-localize]:has(+ .tooltip-icon) + .tooltip-icon {
   margin-left: -20px;
 }
 
@@ -490,7 +497,7 @@ label[for].setting-label {
   margin-left: -48px;
 }
 
-.setting-heading > [data-localize] + .setting-revert {
+.setting-heading > [data-localize]:has(+ .setting-revert) + .setting-revert {
   margin-left: -22px;
 }
 
@@ -625,8 +632,8 @@ label[for].setting-label {
 .preview-popover {
   position: absolute;
   left: 12px;
+  right: 12px;
   bottom: 64px;
-  width: 264px;
   z-index: 5;
   box-sizing: border-box;
   padding: 8px 8px 6px;
@@ -1358,12 +1365,6 @@ body.meld-off .meld-only {
 .settings-page .projects-meta.is-warn {
   color: var(--ui-accent);
   opacity: 1;
-}
-
-.settings-page #meld-recommended-btn {
-  height: 34px;
-  padding: 0 12px;
-  white-space: nowrap;
 }
 
 .settings-page .projects-row .settings-action-button {

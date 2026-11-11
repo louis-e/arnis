@@ -15,7 +15,7 @@ import {
   t as oneWorldText,
   initMeldFeatures, meldFlags, cellsKey, generationTarget, generationShapes, progressText, holdsNotice,
   initRunControls, initCellMenu, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls,
-  initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing, useRecommended,
+  initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing,
   setPlanMask, hasPlanMask, refreshStretch,
   initDataPanel, initProjects, resumeJob, placeForRun,
 } from './meld-features.js';
@@ -1497,7 +1497,6 @@ function initSettings() {
     redrawProjects();
   });
   document.getElementById('meld-snap-group')?.addEventListener('click', () => setTimeout(pushMeldToMap));
-  document.getElementById('meld-recommended-btn')?.addEventListener('click', () => useRecommended());
   getMapFrame()?.addEventListener('load', pushMeldToMap);
   pushMeldToMap();
   // A One World's built land, and a ring of regions around it to build next.
@@ -3607,29 +3606,42 @@ function setSettingsRowAvailable(inputId, available) {
 // so no two settings contradict each other and nothing is set that a run would ignore.
 function refreshAdvancedRows() {
   const val = (id) => document.getElementById(id)?.value || '';
-  const on = (id) => !!document.getElementById(id)?.checked;
+  const on = (id) => { const el = document.getElementById(id); return !!(el && el.checked && !el.disabled); };
   const seg = (id) => document.querySelector(`#${id} .segment.active`)?.dataset.v || '';
+  // Live builds with standard settings, so nothing here applies while it is the mode.
+  const live = isLiveMode();
+  const row = (id, ok) => setSettingsRowAvailable(id, ok && !live);
+  const group = (id, ok) => { row(id, ok); setSegmentedRowAvailable(id, ok && !live); };
   const java = selectedWorldFormat === 'java';
+  const earth = selectedCelestialBody === 'earth';
   const oneWorld = isOneWorldEnabled();
   const cells = oneWorld && !!val('meld-workers-select');
-  for (const id of ['meld-piece-size-group', 'meld-snap-group', 'meld-margin-input', 'meld-piece-order-select', 'meld-skip-built-toggle', 'meld-stitch-map-toggle']) {
-    setSettingsRowAvailable(id, cells);
-  }
-  setSettingsRowAvailable('meld-origin-input', oneWorld);
-  setSettingsRowAvailable('meld-stretch-toggle', oneWorld);
+  row('meld-rocks-toggle', earth);
+  row('meld-bushes-toggle', earth);
+  row('meld-workers-select', oneWorld);
+  group('meld-piece-size-group', cells);
+  group('meld-snap-group', cells);
+  for (const id of ['meld-margin-input', 'meld-piece-order-select', 'meld-skip-built-toggle', 'meld-stitch-map-toggle']) row(id, cells);
+  row('meld-origin-input', oneWorld);
+  row('meld-stretch-toggle', oneWorld);
   const ownHeight = java && !oneWorld && on('disable-height-limit-toggle');
-  setSettingsRowAvailable('meld-min-y-input', ownHeight);
-  setSettingsRowAvailable('meld-max-y-input', ownHeight);
-  setSettingsRowAvailable('meld-world-border-toggle', java);
-  setSettingsRowAvailable('meld-region-format-group', java && !oneWorld);
-  setSettingsRowAvailable('meld-blinear-level-input', java && !oneWorld && seg('meld-region-format-group') === 'blinear');
-  setSettingsRowAvailable('meld-rock-density-input', on('meld-rocks-toggle'));
-  setSettingsRowAvailable('meld-bush-density-input', on('meld-bushes-toggle'));
-  setSettingsRowAvailable('meld-tree-pack-mode-group', !!val('meld-tree-pack-dir-input').trim());
-  setSettingsRowAvailable('meld-cave-style-select', on('caves-toggle'));
-  setSettingsRowAvailable('meld-cave-ores-group', on('caves-toggle'));
-  setSettingsRowAvailable('meld-archive-folder-input', seg('meld-osm-source-group') === 'archive');
-  setSettingsRowAvailable('meld-pbf-url-input', seg('meld-osm-source-group') === 'region');
+  row('meld-min-y-input', ownHeight);
+  row('meld-max-y-input', ownHeight);
+  row('meld-world-border-toggle', java);
+  const ownFormat = java && !oneWorld && !on('voxy-lod-toggle') && !on('dh-lod-toggle');
+  group('meld-region-format-group', ownFormat);
+  row('meld-blinear-level-input', ownFormat && seg('meld-region-format-group') === 'blinear');
+  row('meld-rock-density-input', earth && on('meld-rocks-toggle'));
+  row('meld-bush-density-input', earth && on('meld-bushes-toggle'));
+  group('meld-tree-pack-mode-group', !!val('meld-tree-pack-dir-input').trim());
+  row('meld-cave-style-select', on('caves-toggle'));
+  group('meld-cave-ores-group', on('caves-toggle'));
+  row('meld-archive-folder-input', seg('meld-osm-source-group') === 'archive');
+  row('meld-pbf-url-input', seg('meld-osm-source-group') === 'region');
+  for (const id of ['meld-seed-input', 'meld-surface-patches-toggle', 'meld-buildings-toggle', 'meld-tree-realm-select',
+    'meld-tree-pack-dir-input', 'meld-overpass-input', 'meld-offline-toggle', 'meld-ram-budget-input', 'meld-threads-input']) row(id, true);
+  for (const id of ['meld-road-detail-group', 'meld-props-group', 'meld-river-bed-group', 'meld-water-detail-group',
+    'meld-climate-mode-group', 'meld-osm-source-group']) group(id, true);
 }
 
 function initAdvancedRows() {
@@ -3816,7 +3828,7 @@ async function refreshOneWorldState() {
     return;
   }
   if (seq !== oneWorldRefreshSeq) return;
-  if (oneWorldPicked && info && !info.exists) {
+  if (oneWorldPicked && oneWorldFolderName() === oneWorldName && info && !info.exists) {
     // The world picked in Projects is gone (deleted outside Arnis): back to the default name.
     setOneWorldName('');
     return refreshOneWorldState();

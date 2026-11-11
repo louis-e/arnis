@@ -38,7 +38,8 @@ function currentSectionIndex() {
   // At the very bottom the last section is the one being read, even when it
   // is too short to reach the top.
   if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
-    return sections.length - 1;
+    const shown = sections.map((section, i) => (section.offsetParent !== null ? i : -1)).filter((i) => i >= 0);
+    return shown.length ? shown[shown.length - 1] : 0;
   }
   const top = scroller.getBoundingClientRect().top + SPY_OFFSET_PX;
   let index = 0;
@@ -60,6 +61,12 @@ function unpin() {
 function jumpTo(index) {
   const section = sections[index];
   if (!section) return;
+  // A search may be hiding the section: going to one by name ends the search.
+  const search = document.getElementById('settings-search');
+  if (search && search.value) {
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+  }
   pinned = index;
   setActive(index);
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -212,9 +219,15 @@ function initSearch() {
       title.classList.toggle('search-miss', searching && !(grid && grid.querySelector('.settings-row:not(.search-miss)')));
     });
     if (empty) empty.hidden = !searching || any;
-    if (searching && scroller) scroller.scrollTop = 0;
+    if (scroller) {
+      if (searching) scroller.scrollTop = 0;
+      pinned = null;
+      setActive(currentSectionIndex());
+    }
   };
   input.addEventListener('input', apply);
+  // Reset all settings or the Advanced switch can change what there is to find.
+  document.addEventListener(SETTINGS_REFRESHED_EVENT, () => input.value && apply());
   // Escape empties the field first; pressed again it closes Settings as usual.
   input.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || !input.value) return;

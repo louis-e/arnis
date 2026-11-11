@@ -15,12 +15,9 @@ globalThis.document = {
   getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node(id)), nodes.get(id))),
 };
 globalThis.window = { addEventListener() {} };
-const { initRunControls, initJobPlan, schedulePlan, useRecommended, planPieces } = await import('../../src/gui/js/meld-features.js');
+const { initRunControls, initJobPlan, schedulePlan, planPieces } = await import('../../src/gui/js/meld-features.js');
 
 const workers = document.getElementById('meld-workers-select');
-workers.value = '4';
-useRecommended();
-assert.deepStrictEqual([workers.value, sizeChoice], ['auto', 'auto'], 'the recommendation is Auto, which fits this computer');
 
 // A plan with and without `single`.
 const sent = [];

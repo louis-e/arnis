@@ -652,20 +652,3 @@ body,
   border-right-color: rgba(30, 30, 30, 0.94);
 }
 
-/* The state icon in a piece's label: green done, red failed, orange stopped */
-.piece-icon-done,
-.piece-icon-skipped {
-  color: #7bd864;
-}
-
-.piece-icon-failed {
-  color: #fa7878;
-}
-
-.piece-icon-stopped {
-  color: #ff9f43;
-}
-
-.piece-icon-held {
-  color: #b794f6;
-}

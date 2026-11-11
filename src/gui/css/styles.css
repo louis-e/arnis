@@ -1129,6 +1129,7 @@ input[type="range"] {
 /* A quiet secondary action: text, no box */
 .run-button.plan-expand {
   height: auto;
+  line-height: 1.2;
   padding: 2px 0;
   border: 0;
   background: none;
@@ -1242,10 +1243,7 @@ input[type="range"] {
 
 /* Under a size warning: the way to Advanced features, centred, as wide as the warning */
 #bbox-features-cta {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+  display: block;
   width: 100%;
   margin: 4px 0 0;
   padding: 0;
@@ -1264,10 +1262,13 @@ input[type="range"] {
 /* An arrow into a corner after it says it leads somewhere, without an underline. */
 #bbox-features-cta::after {
   content: "";
-  flex: none;
+  display: inline-block;
   width: 13px;
   height: 13px;
+  margin-left: 5px;
+  vertical-align: -1px;
   background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 

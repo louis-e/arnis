@@ -151,6 +151,4 @@ export function initPreviews() {
   });
 
   window.addEventListener('resize', hide);
-  const scrollable = document.querySelector('.settings-scrollable');
-  if (scrollable) scrollable.addEventListener('scroll', hide, { passive: true });
 }
