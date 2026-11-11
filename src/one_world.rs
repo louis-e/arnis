@@ -529,7 +529,8 @@ fn compatibility_errors(manifest: &Manifest, args: &Args) -> Vec<String> {
     {
         errors.push(match manifest.cave_seed {
             Some(s) => format!("--cave-seed does not match the world's {s}"),
-            None => "--cave-seed was not used when the world was created".to_string(),
+            None => "the world keeps its built-in cave seed, so --cave-seed cannot be set here"
+                .to_string(),
         });
     }
     if args
@@ -1696,6 +1697,10 @@ mod tests {
         let mut args = args_for(MUNICH, &["--caves", "--cave-seed", "6"]);
         let err = prepare(&world, &req, &mut args).err().unwrap();
         assert!(err.contains("--cave-seed does not match"), "{err}");
+        // So is any value for a world on the built-in seed.
+        let mut args = args_for(MUNICH, &["--caves", "--cave-seed", "6"]);
+        let err = prepare(&plain, &req, &mut args).err().unwrap();
+        assert!(err.contains("keeps its built-in cave seed"), "{err}");
     }
 
     #[test]
