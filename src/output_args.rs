@@ -1,4 +1,4 @@
-//! Types and checks behind the `confluence:output` flags (region format, origin, border).
+//! Types and checks behind the output flags (region format, origin, border).
 
 use crate::args::Args;
 

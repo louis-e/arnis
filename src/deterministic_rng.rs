@@ -23,9 +23,7 @@ pub fn set_world_seed(seed: u64) {
     WORLD_SEED.store(seed, Ordering::Relaxed);
 }
 
-/// `value` with the world seed mixed in, unchanged while the seed is 0. Every stream and
-/// coordinate hash routes its seed through here, so `--seed` changes the look everywhere
-/// and stays a pure function of world position and element id.
+/// `value` with the world seed mixed in, unchanged while the seed is 0.
 #[inline]
 pub fn seeded(value: u64) -> u64 {
     mix_seed(value, WORLD_SEED.load(Ordering::Relaxed))

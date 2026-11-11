@@ -514,9 +514,9 @@ pub struct Args {
     pub water: WaterArgs,
 
     /// Experimental. Where the Köppen climate behind surfaces and biomes is read:
-    /// origin (once, at the bbox centre or the One World origin, default) or
-    /// per-position (at every block, with organic borders, so a large world
-    /// crosses climate zones; biome latitude follows each block too).
+    /// origin (once, at the centre of the area, default) or per-position (across
+    /// the area, with organic borders, so a large world crosses climate zones;
+    /// biome latitude follows each block too).
     #[arg(long, value_enum, default_value_t = crate::climate_field::ClimateMode::Origin)]
     pub climate_mode: crate::climate_field::ClimateMode,
 
@@ -526,8 +526,8 @@ pub struct Args {
     #[arg(long = "climate-map", value_name = "PREFIX")]
     pub climate_map: Option<PathBuf>,
 
-    /// Lowest Y of the extended-height world, a multiple of 16 from -2032 to -64. Needs
-    /// --disable-height-limit; the default is the pack's -2032.
+    /// Lowest Y of the extended-height world, a multiple of 16 from -2032 to -64. Turns on the
+    /// extended build height; the default is the pack's -2032.
     #[arg(
         long,
         value_name = "Y",
@@ -537,7 +537,7 @@ pub struct Args {
     pub min_y: Option<i32>,
 
     /// Highest Y of the extended-height world, one less than a multiple of 16 from 319 to
-    /// 2031. Needs --disable-height-limit; the default is the pack's 2031.
+    /// 2031. Turns on the extended build height; the default is the pack's 2031.
     #[arg(
         long,
         value_name = "Y",
@@ -546,10 +546,11 @@ pub struct Args {
     )]
     pub max_y: Option<i32>,
 
-    /// EXPERIMENTAL. World seed mixed into every per-element and per-block random choice
-    /// (trees, rocks, flowers, building variety), so the same area can be rebuilt with a
-    /// different but repeatable look. Omitted or 0 keeps the default look. A One World
-    /// keeps the seed its first area was built with.
+    /// EXPERIMENTAL. World seed mixed into most random choices (trees, rocks, flowers,
+    /// building variety), so the same area can be rebuilt with a different but repeatable
+    /// look; trains, facades and rooftop details keep theirs, and climate borders stay put.
+    /// Omitted or 0 keeps the default look. A One World keeps the seed its first area was
+    /// built with.
     #[arg(long, value_name = "SEED")]
     pub seed: Option<u64>,
     // --- end confluence:terrain ---
