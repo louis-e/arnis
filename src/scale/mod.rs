@@ -79,6 +79,8 @@ pub struct Queue {
     cancel: BTreeSet<usize>,
     /// State changes the job has not reported yet.
     events: Vec<(usize, &'static str)>,
+    /// No worker takes a cell any more, so actions would be lost.
+    closed: bool,
 }
 
 /// What a worker does next.
@@ -103,6 +105,7 @@ impl Queue {
     /// is done when nothing is pending or running; held cells keep it waiting.
     fn next(&mut self, start: bool) -> Next {
         if self.pending.is_empty() && self.running.is_empty() {
+            self.closed = true;
             return Next::Done;
         }
         let at = self.pending.iter().position(|i| !self.held.contains(i));
@@ -277,6 +280,9 @@ pub fn control(action: &str, cells: &[u32]) -> Result<CellsControlResult, String
     let active = lock(&ACTIVE);
     let (_, queue) = active.as_ref().ok_or("No job is running.")?;
     let mut q = lock(queue);
+    if q.closed {
+        return Err("The job is finishing; no cell can change now.".to_string());
+    }
     let wanted: Vec<usize> = cells.iter().map(|&c| c as usize).collect();
     let applied = q.apply(action, &wanted)?;
     let ids = |s: &mut dyn Iterator<Item = &usize>| s.map(|&i| i as u32).collect::<Vec<_>>();
@@ -533,6 +539,9 @@ pub fn run_with(
     argv: Vec<OsString>,
     settings: &[String],
 ) -> Result<(), String> {
+    // Left over from an earlier job of this process.
+    PAUSE.store(false, Ordering::Release);
+    STOP.store(false, Ordering::Release);
     let ctx = args
         .one_world_run
         .as_ref()
@@ -796,14 +805,16 @@ pub fn run_with(
     let finished = AtomicUsize::new(lock(&results).iter().flatten().count());
     // How far the job is, kept in the manifest for the window's Projects list.
     let (lo, hi) = (selection.min(), selection.max());
+    // The command line has no window settings; it keeps the ones a window run recorded.
+    let settings = Some(settings).filter(|s| !s.is_empty());
     let first = Some((settings, [lo.lat(), lo.lng(), hi.lat(), hi.lng()]));
-    let record_job = |start: Option<(&[String], [f64; 4])>| {
+    let record_job = |start: Option<(Option<&[String]>, [f64; 4])>| {
         let _guard = lock(&MANIFEST);
         let done = finished.load(Ordering::Relaxed);
         if let Err(e) = one_world::record_job(
             world_dir,
             &job.name,
-            start.map(|s| s.0),
+            start.and_then(|s| s.0),
             start.map(|s| s.1),
             done as u32,
             of as u32,
@@ -1057,6 +1068,7 @@ pub fn run_with(
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
     });
+    lock(&queue).closed = true;
     record_job(None);
     if let Some(e) = failure.into_inner().unwrap_or_else(|e| e.into_inner()) {
         return Err(format!("{e}\n{RESUME}"));
@@ -1595,6 +1607,10 @@ second
         // No cells come out of a world a job is building.
         let err = one_world::remove_cells(tmp.path(), "J", &[0]).unwrap_err();
         assert!(err.contains("job is building"), "{err}");
+        // Once no worker takes a cell, an action would be lost: refused.
+        lock(&queue).pending.clear();
+        assert_eq!(lock(&queue).next(true), Next::Done);
+        assert!(control("retry", &[0]).unwrap_err().contains("finishing"));
         drop(active);
         assert!(control("hold", &[0]).is_err());
     }
