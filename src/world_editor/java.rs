@@ -186,6 +186,7 @@ impl<'a> WorldEditor<'a> {
             region_to_modify,
             &self.region_write_mode(),
             (self.ground_origin_x, self.ground_origin_z),
+            self.blinear_level,
         )
     }
 }
@@ -380,6 +381,8 @@ enum RegionSink {
         file: File,
     },
     Merge(Region<File>),
+    /// Leaf B_Linear: takes the raw chunk NBT, not zlib.
+    Blinear(Box<super::blinear::BlinearRegionWriter>),
 }
 
 impl RegionSink {
@@ -390,7 +393,13 @@ impl RegionSink {
         world_dir: &std::path::Path,
         region_x: i32,
         region_z: i32,
+        blinear_level: Option<i32>,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(level) = blinear_level {
+            return Ok(Self::Blinear(Box::new(
+                super::blinear::BlinearRegionWriter::create(world_dir, region_x, region_z, level)?,
+            )));
+        }
         let region_dir = world_dir.join("region");
         let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
         std::fs::create_dir_all(&region_dir)?;
@@ -410,6 +419,7 @@ impl RegionSink {
         match self {
             Self::Fresh { region, .. } => region.write_compressed_chunk(x, z, scheme, zlib),
             Self::Merge(region) => region.write_compressed_chunk(x, z, scheme, zlib),
+            Self::Blinear(_) => unreachable!("B_Linear takes raw NBT"),
         }
     }
 
@@ -418,6 +428,7 @@ impl RegionSink {
         match self {
             Self::Fresh { region, mut file } => file.write_all(region.into_inner()?.get_ref()),
             Self::Merge(_) => Ok(()),
+            Self::Blinear(writer) => writer.finish().map_err(std::io::Error::other),
         }
     }
 }
@@ -572,6 +583,7 @@ fn write_region_to_disk(
     region_to_modify: &super::common::RegionToModify,
     mode: &RegionWriteMode,
     ground_origin: (i32, i32),
+    blinear_level: Option<i32>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if let Some(preview) = preview {
         preview.ingest_region(region_x, region_z, region_to_modify);
@@ -585,9 +597,12 @@ fn write_region_to_disk(
         RegionWriteMode::Fresh => None,
     };
     let merge = mode.is_merge();
+    if merge && blinear_level.is_some() {
+        return Err("--region-format blinear cannot merge into a world".into());
+    }
     let mut region = match &merge_dir {
         Some(dir) => RegionSink::Merge(open_region_file_for_merge(dir, region_x, region_z)?),
-        None => RegionSink::create(world_dir, region_x, region_z)?,
+        None => RegionSink::create(world_dir, region_x, region_z, blinear_level)?,
     };
     let mut ser_buffer = Vec::with_capacity(8192);
     let mut compressor = flate2::Compress::new(flate2::Compression::fast(), true);
@@ -694,6 +709,12 @@ fn write_region_to_disk(
                     let chunk_nbt = create_chunk_nbt_with_lighting(&chunk, lighting, &biome_value);
                     ser_buffer.clear();
                     fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
+                    if let RegionSink::Blinear(w) = &mut region {
+                        w.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer);
+                        crate::progress_json::CHUNKS_WRITTEN
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        continue;
+                    }
                     let len = compress_chunk_to_fit(&mut compressor, &ser_buffer, &mut compressed)?;
                     if len > MAX_COMPRESSED_CHUNK {
                         return Err(format!(
@@ -833,6 +854,7 @@ pub(crate) struct RegionWriteCtx {
     dh: Option<std::sync::Arc<crate::distant_horizons::DhWriter>>,
     mode: RegionWriteMode,
     ground_origin: (i32, i32),
+    blinear_level: Option<i32>,
 }
 
 impl RegionWriteCtx {
@@ -860,7 +882,14 @@ impl RegionWriteCtx {
             dh,
             mode,
             ground_origin,
+            blinear_level: None,
         }
+    }
+
+    /// Write B_Linear at this zstd level instead of Anvil.
+    pub(crate) fn with_blinear(mut self, level: Option<i32>) -> Self {
+        self.blinear_level = level;
+        self
     }
 
     pub(crate) fn write(
@@ -883,6 +912,7 @@ impl RegionWriteCtx {
             region_to_modify,
             &self.mode,
             self.ground_origin,
+            self.blinear_level,
         )
     }
 }
@@ -1320,7 +1350,7 @@ fn compute_lighting(
 /// The skipped gaps are air, so the skylight leaving a run passes through unchanged and seeds
 /// the run below, and block light cannot cross their 16-plus blocks. A gap plane that is not
 /// uniform cannot be carried that way, so those chunks fall back to one full-span pass.
-fn compute_chunk_lighting(sections: &[Section], span: (i8, i8)) -> SectionLight {
+pub(crate) fn compute_chunk_lighting(sections: &[Section], span: (i8, i8)) -> SectionLight {
     let (min_section_y, max_section_y) = span;
     let len = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
     let mut out: SectionLight = vec![(Vec::new(), Vec::new()); len];
@@ -2316,8 +2346,107 @@ mod merge_tests {
             region,
             &mode,
             (0, 0),
+            None,
         )
         .unwrap();
+    }
+
+    /// LODs from the region files of a world on disk: a database appears, no region changes.
+    #[test]
+    fn dh_lod_only_touches_no_region() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            &region_with(&[(5, 5), (6, 5)], STONE),
+            RegionWriteMode::Fresh,
+        );
+        let mca = dir.path().join("region").join("r.0.0.mca");
+        let before = (
+            std::fs::read(&mca).unwrap(),
+            std::fs::metadata(&mca).unwrap().modified().unwrap(),
+        );
+
+        let summary = crate::distant_horizons::from_existing(dir.path()).unwrap();
+        assert!(summary.sections > 0, "LOD rows written");
+        assert!(dir
+            .path()
+            .join("data")
+            .join("DistantHorizons.sqlite")
+            .is_file());
+        let after = (
+            std::fs::read(&mca).unwrap(),
+            std::fs::metadata(&mca).unwrap().modified().unwrap(),
+        );
+        assert!(before == after, "region file untouched");
+        assert!(
+            crate::distant_horizons::from_existing(tempfile::tempdir().unwrap().path()).is_err()
+        );
+    }
+
+    /// The same region through both containers carries the same chunk NBT.
+    #[test]
+    fn blinear_matches_anvil_payloads() {
+        // Both writes size heightmaps from the world-bounds globals; hold them still.
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let (mca_dir, bl_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let region = region_with(&[(5, 5), (31, 0), (0, 31)], STONE);
+        write(mca_dir.path(), &region, RegionWriteMode::Fresh);
+        let blinear = |void_world: bool, mode: RegionWriteMode| {
+            write_region_to_disk(
+                bl_dir.path(),
+                &llbbox(),
+                None,
+                false,
+                void_world,
+                None,
+                None,
+                None,
+                0,
+                0,
+                &region,
+                &mode,
+                (0, 0),
+                Some(6),
+            )
+        };
+        blinear(false, RegionWriteMode::Fresh).unwrap();
+        let region_dir = bl_dir.path().join("region");
+        assert!(!region_dir.join("r.0.0.mca").exists());
+        assert!(!mca_dir
+            .path()
+            .join("region")
+            .join("r.0.0.b_linear")
+            .exists());
+        let slots = crate::world_editor::blinear::decode(
+            &std::fs::read(region_dir.join("r.0.0.b_linear")).unwrap(),
+        );
+        let mut mca = Region::from_stream(
+            File::open(mca_dir.path().join("region").join("r.0.0.mca")).unwrap(),
+        )
+        .unwrap();
+        for cz in 0..32 {
+            for cx in 0..32 {
+                // Compared as NBT: compound key order follows HashMap iteration.
+                let nbt = |bytes: &[u8]| fastnbt::from_bytes::<Value>(bytes).unwrap();
+                let anvil = mca.read_chunk(cx, cz).unwrap().expect("anvil chunk");
+                let slot = slots[cx + cz * 32].as_deref().expect("b_linear chunk");
+                assert_eq!(nbt(slot), nbt(&anvil), "chunk ({cx}, {cz})");
+            }
+        }
+        // A merge has no B_Linear reader to merge with.
+        let merge = RegionWriteMode::Merge {
+            min_x: 0,
+            min_z: 0,
+            max_x: 15,
+            max_z: 15,
+            layout: crate::world_utils::WorldLayout::Legacy,
+        };
+        assert!(blinear(false, merge).is_err());
     }
 
     fn present_chunks(dir: &std::path::Path) -> Vec<(usize, usize)> {
@@ -2543,6 +2672,7 @@ mod merge_tests {
             &region,
             &RegionWriteMode::Fresh,
             (0, 0),
+            None,
         )
         .unwrap();
         // The empty chunk is left to the void generator, like an absent one.
@@ -2633,6 +2763,7 @@ mod merge_tests {
             &region,
             &RegionWriteMode::Fresh,
             (0, 0),
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -2850,6 +2981,7 @@ mod merge_tests {
                 layout: crate::world_utils::WorldLayout::Legacy,
             },
             (0, 0),
+            None,
         )
         .unwrap_err();
         assert!(err.to_string().contains("chunk (1, 1)"), "{err}");

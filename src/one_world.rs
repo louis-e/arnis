@@ -417,12 +417,12 @@ pub fn existing_chunks(world_dir: &Path, rect: &XZBBox) -> u64 {
     count
 }
 
-/// Block (0, 0) of a world created for `requested`: the request's centre.
-fn new_origin(requested: &LLBBox) -> (f64, f64) {
-    (
+/// Block (0, 0) of a world created for `requested`: `--origin`, or the request's centre.
+fn new_origin(requested: &LLBBox, args: &Args) -> (f64, f64) {
+    args.origin.unwrap_or((
         (requested.min().lat() + requested.max().lat()) / 2.0,
         (requested.min().lng() + requested.max().lng()) / 2.0,
-    )
+    ))
 }
 
 /// The frame `requested` lands in: the world's own, or for a world that does
@@ -435,7 +435,7 @@ pub fn frame_for(
     Ok(match Manifest::load(world_dir)? {
         Some(manifest) => manifest.projection(),
         None => {
-            let (lat, lon) = new_origin(requested);
+            let (lat, lon) = new_origin(requested, args);
             Manifest::new(args, lat, lon).projection()
         }
     })
@@ -660,6 +660,14 @@ fn resolve(
                 );
                 args.height_multiplier = manifest.height_multiplier;
             }
+            if let Some((lat, lon)) = args.origin {
+                if (stable(lat, 7), stable(lon, 7)) != (manifest.origin_lat, manifest.origin_lon) {
+                    println!(
+                        "Note: --origin {lat},{lon} is ignored; the One World keeps the origin it was created with ({},{}).",
+                        manifest.origin_lat, manifest.origin_lon
+                    );
+                }
+            }
             (manifest, false)
         }
         None => {
@@ -689,7 +697,7 @@ fn resolve(
                 );
                 args.disable_height_limit = true;
             }
-            let (origin_lat, origin_lon) = new_origin(requested);
+            let (origin_lat, origin_lon) = new_origin(requested, args);
             (Manifest::new(args, origin_lat, origin_lon), true)
         }
     };
@@ -882,6 +890,27 @@ pub fn record_area(
         }
     }
     Ok(())
+}
+
+/// `--world-border`: the border around `rect`, the area just built, or for a
+/// One World around every area it holds. A failure is a warning: the world
+/// itself is written.
+pub fn apply_world_border(world_dir: &Path, rect: &XZBBox) {
+    let all = Manifest::load(world_dir)
+        .ok()
+        .flatten()
+        .and_then(|m| m.extent());
+    let rect = all.as_ref().unwrap_or(rect);
+    match crate::world_utils::set_world_border(world_dir, rect) {
+        Ok(()) => println!(
+            "World border set around {},{} to {},{}.",
+            rect.min_x(),
+            rect.min_z(),
+            rect.max_x(),
+            rect.max_z()
+        ),
+        Err(e) => eprintln!("Warning: Failed to set the world border: {e}"),
+    }
 }
 
 /// A new One World centred on `(origin_lat, origin_lon)` with no areas yet, for live mode,
@@ -1814,5 +1843,127 @@ mod tests {
         // Grown towards its neighbours, held at the selection's own edges.
         assert_eq!((b.min_x(), b.max_x()), (-h, 319));
         assert_eq!((b.min_z(), b.max_z()), (-176, -1 + h));
+    }
+
+    /// `--world-border` reads back from level.dat: around the area of a plain world, around
+    /// every area of a One World.
+    #[test]
+    fn border_covers_all_areas() {
+        fn border(world: &Path) -> std::collections::HashMap<String, f64> {
+            let raw = std::fs::read(world.join("level.dat")).unwrap();
+            let mut bytes = Vec::new();
+            flate2::read::GzDecoder::new(raw.as_slice())
+                .read_to_end(&mut bytes)
+                .unwrap();
+            let fastnbt::Value::Compound(root) = fastnbt::from_bytes(&bytes).unwrap() else {
+                panic!("root");
+            };
+            let Some(fastnbt::Value::Compound(data)) = root.get("Data") else {
+                panic!("Data");
+            };
+            data.iter()
+                .filter_map(|(k, v)| match v {
+                    fastnbt::Value::Double(d) if k.starts_with("Border") => Some((k.clone(), *d)),
+                    _ => None,
+                })
+                .collect()
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let plain = crate::world_utils::create_new_world(dir.path()).unwrap();
+        let plain = Path::new(&plain);
+        apply_world_border(plain, &XZBBox::rect_from_min_max(-50, 10, 49, 49).unwrap());
+        let b = border(plain);
+        assert_eq!((b["BorderCenterX"], b["BorderCenterZ"]), (0.0, 30.0));
+        assert_eq!((b["BorderSize"], b["BorderSizeLerpTarget"]), (100.0, 100.0));
+
+        // A One World with two areas side by side: the union of both.
+        let world = dir.path().join("w");
+        let mut args = args_for(MUNICH, &[]);
+        let session = prepare(&world, &LLBBox::from_str(MUNICH).unwrap(), &mut args).unwrap();
+        let first = rect(&args, &session);
+        record(&args, &session, None);
+        drop(session);
+        let east = "48.130,11.585,48.145,11.610";
+        let mut args2 = args_for(east, &[]);
+        let session2 = prepare(&world, &LLBBox::from_str(east).unwrap(), &mut args2).unwrap();
+        let second = rect(&args2, &session2);
+        record(&args2, &session2, None);
+        drop(session2);
+        assert!(second.max_x() > first.max_x());
+        apply_world_border(&world, &second);
+        let (x0, z0) = (
+            first.min_x().min(second.min_x()),
+            first.min_z().min(second.min_z()),
+        );
+        let (x1, z1) = (
+            first.max_x().max(second.max_x()),
+            first.max_z().max(second.max_z()),
+        );
+        let b = border(&world);
+        assert_eq!(b["BorderCenterX"], f64::from(x0 + x1 + 1) / 2.0);
+        assert_eq!(b["BorderCenterZ"], f64::from(z0 + z1 + 1) / 2.0);
+        assert_eq!(b["BorderSize"], f64::from((x1 + 1 - x0).max(z1 + 1 - z0)));
+    }
+
+    /// `--origin` pins block (0, 0) of a new world; an existing world keeps its own.
+    #[test]
+    fn origin_pins_a_new_world_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let mut args = args_for(MUNICH, &["--origin", "48.1234567891,11.5432109876"]);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        let manifest = Manifest::load(&world).unwrap().unwrap();
+        assert_eq!(
+            (manifest.origin_lat, manifest.origin_lon),
+            (48.1234568, 11.543211)
+        );
+        let frame = manifest.projection();
+        assert_eq!(frame.x_for_lon(manifest.origin_lon), 0.0);
+        assert_eq!(frame.z_for_lat(manifest.origin_lat), 0.0);
+
+        let mut args = args_for(MUNICH, &["--origin", "-45,170"]);
+        drop(prepare(&world, &req, &mut args).unwrap());
+        let run = args.one_world_run.unwrap();
+        assert_eq!(
+            (run.origin_lat, run.origin_lon),
+            (manifest.origin_lat, manifest.origin_lon)
+        );
+    }
+
+    /// The same bbox under two origins is the same area in a shifted frame: equal size, every
+    /// corner translated by the same amount (the planner sees the shifted frame too); an origin
+    /// a whole number of chunks away moves the snapped area by exactly those chunks. This checks
+    /// the frame, not generated blocks: block content under `--origin` is only smoke-tested.
+    #[test]
+    fn origin_shifts_the_frame() {
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let corners = |origin: &[&str]| {
+            let args = args_for(MUNICH, origin);
+            let proj = frame_for(Path::new("does-not-exist"), &req, &args).unwrap();
+            let (rect, _) = snap_bbox_to_chunks(&proj, &req).unwrap();
+            (rect.min_x(), rect.min_z(), rect.max_x(), rect.max_z())
+        };
+        let (a, b) = (corners(&[]), corners(&["--origin", "48.0,11.0"]));
+        assert_eq!((a.2 - a.0, a.3 - a.1), (b.2 - b.0, b.3 - b.1), "same size");
+        assert_ne!(a, b, "shifted");
+        assert_eq!(
+            (a.0 - b.0, a.1 - b.1),
+            (a.2 - b.2, a.3 - b.3),
+            "one translation"
+        );
+
+        // Origin B is block (48, 80) of frame A, so every block of B sits (48, 80) lower.
+        let frame_a = frame_for(Path::new("does-not-exist"), &req, &args_for(MUNICH, &[])).unwrap();
+        let origin = format!(
+            "{:.9},{:.9}",
+            frame_a.lat_for_z(80.0),
+            frame_a.lon_for_x(48.0)
+        );
+        let c = corners(&["--origin", &origin]);
+        assert_eq!(
+            (a.0 - c.0, a.1 - c.1, a.2 - c.2, a.3 - c.3),
+            (48, 80, 48, 80)
+        );
     }
 }

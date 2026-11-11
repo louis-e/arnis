@@ -9,6 +9,7 @@
 //! - `java` - Java Edition Anvil format saving
 //! - `bedrock` - Bedrock Edition .mcworld format saving
 
+pub(crate) mod blinear;
 pub(crate) mod common;
 pub(crate) mod java;
 mod luanti;
@@ -271,6 +272,8 @@ pub struct WorldEditor<'a> {
     /// Java: leave every chunk outside the area unwritten for the void generator,
     /// instead of filling it with the flat ground plane.
     void_world: bool,
+    /// Java: `Some(zstd level)` writes B_Linear regions instead of Anvil.
+    blinear_level: Option<i32>,
     /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
     voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Pre-generated Distant Horizons LOD database, fed the same way. Java only.
@@ -355,6 +358,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
+            blinear_level: None,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -426,6 +430,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
+            blinear_level: None,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -497,6 +502,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: game,
             bake_lighting: false,
             void_world: false,
+            blinear_level: None,
             place_schematics: true,
             preview: None,
             voxy: None,
@@ -838,6 +844,11 @@ impl<'a> WorldEditor<'a> {
     /// Enables baking per-chunk lighting into Java chunks.
     pub fn set_bake_lighting(&mut self, enabled: bool) {
         self.bake_lighting = enabled;
+    }
+
+    /// Java: write `r.X.Z.b_linear` at this zstd level instead of Anvil `.mca`.
+    pub fn set_blinear_level(&mut self, level: Option<i32>) {
+        self.blinear_level = level;
     }
 
     /// Java: write only the chunks the area touches and leave the rest to a void generator.
@@ -1364,6 +1375,7 @@ impl<'a> WorldEditor<'a> {
             self.region_write_mode(),
             (self.ground_origin_x, self.ground_origin_z),
         )
+        .with_blinear(self.blinear_level)
     }
 
     /// Evict one region (stream-to-disk): hand it to the background `worker` for

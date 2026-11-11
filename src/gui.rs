@@ -1957,6 +1957,10 @@ const WINDOW_FLAGS: &[&str] = &[
     "threads",
     "ram-budget-mb",
     "max-downloads",
+    "origin",
+    "world-border",
+    "region-format",
+    "blinear-level",
     "osm-pbf",
     "osm-pbf-url",
     "osm-tiles-url",
@@ -2000,6 +2004,7 @@ fn confluence_args(flags: &[String], one_world: bool, world_format: &str) -> Res
     if extra.units.only_pieces.is_some() && !extra.units.coordinates() {
         return Err("Retrying pieces only applies to a job built in pieces.".to_string());
     }
+    crate::output_args::validate(&extra)?;
     Ok(extra)
 }
 
@@ -2653,6 +2658,12 @@ fn gui_start_generation(
                 offline: false,
                 prewarm: false,
                 prewarm_first: false,
+                region_format: crate::output_args::RegionFormat::Mca,
+                blinear_level: 6,
+                origin: None,
+                world_border: false,
+                map_item_only: false,
+                dh_lod_only: false,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
@@ -3314,8 +3325,11 @@ mod tests {
     #[test]
     fn every_flag_the_window_sends_parses() {
         let flags: Vec<String> = [
+            "--world-border",
+            "--region-format=blinear",
             "--ram-budget-mb=4096",
             "--threads=4",
+            "--blinear-level=9",
             "--osm-pbf=geofabrik",
             "--osm-pbf-url=https://example.org/x.osm.pbf",
             "--osm-tiles-url=archive",
@@ -3327,6 +3341,11 @@ mod tests {
         let extra = confluence_args(&flags, false, "java").unwrap();
         assert!(extra.threads == Some(4) && extra.ram_budget_mb == Some(4096));
         assert!(extra.offline && extra.overpass_url.len() == 2 && extra.osm_pbf.is_some());
+        let one = ["--origin=44.4,26.1".to_string()];
+        assert!(confluence_args(&one, true, "java")
+            .unwrap()
+            .origin
+            .is_some());
     }
 
     /// The window draws the plan the job would run, from the same flags, and writes nothing.

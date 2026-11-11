@@ -457,6 +457,22 @@ pub fn sync_map_counter(world_path: &Path) -> Result<(), String> {
     }
 }
 
+/// Redraws a One World's map item from the area previews its manifest
+/// records, so it shows every area instead of the first. Repaints the locked
+/// map in the player's first hotbar slot (the one the spawn frame shows too),
+/// or adds a new one there. Returns the map id.
+pub fn redraw_one_world_map(world_path: &Path) -> Result<i32, String> {
+    if crate::one_world::Manifest::load(world_path)?.is_none() {
+        return Err(format!(
+            "{} is not a One World; a single run's map item already shows all of it.",
+            world_path.display()
+        ));
+    }
+    let _lock = crate::world_utils::SessionLock::acquire(world_path)
+        .map_err(|_| "the world is open in Minecraft or being generated".to_string())?;
+    redraw(world_path, true).map(|id| id.unwrap_or_default())
+}
+
 /// What a finished job in pieces does with the map item its head piece drew from that
 /// piece alone: repaints it over every area. `None` when the world has no locked map in
 /// the first hotbar slot to repaint. The caller holds the world's lock.
@@ -464,8 +480,7 @@ pub fn repaint_job_map(world_path: &Path) -> Result<Option<i32>, String> {
     redraw(world_path, false)
 }
 
-/// Repaints the One World's hotbar map over every area, under a lock already held; adds the
-/// map only when `add`.
+/// `redraw_one_world_map` under a lock already held; adds the map only when `add`.
 fn redraw(world_path: &Path, add: bool) -> Result<Option<i32>, String> {
     let manifest = crate::one_world::Manifest::load(world_path)?
         .ok_or_else(|| format!("{} is not a One World.", world_path.display()))?;
@@ -1068,7 +1083,7 @@ mod tests {
         assert_eq!(items.iter().filter(|e| is_filled_map(e)).count(), 1);
     }
     #[test]
-    fn a_job_map_repaints_every_area_and_touches_no_region() {
+    fn map_item_only_touches_no_region() {
         let tmp = tempfile::tempdir().unwrap();
         let world =
             std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
@@ -1133,14 +1148,14 @@ mod tests {
         // A job only repaints a map its head piece made; it never adds one.
         assert_eq!(repaint_job_map(&world).unwrap(), None);
         assert_eq!(hotbar_map_id(&world), None);
-        let id = redraw(&world, true).unwrap().unwrap();
+        let id = redraw_one_world_map(&world).unwrap();
         assert_eq!(repaint_job_map(&world).unwrap(), Some(id));
         // 256x256 blocks at 2 blocks per pixel: the left half red, the right half blue.
         let c = colors(id);
         assert_eq!(c[64 * 128 + 10], nearest_map_color(200, 0, 0) as i8);
         assert_eq!(c[64 * 128 + 117], nearest_map_color(0, 0, 200) as i8);
         // A second run repaints the same map rather than adding one.
-        assert_eq!(redraw(&world, true).unwrap(), Some(id));
+        assert_eq!(redraw_one_world_map(&world).unwrap(), id);
         assert_eq!(hotbar_map_id(&world), Some(id));
         assert_eq!(
             std::fs::metadata(&region_file).unwrap().modified().unwrap(),

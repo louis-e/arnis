@@ -240,6 +240,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tempfile",
  "tokio",
+ "twox-hash 2.1.2",
  "windows 0.62.2",
  "zip",
  "zstd",

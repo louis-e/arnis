@@ -483,6 +483,31 @@ pub struct Args {
     pub units: UnitArgs,
     // --- end confluence:core ---
 
+    // --- confluence:output ---
+    /// EXPERIMENTAL. Java region container; blinear writes Leaf 1.21.11+ and 26.x B_Linear regions (not with --one-world, --voxy-lod or --dh-lod).
+    #[arg(long = "region-format", value_enum, default_value_t = crate::output_args::RegionFormat::Mca)]
+    pub region_format: crate::output_args::RegionFormat,
+
+    /// zstd level for --region-format blinear (Leaf's own default is 6).
+    #[arg(long = "blinear-level", default_value_t = 6, value_parser = clap::value_parser!(i32).range(1..=22))]
+    pub blinear_level: i32,
+
+    /// LAT,LON for block (0, 0) of a --one-world world this run creates, instead of the centre of the first --bbox.
+    #[arg(long, value_name = "LAT,LON", value_parser = crate::output_args::parse_origin, allow_hyphen_values = true)]
+    pub origin: Option<(f64, f64)>,
+
+    /// Java only: put the world border around the generated area (a One World: around all its areas) after the run.
+    #[arg(long, default_value_t = false)]
+    pub world_border: bool,
+
+    /// Redraw the map item of the One World at --output-dir and --world-name from its area previews and exit.
+    #[arg(long, default_value_t = false)]
+    pub map_item_only: bool,
+
+    /// Write the Distant Horizons LODs of the One World at --output-dir and --world-name from its region files and exit.
+    #[arg(long, default_value_t = false)]
+    pub dh_lod_only: bool,
+    // --- end confluence:output ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
     #[arg(long, value_name = "PATH|geofabrik", conflicts_with = "file")]
@@ -748,6 +773,15 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (u.plan_mask.is_some(), "--plan-mask"),
         (u.stitch_map, "--stitch-map"),
         (u.skip_cells.is_some(), "--skip-cells"),
+        (
+            args.region_format != crate::output_args::RegionFormat::Mca,
+            "--region-format",
+        ),
+        (args.blinear_level != 6, "--blinear-level"),
+        (args.origin.is_some(), "--origin"),
+        (args.world_border, "--world-border"),
+        (args.map_item_only, "--map-item-only"),
+        (args.dh_lod_only, "--dh-lod-only"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),
@@ -1385,6 +1419,9 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     refuse_live_extras(args)?;
     refuse_extras_in_pieces(args)?;
     // --- end confluence:core ---
+    // --- confluence:output ---
+    crate::output_args::validate(args)?;
+    // --- end confluence:output ---
     // --- confluence:data ---
     if args.prewarm_first && !args.units.coordinates() {
         return Err(
@@ -2866,6 +2903,55 @@ mod tests {
         assert_eq!(retry.units.only_pieces, Some(vec![2, 5]));
         assert!(Args::try_parse_from(["arnis", "--one-world-workers", "0"]).is_err());
         assert!(Args::try_parse_from(["arnis", "--only-pieces", "0"]).is_err());
+    }
+
+    #[test]
+    fn blinear_with_lod_is_refused() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        let bl = ["--region-format", "blinear"];
+        assert!(validate_args(&parse(&bl)).is_ok());
+        assert_eq!(parse(&bl).blinear_level(), Some(6));
+        assert_eq!(parse(&[]).blinear_level(), None);
+        for refused in ["--dh-lod", "--voxy-lod", "--one-world", "--bedrock"] {
+            let args = parse(&[bl[0], bl[1], refused]);
+            assert!(validate_args(&args).is_err(), "{refused}");
+        }
+        assert!(Args::try_parse_from(["arnis", "--blinear-level", "23"]).is_err());
+    }
+
+    #[test]
+    fn origin_border_and_map_item_only_validate() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        assert_eq!(
+            parse(&["--origin", "-45.5, 170"]).origin,
+            Some((-45.5, 170.0))
+        );
+        assert!(Args::try_parse_from(["arnis", "--origin", "90,0"]).is_err());
+        assert!(validate_args(&parse(&["--origin", "1,2"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--origin", "1,2"])).is_ok());
+        assert!(validate_args(&parse(&["--world-border"])).is_ok());
+        assert!(validate_args(&parse(&["--world-border", "--bedrock"])).is_err());
+        assert!(validate_args(&parse(&["--map-item-only"])).is_err());
+        assert!(validate_args(&parse(&["--dh-lod-only"])).is_err());
+        let world_only = Args::parse_from(["arnis", "--one-world", "--map-item-only"]);
+        assert!(
+            crate::output_args::validate(&world_only).is_ok(),
+            "no bbox needed"
+        );
+        let dh_only = Args::parse_from(["arnis", "--one-world", "--dh-lod-only"]);
+        assert!(crate::output_args::validate(&dh_only).is_ok());
     }
 
     #[test]

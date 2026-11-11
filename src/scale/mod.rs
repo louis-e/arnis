@@ -1057,6 +1057,9 @@ pub fn run_with(
     if let Err(e) = crate::world_utils::touch_last_played(world_dir) {
         eprintln!("Warning: Failed to update LastPlayed: {e}");
     }
+    if args.world_border {
+        one_world::apply_world_border(world_dir, &rect);
+    }
     if skipped > 0 {
         println!("  {skipped} cell(s) left out; the job keeps them for a later run");
         return Ok(());

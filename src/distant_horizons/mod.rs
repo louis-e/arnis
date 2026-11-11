@@ -3,7 +3,10 @@
 //! the regions. Tables follow DH's `sqlScripts/`, rows its `FullDataSourceV2DTO`.
 
 mod encode;
+mod existing;
 mod lod;
+
+pub use existing::from_existing;
 
 pub(crate) use lod::RegionLod;
 
