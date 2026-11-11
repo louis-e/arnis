@@ -41,6 +41,8 @@ const TAIL_LINES: usize = 40;
 const MAX_RETRIES: u32 = 2;
 /// Piece size when only `--one-world-workers` is given.
 pub const DEFAULT_UNIT_REGIONS: i32 = 4;
+/// Percent of the job's bar `--prewarm-first` fills before the build, as downloads take of a run.
+const WARM_SHARE: f64 = 20.0;
 
 /// Pause holds the queue: no piece starts, the running ones finish, and the job stays
 /// resumable. Stop ends the job and kills its running pieces; the finished ones are kept,
@@ -724,10 +726,14 @@ pub fn run_with(
 
     // `--prewarm-first`: one piece at a time, each with the job's whole download allowance, so N
     // workers then read the caches instead of all fetching at once. `--prewarm` stops after it.
+    // The warm step fills the start of the job's bar, the build the rest.
+    let mut warm_share = 0.0;
     if args.prewarm || args.prewarm_first {
-        let warm: Vec<usize> = (0..of)
-            .filter(|&i| wanted(i) && job.finished(&units[i]).is_none())
-            .collect();
+        // Only the pieces this run builds: not those built, left out or skipped as built.
+        let warm: Vec<usize> = head.into_iter().chain(queue.iter().copied()).collect();
+        if !warm.is_empty() {
+            warm_share = if args.prewarm { 100.0 } else { WARM_SHARE };
+        }
         // A lease already there marks a piece an earlier run started; `--prewarm` must keep it.
         let fresh: Vec<usize> = warm
             .iter()
@@ -754,7 +760,7 @@ pub fn run_with(
             println!("  piece {}/{of}: warming the caches", i + 1);
             // The job's bar: the pieces warmed so far plus this one's share.
             let report = |f: f64| {
-                let pct = (k as f64 + f) / warm.len() as f64 * 100.0;
+                let pct = (k as f64 + f) / warm.len() as f64 * warm_share;
                 crate::progress::emit_gui_progress_update(pct, "");
             };
             let log = piece_log_path(&job.dir, i);
@@ -827,7 +833,7 @@ pub fn run_with(
         d.0[i] = f;
         // A retried piece starts over; the bar waits for it instead.
         d.1 = d.1.max(job_percent(&d.0));
-        let percent = d.1;
+        let percent = warm_share + (100.0 - warm_share) * d.1 / 100.0;
         drop(d);
         crate::progress::emit_gui_progress_update(percent, &status());
     };
