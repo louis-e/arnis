@@ -299,6 +299,16 @@ a:hover {
   flex: 0 1 auto;
 }
 
+/* The world's name can be clicked to rename it */
+.world-name-label[data-renamable] {
+  cursor: text;
+}
+
+.world-name-label[data-renamable]:hover {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 /* A custom name waiting for the next Start, not a world that exists yet */
 .world-name-label[data-pending] {
   font-style: italic;

@@ -229,6 +229,14 @@
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
+          <button type="button" class="settings-nav-item meld-only" data-target="settings-section-projects">
+            <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_projects">Projects</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_projects">Worlds you have built</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
           <button type="button" class="settings-nav-item" data-target="settings-section-generation">
             <svg class="icon" aria-hidden="true"><use href="#i-box"></use></svg>
             <span class="settings-nav-text">
@@ -497,6 +505,22 @@
                   </div>
                 </div>
               </div>
+            </section>
+
+            <!-- Projects -->
+            <section class="settings-section meld-only" id="settings-section-projects">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-folder-open"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_projects">Projects</h3>
+                  <p data-localize="settings_section_projects_desc">The worlds built with One World in your save folder.</p>
+                </div>
+              </header>
+              <div class="projects-view" role="group" data-localize-aria-label="projects_view">
+                <button type="button" id="projects-view-list" class="settings-action-button" aria-pressed="true" data-localize="projects_view_list">List</button>
+                <button type="button" id="projects-view-grid" class="settings-action-button" aria-pressed="false" data-localize="projects_view_grid">Grid</button>
+              </div>
+              <div id="projects-list" class="projects-list"></div>
             </section>
 
             <!-- Generation -->

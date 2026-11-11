@@ -128,6 +128,64 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
   return f;
 }
 
+// meldFlags in reverse: each flag a job kept, and the control it came from, with the control's
+// value when the flag is absent. Flags that carry a path (an archive, a tree pack, the plan
+// mask) are not kept by a job, so they are not here.
+const FLAG_CONTROLS = [
+  ['--one-world-workers', 'meld-workers-select', 'value', ''], ['--snap-regions', 'meld-snap-group', 'group', 'off'],
+  ['--margin-regions', 'meld-margin-input', 'value', '0'], ['--unit-regions', 'meld-piece-size-group', 'group', '4'],
+  ['--piece-order', 'meld-piece-order-select', 'value', 'centre'], ['--skip-built', 'meld-skip-built-toggle', 'toggle'],
+  ['--stitch-map', 'meld-stitch-map-toggle', 'toggle'], ['--threads', 'meld-threads-input', 'value', ''],
+  ['--ram-budget-mb', 'meld-ram-budget-input', 'value', ''], ['--seed', 'meld-seed-input', 'value', ''],
+  ['--min-y', 'meld-min-y-input', 'value', ''], ['--max-y', 'meld-max-y-input', 'value', ''],
+  ['--road-detail', 'meld-road-detail-group', 'group', 'max'], ['--surface-patches', 'meld-surface-patches-toggle', 'toggle'],
+  ['--no-buildings', 'meld-buildings-toggle', 'untoggle'], ['--props', 'meld-props-group', 'group', 'auto'],
+  ['--rocks', 'meld-rocks-toggle', 'toggle'], ['--rock-density', 'meld-rock-density-input', 'value', '0.02'],
+  ['--bushes', 'meld-bushes-toggle', 'toggle'], ['--bush-density', 'meld-bush-density-input', 'value', '0.05'],
+  ['--tree-realm', 'meld-tree-realm-select', 'value', 'auto'], ['--cave-style', 'meld-cave-style-select', 'value', 'all-mix'],
+  ['--cave-ores', 'meld-cave-ores-group', 'group', 'normal'], ['--river-bed', 'meld-river-bed-group', 'group', 'off'],
+  ['--water-detail', 'meld-water-detail-group', 'group', 'default'], ['--climate-mode', 'meld-climate-mode-group', 'group', 'origin'],
+  ['--osm-pbf-url', 'meld-pbf-url-input', 'value', ''], ['--overpass-url', 'meld-overpass-input', 'value', ''],
+  ['--offline', 'meld-offline-toggle', 'toggle'], ['--origin', 'meld-origin-input', 'value', ''],
+  ['--world-border', 'meld-world-border-toggle', 'toggle'], ['--region-format', 'meld-region-format-group', 'group', 'mca'],
+  ['--blinear-level', 'meld-blinear-level-input', 'value', '6'],
+];
+
+// Puts a job's flags back into the controls (the Start path in reverse); a flag the job did not
+// send puts its control back to the default. `rebuild` leaves out what would skip built cells.
+export function applyFlags(flags, rebuild = false) {
+  const kept = new Map();
+  for (const f of flags || []) {
+    const i = f.indexOf('=');
+    kept.set(i < 0 ? f : f.slice(0, i), i < 0 ? true : f.slice(i + 1));
+  }
+  if (rebuild) kept.delete('--skip-built');
+  const set = (id, kind, v) => {
+    if (kind === 'group') {
+      const seg = document.querySelector(`#${id} .segment[data-v="${v}"]`);
+      if (seg && choice(id) !== v) seg.click();
+      return;
+    }
+    const box = el(id);
+    if (!box) return;
+    const prop = kind === 'value' ? 'value' : 'checked';
+    if (box[prop] !== v) {
+      box[prop] = v;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+  for (const [flag, id, kind, fallback] of FLAG_CONTROLS) {
+    const v = kept.get(flag);
+    if (kind === 'value' || kind === 'group') set(id, kind, v === undefined ? fallback : String(v));
+    else set(id, 'toggle', kind === 'untoggle' ? v === undefined : v !== undefined);
+  }
+  // Region Download is the one data source a job keeps; any other source goes back to the default.
+  set('meld-osm-source-group', 'group', kept.get('--osm-pbf') === 'geofabrik' ? 'region' : 'default');
+}
+
+// Selects `bounds` ([south, west, north, east]) exactly, with no ring around it.
+export const selectBounds = (bounds) => postToMap({ type: 'setBbox', bounds });
+
 // The outline drawn or picked on the map, as the file `--plan-mask` reads ('' for none): a
 // job in pieces then builds only the pieces it touches.
 let maskPath = '';
@@ -902,4 +960,275 @@ export function refreshStretch() {
   stretchShown = STRETCH_LEVELS.filter(([, color]) => lines.some((l) => l.color === color)).map(([level]) => level);
   postToMap({ type: 'stretchLines', lines });
   showPlan(...shown);
+}
+
+// Settings > Projects: the One Worlds in the save folder, as a list or a grid of cards.
+// `open(name, expand)` makes one the target; the name is stored here so the choice outlives the
+// session. Every field the engine adds later (place name, thumbnail, jobs) may be missing.
+// Returns a refresh function.
+const VIEW_KEY = 'arnis-projects-view';
+const readView = () => {
+  try { return localStorage.getItem(VIEW_KEY) === 'grid' ? 'grid' : 'list'; } catch (_) { return 'list'; }
+};
+
+// Nominatim's zoom for a reverse lookup, by the longer side of the area in km: a country for a
+// huge area, a city or town for a mid one, the suburb or main place for a small one.
+export function placeZoom([south, west, north, east]) {
+  const km = Math.max((north - south) * 111, (east - west) * 111 * Math.cos(((north + south) / 2) * Math.PI / 180));
+  return km >= 1500 ? 3 : km >= 300 ? 5 : km >= 60 ? 8 : km >= 15 ? 10 : km >= 3 ? 14 : 16;
+}
+
+// The name of a search result the selection came from, if its point is inside the area built.
+export function placeForRun(found, bboxText) {
+  const [s, w, n, e] = (bboxText || '').split(/[\s,]+/).map(Number);
+  return found && found.name && found.lat >= s && found.lat <= n && found.lon >= w && found.lon <= e ? found.name : '';
+}
+
+// The same geocoder, language and browser identity as the search box; only the coordinates leave.
+const nominatim = async (lat, lon, zoom) => {
+  const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}&zoom=${zoom}&accept-language=en`);
+  if (!r.ok) return '';
+  const j = await r.json();
+  return String(j.name || String(j.display_name || '').split(',')[0]).trim();
+};
+const MISS_KEY = 'arnis-place-misses';
+const MISS_MS = 7 * 864e5;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The job a card offers: the unfinished one that ran last, else the last one that finished.
+export function projectJob(w) {
+  const jobs = [...(Array.isArray(w.jobs) ? w.jobs : [])].sort((a, b) => (b.last_run_ms || 0) - (a.last_run_ms || 0));
+  return jobs.find((j) => !j.finished) || jobs[0] || null;
+}
+
+// Resume / Rebuild after the world is open: the job's settings go back in, its area ([south,
+// west, north, east]) is selected, and the run starts once the map reports the same area. A job
+// without an area (an old one) only restores its settings and tells the user to pick one.
+export async function resumeJob(job, rebuild, { select = selectBounds, current, start, noArea, wait = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  applyFlags(job.settings, rebuild);
+  const b = Array.isArray(job.bbox) ? job.bbox.map(Number) : [];
+  if (b.length !== 4 || !b.every(Number.isFinite)) return noArea();
+  select(b);
+  for (let i = 0; i < 80; i++) {
+    const now = (current() || '').split(/[\s,]+/).map(Number);
+    if (now.length === 4 && now.every((v, k) => Math.abs(v - b[k]) < 1e-4)) return start();
+    await wait(50);
+  }
+}
+
+// `resume(world, job, rebuild)` starts a job again with its settings; without it (or without
+// job data from the engine) only Open and Expand are offered.
+export function initProjects({ invoke, savePath, scale, open, available = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null }) {
+  const list = el('projects-list');
+  let view = readView();
+  const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
+  const button = (key, fallback, disabled, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'settings-action-button';
+    b.disabled = disabled;
+    b.textContent = t(key, fallback);
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  const text = (cls, s) => {
+    const span = document.createElement('span');
+    span.className = cls;
+    span.textContent = s;
+    return span;
+  };
+  const pick = async (name, expand) => {
+    localStorage.setItem('arnis-one-world-name', name);
+    localStorage.setItem('arnis-one-world-picked', '1');
+    await open(name, expand);
+  };
+
+  // A thumbnail is asked for when its card scrolls into view; no image leaves the placeholder.
+  const thumbs = new Map();
+  const loaders = new Map();
+  const seen = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      seen.unobserve(e.target);
+      loaders.get(e.target)?.();
+    }
+  }, { rootMargin: '200px' });
+  const thumb = (w) => {
+    const box = document.createElement('div');
+    box.className = 'projects-thumb is-empty';
+    const path = w.world_path || `${savePath()}/${w.name}`;
+    const key = `${path}|${w.modified_ms || 0}`;
+    const show = (url) => {
+      if (!url) return;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = url;
+      box.className = 'projects-thumb';
+      box.replaceChildren(img);
+    };
+    const load = async () => {
+      if (!thumbs.has(key)) {
+        let url = null;
+        try { url = w.preview === false ? null : await invoke('gui_world_thumbnail', { worldPath: path }); } catch (_) { /* a world without an image */ }
+        thumbs.set(key, url || null);
+      }
+      show(thumbs.get(key));
+    };
+    if (thumbs.has(key)) show(thumbs.get(key));
+    else if (seen) { loaders.set(box, load); seen.observe(box); } else load();
+    return box;
+  };
+
+  const setView = (v) => {
+    view = v;
+    try { localStorage.setItem(VIEW_KEY, v); } catch (_) { /* not kept */ }
+    paint();
+    refresh();
+  };
+  const paint = () => {
+    list.className = view === 'grid' ? 'projects-list is-grid' : 'projects-list';
+    for (const v of ['list', 'grid']) el(`projects-view-${v}`)?.setAttribute('aria-pressed', String(v === view));
+  };
+  el('projects-view-list')?.addEventListener('click', () => setView('list'));
+  el('projects-view-grid')?.addEventListener('click', () => setView('grid'));
+  paint();
+
+  // A world with a null place name (the engine knows the field) is looked up once, at its
+  // centre, one world at a time and a second apart (the geocoder's limit). A miss is kept for a week.
+  const titles = new Map();
+  const misses = () => { try { return JSON.parse(localStorage.getItem(MISS_KEY) || '{}'); } catch (_) { return {}; } };
+  let filling = false;
+  async function fillPlaces(worlds) {
+    if (filling) return;
+    filling = true;
+    let first = true;
+    try {
+      for (const w of worlds) {
+        if (w.place_name !== null || w.locked) continue;
+        const path = w.world_path || `${savePath()}/${w.name}`;
+        if (Date.now() - (misses()[path] || 0) < MISS_MS) continue;
+        let name = '';
+        try {
+          const b = Array.isArray(w.bbox) && w.bbox.length === 4 && w.bbox.every(Number.isFinite) ? w.bbox : null;
+          if (b) {
+            if (!first) await pause(1100);
+            first = false;
+            name = await geocode((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, placeZoom(b));
+          }
+          if (name) await invoke('gui_set_place_name', { worldPath: path, placeName: name });
+        } catch (_) { name = ''; }
+        if (name) {
+          w.place_name = name;
+          titles.get(path)?.append(text('projects-place', name));
+        } else {
+          try { localStorage.setItem(MISS_KEY, JSON.stringify({ ...misses(), [path]: Date.now() })); } catch (_) { /* tried again next time */ }
+        }
+      }
+    } finally {
+      filling = false;
+    }
+  }
+
+  // The folder and the name inside level.dat change together in the engine; a refusal comes back
+  // as text and is shown beside the field.
+  const PENCIL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75z"/></svg>';
+  function renameField(w, title) {
+    const before = [...title.children];
+    const from = w.name;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'projects-rename';
+    input.maxLength = 48;
+    input.value = w.name;
+    input.setAttribute('aria-label', t('projects_rename', 'Rename'));
+    const err = text('projects-error', '');
+    let ended = false;
+    const cancel = () => { if (!ended) { ended = true; title.replaceChildren(...before); } };
+    const commit = async () => {
+      const name = input.value.trim();
+      if (!name || name === from) return cancel();
+      try {
+        const folder = (await invoke('gui_rename_world', { savePath: savePath(), oldName: from, newName: name })) || name;
+        ended = true;
+        try { if (localStorage.getItem('arnis-one-world-name') === from) localStorage.setItem('arnis-one-world-name', folder); } catch (_) { /* not kept */ }
+        if (renamed) renamed(from, folder);
+        await refresh();
+      } catch (e) {
+        err.textContent = String((e && e.message) || e);
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation?.();
+      if (e.key === 'Enter') { e.preventDefault?.(); commit(); } else if (e.key === 'Escape') { e.preventDefault?.(); cancel(); }
+    });
+    input.addEventListener('blur', cancel);
+    title.replaceChildren(input, err);
+    input.focus?.();
+    input.select?.();
+    return input;
+  }
+
+  async function refresh() {
+    let worlds = [];
+    try { worlds = savePath() ? (await invoke('gui_list_one_worlds', { savePath: savePath() })) || [] : []; } catch (e) { console.error(e); }
+    const rows = worlds.map((w) => {
+      const row = document.createElement('div');
+      row.className = 'projects-row';
+      const odd = w.scale != null && scale() != null && Math.abs(w.scale - scale()) > 1e-6;
+      const title = document.createElement('div');
+      title.className = 'projects-title';
+      const name = text('projects-name', w.name);
+      const pencil = document.createElement('button');
+      pencil.type = 'button';
+      pencil.className = 'projects-pencil';
+      pencil.innerHTML = PENCIL;
+      pencil.title = t('projects_rename', 'Rename');
+      pencil.setAttribute('aria-label', t('projects_rename', 'Rename'));
+      pencil.disabled = Boolean(w.locked);
+      const edit = () => { if (!w.locked) renameField(w, title); };
+      name.addEventListener('click', edit);
+      pencil.addEventListener('click', edit);
+      title.append(name, pencil);
+      if (w.place_name) title.append(text('projects-place', w.place_name));
+      titles.set(w.world_path || `${savePath()}/${w.name}`, title);
+      const kids = [
+        thumb(w),
+        title,
+        text('projects-meta', t('projects_areas', 'Areas: {n}', { n: w.area_count })),
+        text(odd ? 'projects-meta is-warn' : 'projects-meta', t('projects_scale', 'Scale {scale}', { scale: w.scale ? ratio(w.scale) : '-' })),
+      ];
+      if (w.modified_ms) kids.push(text('projects-meta', new Date(w.modified_ms).toLocaleDateString()));
+      if (w.locked) kids.push(text('projects-meta is-warn', t('projects_in_use', 'In use')));
+      // One World needs Java on Earth: without it the buttons would do nothing.
+      const off = !available();
+      const job = resume ? projectJob(w) : null;
+      if (job && job.total > 0) {
+        const lang = (() => { try { return localStorage.getItem('arnis-language') || undefined; } catch (_) { return undefined; } })();
+        const n = (x) => { try { return Number(x).toLocaleString(lang); } catch (_) { return String(x); } };
+        if (!job.finished) kids.push(text('projects-meta', t('projects_cells', '{done} / {total} cells', { done: n(job.done), total: n(job.total) })));
+        const go = async (rebuild) => { await pick(w.name, false); await resume(w, job, rebuild); };
+        if (!job.finished) kids.push(button('projects_resume', 'Resume', w.locked || off, () => go(false)));
+        else {
+          // Rebuilding replaces what is built: the first click asks, the second does it.
+          let armed = 0;
+          const b = button('projects_rebuild', 'Rebuild', w.locked || off, () => {
+            if (armed) { clearTimeout(armed); armed = 0; b.textContent = t('projects_rebuild', 'Rebuild'); return go(true); }
+            b.textContent = t('projects_rebuild_sure', 'Rebuild? Click again');
+            armed = setTimeout(() => { armed = 0; b.textContent = t('projects_rebuild', 'Rebuild'); }, 4000);
+            armed.unref?.();
+          });
+          kids.push(b);
+        }
+      }
+      kids.push(button('projects_open', 'Open', w.locked || off, () => pick(w.name, false)));
+      kids.push(button('projects_expand', 'Expand', w.locked || off, () => pick(w.name, true)));
+      if (off) kids.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position. Java only.'); });
+      row.append(...kids);
+      return row;
+    });
+    if (!rows.length) rows.push(text('projects-empty', t('projects_empty', 'No worlds yet. Build one with One World on.')));
+    list.replaceChildren(...rows);
+    fillPlaces(worlds);
+  }
+  return refresh;
 }

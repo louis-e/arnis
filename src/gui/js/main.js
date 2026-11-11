@@ -10,7 +10,7 @@ import {
   flushSettingsStore,
 } from './settings-store.js';
 import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
-import { t as oneWorldText, initMeldFeatures, initRunControls, initCellMenu, initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing, useRecommended, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls, meldFlags, setPlanMask, hasPlanMask, refreshStretch, progressText, etaDuration, holdsNotice, generationTarget, generationShapes } from './meld-features.js';
+import { resumeJob, placeForRun, t as oneWorldText, initMeldFeatures, initRunControls, initCellMenu, initProjects, initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing, useRecommended, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls, meldFlags, setPlanMask, hasPlanMask, refreshStretch, progressText, etaDuration, holdsNotice, generationTarget, generationShapes } from './meld-features.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -810,6 +810,18 @@ function setCelestialBody(body) {
   refreshBboxSelectionInfo();
 }
 
+// The last search result used for a selection, and the name the running build keeps for its world.
+let searchedPlace = null;
+let runPlace = '';
+
+// Once a One World's first area is built, its place name is the search result's.
+async function rememberRunPlace() {
+  const place = runPlace;
+  runPlace = '';
+  const path = oneWorldInfo && oneWorldInfo.area_count === 1 ? oneWorldInfo.world_path : '';
+  if (place && path) await invoke('gui_set_place_name', { worldPath: path, placeName: place }).catch(() => {});
+}
+
 // Function to register the event listener for bbox updates from iframe
 function registerMessageEvent() {
   window.addEventListener('message', function (event) {
@@ -825,6 +837,11 @@ function registerMessageEvent() {
     // "Select this area" on a search result: the area and a ring of regions around it.
     if (event.data && event.data.type === 'selectArea' && event.source === getMapFrame()?.contentWindow) {
       selectWithRing(event.data.bounds);
+    }
+
+    // The search result the selection came from: its name goes to the world a build makes.
+    if (event.data && event.data.type === 'searchPlace' && event.source === getMapFrame()?.contentWindow) {
+      searchedPlace = { name: String(event.data.name), lat: Number(event.data.lat), lon: Number(event.data.lon) };
     }
 
     // The outline the selection was made from (shape tool or "Use outline"), or null.
@@ -1158,7 +1175,7 @@ function setupProgressListener() {
         // The world just grew by one area: reload its status and overlays.
         if (lastRunOneWorld) {
           oneWorldOverlayKey = null;
-          refreshOneWorldState();
+          refreshOneWorldState().then(rememberRunPlace);
         }
         // A generation just built facades into the same cache, so the preview
         // has something new to say.
@@ -1278,8 +1295,13 @@ function initSettings() {
   // Where focus goes back to once the page closes.
   let focusBeforeSettings = null;
 
+  let refreshProjects = null;
+  // Open and Expand follow the format, the body and Live while the page is open.
+  redrawProjects = () => { if (refreshProjects && settingsModal.style.display === "flex") refreshProjects(); };
+
   // Open the settings page
   function openSettings() {
+    if (refreshProjects) refreshProjects();
     focusBeforeSettings = document.activeElement;
     settingsModal.style.display = "flex";
     syncSettingsLayout();
@@ -1428,7 +1450,7 @@ function initSettings() {
   const pushMeldToMap = () => postToMap({ type: 'meldFeatures', on: meldToggle.checked, scale: readGenerationSettings(true).worldScale, snap: Boolean(document.querySelector('#meld-snap-group .segment.active:not([data-v="off"])')), mapFirst: document.body.classList.contains('map-first') });
   document.addEventListener('change', pushMeldToMap);
   // Advanced off: a finished One World's name is no longer the world under Start.
-  meldToggle.addEventListener('change', () => { if (!meldToggle.checked && lastRunOneWorld) setWorldNameLabel(""); });
+  meldToggle.addEventListener('change', () => { if (!meldToggle.checked && (lastRunOneWorld || oneWorldPicked)) setWorldNameLabel(""); });
   document.getElementById('meld-snap-group')?.addEventListener('click', () => setTimeout(pushMeldToMap));
   document.getElementById('meld-recommended-btn')?.addEventListener('click', () => {
     const [a, b, c, d] = (selectedBBox || '').split(/[\s,]+/).map(Number);
@@ -1459,6 +1481,31 @@ function initSettings() {
   holdToConfirm(document.getElementById('run-confirm-hold'), () => {
     document.getElementById('run-confirm').hidden = true;
     startGeneration(true);
+  });
+  refreshProjects = initProjects({
+    invoke,
+    savePath: () => savePath,
+    scale: () => readGenerationSettings(true).worldScale,
+    available: () => isOneWorldAvailable() && !liveActive(),
+    renamed: (from, to) => worldRenamed(from, to),
+    open: async (name, expand) => {
+      oneWorldName = name;
+      oneWorldPicked = true;
+      clearPrefetchDone();
+      if (oneWorldMode() === 'off') document.querySelector('#one-world-group .segment[data-one-world="on"]')?.click();
+      oneWorldOverlayKey = null;
+      oneWorldRefit = true; // Open on the world already shown refits the map too
+      await refreshOneWorldState();
+      oneWorldRefit = false;
+      closeSettings();
+      if (expand) document.getElementById('plan-expand-button').click();
+    },
+    // Resume and Rebuild: the job's settings and area go back in, and the same run starts.
+    resume: (world, job, rebuild) => resumeJob(job, rebuild, {
+      current: () => selectedBBox,
+      start: () => startGeneration(true),
+      noArea: () => setBboxSelectionInfo(document.getElementById('bbox-selection-info'), 'select_area_prompt', '#ffffff'),
+    }),
   });
 
   // Blueprint greys out the traffic lights.
@@ -3028,10 +3075,13 @@ function renderWorldNameLabel() {
   if (!label) return;
   const pending = pendingWorldName();
   const text = pending || worldLabelName;
+  // The world under Start can be renamed by clicking its name.
+  const renamable = !pending && !!text && !!renamableWorld();
   label.toggleAttribute('data-pending', !!pending);
+  label.toggleAttribute('data-renamable', renamable);
   label.title = pending
     ? (window.localization && window.localization.placeholder_world_name) || 'Name of the next world'
-    : '';
+    : renamable ? oneWorldText('world_rename_tip', 'Click to rename this world') : '';
   if (text) {
     label.removeAttribute('data-placeholder');
     label.textContent = text;
@@ -3050,6 +3100,68 @@ function renderWorldNameLabel() {
 function basenameFromPath(p) {
   if (!p) return "";
   return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+}
+
+/* Renaming the world on disk: click its name under Start, or the pencil in Projects */
+
+// Folder name of the world a click on the name would rename, or "": the One World shown, or the
+// Java world the last run made, once nothing is running and Meld features are on.
+function renamableWorld() {
+  if (!savePath || document.body.classList.contains('meld-off') || selectedWorldFormat !== 'java' || !generationButtonEnabled || liveActive()) return "";
+  if (isOneWorldEnabled()) return oneWorldInfo && oneWorldInfo.exists && !oneWorldInfo.locked ? basenameFromPath(oneWorldInfo.world_path) : "";
+  return basenameFromPath(worldPath);
+}
+
+// What the window remembers of a world's name once its folder has been renamed.
+function worldRenamed(from, to) {
+  if (basenameFromPath(worldPath) === from) worldPath = worldPath.replace(/[^\\/]+([\\/]*)$/, to + '$1');
+  // A One World keeps being the one under Start, now picked by its new name.
+  if (oneWorldName === from || (oneWorldInfo && basenameFromPath(oneWorldInfo.world_path) === from)) {
+    oneWorldName = to;
+    oneWorldPicked = true;
+    localStorage.setItem(ONE_WORLD_NAME_KEY, to);
+    localStorage.setItem('arnis-one-world-picked', '1');
+  }
+  if (worldLabelName === from) setWorldNameLabel(to);
+  oneWorldOverlayKey = null;
+  refreshOneWorldState();
+}
+
+// The name under Start becomes the editor; Enter renames, Escape leaves it.
+let renamingWorld = "";
+function startWorldRename(event) {
+  const from = renamableWorld();
+  if (!from || !worldLabelName) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const label = document.getElementById('world-name-label');
+  const input = document.getElementById('world-name-input');
+  if (!label || !input) return;
+  renamingWorld = from;
+  input.value = from;
+  label.style.display = 'none';
+  const editButton = document.getElementById('world-name-edit-button');
+  if (editButton) editButton.style.display = 'none';
+  input.style.display = '';
+  updateWorldNameLimitState();
+  input.focus();
+  input.select();
+}
+
+async function commitWorldRename(input) {
+  const from = renamingWorld;
+  const to = input.value.trim();
+  endWorldNameEdit();
+  if (!to || to === from) return;
+  try {
+    const folder = (await invoke('gui_rename_world', { savePath: savePath, oldName: from, newName: to })) || to;
+    worldRenamed(from, folder);
+  } catch (error) {
+    // The engine says why (a clash, a path character, a world in use).
+    const info = document.getElementById('progress-info');
+    info.textContent = String((error && error.message) || error);
+    info.style.color = "#fa7878";
+  }
 }
 
 /* Custom world name (Java only, opt-in via Settings > Custom World Name) */
@@ -3152,6 +3264,10 @@ function commitWorldNameEdit() {
     endWorldNameEdit();
     return;
   }
+  if (renamingWorld) {
+    commitWorldRename(input);
+    return;
+  }
   const newName = input.value.trim();
 
   // One World: the name picks the world to extend or create. Nothing is renamed.
@@ -3180,6 +3296,7 @@ function endWorldNameEdit() {
   const label = document.getElementById('world-name-label');
   const input = document.getElementById('world-name-input');
   const editButton = document.getElementById('world-name-edit-button');
+  renamingWorld = "";
   if (!input || input.style.display === 'none') return;
   // Only when the input still holds focus: a teardown reached *from* the blur
   // handler must not arm this, or it would swallow the next real blur.
@@ -3200,6 +3317,10 @@ function initCustomWorldNameToggle() {
   // (both dispatch a real "change" event), as long as this listener is
   // attached before initSettingsStore() runs its restore().
   toggle.addEventListener('change', refreshWorldNameEditUI);
+
+  document.getElementById('world-name-label')?.addEventListener('click', (event) => {
+    if (document.getElementById('world-name-label').hasAttribute('data-renamable')) startWorldRename(event);
+  });
 
   if (editButton) {
     editButton.addEventListener('click', startWorldNameEdit);
@@ -3256,6 +3377,8 @@ let lastRunOneWorld = false;
 // Whether it only filled the caches (Download now).
 let lastRunPrewarm = false;
 let oneWorldName = localStorage.getItem(ONE_WORLD_NAME_KEY) || '';
+// Set by Settings > Projects > Open: the name above is then used with or without Custom World Name.
+let oneWorldPicked = localStorage.getItem('arnis-one-world-picked') === '1';
 
 function isOneWorldAvailable() {
   return selectedWorldFormat === 'java' && selectedCelestialBody === 'earth';
@@ -3318,7 +3441,7 @@ function refreshWorldRulesRows() {
 
 // The name picks the world; it never renames one on disk.
 function oneWorldFolderName() {
-  if (isCustomWorldNameFeatureEnabled() && oneWorldName) return oneWorldName;
+  if (oneWorldName && (isCustomWorldNameFeatureEnabled() || (oneWorldPicked && !document.body.classList.contains('meld-off')))) return oneWorldName;
   return ONE_WORLD_DEFAULT_NAME;
 }
 
@@ -3329,6 +3452,8 @@ function oneWorldDisplayName() {
 
 function setOneWorldName(name) {
   oneWorldName = name;
+  oneWorldPicked = false;
+  localStorage.removeItem('arnis-one-world-picked');
   if (name) localStorage.setItem(ONE_WORLD_NAME_KEY, name);
   else localStorage.removeItem(ONE_WORLD_NAME_KEY);
 }
@@ -3531,6 +3656,8 @@ async function fetchOneWorldInfo() {
 // Re-reads the world the next area joins. Call whenever something that picks
 // the world changes: toggle, name, save path, format, body, window focus.
 let oneWorldRefreshSeq = 0;
+let oneWorldRefit = false;
+let redrawProjects = () => {};
 async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
   // An outline picked while One World was off is written once it is on.
@@ -3538,6 +3665,7 @@ async function refreshOneWorldState() {
   if (!outline && selectedShapes && isOneWorldEnabled() !== shapesWritten) writeShapesMask();
   refreshLuantiAvailability();
   setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  redrawProjects();
   refreshLiveRows();
   refreshStartButton();
   if (!isOneWorldEnabled()) {
@@ -3589,6 +3717,7 @@ async function refreshOneWorldState() {
     postToMap({
       type: 'oneWorldOverlays',
       world_path: info.world_path,
+      refit: oneWorldRefit,
       areas: (overlays && overlays.areas) || [],
       origin_lat: overlays ? overlays.origin_lat : 0,
       origin_lon: overlays ? overlays.origin_lon : 0,
@@ -4028,6 +4157,7 @@ function onLiveStatus() {
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   refreshLiveRows();
   setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  redrawProjects();
   const bedrockBtn = document.getElementById('format-bedrock');
   if (bedrockBtn) bedrockBtn.disabled = liveActive();
   renderOneWorldStatus();
@@ -4307,6 +4437,7 @@ async function startGeneration(confirmed = false, prewarm = false) {
     }
     lastRunOneWorld = oneWorld;
     lastRunPrewarm = prewarm;
+    runPlace = oneWorld && !prewarm ? placeForRun(searchedPlace, selectedBBox) : '';
 
     // Auto-create world for Java format (a One World is resolved by the backend)
     if (selectedWorldFormat === 'java' && !oneWorld && !prewarm) {
