@@ -584,9 +584,9 @@ pub fn decorate_region(
     if !ground.has_land_cover() || !ground.body().is_earth() || min_x > max_x || min_z > max_z {
         return;
     }
-    let (lat, lon) = args
-        .bbox
-        .as_ref()
+    let (lat, lon) = ground
+        .anchor()
+        .or(args.bbox.as_ref())
         .map(|b| {
             (
                 (b.min().lat() + b.max().lat()) * 0.5,

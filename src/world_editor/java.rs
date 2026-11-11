@@ -611,7 +611,8 @@ fn write_region_to_disk(
 
     // World-center latitude drives temperature-based biome variants (taiga
     // vs forest vs jungle) at chunk-build time. Cheap to recompute.
-    let center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
+    let at = ground.and_then(|g| g.anchor()).unwrap_or(llbbox);
+    let center_lat = (at.min().lat() + at.max().lat()) * 0.5;
 
     // Filler chunks all share one set of sections, so they share their light too.
     let base_sections = filler_sections(void_world);

@@ -67,6 +67,8 @@ pub struct Ground {
     /// Absolute block of the grids' first cell, so passes that draw patterns line up
     /// across One World seams. (0, 0) in a local run.
     origin: (i32, i32),
+    /// In a piece of a job, the whole job's bbox: per-run choices are taken there.
+    anchor: Option<LLBBox>,
 }
 
 pub(crate) type Geo = Box<dyn Fn(f64, f64) -> (f64, f64) + Send + Sync>;
@@ -82,6 +84,8 @@ pub struct GroundFrame {
     pub affine: AffinePolicy,
     /// What the water options add to the land-cover estimate of the deepest carve.
     pub carve_depth: crate::water_detail::CarveDepth,
+    /// In a piece of a job, the whole job's bbox.
+    pub anchor: Option<LLBBox>,
 }
 
 impl GroundFrame {
@@ -92,6 +96,7 @@ impl GroundFrame {
             pad_blocks: 0,
             affine: AffinePolicy::Fit,
             carve_depth: Default::default(),
+            anchor: None,
         }
     }
 
@@ -118,6 +123,10 @@ impl GroundFrame {
                     None => AffinePolicy::FitWithHeadroom,
                 },
                 carve_depth: Default::default(),
+                anchor: run.unit.as_ref().and_then(|u| {
+                    let job = XZBBox::rect_from_min_max(u.job[0], u.job[1], u.job[2], u.job[3]);
+                    crate::projection::llbbox_for_rect(&projection, &job.ok()?).ok()
+                }),
             },
             None => Self {
                 world_dims: Some((world_w, world_h)),
@@ -125,6 +134,7 @@ impl GroundFrame {
                 pad_blocks: 0,
                 affine: AffinePolicy::Fit,
                 carve_depth: Default::default(),
+                anchor: None,
             },
         }
     }
@@ -320,6 +330,7 @@ impl Ground {
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -373,12 +384,13 @@ impl Ground {
             world_height: world_h,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
-            climate: crate::climate::Climate::classify(bbox),
+            climate: crate::climate::Climate::classify(frame.anchor.as_ref().unwrap_or(bbox)),
             climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
             winter: false,
             origin: frame.origin(bbox),
+            anchor: frame.anchor,
         }
     }
 
@@ -405,6 +417,7 @@ impl Ground {
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -431,6 +444,7 @@ impl Ground {
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -485,6 +499,7 @@ impl Ground {
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -582,7 +597,8 @@ impl Ground {
                 }),
             ) {
                 Ok(mut elevation_data) => {
-                    let lat = (requested_bbox.min().lat() + requested_bbox.max().lat()) / 2.0;
+                    let at = frame.anchor.as_ref().unwrap_or(&requested_bbox);
+                    let lat = (at.min().lat() + at.max().lat()) / 2.0;
                     // Must use the base the scaler actually settled on: snow_threshold_for
                     // inverts that exact affine, so a mismatched base misplaces every snow cap.
                     let base = elevation_data.ground_level;
@@ -624,7 +640,9 @@ impl Ground {
                         world_height: final_h,
                         rotation_mask: None,
                         snow_threshold_y,
-                        climate: crate::climate::Climate::classify(&requested_bbox),
+                        climate: crate::climate::Climate::classify(
+                            frame.anchor.as_ref().unwrap_or(&requested_bbox),
+                        ),
                         climate_field: None,
                         body,
                         ecoregions: body
@@ -633,6 +651,7 @@ impl Ground {
                             .flatten(),
                         winter: false,
                         origin: frame.origin(&requested_bbox),
+                        anchor: frame.anchor,
                     }
                 }
                 Err(e) => {
@@ -661,7 +680,9 @@ impl Ground {
                         world_height: 0,
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
-                        climate: crate::climate::Climate::classify(&requested_bbox),
+                        climate: crate::climate::Climate::classify(
+                            frame.anchor.as_ref().unwrap_or(&requested_bbox),
+                        ),
                         climate_field: None,
                         body,
                         ecoregions: body
@@ -670,6 +691,7 @@ impl Ground {
                             .flatten(),
                         winter: false,
                         origin: frame.origin(&requested_bbox),
+                        anchor: frame.anchor,
                     }
                 }
             }
@@ -735,6 +757,19 @@ impl Ground {
 
     pub fn ecoregion_map(&self) -> Option<&EcoMap> {
         self.ecoregions.as_deref()
+    }
+
+    /// In a piece of a job, the whole job's bbox, where per-run choices are taken so every
+    /// piece makes the ones a single run would.
+    pub fn anchor(&self) -> Option<&LLBBox> {
+        self.anchor.as_ref()
+    }
+
+    /// In a piece of a job, the ecoregions over the whole job.
+    pub fn job_ecoregions(&self, args: &Args) -> Option<Arc<EcoMap>> {
+        let job = self.anchor.as_ref().filter(|_| self.body.is_earth())?;
+        let frame = GroundFrame::from_args(args, job);
+        frame.ecoregions(job, frame.world_dims?)
     }
 
     /// Replaces the ecoregion map after the ground was rotated.
@@ -1976,6 +2011,7 @@ mod tests {
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -2509,6 +2545,7 @@ pub(crate) mod test_support {
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 }
@@ -2525,6 +2562,7 @@ mod frame_tests {
             pad_blocks: pad,
             affine: AffinePolicy::Fit,
             carve_depth: Default::default(),
+            anchor: None,
         }
     }
 
@@ -2612,5 +2650,42 @@ mod frame_tests {
                 (rect.max_z() - rect.min_z() + 1) as usize
             ))
         );
+    }
+
+    #[test]
+    fn a_piece_takes_per_run_choices_at_its_whole_job() {
+        use clap::Parser;
+        let mut args =
+            crate::args::Args::parse_from(["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"]);
+        let proj = WebMercatorProjection::new(48.0, 11.0, 1.0);
+        let lease = crate::one_world::UnitLease {
+            piece: 3,
+            area_id: 4,
+            extending: true,
+            first_map_id: 0,
+            rect: [0, 0, 511, 511],
+            job: [-1024, -1024, 1023, 1023],
+            tiled: false,
+        };
+        let run = |unit| crate::one_world::RunContext {
+            world_dir: std::path::PathBuf::new(),
+            origin_lat: 48.0,
+            origin_lon: 11.0,
+            extending: true,
+            elevation: None,
+            replaced_chunks: 0,
+            area_id: 4,
+            piece: None,
+            unit,
+        };
+        let own = XZBBox::rect_from_min_max(-32, -32, 543, 543).unwrap();
+        let bbox = llbbox_for_rect(&proj, &own).unwrap();
+        let job = XZBBox::rect_from_min_max(-1024, -1024, 1023, 1023).unwrap();
+        args.one_world_run = Some(run(Some(lease)));
+        let anchor = GroundFrame::from_args(&args, &bbox).anchor.unwrap();
+        assert_eq!(anchor, llbbox_for_rect(&proj, &job).unwrap());
+        // A run that is not a piece keeps its own bbox.
+        args.one_world_run = Some(run(None));
+        assert!(GroundFrame::from_args(&args, &bbox).anchor.is_none());
     }
 }

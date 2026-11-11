@@ -1431,11 +1431,20 @@ impl<'a> WorldEditor<'a> {
         self.get_ground_level(x, z) + y_offset
     }
 
+    /// The area's bbox, or in a piece of a job the whole job's.
+    fn anchor_bbox(&self) -> &LLBBox {
+        self.ground
+            .as_ref()
+            .and_then(|g| g.anchor())
+            .unwrap_or(&self.llbbox)
+    }
+
     /// Latitude/longitude the area's regional styles are taken at: the bbox centre.
     pub fn geo_anchor(&self) -> (f64, f64) {
+        let b = self.anchor_bbox();
         (
-            (self.llbbox.min().lat() + self.llbbox.max().lat()) / 2.0,
-            (self.llbbox.min().lng() + self.llbbox.max().lng()) / 2.0,
+            (b.min().lat() + b.max().lat()) / 2.0,
+            (b.min().lng() + b.max().lng()) / 2.0,
         )
     }
 
@@ -1446,7 +1455,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Köppen climate class of the generated area, taken at the bbox centre.
     pub fn climate(&self) -> crate::climate::Climate {
-        crate::climate::Climate::classify(&self.llbbox)
+        crate::climate::Climate::classify(self.anchor_bbox())
     }
 
     /// Get the effective ground level at a world coordinate.

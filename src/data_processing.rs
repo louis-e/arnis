@@ -1111,13 +1111,18 @@ pub fn generate_world_with_options(
     // Uses the area's floor, not args: the montane check measures blocks above it, and the
     // base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
     // blocks back into metres, which compression makes far smaller than args.scale.
+    // A piece of a job picks the pack and the sign region a single run of the job would.
+    let anchor = *ground.anchor().unwrap_or(&llbbox);
     let tree_pack = crate::trees::tree_pack::load(
         args,
-        llbbox,
+        anchor,
         args.scale,
         crate::ground::area_floor_for(&ground, args),
         ground.blocks_per_meter(),
-        ground.ecoregion_map(),
+        ground
+            .job_ecoregions(args)
+            .as_deref()
+            .or(ground.ecoregion_map()),
     )
     .map(Arc::new);
     bench.reset();
@@ -1154,8 +1159,8 @@ pub fn generate_world_with_options(
         highway_connectivity.meet_at_edge_of(xzbbox.clone());
     }
     let sign_region = crate::decals::region::SignRegion::detect(
-        (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
-        (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
+        (anchor.min().lat() + anchor.max().lat()) / 2.0,
+        (anchor.min().lng() + anchor.max().lng()) / 2.0,
     );
     let road_markings = road_markings::RoadMarkingIndex::build_with(
         &elements,

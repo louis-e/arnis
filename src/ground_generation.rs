@@ -275,9 +275,9 @@ pub fn generate_ground_region(
     // `Some` only off Earth, where the body's palette replaces land cover and
     // every Earth-only surface pass is off.
     let planetary_body = (!args.body.is_earth()).then_some(args.body);
-    let center_lat = args
-        .bbox
-        .as_ref()
+    let center_lat = ground
+        .anchor()
+        .or(args.bbox.as_ref())
         .map(|b| (b.min().lat() + b.max().lat()) * 0.5)
         .unwrap_or(0.0);
     let has_land_cover = ground.has_land_cover();
