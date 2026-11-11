@@ -798,5 +798,7 @@
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "Un solo mundo genera rectángulos. Dibuja un rectángulo o desactiva Un solo mundo.",
   "map_tool_shape_rectangles_only": "Un solo mundo solo genera rectángulos.",
-  "hold_again": "Press again to confirm"
+  "hold_again": "Press again to confirm",
+  "run_paused": "Paused.",
+  "plan_settings_changed": "Changed in Settings: {list}."
 }

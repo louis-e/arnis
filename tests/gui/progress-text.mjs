@@ -16,6 +16,7 @@ assert.equal(n.text, 'Notice');
 assert.ok(n.notice);
 
 assert.equal(progressText({ message: 'Building pieces... 23/100 done' }).text, 'Building cells… 23/100', 'the title counts cells');
+assert.equal(progressText({ message: 'Building pieces... 23/100 done. Paused.' }).text, 'Building cells… 23/100 Paused.', 'paused, in the same words');
 
 // A notice outlasts the next stage line for 8 s, not an error or the end of a run.
 const ord = progressText({ message: 'Fetching' });

@@ -984,18 +984,6 @@ label[for].setting-label {
   line-height: 1.45;
 }
 
-.settings-about-layout {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-  font-size: 13.5px;
-}
-
-.settings-about-layout .settings-select {
-  width: 160px;
-}
-
 .settings-about-links {
   flex-basis: 100%;
   padding-top: 14px;

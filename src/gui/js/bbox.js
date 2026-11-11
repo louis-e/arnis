@@ -1026,7 +1026,7 @@ $(document).ready(function () {
         return bounds;
     }
 
-    // The world overlay's own default opacity: 70 %, or opaque for a One World in Classic (3.4.0).
+    // The world overlay's own default opacity: 70 %, or opaque for a One World in Classic.
     function worldBaseOpacity() {
         return worldOverlayData && worldOverlayData.areas && !window.arnisMapFirst ? 1 : 0.7;
     }
@@ -2046,13 +2046,13 @@ $(document).ready(function () {
             setLivePlayers(event.data.active, event.data.canTeleport, event.data.players);
         }
 
-        // Meld features on: a country or region found by the search can be selected whole.
+        // Advanced features on: a country or region found by the search can be selected whole.
         if (event.data && event.data.type === 'meldFeatures') {
             var was = window.arnisMeldOn;
             window.arnisMeldOn = Boolean(event.data.on);
             window.arnisWorldScale = Number(event.data.scale) || 1;
             window.arnisSnapOn = Boolean(event.data.snap);
-            // The map-first page's look (hover font, previews under the selection); Classic keeps 3.4.0's.
+            // The map-first page's look (hover font, previews under the selection); Classic keeps its own.
             window.arnisMapFirst = Boolean(event.data.mapFirst);
             document.body.classList.toggle('map-first', window.arnisMapFirst);
             if (!window.arnisMeldOn && planMask) setPlanMask(null);
@@ -3186,7 +3186,7 @@ $(document).ready(function () {
         if (window.arnisMeldOn && _getBboxRect()) meldHandles(_getBboxRect());
     }
 
-    // ---- Meld features: edge handles, move from inside, a size readout, a live plan ----
+    // ---- Advanced features: edge handles, move from inside, a size readout, a live plan ----
 
     // Each edge's midpoint moves that edge alone.
     // [edge, the opposite edge, axis]: the axis is the one the edge moves along.
@@ -3238,7 +3238,7 @@ $(document).ready(function () {
             .replace('{r}', Math.ceil(w / side) * Math.ceil(h / side));
     }
 
-    // While a handle drags: the readout follows, and with Meld features the window gets the
+    // While a handle drags: the readout follows, and with Advanced features the window gets the
     // selection once a second (and at the end), so the planned pieces follow without a plan
     // request on every move.
     function liveSelection(rect) {
@@ -3257,7 +3257,7 @@ $(document).ready(function () {
         syncSelection();
     }
 
-    // Meld features: a drag that starts inside the selection moves it, while all of it is on
+    // Advanced features: a drag that starts inside the selection moves it, while all of it is on
     // screen; zoomed into a big one, the drag pans the map.
     var inside = null;
     map.on('mousedown', function (ev) {

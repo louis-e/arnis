@@ -798,5 +798,7 @@
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "One World generates rectangles. Draw a rectangle, or turn One World off.",
   "map_tool_shape_rectangles_only": "One World generates rectangles only.",
-  "hold_again": "Press again to confirm"
+  "hold_again": "Press again to confirm",
+  "run_paused": "Paused.",
+  "plan_settings_changed": "Changed in Settings: {list}."
 }

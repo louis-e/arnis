@@ -798,5 +798,7 @@
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "Yksi maailma generoi suorakulmioita. Piirrä suorakulmio tai poista Yksi maailma käytöstä.",
   "map_tool_shape_rectangles_only": "Yksi maailma generoi vain suorakulmioita.",
-  "hold_again": "Press again to confirm"
+  "hold_again": "Press again to confirm",
+  "run_paused": "Paused.",
+  "plan_settings_changed": "Changed in Settings: {list}."
 }

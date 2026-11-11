@@ -2098,7 +2098,6 @@ const WINDOW_FLAGS: &[&str] = &[
     "plan-mask",
     "threads",
     "ram-budget-mb",
-    "max-downloads",
     "seed",
     "min-y",
     "max-y",
@@ -2480,8 +2479,6 @@ fn gui_cancel_bake() {
     BAKE_CANCEL.store(true, std::sync::atomic::Ordering::Release);
 }
 
-/// Offline Mode stops a run the caches could not serve, naming what they lacked, rather than
-/// build flat or empty ground there.
 /// The end of a `--prewarm` run: the caches are filled and no world is kept.
 fn prewarmed() -> Result<(), String> {
     emit_gui_progress_update(100.0, "Done! Inputs for this area are cached.");
@@ -2494,6 +2491,8 @@ fn prewarmed() -> Result<(), String> {
     Ok(())
 }
 
+/// Offline Mode stops a run the caches could not serve, naming what they lacked, rather than
+/// build flat or empty ground there.
 fn offline_complete() -> Result<(), String> {
     let missing = crate::net::offline_misses();
     if !crate::net::offline() || missing.is_empty() {

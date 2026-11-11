@@ -798,5 +798,7 @@
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "Eine Welt generiert nur Rechtecke. Zeichne ein Rechteck oder schalte Eine Welt aus.",
   "map_tool_shape_rectangles_only": "Eine Welt generiert nur Rechtecke.",
-  "hold_again": "Press again to confirm"
+  "hold_again": "Press again to confirm",
+  "run_paused": "Paused.",
+  "plan_settings_changed": "Changed in Settings: {list}."
 }

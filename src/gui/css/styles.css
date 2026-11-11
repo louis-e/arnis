@@ -1127,10 +1127,6 @@ input[type="range"] {
   display: block;
 }
 
-.job-plan-warn {
-  color: #fa7878;
-}
-
 .plan-expand {
   width: 100%;
   margin-top: 6px;

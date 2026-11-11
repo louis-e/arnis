@@ -11,7 +11,14 @@ import {
 } from './settings-store.js';
 import { initPreviews } from './preview-popover.js';
 import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
-import { resumeJob, placeForRun, t as oneWorldText, initMeldFeatures, initRunControls, initCellMenu, initDataPanel, initProjects, initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing, useRecommended, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls, meldFlags, setPlanMask, hasPlanMask, refreshStretch, progressText, holdsNotice, generationTarget, generationShapes } from './meld-features.js';
+import {
+  t as oneWorldText,
+  initMeldFeatures, meldFlags, cellsKey, generationTarget, generationShapes, progressText, holdsNotice,
+  initRunControls, initCellMenu, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls,
+  initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing, useRecommended,
+  setPlanMask, hasPlanMask, refreshStretch,
+  initDataPanel, initProjects, resumeJob, placeForRun,
+} from './meld-features.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -155,7 +162,7 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 async function applyLocalization(localization) {
   const localizationElements = {
     "#start-button > span[data-localize='start_generation']": "start_generation",
-    // Meld features: the size warning's way out and the One World's Expand.
+    // Advanced features: the size warning's way out and the One World's Expand.
     "#bbox-features-cta": "meld_use_pieces",
     "#plan-expand-button": "plan_expand",
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
@@ -827,6 +834,14 @@ function setCelestialBody(body) {
   refreshBboxSelectionInfo();
 }
 
+// Settings Expand or "Select this area" changed stay changed: the line under the bar names them.
+function sayChangedSettings(names) {
+  const info = document.getElementById('progress-info');
+  if (!names.length || !info || !generationButtonEnabled) return;
+  info.textContent = oneWorldText('plan_settings_changed', 'Changed in Settings: {list}.', { list: names.join(', ') });
+  info.style.color = "#ececec";
+}
+
 // The last search result used for a selection, and { name, path } of the run that builds a One
 // World's first land, taken when it starts.
 let searchedPlace = null;
@@ -853,7 +868,7 @@ function registerMessageEvent() {
 
     // "Select this area" on a search result: the area and a ring of regions around it.
     if (event.data && event.data.type === 'selectArea' && event.source === getMapFrame()?.contentWindow) {
-      selectWithRing(event.data.bounds);
+      sayChangedSettings(selectWithRing(event.data.bounds));
     }
 
     // The search result the selection came from: its name goes to the world a build makes.
@@ -1434,7 +1449,7 @@ function initSettings() {
     start: () => startGeneration(true),
     localize: (element, key) => localizeElement(window.localization, { element }, key),
     // The flags that cut the job into pieces are part of it: --only-pieces numbers its pieces.
-    key: () => `${selectedBBox}|${isOneWorldEnabled() ? oneWorldFolderName() : ''}|${meldFlags({ oneWorld: true, java: true, plan: true, forKey: true }).filter((f) => /^--(unit-regions|margin-regions|snap-regions|plan-mask|origin)=/.test(f))}`,
+    key: () => cellsKey(selectedBBox, isOneWorldEnabled() ? oneWorldFolderName() : ''),
     map: () => getMapFrame()?.contentWindow,
     // Remove and Rebuild in the cell menu work on the open One World, then read it again.
     world: () => oneWorldInfo?.world_path || '',
@@ -1476,7 +1491,7 @@ function initSettings() {
     },
   });
   // The map offers "Select this area" on a country or region, the edge handles and the size
-  // readout only with Meld features on; the readout counts regions at the world scale.
+  // readout only with Advanced features on; the readout counts regions at the world scale.
   const meldToggle = document.getElementById('advanced-meld-features-toggle');
   const pushMeldToMap = () => postToMap({ type: 'meldFeatures', on: meldToggle.checked, scale: readGenerationSettings(true).worldScale, snap: Boolean(document.querySelector('#meld-snap-group .segment.active:not([data-v="off"])')), mapFirst: document.body.classList.contains('map-first') });
   document.addEventListener('change', pushMeldToMap);
@@ -1496,7 +1511,7 @@ function initSettings() {
   document.getElementById('plan-expand-button').addEventListener('click', () => {
     if (!builtAreas.length) return;
     const pick = (f, key) => f(...builtAreas.map((a) => a[key]));
-    selectWithRing([pick(Math.min, 'min_lat'), pick(Math.min, 'min_lon'), pick(Math.max, 'max_lat'), pick(Math.max, 'max_lon')], true);
+    sayChangedSettings(selectWithRing([pick(Math.min, 'min_lat'), pick(Math.min, 'min_lon'), pick(Math.max, 'max_lat'), pick(Math.max, 'max_lon')], true));
     askRunConfirm();
   });
   // Cancel (or Escape) closes the panel and gives the focus back to Start.
@@ -1557,7 +1572,8 @@ function initSettings() {
         canopyHeightEnabled: document.getElementById("canopy-height-toggle").checked,
         overtureEnabled: document.getElementById("overture-toggle").checked,
         awsOnlyElevation: document.getElementById("aws-only-elevation-toggle").checked,
-        flags: meldFlags({ oneWorld: false, java: true, caves: false, extendHeight: false, lods: false }),
+        // A plan's flags: the next run's pending retry and skipped cells stay.
+        flags: meldFlags({ oneWorld: false, java: true, caves: false, extendHeight: false, lods: false, plan: true }),
       };
     },
   });
@@ -2931,7 +2947,7 @@ let bboxInputError = false;  // The coordinate field holds input that did not va
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   const t = AREA_THRESHOLDS[selectedCelestialBody] || AREA_THRESHOLDS.earth;
   selectedSize *= earthScaleFactor();
-  // Meld features: built in pieces, the size is no longer a worry; say how instead.
+  // Advanced features: built in pieces, the size is no longer a worry; say how instead.
   const pieces = planPieces();
   let warned = false;
   if (planPending()) {
@@ -2939,8 +2955,8 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
     setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   } else if (pieces) {
     setBboxSelectionInfo(bboxSelectionElement, pieces.single ? "area_single_info" : "area_pieces_info", "#ececec", pieces);
-  } else if (hasPlanMask() && !selectedShapes) {
-    // An outline only leaves pieces out: a build in one go would build the whole box.
+  } else if ((hasPlanMask() || outline) && !selectedShapes) {
+    // An outline only leaves pieces out: a build in one go (One World off too) builds the whole box.
     setBboxSelectionInfo(bboxSelectionElement, "area_outline_needs_pieces", "#fecc44");
     warned = true;
   } else if (selectedSize > t.extreme) {
@@ -2962,7 +2978,7 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   document.getElementById("bbox-features-cta").hidden = !(warned && isOneWorldAvailable());
 }
 
-// Turns on Meld features, One World and parallel pieces, and shows the Scale card.
+// Turns on Advanced features, One World and parallel pieces, and shows the Scale card.
 function useMeldPieces() {
   window.openSettings();
   const meld = document.getElementById("advanced-meld-features-toggle");
@@ -3065,7 +3081,7 @@ function displayBboxInfoText(bboxText, shapes) {
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
   dropStalePieces(selectedBBox);
-  // Meld features: a single run's preview belongs to that run's area; a new selection drops it
+  // Advanced features: a single run's preview belongs to that run's area; a new selection drops it
   // (a One World keeps showing its own areas).
   if (document.getElementById('advanced-meld-features-toggle').checked && currentWorldMapData && !lastRunOneWorld) {
     notifyWorldChanged();
@@ -3168,16 +3184,22 @@ function basenameFromPath(p) {
 /* Renaming the world on disk: click its name under Start, or the pencil in Projects */
 
 // Folder name of the world a click on the name would rename, or "": the One World shown, or the
-// Java world the last run made, once nothing is running and Meld features are on.
+// Java world the last run made, once nothing is running and Advanced features are on.
 function renamableWorld() {
   if (!savePath || document.body.classList.contains('meld-off') || selectedWorldFormat !== 'java' || !generationButtonEnabled || liveActive()) return "";
   if (isOneWorldEnabled()) return oneWorldInfo && oneWorldInfo.exists && !oneWorldInfo.locked ? basenameFromPath(oneWorldInfo.world_path) : "";
-  return basenameFromPath(worldPath);
+  // The rename goes by name in the saves folder: a world made in another one is not it.
+  return inSavesFolder(worldPath) ? basenameFromPath(worldPath) : "";
+}
+
+function inSavesFolder(path) {
+  const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  return Boolean(path) && norm(path).replace(/\/[^/]*$/, '') === norm(savePath);
 }
 
 // What the window remembers of a world's name once its folder has been renamed.
 function worldRenamed(from, to) {
-  if (basenameFromPath(worldPath) === from) worldPath = worldPath.replace(/[^\\/]+([\\/]*)$/, to + '$1');
+  if (inSavesFolder(worldPath) && basenameFromPath(worldPath) === from) worldPath = worldPath.replace(/[^\\/]+([\\/]*)$/, (_, tail) => to + tail);
   // A One World keeps being the one under Start, now picked by its new name.
   if (oneWorldName === from || (oneWorldInfo && basenameFromPath(oneWorldInfo.world_path) === from)) {
     oneWorldName = to;

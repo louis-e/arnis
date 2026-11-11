@@ -203,7 +203,7 @@ var citySearch = {
         });
     },
     
-    // The place's box becomes the selection: with Meld features through the window's "Select
+    // The place's box becomes the selection: with Advanced features through the window's "Select
     // this area" (a ring of regions around it), otherwise straight on the map.
     selectArea: function(result) {
         // Nominatim's box is south, north, west, east.

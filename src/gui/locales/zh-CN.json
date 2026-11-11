@@ -798,5 +798,7 @@
   "projects_live_off": "Not while One World is set to Live.",
   "shapes_rectangles_only": "单一世界只生成矩形。请绘制矩形，或关闭单一世界。",
   "map_tool_shape_rectangles_only": "单一世界只生成矩形。",
-  "hold_again": "Press again to confirm"
+  "hold_again": "Press again to confirm",
+  "run_paused": "Paused.",
+  "plan_settings_changed": "Changed in Settings: {list}."
 }

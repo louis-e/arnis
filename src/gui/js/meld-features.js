@@ -1,4 +1,4 @@
-// The "Meld features" switch (Settings > Advanced) and the flags it sends. Off, every
+// The "Advanced features" switch (Settings > Advanced) and the flags it sends. Off, every
 // control marked meld-only is hidden and generation gets no flags, so it runs as stock.
 
 const el = (id) => document.getElementById(id);
@@ -60,8 +60,11 @@ export function progressText({ message = '', detail = '' }) {
     return { text: t('region_download_fallback', 'Region Download is not available for this selection, so Arnis used the default source.'), title: '', log: message, notice: true };
   }
   // The backend counts "pieces"; the window says cells.
-  const built = /^Building pieces\.\.\. (\d+)\/(\d+) done$/.exec(message);
-  if (built) return { text: t('run_building', 'Building cells… {done}/{total}', { done: built[1], total: built[2] }), title: detail, log: detail || null, notice: false };
+  const built = /^Building pieces\.\.\. (\d+)\/(\d+) done(\. Paused\.)?$/.exec(message);
+  if (built) {
+    const text = t('run_building', 'Building cells… {done}/{total}', { done: built[1], total: built[2] });
+    return { text: built[3] ? `${text} ${t('run_paused', 'Paused.')}` : text, title: detail, log: detail || null, notice: false };
+  }
   return { text: message, title: detail, log: detail || null, notice: false };
 }
 
@@ -100,34 +103,24 @@ export function initDockGrip(dock, grip) {
 export function initMeldFeatures() {
   const toggle = el('advanced-meld-features-toggle');
   if (!toggle) return;
-  // The map-first page (styles.css, body.map-first) with Meld features on, the 3.4.0-style one
-  // off when Main Page Layout is Auto; Map first is the default for everyone.
+  // The map-first page (styles.css, body.map-first): Map first, or Auto with Advanced features on.
   const layout = el('layout-select');
-  const about = el('layout-about-select');
   const apply = () => {
     const mode = layout ? layout.value : 'classic';
     document.body.classList.toggle('meld-off', !toggle.checked);
     const mapFirst = mode === 'map' || (mode === 'auto' && toggle.checked);
     document.body.classList.toggle('map-first', mapFirst);
-    if (about) about.value = mapFirst ? 'map' : 'classic';
     const dock = el('preview3d-mini');
     if (dock) {
       let w = 0;
       try { w = Number(localStorage.getItem('arnis-preview-dock-width')); } catch (_) { /* default size */ }
       dock.style.width = mapFirst && w >= 200 ? `${w}px` : '';
     }
-    // Off, a finished job's pieces leave the map with the rest of Meld features.
+    // Off, a finished job's pieces leave the map with the rest of Advanced features.
     if (!toggle.checked && !running && pieces.size) resetPieces();
   };
   toggle.addEventListener('change', apply);
   if (layout) layout.addEventListener('change', apply);
-  // Settings > About sets the same setting (and so its storage).
-  if (about && layout) {
-    about.addEventListener('change', () => {
-      layout.value = about.value;
-      layout.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-  }
   apply();
 
   // The docked 3D preview keeps the width it was dragged to (map-first page only: the classic
@@ -231,6 +224,11 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
   if (!plan) skipCells = null;
   return f;
 }
+
+// What a job's cells belong to: the selection, the One World and the flags that cut it
+// (--only-pieces and --skip-cells number its cells). Leaves out the skip list it guards.
+export const cellsKey = (bbox, world) =>
+  `${bbox}|${world}|${meldFlags({ oneWorld: true, java: true, plan: true, forKey: true }).filter((f) => /^--(unit-regions|margin-regions|snap-regions|plan-mask|origin)=/.test(f))}`;
 
 // meldFlags in reverse: each flag a job kept, and the control it came from, with the control's
 // value when the flag is absent. Flags that carry a path (an archive, a tree pack, the plan
@@ -631,8 +629,7 @@ function sendOutlines() {
   });
 }
 
-// A new run starts clean; a retry keeps the pieces it does not rebuild. `bbox` is the selection
-// the run is for.
+// A new run starts clean; a retry keeps the pieces it does not rebuild.
 export function clearPieces() {
   runStart = 0;
   headCell = -1;
@@ -762,16 +759,20 @@ export function useRecommended(areaKm2) {
 
 // Selects `bounds` ([south, west, north, east]) with a ring of regions around it: a job in
 // pieces with a margin of at least one region. `skipBuilt` leaves out what the world has.
+// Returns the names of the settings it changed: they stay so, and the caller says it.
 export function selectWithRing(bounds, skipBuilt = false) {
-  const set = (id, prop, v) => {
+  const changed = [];
+  const set = (id, prop, v, key, fallback) => {
     if (!el(id) || el(id)[prop] === v) return;
     el(id)[prop] = v;
     el(id).dispatchEvent(new Event('change', { bubbles: true }));
+    changed.push(t(key, fallback));
   };
-  if (!value('meld-workers-select')) set('meld-workers-select', 'value', 'auto');
-  if (value('meld-margin-input') === '0') set('meld-margin-input', 'value', '1');
-  if (skipBuilt) set('meld-skip-built-toggle', 'checked', true);
+  if (!value('meld-workers-select')) set('meld-workers-select', 'value', 'auto', 'meld_workers', 'Parallel cells');
+  if (value('meld-margin-input') === '0') set('meld-margin-input', 'value', '1', 'meld_margin', 'Margin Regions');
+  if (skipBuilt) set('meld-skip-built-toggle', 'checked', true, 'meld_skip_built', 'Skip Built Cells');
   postToMap({ type: 'setBbox', bounds });
+  return changed;
 }
 
 const gb = (mbs) => (mbs >= 1048576 ? `${(mbs / 1048576).toFixed(1)} TB` : mbs >= 1024 ? `${(mbs / 1024).toFixed(1)} GB` : `${Math.round(mbs)} MB`);
@@ -782,7 +783,7 @@ const range = ([lo, hi], unit) => {
   const u = a.match(/^[\d.,]+( \S+)$/);
   return u && b.endsWith(u[1]) ? `${a.slice(0, -u[1].length)}–${b}` : `${a}–${b}`;
 };
-// Rounded so a time never claims more than it knows (as 3.4.0's formatEstimateTime): 5 s
+// Rounded so a time never claims more than it knows: 5 s
 // steps, then minutes, then 10 minutes.
 const minutes = (m) => {
   if (m < 1.5) return t('plan_seconds', '{s} s', { s: Math.max(5, Math.round((m * 60) / 5) * 5) });
@@ -835,10 +836,10 @@ const sizeText = (i) => (planSizes.has(i) ? t('plan_piece_size', '{n} × {m} reg
 
 const div = (className, textContent) => Object.assign(document.createElement('div'), { className, textContent });
 
-// The plan's blocks, a warning, and the legend of what the map shows: the selection, the
+// The plan's blocks and the legend of what the map shows: the selection, the
 // pieces to build and, with a margin, the ring around it.
-function showPlan(rows, warn = '', ring = false, single = false) {
-  shown = [rows, warn, ring, single];
+function showPlan(rows, ring = false, single = false) {
+  shown = [rows, ring, single];
   const box = el('job-plan');
   if (!box) return;
   // With a plan the stretch lines sit behind its "?" (amber or red there too); alone they show as they are.
@@ -855,7 +856,6 @@ function showPlan(rows, warn = '', ring = false, single = false) {
     head.help.classList.toggle('is-error', stretch.some((x) => x.classList.contains('is-error')));
   }
   box.replaceChildren(...rows, ...(head ? [] : stretch));
-  if (warn) box.append(div('job-plan-warn', warn));
   if (rows.length > 1) {
     const legend = div('job-plan-legend', '');
     const keys = [['selection', 'plan_legend_selection', 'Selection'], ...(single ? [] : [['pieces', 'plan_legend_pieces', 'Cells to build']])];
@@ -1008,7 +1008,7 @@ async function updatePlan() {
       tn('plan_workers', '{n} workers', '{n} worker', e.workers),
     ].join(' · '),
     `${t('plan_ram_tip', 'Memory per worker')}: ${range(e.ram_mb, gb)}`,
-  ]), '', units.some((u) => u.ring), single);
+  ]), units.some((u) => u.ring), single);
   if (single && !pieces.size) {
     postToMap({ type: 'pieceOutlines', pieces: [] });
     return;
@@ -1068,7 +1068,7 @@ export function worstStretch(origin, south, north) {
 let stretchSource = () => null;
 let stretchRows = [];
 let stretchKey = 'null';
-let shown = [[], '', false];
+let shown = [[], false, false];
 // The stretch levels drawn on the map now (STRETCH_LEVELS), for the legend.
 let stretchShown = [];
 const STRETCH_LEVELS = [[0.05, '#fecc44'], [0.1, '#fa7878']];
