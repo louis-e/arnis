@@ -797,6 +797,5 @@
   "shapes_rectangles_only": "Vieno pasaulio režimas generuoja stačiakampius. Nubrėžkite stačiakampį arba išjunkite Vieno pasaulio režimą.",
   "map_tool_shape_rectangles_only": "Vieno pasaulio režimas generuoja tik stačiakampius.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused.",
-  "plan_settings_changed": "Changed in Settings: {list}."
+  "run_paused": "Paused."
 }

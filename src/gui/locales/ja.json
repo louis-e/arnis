@@ -797,6 +797,5 @@
   "shapes_rectangles_only": "ワンワールドは長方形のみ生成します。長方形を描くか、ワンワールドをオフにしてください。",
   "map_tool_shape_rectangles_only": "ワンワールドは長方形のみ生成します。",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused.",
-  "plan_settings_changed": "Changed in Settings: {list}."
+  "run_paused": "Paused."
 }

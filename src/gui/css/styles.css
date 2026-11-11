@@ -228,38 +228,26 @@ a:hover {
   color: #fecc44 !important; /* the listener sets an inline colour */
 }
 
-/* The estimate on the bar, in two tones: a white copy clipped to the green fill and a dark copy clipped
-   to the grey track, so a glyph the fill edge cuts shows both. --p is the fill's width in px
-   (main.js follows the fill's size); no shadow. */
 .progress-eta-overlay {
   position: absolute;
-  inset: 0;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   z-index: 1;
+  color: #ffffff;
   font-size: 0.85em;
-  line-height: 20px;
+  line-height: 1;
   font-weight: 700;
   white-space: nowrap;
   pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.7);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
 
-.progress-eta-overlay > span {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
+/* The text is written twice (main.js); one copy is enough. */
 .progress-eta-overlay .eta-on {
-  color: #ffffff;
-  clip-path: inset(0 calc(100% - var(--p, 0px)) 0 0);
-}
-
-.progress-eta-overlay .eta-off {
-  color: #2a2a2a;
-  clip-path: inset(0 0 0 var(--p, 0px));
+  display: none;
 }
 
 .progress-eta-overlay.visible {
@@ -918,6 +906,7 @@ input[type="range"] {
 .job-plan-legend {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
   gap: 2px 12px;
   margin-top: 2px;
@@ -1072,12 +1061,17 @@ input[type="range"] {
   margin-top: 8px;
 }
 
+.job-plan-legend > * {
+  display: inline-flex;
+  align-items: center;
+}
+
 .job-plan-legend .swatch {
-  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
   width: 10px;
   height: 10px;
   margin-right: 4px;
-  vertical-align: -1px;
   border: 2px solid #fecc44;
   border-radius: 2px;
 }
@@ -1175,7 +1169,12 @@ input[type="range"] {
 
 .run-button {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 30px;
+  padding: 0 10px;
+  line-height: 1;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
@@ -1183,6 +1182,10 @@ input[type="range"] {
   font-family: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+
+.run-button[hidden] {
+  display: none;
 }
 
 .run-button:hover {
@@ -1239,7 +1242,10 @@ input[type="range"] {
 
 /* Under a size warning (Meld features): a link, centred, as wide as the warning (3.4.0) */
 #bbox-features-cta {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   width: 100%;
   margin: 4px 0 0;
   padding: 0;
@@ -1249,11 +1255,20 @@ input[type="range"] {
   color: var(--primary-accent);
   font-size: 0.85em;
   font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
   text-align: center;
   line-height: 1.3em;
   white-space: normal;
+  cursor: pointer;
+}
+
+/* A pointer in front of it says it can be clicked, without an underline. */
+#bbox-features-cta::before {
+  content: "";
+  flex: none;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 #bbox-features-cta[hidden] {

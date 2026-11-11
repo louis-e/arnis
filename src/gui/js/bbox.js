@@ -1668,7 +1668,8 @@ $(document).ready(function () {
     // How full each state's cup is: a running piece fills to its percent, a finished one to the top.
     var PIECE_FULL = { done: 1, skipped: 1, failed: 1, stopped: 1 };
     // Colour is never the only sign of a state: an icon in the label, and the line's pattern.
-    var PIECE_ICONS = { done: '\u2713', skipped: '\u2713', failed: '\u2715', stopped: '\u23F8', held: '\u23F8', omitted: '\u2298' };
+    // The cell's colour says its state; no symbols on the map.
+    var PIECE_ICONS = {};
     var PIECE_DASH = window.arnisPieceStyle.dash;
     var lastPieces = [];
     var pieceHalo = false;

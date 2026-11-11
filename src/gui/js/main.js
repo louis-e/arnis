@@ -46,6 +46,9 @@ function fillBboxSelectionVars(element) {
 
 // Helper function to set bbox selection info text and track it for language changes
 async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color, vars) {
+  // Only a size warning brings the Advanced link back (displayBboxSizeStatus).
+  const cta = document.getElementById('bbox-features-cta');
+  if (cta) cta.hidden = true;
   currentBboxSelectionKey = localizationKey;
   currentBboxSelectionColor = color;
   currentBboxSelectionVars = vars || null;
@@ -834,14 +837,6 @@ function setCelestialBody(body) {
   refreshBboxSelectionInfo();
 }
 
-// Settings Expand or "Select this area" changed stay changed: the line under the bar names them.
-function sayChangedSettings(names) {
-  const info = document.getElementById('progress-info');
-  if (!names.length || !info || !generationButtonEnabled) return;
-  info.textContent = oneWorldText('plan_settings_changed', 'Changed in Settings: {list}.', { list: names.join(', ') });
-  info.style.color = "#ececec";
-}
-
 // The last search result used for a selection, and { name, path } of the run that builds a One
 // World's first land, taken when it starts.
 let searchedPlace = null;
@@ -868,7 +863,7 @@ function registerMessageEvent() {
 
     // "Select this area" on a search result: the area and a ring of regions around it.
     if (event.data && event.data.type === 'selectArea' && event.source === getMapFrame()?.contentWindow) {
-      sayChangedSettings(selectWithRing(event.data.bounds));
+      selectWithRing(event.data.bounds);
     }
 
     // The search result the selection came from: its name goes to the world a build makes.
@@ -1511,7 +1506,7 @@ function initSettings() {
   document.getElementById('plan-expand-button').addEventListener('click', () => {
     if (!builtAreas.length) return;
     const pick = (f, key) => f(...builtAreas.map((a) => a[key]));
-    sayChangedSettings(selectWithRing([pick(Math.min, 'min_lat'), pick(Math.min, 'min_lon'), pick(Math.max, 'max_lat'), pick(Math.max, 'max_lon')], true));
+    selectWithRing([pick(Math.min, 'min_lat'), pick(Math.min, 'min_lon'), pick(Math.max, 'max_lat'), pick(Math.max, 'max_lon')], true);
     askRunConfirm();
   });
   // Cancel (or Escape) closes the panel and gives the focus back to Start.
@@ -2954,7 +2949,8 @@ function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
     // The plan is being recomputed: neither warn nor offer pieces until it answers.
     setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   } else if (pieces) {
-    setBboxSelectionInfo(bboxSelectionElement, pieces.single ? "area_single_info" : "area_pieces_info", "#ececec", pieces);
+    // The plan under the button says how it is built; this line stays what it always was.
+    setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   } else if ((hasPlanMask() || outline) && !selectedShapes) {
     // An outline only leaves pieces out: a build in one go (One World off too) builds the whole box.
     setBboxSelectionInfo(bboxSelectionElement, "area_outline_needs_pieces", "#fecc44");
@@ -2992,7 +2988,8 @@ function useMeldPieces() {
     workers.value = "auto";
     workers.dispatchEvent(new Event("change", { bubbles: true }));
   }
-  workers.scrollIntoView({ block: "center" });
+  // Once the page is up and the section is shown: the sidebar's own jump, so the entry lights up too.
+  setTimeout(() => document.querySelector('.settings-nav-item[data-target="settings-section-scale"]')?.click(), 80);
 }
 
 // Blocks, and so memory, grow with the square of the scale; Moon and Mars use a fixed one.

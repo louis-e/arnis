@@ -797,6 +797,5 @@
   "shapes_rectangles_only": "O Mundo único gera retângulos. Desenhe um retângulo ou desative o Mundo único.",
   "map_tool_shape_rectangles_only": "O Mundo único gera apenas retângulos.",
   "hold_again": "Press again to confirm",
-  "run_paused": "Paused.",
-  "plan_settings_changed": "Changed in Settings: {list}."
+  "run_paused": "Paused."
 }
