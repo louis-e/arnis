@@ -1,15 +1,25 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::field_texture::PLOT_PLANTS;
+use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::ProcessedWay;
+use crate::water_depth::{carve_water_column, BigWaterField};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
+
+/// What a channel needs to dig its `--river-bed`; the field marks no river when that is off.
+pub struct ChannelBed<'a> {
+    pub field: &'a BigWaterField,
+    pub road_mask: &'a RoadMaskBitmap,
+    pub tunnel_footprint: &'a RoadMaskBitmap,
+}
 
 /// `width_cap` narrows every channel (`--water-detail scaled` on small maps).
 pub fn generate_waterways(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     width_cap: Option<i32>,
+    bed: &ChannelBed,
 ) {
     if let Some(waterway_type) = element.tags.get("waterway") {
         // waterway=* structures are not channels; outlining a dam draws canals down it.
@@ -57,7 +67,7 @@ pub fn generate_waterways(
                     y0.min(y1)
                 };
                 let seg_water_y = ramped.min(editor.get_water_level(bx, bz));
-                create_water_channel(editor, bx, bz, waterway_width, seg_water_y);
+                create_water_channel(editor, bx, bz, waterway_width, seg_water_y, bed);
             }
         }
     }
@@ -142,6 +152,7 @@ fn create_water_channel(
     center_z: i32,
     width: i32,
     target_water_y: i32,
+    bed: &ChannelBed,
 ) {
     const BANK_TOLERANCE: i32 = 2;
     let half_width = width / 2;
@@ -168,6 +179,15 @@ fn create_water_channel(
 
                 if let Some(water_y) = water_y {
                     editor.set_block_absolute(WATER, x, water_y, z, None, None);
+                    // The river's depth and bed, unless a road or a bore owns the column.
+                    if bed.field.is_river(x, z)
+                        && !bed.road_mask.contains(x, z)
+                        && !bed.tunnel_footprint.contains(x, z)
+                        && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
+                    {
+                        let depth = bed.field.depth_at(x, z);
+                        carve_water_column(editor, x, z, water_y, depth, bed.road_mask, bed.field);
+                    }
 
                     // Clear vegetation above the water, a sunflower's top half too.
                     editor.set_block_absolute(AIR, x, water_y + 1, z, Some(PLOT_PLANTS), None);
@@ -233,6 +253,18 @@ mod waterway_profile_tests {
         }
     }
 
+    fn no_bed() -> ChannelBed<'static> {
+        static FIELD: std::sync::LazyLock<BigWaterField> =
+            std::sync::LazyLock::new(BigWaterField::empty);
+        static NONE: std::sync::LazyLock<RoadMaskBitmap> =
+            std::sync::LazyLock::new(RoadMaskBitmap::new_empty);
+        ChannelBed {
+            field: &FIELD,
+            road_mask: &NONE,
+            tunnel_footprint: &NONE,
+        }
+    }
+
     fn water_ys(editor: &WorldEditor, x: i32, z: i32) -> Vec<i32> {
         (-8..40)
             .filter(|&y| editor.check_for_block_absolute(x, y, z, Some(&[WATER]), None))
@@ -243,7 +275,7 @@ mod waterway_profile_tests {
     fn a_dropping_channel_follows_the_terrain_instead_of_pooling_at_the_lower_node() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 16.0, 0.25);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None);
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);
@@ -265,7 +297,7 @@ mod waterway_profile_tests {
     fn a_flat_channel_sits_at_the_single_shared_level() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None);
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
 
         for z in FIRST_Z..=LAST_Z {
             assert_eq!(
@@ -280,7 +312,7 @@ mod waterway_profile_tests {
     fn a_one_block_drop_moves_the_upper_half_by_at_most_one_block() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.02);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None);
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);

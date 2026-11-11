@@ -44,8 +44,8 @@ fn build_capped(
     elements: &[ProcessedElement],
     scale: f64,
     cap: Option<i32>,
-    lc: &dyn Fn(i32, i32) -> bool,
-    legacy: &dyn Fn(i32, i32) -> i32,
+    lc: &(dyn Fn(i32, i32) -> bool + Sync),
+    legacy: &(dyn Fn(i32, i32) -> i32 + Sync),
 ) -> RiverBedField {
     build_field(
         elements,
@@ -62,8 +62,8 @@ fn build_capped(
 fn build(
     elements: &[ProcessedElement],
     scale: f64,
-    lc: &dyn Fn(i32, i32) -> bool,
-    legacy: &dyn Fn(i32, i32) -> i32,
+    lc: &(dyn Fn(i32, i32) -> bool + Sync),
+    legacy: &(dyn Fn(i32, i32) -> i32 + Sync),
 ) -> RiverBedField {
     build_capped(elements, scale, None, lc, legacy)
 }
@@ -82,32 +82,121 @@ fn straight_polygon_river(width: i32) -> Vec<ProcessedElement> {
 }
 
 #[test]
-fn cross_section_is_a_smooth_symmetric_u() {
-    // Centre depth off the cap table: hw 3 -> 1.2, hw 6 -> 1.9, hw 20 -> 4.5.
+fn cross_section_is_a_u_that_deepens_with_width() {
+    // Centre depth off the cap table: hw 3 -> 1.2, hw 6 -> 1.9, hw 20 -> 4.5; pools and
+    // ripples move it by less than a block.
     for (width, want_centre) in [(6i32, 1i32), (12, 2), (40, 5)] {
         let f = build(&straight_polygon_river(width), 1.0, &no_lc, &no_legacy);
         let x0 = 100 - width / 2;
-        let row: Vec<_> = (x0 - 2..=x0 + width + 1)
-            .map(|x| f.depth_override(x, 100))
-            .collect();
-        assert_eq!(row[0], None, "w={width}: override outside the polygon");
-        assert_eq!(*row.last().unwrap(), None, "w={width}: override outside");
+        for z in [60, 100, 140] {
+            let row: Vec<_> = (x0 - 2..=x0 + width + 1)
+                .map(|x| f.depth_override(x, z))
+                .collect();
+            assert_eq!(row[0], None, "w={width}: override outside the polygon");
+            assert_eq!(*row.last().unwrap(), None, "w={width}: override outside");
 
-        let inside: Vec<i32> = row.iter().flatten().copied().collect();
-        assert_eq!(inside.len(), width as usize, "w={width}: mask width");
-        assert_eq!((inside[0], *inside.last().unwrap()), (0, 0), "w={width}");
-        for i in 1..inside.len() {
-            assert!(
-                (inside[i] - inside[i - 1]).abs() <= 1,
-                "w={width}: {inside:?}"
-            );
-            if i < inside.len() / 2 {
-                assert!(inside[i] >= inside[i - 1], "w={width}: {inside:?}");
+            let inside: Vec<i32> = row.iter().flatten().copied().collect();
+            assert_eq!(inside.len(), width as usize, "w={width}: mask width");
+            // A wide river wades in; a canal may drop a block at its wall.
+            let bank = inside[0].max(*inside.last().unwrap());
+            assert!(bank <= i32::from(width < 20), "w={width}: {inside:?}");
+            for i in 1..inside.len() {
+                assert!(
+                    (inside[i] - inside[i - 1]).abs() <= 1,
+                    "w={width}: {inside:?}"
+                );
             }
+            let centre = inside[inside.len() / 2];
+            assert!((centre - want_centre).abs() <= 1, "w={width}: {inside:?}");
+            assert!(*inside.iter().max().unwrap() <= want_centre + 1);
         }
-        let mirrored: Vec<i32> = inside.iter().rev().copied().collect();
-        assert_eq!(inside, mirrored, "w={width}: asymmetric");
-        assert_eq!(*inside.iter().max().unwrap(), want_centre, "{inside:?}");
+    }
+}
+
+#[test]
+fn a_line_only_stream_is_shallow_at_its_edges() {
+    // An untagged stream draws 5 wide: one block of water at the edges, two in the middle.
+    let els = vec![way(1, &[("waterway", "stream")], &[(100, 20), (100, 180)])];
+    let f = build(&els, 1.0, &no_lc, &no_legacy);
+    let row: Vec<_> = (97..=103).map(|x| f.depth_override(x, 100)).collect();
+    assert_eq!(
+        row,
+        [None, Some(0), Some(1), Some(1), Some(1), Some(0), None]
+    );
+}
+
+#[test]
+fn tiles_give_the_field_of_one_lattice() {
+    // A river polygon, a lake it enters, a canal line and land-cover water over three tiles.
+    let els = vec![
+        way(
+            1,
+            &[("natural", "water"), ("water", "river")],
+            &[
+                (40, 300),
+                (700, 180),
+                (1250, 520),
+                (1250, 600),
+                (700, 260),
+                (40, 380),
+                (40, 300),
+            ],
+        ),
+        rect(2, &[("natural", "water")], 480, 560, 40, 215),
+        way(
+            3,
+            &[("waterway", "canal"), ("width", "14")],
+            &[(100, 650), (530, 500), (900, 660), (1290, 640)],
+        ),
+        way(4, &[("waterway", "stream")], &[(505, 20), (520, 680)]),
+    ];
+    let lc = |x: i32, z: i32| (x - 900).abs() < 40 && (z - 600).abs() < 90;
+    let legacy = |x: i32, z: i32| (x + z).rem_euclid(4);
+    let inp = FieldInputs {
+        is_lc_water: &lc,
+        legacy_depth: &legacy,
+        bb: (0, 1299, 0, 699),
+        scale: 1.0,
+        channel_width_cap: None,
+    };
+    let tiled = build_field(&els, &inp);
+    // A halo past the whole area: every tile works on the same single lattice.
+    let whole = build_field_tiled(&els, &inp, 4096);
+    assert!(tiled.override_count() > 50_000);
+    for z in 0..700 {
+        for x in 0..1300 {
+            assert_eq!(
+                tiled.depth_override(x, z),
+                whole.depth_override(x, z),
+                "({x},{z})"
+            );
+        }
+    }
+}
+
+#[test]
+fn bed_shifts_from_earth_to_gravel_without_bands() {
+    use crate::block_definitions::{COARSE_DIRT, DIRT, GRAVEL, MUD};
+    let share = |depth: i32, of: &[Block]| {
+        let n = (0..120)
+            .flat_map(|x| (0..120).map(move |z| (x, z)))
+            .filter(|&(x, z)| of.contains(&bed_blocks(x, z, depth, false).0))
+            .count();
+        n as f64 / 14_400.0
+    };
+    let earth = [DIRT, COARSE_DIRT, MUD];
+    assert!(share(0, &earth) > 0.35, "{}", share(0, &earth));
+    assert!(share(5, &earth) < 0.12, "{}", share(5, &earth));
+    assert!(share(5, &[GRAVEL]) > share(0, &[GRAVEL]) + 0.2);
+    // Neighbouring depths share most of their blocks, so a depth step is no material edge.
+    for depth in 0..6 {
+        let same = (0..120)
+            .flat_map(|x| (0..120).map(move |z| (x, z)))
+            .filter(|&(x, z)| {
+                bed_blocks(x, z, depth, false).0 == bed_blocks(x, z, depth + 1, false).0
+            })
+            .count();
+        assert!(same > 14_400 * 6 / 10, "depth {depth}: {same}");
     }
 }
 
@@ -178,7 +267,7 @@ fn riverbank_ways_and_relations_are_rivers() {
         .filter_map(|x| f.depth_override(x, 100))
         .collect();
     assert_eq!(row.len(), 40);
-    assert_eq!(*row.iter().max().unwrap(), 5, "{row:?}");
+    assert!((4..=5).contains(row.iter().max().unwrap()), "{row:?}");
 
     let ring = match &rect(2, &[], 80, 119, 20, 180) {
         ProcessedElement::Way(w) => std::sync::Arc::new(w.clone()),
@@ -266,7 +355,7 @@ fn depth_stays_capped_at_every_scale() {
         let p = build(&straight_polygon_river(90), scale, &no_lc, &no_legacy);
         assert!(p.max_override_depth() <= MAX_WATER_DEPTH, "scale {scale}");
     }
-    assert!(river_profile_depth(3.0, 0.0, 0.2).is_finite());
+    assert!(river_profile_depth(3.0, 0.0).is_finite());
 }
 
 #[test]
@@ -281,7 +370,7 @@ fn a_width_cap_narrows_the_line_mask() {
 #[test]
 fn the_profile_is_flat_at_both_ends_and_never_steps_more_than_a_block() {
     let hw = 30.0;
-    let p = |d: f64| river_profile_depth(d, hw, 1.0);
+    let p = |d: f64| river_profile_depth(d, hw);
     let mid = p(hw * 0.55) - p(hw * 0.45);
     assert!(p(hw * 0.1) - p(0.0) < mid);
     assert!(p(hw) - p(hw * 0.9) < mid);

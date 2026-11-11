@@ -476,6 +476,11 @@ fn process_element(
                         editor,
                         way,
                         args.water.water_detail.channel_width_cap(args.scale),
+                        &waterways::ChannelBed {
+                            field: big_water_field,
+                            road_mask,
+                            tunnel_footprint,
+                        },
                     );
                 }
             } else if way.tags.contains_key("railway") {

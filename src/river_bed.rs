@@ -1,18 +1,12 @@
-//! River-only U-shaped bed (`--river-bed v1`).
+//! `--river-bed v1`: a U-shaped bed for rivers, canals and streams, deeper where they are wider.
 //!
-//! Overrides the carve depth of columns inside a river mask with a smoothstep profile scaled
-//! by the river's width, and blends back to the legacy depth where the river meets water it
-//! does not own (a lake, the sea, ESA-only water).
-//!
-//! - Off builds an empty field, so `BigWaterField::depth_at` is unchanged.
-//! - Lakes, oceans and ESA-only water keep the legacy bed. A river centreline drawn through a
-//!   mapped lake is clipped out of the mask, and one buried in wide land-cover water with no
-//!   river polygon behind it is dropped.
-//! - Depth only: the override is read by the existing carve paths, so it never carves a
-//!   column that was not carved before.
-//!
-//! No RNG: the field is a pure function of element geometry, block coordinates and scale.
+//! Depth only, read by the existing carve paths. Lakes, the sea and unmapped land-cover water
+//! keep their bed, and a river blends to it where the two meet. Everything is a function of
+//! element geometry, block coordinates and scale, so pieces and tiles agree.
 
+use crate::block_definitions::{
+    Block, ANDESITE, CLAY, COARSE_DIRT, DIRT, GRAVEL, MOSSY_COBBLESTONE, MUD, SAND, STONE,
+};
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::water_areas::PolygonEdges;
@@ -20,9 +14,11 @@ use crate::element_processing::waterways::{
     is_channel_waterway, is_underground_waterway, waterway_width,
 };
 use crate::ground::Ground;
-use crate::land_cover::LC_WATER;
+use crate::ground_generation::ground_noise;
+use crate::land_cover::{coord_hash, LC_WATER};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::water_depth::{chamfer_3_4_dt, BigWaterField, MAX_WATER_DEPTH};
+use rayon::prelude::*;
 use std::collections::HashMap;
 
 /// `waterway=*` values that get a river profile. Ditches and drains are too narrow to matter.
@@ -45,11 +41,14 @@ const DT_MAX: u8 = u8::MAX;
 /// Chamfer units per block (the 3-4 chamfer's straight step).
 const DT_UNITS_PER_BLOCK: f64 = 3.0;
 
-/// Lattice cell cap. Past it the field is dropped and the legacy bed is used.
-// ponytail: one lattice per run (~25 B/cell peak); per-tile lattices if single runs this big matter.
-const MAX_LATTICE_CELLS: usize = 64_000_000;
+/// The field is built and kept in tiles this wide, and only where a river runs.
+const TILE_SHIFT: u32 = 9;
+const TILE: usize = 1 << TILE_SHIFT;
 
-/// `--river-bed` value. Versioned: a retune of the profile ships as a new value.
+/// A tile cell the river mask does not cover.
+const NO_RIVER: u8 = u8::MAX;
+
+/// `--river-bed` value.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RiverBed {
     /// The bed every water body gets
@@ -59,52 +58,83 @@ pub enum RiverBed {
     V1,
 }
 
-/// Baked per-block river bed depth over a lattice around the river geometry.
+/// Per-block river bed depth, one byte a cell in the tiles a river touches.
 #[derive(Default)]
 pub struct RiverBedField {
-    lat: Lat,
-    depth: Vec<u8>,
-    mask: Vec<bool>,
+    tx0: i32,
+    tz0: i32,
+    tw: usize,
+    th: usize,
+    tiles: Vec<Option<Box<[u8]>>>,
 }
 
 impl RiverBedField {
+    pub fn is_empty(&self) -> bool {
+        self.tiles.iter().all(Option::is_none)
+    }
+
     /// River bed depth at this column, or `None` where the legacy bed owns it.
     #[inline]
     pub fn depth_override(&self, x: i32, z: i32) -> Option<i32> {
-        let i = self.lat.idx(x, z)?;
-        self.mask[i].then(|| i32::from(self.depth[i]))
+        let tx = (x >> TILE_SHIFT) - self.tx0;
+        let tz = (z >> TILE_SHIFT) - self.tz0;
+        if tx < 0 || tz < 0 || tx as usize >= self.tw || tz as usize >= self.th {
+            return None;
+        }
+        let tile = self.tiles[tz as usize * self.tw + tx as usize].as_deref()?;
+        let m = TILE as i32 - 1;
+        let d = tile[(((z & m) as usize) << TILE_SHIFT) | (x & m) as usize];
+        (d != NO_RIVER).then_some(i32::from(d))
     }
 
     /// A river of one depth over a rectangle, for tests of the carve.
     #[cfg(test)]
     pub(crate) fn uniform(min_x: i32, min_z: i32, w: usize, h: usize, depth: u8) -> Self {
+        let (max_x, max_z) = (min_x + w as i32 - 1, min_z + h as i32 - 1);
+        let (tx0, tz0) = (min_x >> TILE_SHIFT, min_z >> TILE_SHIFT);
+        let tw = ((max_x >> TILE_SHIFT) - tx0 + 1) as usize;
+        let th = ((max_z >> TILE_SHIFT) - tz0 + 1) as usize;
+        let mut tiles: Vec<Option<Box<[u8]>>> = vec![None; tw * th];
+        let m = TILE as i32 - 1;
+        for z in min_z..=max_z {
+            for x in min_x..=max_x {
+                let t =
+                    ((z >> TILE_SHIFT) - tz0) as usize * tw + ((x >> TILE_SHIFT) - tx0) as usize;
+                let tile = tiles[t].get_or_insert_with(|| vec![NO_RIVER; TILE * TILE].into());
+                tile[(((z & m) as usize) << TILE_SHIFT) | (x & m) as usize] = depth;
+            }
+        }
         Self {
-            lat: Lat { min_x, min_z, w, h },
-            depth: vec![depth; w * h],
-            mask: vec![true; w * h],
+            tx0,
+            tz0,
+            tw,
+            th,
+            tiles,
         }
     }
 
     #[cfg(test)]
+    fn overrides(&self) -> impl Iterator<Item = u8> + '_ {
+        self.tiles
+            .iter()
+            .flatten()
+            .flat_map(|t| t.iter().copied())
+            .filter(|&d| d != NO_RIVER)
+    }
+
+    #[cfg(test)]
     fn override_count(&self) -> usize {
-        self.mask.iter().filter(|&&m| m).count()
+        self.overrides().count()
     }
 
     #[cfg(test)]
     fn max_override_depth(&self) -> i32 {
-        self.mask
-            .iter()
-            .zip(&self.depth)
-            .filter(|(&m, _)| m)
-            .map(|(_, &d)| i32::from(d))
-            .max()
-            .unwrap_or(0)
+        self.overrides().map(i32::from).max().unwrap_or(0)
     }
 }
 
-/// Build the field once per run. `bwf` supplies the legacy depth the confluence band blends
-/// to. `clip_bbox` is the area plus the One World clip pad: element geometry is complete
-/// inside it, so the field reads the same banks on both sides of a seam.
+/// Build the field once per run. `clip_bbox` is the area plus the One World clip pad, inside
+/// which element geometry is complete.
 #[allow(clippy::too_many_arguments)]
 pub fn compute_river_bed_field(
     mode: RiverBed,
@@ -120,8 +150,7 @@ pub fn compute_river_bed_field(
         return RiverBedField::default();
     }
     let (off_x, off_z) = (xzbbox.min_x(), xzbbox.min_z());
-    // Reads past the area repeat its border row; that only reaches the blend band and the
-    // embedding test near a seam.
+    // Reads past the area repeat its border row.
     let is_lc_water =
         |x: i32, z: i32| ground.cover_class(XZPoint::new(x - off_x, z - off_z)) == LC_WATER;
     let legacy_depth = |x: i32, z: i32| bwf.legacy_depth_at(x, z);
@@ -144,8 +173,8 @@ pub fn compute_river_bed_field(
 
 /// Everything the build reads besides geometry, behind closures so tests need no `Ground`.
 struct FieldInputs<'a> {
-    is_lc_water: &'a dyn Fn(i32, i32) -> bool,
-    legacy_depth: &'a dyn Fn(i32, i32) -> i32,
+    is_lc_water: &'a (dyn Fn(i32, i32) -> bool + Sync),
+    legacy_depth: &'a (dyn Fn(i32, i32) -> i32 + Sync),
     /// (min_x, max_x, min_z, max_z) of the region whose geometry is complete.
     bb: (i32, i32, i32, i32),
     scale: f64,
@@ -154,8 +183,22 @@ struct FieldInputs<'a> {
 }
 
 struct PolyRings {
-    outers: Vec<Vec<XZPoint>>,
-    inners: Vec<Vec<XZPoint>>,
+    edges: PolygonEdges,
+    /// (min_x, max_x, min_z, max_z) of the outer rings.
+    bounds: (i32, i32, i32, i32),
+}
+
+impl PolyRings {
+    fn new(outers: Vec<Vec<XZPoint>>, inners: Vec<Vec<XZPoint>>) -> Self {
+        let mut b = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+        for p in outers.iter().flatten() {
+            b = (b.0.min(p.x), b.1.max(p.x), b.2.min(p.z), b.3.max(p.z));
+        }
+        Self {
+            edges: PolygonEdges::new(&outers, &inners),
+            bounds: b,
+        }
+    }
 }
 
 struct LineRiver<'a> {
@@ -164,8 +207,30 @@ struct LineRiver<'a> {
     hw_stamp: i32,
 }
 
+/// What one tile has to read: indices into the classified geometry.
+#[derive(Default, Clone)]
+struct TileWork {
+    has_river: bool,
+    lines: Vec<u32>,
+    rivers: Vec<u32>,
+    lakes: Vec<u32>,
+}
+
+/// Window of the polygon half-width estimate, in blocks.
+fn hw_window(scale: f64) -> usize {
+    ((16.0 * scale).round() as usize).clamp(1, 48)
+}
+
+/// How far a cell's depth reads: the saturated bank distance, the window and the tent.
+fn reach(scale: f64) -> i32 {
+    (f64::from(DT_MAX) / DT_UNITS_PER_BLOCK).ceil() as i32 + hw_window(scale) as i32 + 3
+}
+
 fn build_field(elements: &[ProcessedElement], inp: &FieldInputs) -> RiverBedField {
-    let scale = inp.scale;
+    build_field_tiled(elements, inp, reach(inp.scale))
+}
+
+fn build_field_tiled(elements: &[ProcessedElement], inp: &FieldInputs, halo: i32) -> RiverBedField {
     let mut lines = Vec::new();
     let mut river_polys = Vec::new();
     let mut nonriver_polys = Vec::new();
@@ -176,28 +241,138 @@ fn build_field(elements: &[ProcessedElement], inp: &FieldInputs) -> RiverBedFiel
         &mut river_polys,
         &mut nonriver_polys,
     );
-    if lines.is_empty() && river_polys.is_empty() {
+    let bb = inp.bb;
+    if (lines.is_empty() && river_polys.is_empty()) || bb.0 > bb.1 || bb.2 > bb.3 {
         return RiverBedField::default();
     }
-    // Room for the banks, the half-width window and the confluence band around the river.
-    let halo = ((64.0 * scale).ceil() as i32 + 32).clamp(1, 96);
-    let Some(lat) = lattice_for(&lines, &river_polys, halo, inp.bb) else {
+    let (tx0, tz0) = (bb.0 >> TILE_SHIFT, bb.2 >> TILE_SHIFT);
+    let tw = ((bb.1 >> TILE_SHIFT) - tx0 + 1) as usize;
+    let th = ((bb.3 >> TILE_SHIFT) - tz0 + 1) as usize;
+
+    // Tiles a (min_x, max_x, min_z, max_z) box grown by `pad` overlaps.
+    let tiles_of = |b: (i32, i32, i32, i32), pad: i32| {
+        let x0 = (b.0.saturating_sub(pad).max(bb.0) >> TILE_SHIFT) - tx0;
+        let x1 = (b.1.saturating_add(pad).min(bb.1) >> TILE_SHIFT) - tx0;
+        let z0 = (b.2.saturating_sub(pad).max(bb.2) >> TILE_SHIFT) - tz0;
+        let z1 = (b.3.saturating_add(pad).min(bb.3) >> TILE_SHIFT) - tz0;
+        (z0..=z1).flat_map(move |tz| (x0..=x1).map(move |tx| tz as usize * tw + tx as usize))
+    };
+    let mut work = vec![TileWork::default(); tw * th];
+    for (i, lr) in lines.iter().enumerate() {
+        let r = lr.hw_stamp + 1;
+        for pair in lr.way.nodes.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            let seg = (a.x.min(b.x), a.x.max(b.x), a.z.min(b.z), a.z.max(b.z));
+            for t in tiles_of(seg, r) {
+                work[t].has_river = true;
+            }
+            for t in tiles_of(seg, r + halo) {
+                if work[t].lines.last() != Some(&(i as u32)) {
+                    work[t].lines.push(i as u32);
+                }
+            }
+        }
+    }
+    for (i, p) in river_polys.iter().enumerate() {
+        for t in tiles_of(p.bounds, 0) {
+            work[t].has_river = true;
+        }
+        for t in tiles_of(p.bounds, halo) {
+            work[t].rivers.push(i as u32);
+        }
+    }
+    for (i, p) in nonriver_polys.iter().enumerate() {
+        for t in tiles_of(p.bounds, halo) {
+            work[t].lakes.push(i as u32);
+        }
+    }
+
+    let geometry = Geometry {
+        lines: &lines,
+        river_polys: &river_polys,
+        nonriver_polys: &nonriver_polys,
+    };
+    let built: Vec<(usize, Box<[u8]>)> = work
+        .par_iter()
+        .enumerate()
+        .filter(|(_, w)| w.has_river)
+        .filter_map(|(t, w)| {
+            let core_x = (tx0 + (t % tw) as i32) << TILE_SHIFT;
+            let core_z = (tz0 + (t / tw) as i32) << TILE_SHIFT;
+            build_tile(&geometry, w, inp, core_x, core_z, halo).map(|d| (t, d))
+        })
+        .collect();
+    if built.is_empty() {
         return RiverBedField::default();
+    }
+    let mut tiles: Vec<Option<Box<[u8]>>> = vec![None; tw * th];
+    for (t, d) in built {
+        tiles[t] = Some(d);
+    }
+    RiverBedField {
+        tx0,
+        tz0,
+        tw,
+        th,
+        tiles,
+    }
+}
+
+struct Geometry<'a> {
+    lines: &'a [LineRiver<'a>],
+    river_polys: &'a [PolyRings],
+    nonriver_polys: &'a [PolyRings],
+}
+
+/// Depths of the tile at (`core_x`, `core_z`), or `None` when no river crosses it. Worked out
+/// on the tile grown by `halo`, which holds everything its cells read, so the result does not
+/// depend on the tiling.
+fn build_tile(
+    geo: &Geometry,
+    work: &TileWork,
+    inp: &FieldInputs,
+    core_x: i32,
+    core_z: i32,
+    halo: i32,
+) -> Option<Box<[u8]>> {
+    let scale = inp.scale;
+    let bb = inp.bb;
+    let last = TILE as i32 - 1;
+    // Clipped where geometry ends, so a truncated river is never a seeded bank.
+    let min_x = (core_x - halo).max(bb.0);
+    let max_x = (core_x + last + halo).min(bb.1);
+    let min_z = (core_z - halo).max(bb.2);
+    let max_z = (core_z + last + halo).min(bb.3);
+    let lat = Lat {
+        min_x,
+        min_z,
+        w: (max_x - min_x + 1) as usize,
+        h: (max_z - min_z + 1) as usize,
     };
     let n = lat.w * lat.h;
+    // The tile's own cells, in lattice coordinates.
+    let ci = (core_x.max(bb.0) - min_x) as usize..=((core_x + last).min(bb.1) - min_x) as usize;
+    let cj = (core_z.max(bb.2) - min_z) as usize..=((core_z + last).min(bb.3) - min_z) as usize;
+    let any_in_core = |m: &[bool]| {
+        cj.clone()
+            .any(|j| m[j * lat.w + ci.start()..=j * lat.w + ci.end()].contains(&true))
+    };
 
     let mut line_mask = vec![false; n];
     let mut hw_line = vec![0u8; n];
-    for lr in &lines {
-        stamp_line(lr, &lat, &mut line_mask, &mut hw_line);
+    for &i in &work.lines {
+        stamp_line(&geo.lines[i as usize], &lat, &mut line_mask, &mut hw_line);
     }
     let mut poly_mask = vec![false; n];
-    for p in &river_polys {
-        rasterize_poly(p, &lat, &mut poly_mask);
+    for &i in &work.rivers {
+        rasterize_poly(&geo.river_polys[i as usize], &lat, &mut poly_mask);
+    }
+    if !any_in_core(&line_mask) && !any_in_core(&poly_mask) {
+        return None;
     }
     let mut nonriver_mask = vec![false; n];
-    for p in &nonriver_polys {
-        rasterize_poly(p, &lat, &mut nonriver_mask);
+    for &i in &work.lakes {
+        rasterize_poly(&geo.nonriver_polys[i as usize], &lat, &mut nonriver_mask);
     }
     let mut lc_water = vec![false; n];
     for j in 0..lat.h {
@@ -236,18 +411,13 @@ fn build_field(elements: &[ProcessedElement], inp: &FieldInputs) -> RiverBedFiel
         }
     }
 
-    let mut mask = vec![false; n];
-    for i in 0..n {
-        if line_mask[i] || poly_mask[i] {
-            mask[i] = true;
-        }
-    }
-    if !mask.contains(&true) {
-        return RiverBedField::default();
+    let mask: Vec<bool> = (0..n).map(|i| line_mask[i] || poly_mask[i]).collect();
+    drop(line_mask);
+    if !any_in_core(&mask) {
+        return None;
     }
 
-    // Distance from the bank. The lattice ends where geometry is clipped, so a truncated
-    // river end is the lattice edge, never a seeded bank that would pinch the bed shut.
+    // Distance from the bank.
     let mut dt: Vec<u8> = (0..n).map(|i| if mask[i] { DT_MAX } else { 0 }).collect();
     chamfer_3_4_dt(&mut dt, lat.w, lat.h);
 
@@ -262,9 +432,8 @@ fn build_field(elements: &[ProcessedElement], inp: &FieldInputs) -> RiverBedFiel
             }
         })
         .collect();
-    let win = ((16.0 * scale).round() as usize).max(1);
     let poly_hw = if poly_mask.contains(&true) {
-        windowed_max_2d(&d_in_mask, lat.w, lat.h, win)
+        windowed_max_2d(&d_in_mask, lat.w, lat.h, hw_window(scale))
     } else {
         Vec::new()
     };
@@ -282,9 +451,9 @@ fn build_field(elements: &[ProcessedElement], inp: &FieldInputs) -> RiverBedFiel
         let hw = hw.max(1.0);
         hw_field[i] = hw as f32;
         let d_blocks = f64::from(dt[i]) / DT_UNITS_PER_BLOCK;
-        depth_f[i] = river_profile_depth(d_blocks, hw, scale) as f32;
+        depth_f[i] = river_profile_depth(d_blocks, hw) as f32;
     }
-    drop((dt, d_in_mask, poly_hw));
+    drop((dt, d_in_mask, poly_hw, poly_mask, hw_line));
     // Rounds the chamfer's octagonal facets off the depth contours.
     let depth_f = tent3(&depth_f, lat.w, lat.h);
 
@@ -303,36 +472,92 @@ fn build_field(elements: &[ProcessedElement], inp: &FieldInputs) -> RiverBedFiel
             }
         }
     }
+    drop((nonriver_mask, removed_stamp, lc_water));
     let has_seed = m_dt.contains(&0);
     if has_seed {
         chamfer_3_4_dt(&mut m_dt, lat.w, lat.h);
     }
 
-    let mut depth = vec![0u8; n];
-    for j in 0..lat.h {
-        for i in 0..lat.w {
+    let mut out: Box<[u8]> = vec![NO_RIVER; TILE * TILE].into();
+    for j in cj {
+        for i in ci.clone() {
             let idx = j * lat.w + i;
             if !mask[idx] {
                 continue;
             }
-            let river = f64::from(depth_f[idx]);
+            let (x, z) = (lat.min_x + i as i32, lat.min_z + j as i32);
+            let river = natural_depth(f64::from(depth_f[idx]), x, z);
             let blended = if has_seed {
                 let band = (2.0 * f64::from(hw_field[idx])).clamp(BAND_MIN, BAND_MAX);
                 let m = f64::from(m_dt[idx]) / DT_UNITS_PER_BLOCK;
                 let wgt = smoothstep((m / band).clamp(0.0, 1.0));
-                let legacy = f64::from((inp.legacy_depth)(
-                    lat.min_x + i as i32,
-                    lat.min_z + j as i32,
-                ));
+                let legacy = f64::from((inp.legacy_depth)(x, z));
                 legacy + (river - legacy) * wgt
             } else {
                 river
             };
-            depth[idx] = blended.round().clamp(0.0, f64::from(MAX_WATER_DEPTH)) as u8;
+            let depth = blended.round().clamp(0.0, f64::from(MAX_WATER_DEPTH)) as u8;
+            out[(((z - core_z) as usize) << TILE_SHIFT) | (x - core_x) as usize] = depth;
         }
     }
+    Some(out)
+}
 
-    RiverBedField { lat, depth, mask }
+const SALT_POOL: u32 = 0x5256_0001;
+const SALT_RIPPLE: u32 = 0x5256_0002;
+const SALT_ZONE: u32 = 0x5256_0003;
+const SALT_EARTH: u32 = 0x5256_0004;
+const SALT_SAND: u32 = 0x5256_0005;
+const SALT_ROCK: u32 = 0x5256_0006;
+const SALT_CLAY: u32 = 0x5256_0007;
+const SALT_SILT: u32 = 0x5256_0008;
+
+/// Pools and shallows along the river, and a ripple that bends the depth contours off the
+/// bank lines. The bank itself stays at the profile's depth.
+fn natural_depth(d: f64, x: i32, z: i32) -> f64 {
+    let pool = 0.88 + 0.24 * ground_noise(x, z, 36, SALT_POOL);
+    let ripple = (ground_noise(x, z, 5, SALT_RIPPLE) - 0.5) * 0.8;
+    d * pool + ripple * d.min(1.0)
+}
+
+/// Bed and the block under it for a river column `depth` deep; `sandy` beside a beach. Earth
+/// at the banks gives way to sand, then gravel and rock with depth. Each material has its
+/// own noise field over a noisy depth, so they lie in ragged patches, not in bands along
+/// the banks.
+pub fn bed_blocks(x: i32, z: i32, depth: i32, sandy: bool) -> (Block, Block) {
+    let dither = (coord_hash(x ^ 0x52B3, z ^ 0x1F7D) % 1000) as f64 / 1000.0 - 0.5;
+    let zone = f64::from(depth) + (ground_noise(x, z, 9, SALT_ZONE) - 0.5) * 2.4 + dither * 0.8;
+    // 0 at the bank, 1 in the deep channel.
+    let s = ((zone - 0.5) / 4.0).clamp(0.0, 1.0);
+    let field = |scale: i32, salt: u32| ground_noise(x, z, scale, salt) + dither * 0.14;
+    if zone > 0.8 && field(10, SALT_CLAY) > 0.94 {
+        return (CLAY, STONE);
+    }
+    let earth = 0.56 - 0.52 * s.powf(0.7);
+    if field(9, SALT_EARTH) < if sandy { earth * 0.3 } else { earth } {
+        let silt = ground_noise(x, z, 3, SALT_SILT);
+        let top = if silt < 0.55 {
+            DIRT
+        } else if silt < 0.88 {
+            COARSE_DIRT
+        } else {
+            MUD
+        };
+        return (top, DIRT);
+    }
+    let sand = 0.25 + 0.6 * s * (1.0 - s) - 0.13 * s;
+    if field(10, SALT_SAND) < if sandy { 0.85 } else { sand } {
+        return (SAND, STONE);
+    }
+    if field(6, SALT_ROCK) > 1.0 - 0.12 * s {
+        let top = match coord_hash(x ^ 0x0C0B, z ^ 0x7E55) % 20 {
+            0..=10 => STONE,
+            11..=15 => ANDESITE,
+            _ => MOSSY_COBBLESTONE,
+        };
+        return (top, STONE);
+    }
+    (GRAVEL, STONE)
 }
 
 #[inline]
@@ -345,15 +570,13 @@ fn river_depth_cap_for_hw(hw: f64) -> f64 {
     (6.0 * (hw / 30.0).powf(0.7)).clamp(1.0, f64::from(MAX_WATER_DEPTH))
 }
 
-/// Bed depth `d_blocks` from the bank of a channel of half-width `hw`. Smoothstep has zero
-/// slope at both ends: a soft entry at the shore and a broad rounded bottom. Its peak slope
-/// is `1.5 * D / hw` per block, so neighbouring columns never differ by more than a block.
-fn river_profile_depth(d_blocks: f64, hw: f64, scale: f64) -> f64 {
-    let hw = hw.max(1.0);
-    let t = (d_blocks / hw).clamp(0.0, 1.0);
-    // Wide rivers at full scale get longer, softer banks.
-    let q = 1.0 + 0.5 * (hw / 30.0).min(1.0) * scale.min(1.0);
-    river_depth_cap_for_hw(hw) * smoothstep(t.powf(q))
+/// Bed depth `d_blocks` from the bank of a channel of half-width `hw`: half smoothstep, half
+/// parabola. A shallow step at the shore, then a bank that drops within a few blocks to a
+/// broad bottom. The slope peaks at `1.33 * D / hw` per block, under a block a column.
+fn river_profile_depth(d_blocks: f64, hw: f64) -> f64 {
+    let t = (d_blocks / hw.max(1.0)).clamp(0.0, 1.0);
+    let u = 0.5 * smoothstep(t) + 0.5 * (1.0 - (1.0 - t) * (1.0 - t));
+    river_depth_cap_for_hw(hw) * u
 }
 
 fn tag<'a>(tags: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
@@ -394,7 +617,7 @@ fn relation_rings(rel: &crate::osm_parser::ProcessedRelation) -> Option<PolyRing
     crate::element_processing::merge_way_segments(&mut inners);
     let outers: Vec<_> = outers.iter().filter_map(|r| to_ring(r)).collect();
     let inners = inners.iter().filter_map(|r| to_ring(r)).collect();
-    (!outers.is_empty()).then_some(PolyRings { outers, inners })
+    (!outers.is_empty()).then(|| PolyRings::new(outers, inners))
 }
 
 /// Tag scan of every element. The dispatch can't be reused: it sends a way carrying any
@@ -418,10 +641,7 @@ fn classify<'a>(
                 };
                 if let Some(polys) = polys {
                     if let Some(ring) = to_ring(&way.nodes) {
-                        polys.push(PolyRings {
-                            outers: vec![ring],
-                            inners: Vec::new(),
-                        });
+                        polys.push(PolyRings::new(vec![ring], Vec::new()));
                     }
                     continue;
                 }
@@ -460,7 +680,6 @@ fn classify<'a>(
     }
 }
 
-#[derive(Default)]
 struct Lat {
     min_x: i32,
     min_z: i32,
@@ -480,49 +699,11 @@ impl Lat {
     }
 }
 
-/// The river geometry's bounds, padded by `halo` and intersected with `bb`.
-fn lattice_for(
-    lines: &[LineRiver],
-    river_polys: &[PolyRings],
-    halo: i32,
-    bb: (i32, i32, i32, i32),
-) -> Option<Lat> {
-    let mut aabb = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
-    let mut grow = |x: i32, z: i32, pad: i32| {
-        aabb.0 = aabb.0.min(x.saturating_sub(pad));
-        aabb.1 = aabb.1.max(x.saturating_add(pad));
-        aabb.2 = aabb.2.min(z.saturating_sub(pad));
-        aabb.3 = aabb.3.max(z.saturating_add(pad));
-    };
-    for lr in lines {
-        for n in &lr.way.nodes {
-            grow(n.x, n.z, lr.hw_stamp + 1 + halo);
-        }
-    }
-    for pt in river_polys.iter().flat_map(|p| p.outers.iter().flatten()) {
-        grow(pt.x, pt.z, halo);
-    }
-    let min_x = aabb.0.max(bb.0);
-    let max_x = aabb.1.min(bb.1);
-    let min_z = aabb.2.max(bb.2);
-    let max_z = aabb.3.min(bb.3);
-    if min_x > max_x || min_z > max_z {
-        return None;
-    }
-    let w = (i64::from(max_x) - i64::from(min_x) + 1) as usize;
-    let h = (i64::from(max_z) - i64::from(min_z) + 1) as usize;
-    if w.checked_mul(h).is_some_and(|t| t <= MAX_LATTICE_CELLS) {
-        Some(Lat { min_x, min_z, w, h })
-    } else {
-        eprintln!("Warning: river area too large for --river-bed; using the default bed");
-        None
-    }
-}
-
 /// The ribbon `create_water_channel` draws, geometry only.
 fn stamp_line(lr: &LineRiver, lat: &Lat, mask: &mut [bool], hw_line: &mut [u8]) {
     let r = lr.hw_stamp + 1;
-    let hw = lr.hw_stamp.clamp(1, 255) as u8;
+    // The ribbon's centre is this far from its bank.
+    let hw = (r + 1).clamp(1, 255) as u8;
     for pair in lr.way.nodes.windows(2) {
         let (a, b) = (pair[0].xz(), pair[1].xz());
         for (bx, _, bz) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
@@ -540,24 +721,13 @@ fn stamp_line(lr: &LineRiver, lat: &Lat, mask: &mut [bool], hw_line: &mut [u8]) 
 }
 
 fn rasterize_poly(p: &PolyRings, lat: &Lat, out: &mut [bool]) {
-    let (z0, z1) = p
-        .outers
-        .iter()
-        .flatten()
-        .fold((i32::MAX, i32::MIN), |(lo, hi), pt| {
-            (lo.min(pt.z), hi.max(pt.z))
-        });
-    let z0 = z0.max(lat.min_z);
-    let z1 = z1.min(lat.min_z + lat.h as i32 - 1);
+    let z0 = p.bounds.2.max(lat.min_z);
+    let z1 = p.bounds.3.min(lat.min_z + lat.h as i32 - 1);
     let (lo_x, hi_x) = (lat.min_x, lat.min_x + lat.w as i32 - 1);
-    let edges = PolygonEdges::new(&p.outers, &p.inners);
     for z in z0..=z1 {
-        for (s, e) in edges.row_spans(z, lo_x, hi_x) {
-            for x in s..=e {
-                if let Some(i) = lat.idx(x, z) {
-                    out[i] = true;
-                }
-            }
+        let row = (z - lat.min_z) as usize * lat.w;
+        for (s, e) in p.edges.row_spans(z, lo_x, hi_x) {
+            out[row + (s - lo_x) as usize..=row + (e - lo_x) as usize].fill(true);
         }
     }
 }

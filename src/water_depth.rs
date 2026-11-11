@@ -630,7 +630,7 @@ pub fn carve_water_column(
     }
     clear_stranded_vegetation(editor, x, z, water_y);
     let bed_y = water_y - depth - 1;
-    // River beds stay smooth: no soul sand pits, no dunes.
+    // River beds: their own palette, no soul sand pits, no dunes.
     let is_river = bwf.is_river(x, z);
 
     // Keep the bed plain near causeways so blobs/dunes/veg don't clutter piers.
@@ -638,6 +638,10 @@ pub fn carve_water_column(
 
     // Layered bed: gravel base with noise-driven sand/clay/dirt patches over stone.
     let (top_block, under_block) = match depth {
+        _ if is_river => {
+            let sandy = depth <= 1 && editor.near_beach(x, z, (4.0 * editor.scale()).max(1.0));
+            crate::river_bed::bed_blocks(x, z, depth, sandy)
+        }
         0..=1 => shallow_bed(editor, x, z),
         2..=6 if near_bridge => {
             if crate::ground_generation::value_noise_01(x, z, 6) < 0.4 && depth <= 3 {
@@ -712,8 +716,28 @@ pub fn carve_water_column(
     } else {
         0
     };
-    if depth >= 3 && !near_bridge {
+    if is_river {
+        // Fresh water: grass only, and from two blocks down so a canal gets some.
+        if depth >= 2 && !near_bridge {
+            place_river_grass(editor, x, z, water_y, bed_y);
+        }
+    } else if depth >= 3 && !near_bridge {
         place_underwater_vegetation(editor, x, z, water_y, bed_y + bump, depth);
+    }
+}
+
+/// Seagrass in clumps on a river bed; kelp and sea pickles are left to the sea.
+fn place_river_grass(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32, bed_y: i32) {
+    let meadow = crate::ground_generation::ground_noise(x, z, 12, 0x5256_0010);
+    if meadow < 0.72 || crate::land_cover::coord_hash(x + 17, z + 31) % 10 >= 5 {
+        return;
+    }
+    let y = bed_y + 1;
+    if y + 1 < water_y && crate::land_cover::coord_hash(x + 211, z + 73) % 100 < 35 {
+        editor.set_block_absolute(TALL_SEAGRASS_BOTTOM, x, y, z, None, Some(&[AIR]));
+        editor.set_block_absolute(TALL_SEAGRASS_TOP, x, y + 1, z, None, Some(&[AIR]));
+    } else if y < water_y {
+        editor.set_block_absolute(SEAGRASS, x, y, z, None, Some(&[AIR]));
     }
 }
 
