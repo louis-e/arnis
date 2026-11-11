@@ -1,8 +1,6 @@
 //! `--min-y` / `--max-y`: an explicit floor and ceiling for the extended-height Java world.
-//!
-//! They set the same `tall_range` an existing world's pack gives a run into it, so the
-//! scaler's sink floor, the editor's bounds, the `--ground-level` range and the pack that
-//! `install_tall_datapack` writes all follow without a path of their own.
+//! They set the `tall_range` an existing world's pack gives a run into it, so everything
+//! that reads the world's bounds follows.
 
 use crate::args::Args;
 use crate::world_utils::TALL_DATAPACK_FULL_RANGE;
@@ -14,7 +12,7 @@ pub fn check(args: &Args) -> Result<(), String> {
     }
     if !args.disable_height_limit || args.bedrock || args.luanti {
         return Err(
-            "--min-y/--max-y set the tall datapack's range: Java worlds with --disable-height-limit only."
+            "--min-y/--max-y set the range of the extended build height: Java worlds only."
                 .to_string(),
         );
     }
@@ -45,9 +43,11 @@ pub fn check(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// Make the flags the run's tall range; the side left out keeps the pack's limit.
+/// Make the flags the run's tall range; the side left out keeps the pack's limit. They imply
+/// the extended build height, as the window's do.
 pub fn apply(args: &mut Args) {
     if args.min_y.is_some() || args.max_y.is_some() {
+        args.disable_height_limit = true;
         let (min, max) = TALL_DATAPACK_FULL_RANGE;
         args.tall_range = Some((args.min_y.unwrap_or(min), args.max_y.unwrap_or(max)));
     }
@@ -98,9 +98,13 @@ mod tests {
     fn max_y_conflicts_vanilla_height() {
         assert!(try_parse(&["--vanilla-height", "--max-y=447"]).is_err());
         assert!(try_parse(&["--vanilla-height", "--min-y=-128"]).is_err());
-        // Without the extended pack, there is no range to set.
-        assert!(check(&parse(&["--max-y=447"])).is_err());
-        assert!(check(&parse(&["--min-y=-128"])).is_err());
+        // On the command line they imply the extended height.
+        for flag in ["--max-y=447", "--min-y=-128"] {
+            let mut args = parse(&[flag]);
+            assert!(check(&args).is_err(), "{flag} before apply");
+            apply(&mut args);
+            assert!(args.disable_height_limit && check(&args).is_ok(), "{flag}");
+        }
         for bad in [
             &["--disable-height-limit", "--bedrock", "--min-y=-128"][..],
             &["--disable-height-limit", "--luanti", "--max-y=447"],
