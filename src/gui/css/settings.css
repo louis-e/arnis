@@ -958,6 +958,33 @@ label[for].setting-label {
   gap: 10px;
 }
 
+.settings-about-meld {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  flex-basis: 100%;
+}
+
+.settings-about-credit {
+  flex: 1 1 240px;
+  color: var(--ui-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.settings-about-layout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  font-size: 13.5px;
+}
+
+.settings-about-layout .settings-select {
+  width: 160px;
+}
+
 .settings-about-links {
   flex-basis: 100%;
   padding-top: 14px;

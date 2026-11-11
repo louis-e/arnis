@@ -1277,3 +1277,192 @@ body:not(.meld-off) .one-world-status:not(.is-warn):not(.is-error) {
 .plan-expand.is-running {
   display: none;
 }
+
+/* ---- Map-first main page (Meld features; off = the 3.4.0 layout above) ----
+   The map fills the window; logo, title, the control cards, the 3D preview and the footer
+   float over it. CSS only: every element keeps its place in the markup. */
+body.map-first .container {
+  position: relative;
+  padding: 0;
+}
+
+body.map-first .flex-container {
+  position: absolute;
+  inset: 6px;
+  margin: 0;
+  min-height: 0;
+  display: block;
+}
+
+body.map-first .map-box {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  min-height: 0;
+}
+
+/* The logo is the title: centred on the window at the top, level with the control card, no box
+   behind it. A click opens the Arnis site (its link); on hover the version shows under it
+   (main.js sets data-version). */
+body.map-first .row {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+}
+
+body.map-first .row a {
+  position: relative;
+  display: block;
+}
+
+/* !important: the img's inline style sizes it for the 3.4.0 page. */
+body.map-first #arnis-logo {
+  width: auto !important;
+  height: 46px !important;
+  padding: 0;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+}
+
+body.map-first .row a::after {
+  content: attr(data-version);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: rgba(30, 30, 30, 0.9);
+  color: #f2f2f2;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+body.map-first .row a:hover::after {
+  opacity: 1;
+}
+
+/* The controls: one stack of cards on the map's right, under the city search */
+body.map-first .controls-box {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  width: min(340px, 40vw);
+  max-height: calc(100% - 54px);
+  overflow-y: auto;
+}
+
+body.map-first .controls-content {
+  height: auto;
+  padding: 10px;
+  border-radius: 10px;
+  background: #2a2a2a; /* opaque: the cell grid and labels must not show through */
+  color: var(--ui-text, #f2f2f2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+body.map-first .controls-box .progress-section {
+  margin-top: 4px;
+}
+
+/* An empty status line takes no height: it was a blank band between the format row and the plan. */
+body.map-first .progress-info-text:empty {
+  display: none;
+}
+
+/* The card's header names the world and its plan block the pieces: these lines would repeat
+   them (a warning or an error still shows). */
+body.map-first .bbox-selection-text.is-plan,
+body.map-first .one-world-status:not(.is-warn):not(.is-error) {
+  display: none;
+}
+
+/* The 3D preview: a card docked bottom-right over the map, clear of Leaflet's attribution.
+   Its grip in the top-left corner (#preview3d-grip, meld-features.js) resizes it, the bottom-right
+   staying put; the height follows the width (aspect-ratio), 200 px to 60 % of the window. A click
+   still opens the full preview; meld-features.js remembers the width. */
+body.map-first .preview3d-mini {
+  position: fixed;
+  right: 18px;
+  bottom: 34px;
+  z-index: 6;
+  width: 300px;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  min-width: 200px;
+  max-width: 60vw;
+  max-height: 60vh;
+  margin: 0;
+}
+
+/* Three diagonal strokes in the corner, as the native grip draws them (mirrored to the top-left) */
+.preview3d-mini .preview3d-grip { /* two classes: .controls-box button sets width, margin and shadow */
+  position: absolute;
+  margin: 0;
+  box-shadow: none;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: linear-gradient(135deg, transparent 0 3px, rgba(255, 255, 255, 0.85) 3px 4.5px, transparent 4.5px 7px, rgba(255, 255, 255, 0.85) 7px 8.5px, transparent 8.5px 11px, rgba(255, 255, 255, 0.85) 11px 12.5px, transparent 12.5px);
+  background-color: rgba(0, 0, 0, 0.25);
+  border-radius: 8px 0 8px 0;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.preview3d-mini .preview3d-grip:focus-visible {
+  outline: 2px solid var(--primary-accent);
+  outline-offset: -2px;
+}
+
+body:not(.map-first) .preview3d-mini .preview3d-grip {
+  display: none;
+}
+
+/* The footer: the search bar's box (same height, row, fill, radius and font size; map-controls.css) but
+   narrow and centred in the window, quiet until pointed at. Bottom is the search bar's: its 12 px
+   inside the 6 px map inset. */
+body.map-first .footer {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 18px;
+  z-index: 5;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  height: 35px;
+  margin: 0;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(46, 46, 46, 0.9);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  line-height: 17px;
+  white-space: nowrap;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+body.map-first .footer:hover,
+body.map-first .footer:focus-within {
+  opacity: 1;
+}
+
+body.map-first .footer a {
+  color: #ececec;
+}

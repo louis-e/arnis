@@ -89,7 +89,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   const localization = await getLocalization();
   await applyLocalization(localization);
   updateFormatToggleUI(selectedWorldFormat);
-  initFooter();
   initEasterEggs();
   checkForUpdates();
 });
@@ -225,6 +224,9 @@ async function applyLocalization(localization) {
   // The line above has just written the idle label over a button that may be
   // saying Cancel, so put the running state back.
   refreshPrecomputeButton();
+  // The pass wrote the footer's raw template ("{year}", "{version}") back; every
+  // pass fills it in, whoever started it.
+  initFooter();
 }
 
 // Function to initialize the footer with the current year and version
@@ -253,6 +255,8 @@ async function initFooter() {
       .replace("{year}", currentYear)
       .replace("{version}", version);
 
+    // The map-first page shows the version under the logo on hover.
+    document.getElementById("arnis-logo")?.closest("a")?.setAttribute("data-version", `v${version}`);
     // The About section of the settings page repeats the same line.
     const aboutVersion = document.getElementById("about-version");
     if (aboutVersion) aboutVersion.textContent = footerElement.textContent;

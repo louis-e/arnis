@@ -75,16 +75,81 @@ export function progressText({ message = '', detail = '' }) {
   return { text: message, title: detail, log: detail || null, notice: false };
 }
 
+// The docked 3D preview's width after its top-left grip moved `dx` px (left grows it): 200 px up to
+// 60 % of the window's width, and of its height at 16:10.
+export const dockWidth = (start, dx, vw, vh) => Math.round(Math.max(200, Math.min(start - dx, vw * 0.6, vh * 0.6 * 1.6)));
+
+// The grip: dragging or the arrow keys (20 px) resize `dock`; its right and bottom stay where they are.
+// A click on the grip is not a click on the card, so it never opens the full preview.
+export function initDockGrip(dock, grip) {
+  let from = null; // { x, w } while dragging
+  const size = (w) => { dock.style.width = `${w}px`; };
+  const stop = (e) => e.stopPropagation();
+  grip.addEventListener('click', stop);
+  grip.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    from = { x: e.clientX, w: dock.offsetWidth };
+    grip.setPointerCapture?.(e.pointerId);
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (from) size(dockWidth(from.w, e.clientX - from.x, window.innerWidth, window.innerHeight));
+  });
+  const end = (e) => { if (from) { from = null; grip.releasePointerCapture?.(e.pointerId); } };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+  grip.addEventListener('keydown', (e) => {
+    const step = { ArrowLeft: 20, ArrowUp: 20, ArrowRight: -20, ArrowDown: -20 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    e.stopPropagation();
+    size(dockWidth(dock.offsetWidth, -step, window.innerWidth, window.innerHeight));
+  });
+}
+
 export function initMeldFeatures() {
   const toggle = el('advanced-meld-features-toggle');
   if (!toggle) return;
+  // The map-first page (styles.css, body.map-first) with Meld features on, the 3.4.0-style one
+  // off when Main Page Layout is Auto; Map first is the default for everyone.
+  const layout = el('layout-select');
+  const about = el('layout-about-select');
   const apply = () => {
+    const mode = layout ? layout.value : 'map';
     document.body.classList.toggle('meld-off', !toggle.checked);
+    const mapFirst = mode === 'map' || (mode === 'auto' && toggle.checked);
+    document.body.classList.toggle('map-first', mapFirst);
+    if (about) about.value = mapFirst ? 'map' : 'classic';
+    const dock = el('preview3d-mini');
+    if (dock) {
+      let w = 0;
+      try { w = Number(localStorage.getItem('arnis-preview-dock-width')); } catch (_) { /* default size */ }
+      dock.style.width = mapFirst && w >= 200 ? `${w}px` : '';
+    }
     // Off, a finished job's pieces leave the map with the rest of Meld features.
     if (!toggle.checked && !running && pieces.size) resetPieces();
   };
   toggle.addEventListener('change', apply);
+  if (layout) layout.addEventListener('change', apply);
+  // Settings > About sets the same setting (and so its storage).
+  if (about && layout) {
+    about.addEventListener('change', () => {
+      layout.value = about.value;
+      layout.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
   apply();
+
+  // The docked 3D preview keeps the width it was dragged to (map-first page only: the classic
+  // page sizes it itself, so apply() takes the dragged width off there).
+  const dock = el('preview3d-mini');
+  if (dock && el('preview3d-grip')) initDockGrip(dock, el('preview3d-grip'));
+  if (dock && window.ResizeObserver) {
+    new ResizeObserver(() => {
+      if (!document.body.classList.contains('map-first') || !dock.offsetWidth) return;
+      try { localStorage.setItem('arnis-preview-dock-width', String(dock.offsetWidth)); } catch (_) { /* not kept */ }
+    }).observe(dock);
+  }
 }
 
 // The cells the menu skipped or included since the last run (a Set of plan indexes), and the job
