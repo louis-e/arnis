@@ -1135,9 +1135,26 @@ body.meld-off .meld-only {
   display: none;
 }
 
-/* The switch that shows the advanced sections takes the accent while it is on, and so do their nav icons. */
-.settings-page .setting-tile:has(#advanced-meld-features-toggle:checked) {
-  border-color: var(--primary-accent);
+/* Advanced tiles, and the switch that shows them, carry accent corners with a hard cut. */
+.settings-page .settings-section.meld-only .setting-tile,
+.settings-page .setting-tile:has(#advanced-meld-features-toggle) {
+  position: relative;
+}
+
+.settings-page .settings-section.meld-only .setting-tile::after,
+.settings-page .setting-tile:has(#advanced-meld-features-toggle)::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px solid var(--primary-accent);
+  border-radius: inherit;
+  pointer-events: none;
+  --corner: 14px;
+  mask:
+    linear-gradient(#000 0 0) top left / var(--corner) var(--corner) no-repeat,
+    linear-gradient(#000 0 0) top right / var(--corner) var(--corner) no-repeat,
+    linear-gradient(#000 0 0) bottom left / var(--corner) var(--corner) no-repeat,
+    linear-gradient(#000 0 0) bottom right / var(--corner) var(--corner) no-repeat;
 }
 
 .settings-nav-item.meld-only:not(.active) .icon {
