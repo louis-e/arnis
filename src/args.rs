@@ -1908,6 +1908,14 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             ));
         }
     }
+    if let Some(dir) = &args.tree_pack_dir {
+        if !dir.is_dir() {
+            return Err(format!(
+                "--tree-pack-dir: {} is not a directory.",
+                dir.display()
+            ));
+        }
+    }
 
     let cave_preview = args.cave_zone_map.is_some();
     if let Some(spec) = &args.cave_biomes {
@@ -2201,6 +2209,29 @@ mod tests {
         assert!(validate_args(&parse(&["--body", "moon", "--body-gravity"])).is_ok());
         let one_world = validate_args(&parse(&["--one-world", "--pause-menu"])).unwrap_err();
         assert!(one_world.contains("--pause-menu"), "{one_world}");
+    }
+
+    #[test]
+    fn missing_tree_pack_dir_is_refused() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let check = |dir: &str| {
+            let mut args = Args::parse_from([
+                "arnis",
+                "--output-dir",
+                tmp_path,
+                "--bbox",
+                "1,2,3,4",
+                "--tree-pack-dir",
+                dir,
+            ]);
+            apply_body_defaults(&mut args);
+            validate_args(&args)
+        };
+        assert!(check(tmp_path).is_ok());
+        let missing = tmpdir.path().join("nope");
+        let err = check(missing.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("--tree-pack-dir"), "{err}");
     }
 
     #[test]
