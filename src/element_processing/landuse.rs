@@ -148,6 +148,7 @@ fn landuse_area(
         .flatten();
 
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
+    let plants_here = crate::element_processing::natural::piece_plants_at(args);
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
             continue;
@@ -246,6 +247,8 @@ fn landuse_area(
         if editor.is_lc_water(x, z) || !editor.owns(x, z) {
             continue;
         }
+        // A piece's halo cells take their draws but root no trees or bushes.
+        let roots = plants_here(x, z);
 
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
@@ -258,14 +261,18 @@ fn landuse_area(
                         editor.set_block(RED_FLOWER, x, 1, z, None, None);
                     }
                 } else if (30..33).contains(&random_choice) && editor.land_cover_backs_trees(x, z) {
-                    Tree::create(
-                        editor,
-                        (x, 1, z),
-                        Some(building_footprints),
-                        Some(bridge_surface),
-                    );
+                    if roots {
+                        Tree::create(
+                            editor,
+                            (x, 1, z),
+                            Some(building_footprints),
+                            Some(bridge_surface),
+                        );
+                    }
                 } else if !is_protected && (33..35).contains(&random_choice) {
-                    place_bush(editor, x, z, BushKind::Garden);
+                    if roots {
+                        place_bush(editor, x, z, BushKind::Garden);
+                    }
                 } else if !is_protected && (35..37).contains(&random_choice) {
                     editor.set_block(FERN, x, 1, z, None, None);
                 } else if !is_protected && (37..41).contains(&random_choice) {
@@ -281,19 +288,22 @@ fn landuse_area(
                     let tree_type = *trees_ok_to_generate
                         .choose(&mut rng)
                         .unwrap_or(&TreeType::Oak);
-                    Tree::create_of_type(
-                        editor,
-                        (x, 1, z),
-                        tree_type,
-                        Some(building_footprints),
-                        Some(bridge_surface),
-                        false,
-                        leaf_type_tagged,
-                    );
+                    if roots {
+                        Tree::create_of_type(
+                            editor,
+                            (x, 1, z),
+                            tree_type,
+                            Some(building_footprints),
+                            Some(bridge_surface),
+                            false,
+                            leaf_type_tagged,
+                        );
+                    }
                 } else {
                     let random_choice: i32 = rng.random_range(0..30);
                     if random_choice == 2 {
                         match rng.random_range(1..=6) {
+                            1 if !roots => {}
                             1 => place_bush(editor, x, z, BushKind::Wild),
                             5 => editor.set_block(FERN, x, 1, z, None, None),
                             _ => crate::ground_decoration::place_scattered_flower(
@@ -322,7 +332,7 @@ fn landuse_area(
                     let special_choice: i32 = rng.random_range(1..=10);
                     if special_choice <= 4 {
                         editor.set_block(HAY_BALE, x, 1, z, None, Some(&[SPONGE]));
-                    } else {
+                    } else if roots {
                         place_bush(editor, x, z, BushKind::Low);
                     }
                 } else {
@@ -335,6 +345,7 @@ fn landuse_area(
             }
             "grass" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 match rng.random_range(0..200) {
+                    0 if !roots => {}
                     0 => place_bush(editor, x, z, BushKind::Garden),
                     1..=8 => editor.set_block(FERN, x, 1, z, None, None),
                     9..=170 => editor.set_block(GRASS, x, 1, z, None, None),
@@ -346,6 +357,7 @@ fn landuse_area(
             }
             "greenfield" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 match rng.random_range(0..200) {
+                    0 if !roots => {}
                     0 => place_bush(editor, x, z, BushKind::Wild),
                     1..=2 => editor.set_block(FERN, x, 1, z, None, None),
                     3..=16 => editor.set_block(GRASS, x, 1, z, None, None),
@@ -355,12 +367,14 @@ fn landuse_area(
             "meadow" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 let random_choice: i32 = rng.random_range(0..1001);
                 if random_choice < 5 && editor.land_cover_backs_trees(x, z) {
-                    Tree::create(
-                        editor,
-                        (x, 1, z),
-                        Some(building_footprints),
-                        Some(bridge_surface),
-                    );
+                    if roots {
+                        Tree::create(
+                            editor,
+                            (x, 1, z),
+                            Some(building_footprints),
+                            Some(bridge_surface),
+                        );
+                    }
                 } else if random_choice < 6 {
                     crate::ground_decoration::place_scattered_flower(
                         editor,
@@ -369,7 +383,9 @@ fn landuse_area(
                         crate::ground_decoration::FlowerSetting::Meadow,
                     );
                 } else if random_choice < 9 {
-                    place_bush(editor, x, z, BushKind::Wild);
+                    if roots {
+                        place_bush(editor, x, z, BushKind::Wild);
+                    }
                 } else if random_choice < 40 {
                     editor.set_block(FERN, x, 1, z, None, None);
                 } else if random_choice < 65 {
@@ -389,6 +405,7 @@ fn landuse_area(
                     );
                 } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     match rng.random_range(0..100) {
+                        0 if !roots => {}
                         0 => place_bush(editor, x, z, BushKind::Wild),
                         1..=2 => editor.set_block(FERN, x, 1, z, None, None),
                         3..=20 => editor.set_block(GRASS, x, 1, z, None, None),
@@ -406,6 +423,7 @@ fn landuse_area(
                 // (Skipped for landfill spoil heaps — those are GRAVEL, not
                 // COARSE_DIRT, and the guard above filters them out.)
                 match rng.random_range(0..150) {
+                    0..=3 if !roots => {}
                     0..=3 => place_bush(editor, x, z, BushKind::Low),
                     4 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
                     5..=15 => editor.set_block(GRASS, x, 1, z, None, None),

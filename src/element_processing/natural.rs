@@ -221,6 +221,7 @@ fn natural_area(
                 let dry_kind = matches!(natural_type.as_str(), "scrub" | "grassland" | "heath");
                 let bare_rock = matches!(natural_type.as_str(), "bare_rock" | "rock" | "stone");
 
+                let plants_here = piece_plants_at(args);
                 let mut shrubbery_species: Option<Block> = None;
                 for &(x, z) in filled_area.iter() {
                     if in_hole(holes, x, z) {
@@ -302,6 +303,8 @@ fn natural_area(
                         }
                         continue;
                     }
+                    // A piece's halo cells take their draws but root no trees or bushes.
+                    let roots = plants_here(x, z);
                     match natural_type.as_str() {
                         "scrub" | "grassland" | "heath"
                             if dry_ground
@@ -328,7 +331,9 @@ fn natural_area(
                                 if random_choice <= 2 {
                                     editor.set_block(COBBLESTONE, x, 0, z, None, None);
                                 } else if random_choice < 6 {
-                                    place_bush(editor, x, z, BushKind::Low);
+                                    if roots {
+                                        place_bush(editor, x, z, BushKind::Low);
+                                    }
                                 } else {
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                 }
@@ -340,12 +345,14 @@ fn natural_area(
                             }
                             let random_choice = rng.random_range(0..500);
                             if random_choice == 0 && editor.land_cover_backs_trees(x, z) {
-                                Tree::create(
-                                    editor,
-                                    (x, 1, z),
-                                    Some(building_footprints),
-                                    Some(bridge_surface),
-                                );
+                                if roots {
+                                    Tree::create(
+                                        editor,
+                                        (x, 1, z),
+                                        Some(building_footprints),
+                                        Some(bridge_surface),
+                                    );
+                                }
                             } else if random_choice == 1 {
                                 crate::ground_decoration::place_scattered_flower(
                                     editor,
@@ -354,7 +361,9 @@ fn natural_area(
                                     crate::ground_decoration::FlowerSetting::Meadow,
                                 );
                             } else if random_choice < 40 {
-                                place_bush(editor, x, z, BushKind::Wild);
+                                if roots {
+                                    place_bush(editor, x, z, BushKind::Wild);
+                                }
                             } else if random_choice < 300 {
                                 if random_choice < 250 {
                                     editor.set_block(GRASS, x, 1, z, None, None);
@@ -376,15 +385,17 @@ fn natural_area(
                                 let tree_type = *trees_ok_to_generate
                                     .choose(&mut rng)
                                     .unwrap_or(&TreeType::Oak);
-                                Tree::create_of_type(
-                                    editor,
-                                    (x, 1, z),
-                                    tree_type,
-                                    Some(building_footprints),
-                                    Some(bridge_surface),
-                                    false,
-                                    leaf_type_tagged,
-                                );
+                                if roots {
+                                    Tree::create_of_type(
+                                        editor,
+                                        (x, 1, z),
+                                        tree_type,
+                                        Some(building_footprints),
+                                        Some(bridge_surface),
+                                        false,
+                                        leaf_type_tagged,
+                                    );
+                                }
                             } else if random_choice == 1 {
                                 crate::ground_decoration::place_scattered_flower(
                                     editor,
@@ -470,15 +481,17 @@ fn natural_area(
                                         } else {
                                             TreeType::Mangrove
                                         };
-                                        Tree::create_of_type(
-                                            editor,
-                                            (x, 1, z),
-                                            tree_type,
-                                            Some(building_footprints),
-                                            Some(bridge_surface),
-                                            false,
-                                            true,
-                                        );
+                                        if roots {
+                                            Tree::create_of_type(
+                                                editor,
+                                                (x, 1, z),
+                                                tree_type,
+                                                Some(building_footprints),
+                                                Some(bridge_surface),
+                                                false,
+                                                true,
+                                            );
+                                        }
                                     } else if r < 15 {
                                         place_grass_or_tall(editor, &mut rng, x, z);
                                     }
@@ -531,7 +544,7 @@ fn natural_area(
                                 if vegetation_chance < 20 {
                                     // 20% chance for grass
                                     editor.set_block(GRASS, x, 1, z, None, None);
-                                } else if vegetation_chance < 25 {
+                                } else if vegetation_chance < 25 && roots {
                                     // 5% chance for small shrubs
                                     place_bush(editor, x, z, BushKind::Low);
                                 }
@@ -597,12 +610,14 @@ fn natural_area(
                             let hill_chance = rng.random_range(0..1000);
                             if hill_chance == 0 && editor.land_cover_backs_trees(x, z) {
                                 // 0.1% chance for rare trees
-                                Tree::create(
-                                    editor,
-                                    (x, 1, z),
-                                    Some(building_footprints),
-                                    Some(bridge_surface),
-                                );
+                                if roots {
+                                    Tree::create(
+                                        editor,
+                                        (x, 1, z),
+                                        Some(building_footprints),
+                                        Some(bridge_surface),
+                                    );
+                                }
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
                                 crate::ground_decoration::place_scattered_flower(
@@ -760,6 +775,18 @@ pub fn generate_natural_from_relation(
     }
 }
 
+/// Whether a tree or bush drawn from an area's running random sequence may root at a cell. In a
+/// piece of a job a halo cell still takes its draws but plants none: the neighbour that owns
+/// it draws its sequence in another order, so the two would not plant the same tree.
+pub(crate) fn piece_plants_at(args: &Args) -> impl Fn(i32, i32) -> bool {
+    let own = args
+        .one_world_run
+        .as_ref()
+        .and_then(|run| run.unit.as_ref())
+        .map(|unit| unit.rect);
+    move |x, z| own.is_none_or(|[x0, z0, x1, z1]| (x0..=x1).contains(&x) && (z0..=z1).contains(&z))
+}
+
 /// Ground of a `natural=beach` or `shoal`, from its `surface=*`: sand unless mapped otherwise.
 fn beach_block(surface: Option<&String>) -> Block {
     match surface.map(String::as_str) {
@@ -902,12 +929,14 @@ mod tests {
 
     /// Renders one natural area over x/z 5..=54 at the given place and returns the editor.
     fn render_natural(llbbox: LLBBox, tags: &[(&str, &str)]) -> WorldEditor<'static> {
-        render_natural_on(llbbox, None, tags)
+        render_natural_on(llbbox, None, None, tags)
     }
 
+    /// `render_natural` on `ground`, as the piece of a job whose own rect is `piece`.
     fn render_natural_on(
         llbbox: LLBBox,
         ground: Option<crate::ground::Ground>,
+        piece: Option<[i32; 4]>,
         tags: &[(&str, &str)],
     ) -> WorldEditor<'static> {
         use crate::element_processing::bridge_styles::BridgeOutlineIndex;
@@ -924,7 +953,7 @@ mod tests {
         let structures =
             BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
         let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
-        let args = Args::parse_from([
+        let mut args = Args::parse_from([
             "arnis",
             "--bbox",
             "1,2,3,4",
@@ -933,6 +962,25 @@ mod tests {
             "--ground-level",
             "0",
         ]);
+        args.one_world_run = piece.map(|rect| crate::one_world::RunContext {
+            world_dir: std::path::PathBuf::new(),
+            origin_lat: 54.6,
+            origin_lon: 9.9,
+            extending: true,
+            elevation: None,
+            replaced_chunks: 0,
+            area_id: 2,
+            piece: None,
+            unit: Some(crate::one_world::UnitLease {
+                piece: 1,
+                area_id: 2,
+                extending: true,
+                first_map_id: 0,
+                rect,
+                job: [0, 0, 59, 59],
+                tiled: false,
+            }),
+        });
         let way = rect_way(9, 5, 5, 54, 54, tags);
         generate_natural(
             &mut editor,
@@ -1054,6 +1102,24 @@ mod tests {
     }
 
     #[test]
+    fn a_piece_roots_no_wood_trees_in_its_halo() {
+        let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let wood = [("natural", "wood")];
+        let trunks = |e: &WorldEditor, xs: std::ops::Range<i32>| {
+            let logs = [OAK_LOG, SPRUCE_LOG, BIRCH_LOG, DARK_OAK_LOG];
+            xs.flat_map(|x| (5..55).map(move |z| (x, z)))
+                .filter(|&(x, z)| e.check_for_block(x, 1, z, Some(&logs)))
+                .count()
+        };
+        let whole = render_natural(place, &wood);
+        assert!(trunks(&whole, 30..55) > 0);
+        // The piece owns x 0..=29: the rest is a neighbour's, whose trees it does not plant.
+        let piece = render_natural_on(place, None, Some([0, 0, 29, 59]), &wood);
+        assert_eq!(trunks(&piece, 30..55), 0);
+        assert_eq!(trunks(&piece, 5..30), trunks(&whole, 5..30));
+    }
+
+    #[test]
     fn dead_bushes_grow_on_desert_sand_but_not_on_coastal_sand() {
         let baltic = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
         let coast = render_natural(baltic, &[("natural", "sand")]);
@@ -1071,7 +1137,7 @@ mod tests {
         ));
         let per_position = crate::climate_field::ClimateMode::PerPosition;
         ground.apply_climate_mode(per_position, &frame, &sahara);
-        let local = render_natural_on(baltic, Some(ground), &[("natural", "sand")]);
+        let local = render_natural_on(baltic, Some(ground), None, &[("natural", "sand")]);
         assert!(count(&local, 1, &[DEAD_BUSH]) > 0);
     }
 }
