@@ -255,7 +255,7 @@ fn one_world_dir(args: &Args) -> PathBuf {
             "{} --one-world needs --output-dir (the saves folder).",
             "Error:".red().bold()
         );
-        std::process::exit(1);
+        exit_failed();
     });
     let name = args
         .world_name
@@ -364,7 +364,7 @@ fn run_cli() {
     if args.map_item_only || args.dh_lod_only {
         if let Err(e) = output_args::validate(&args) {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            std::process::exit(1);
+            exit_failed();
         }
         let world_dir = one_world_dir(&args);
         let result = if args.map_item_only {
@@ -377,7 +377,7 @@ fn run_cli() {
             Ok(line) => println!("{line}"),
             Err(e) => {
                 eprintln!("{} {e}", "Error:".red().bold());
-                std::process::exit(1);
+                exit_failed();
             }
         }
         return;
@@ -386,13 +386,13 @@ fn run_cli() {
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
         eprintln!("{}: {}", "Error".red().bold(), e);
-        std::process::exit(1);
+        exit_failed();
     }
 
     if args.climate_map.is_some() {
         if let Err(e) = climate_field::render(&args) {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            std::process::exit(1);
+            exit_failed();
         }
         return;
     }
@@ -537,7 +537,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     if args.cave_zone_map.is_some() {
         if let Err(e) = caves::zone_map::render(&args) {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            std::process::exit(1);
+            exit_failed();
         }
         return;
     }
@@ -588,7 +588,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                 Ok(loaded) => loaded,
                 Err(e) => {
                     eprintln!("{} Failed to load OSM file: {}", "Error:".red().bold(), e);
-                    std::process::exit(1);
+                    exit_failed();
                 }
             };
             // Whole ways reach past the downloaded area, and One World would overwrite
@@ -598,7 +598,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                     "{} '{file}' has no bounds; --one-world needs --bbox, or the area would grow to every node in the file.",
                     "Error:".red().bold()
                 );
-                std::process::exit(1);
+                exit_failed();
             }
             let bbox = match osm_parser::resolve_bbox(args.bbox, file_bounds, &data) {
                 Some(bbox) => bbox,
@@ -607,7 +607,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                         "{} could not derive a bounding box from '{file}' (no <bounds> element and no usable node extent); pass --bbox explicitly.",
                         "Error:".red().bold()
                     );
-                    std::process::exit(1);
+                    exit_failed();
                 }
             };
             // Report where a derived bbox came from (an explicit --bbox is echoed by the parse step).
@@ -634,7 +634,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                     "{} A bounding box is required. Provide --bbox, or --file with a local .osm/.xml file.",
                     "Error:".red().bold()
                 );
-                std::process::exit(1);
+                exit_failed();
             });
             (None, bbox)
         }
@@ -648,7 +648,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                 "{} Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box.",
                 "Error:".red().bold()
             );
-            std::process::exit(1);
+            exit_failed();
         }
     }
 
@@ -684,7 +684,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             let session = one_world::prepare(&world_dir, &effective_bbox, &mut args)
                 .unwrap_or_else(|e| {
                     eprintln!("{} {}", "Error:".red().bold(), e);
-                    std::process::exit(1);
+                    exit_failed();
                 });
             effective_bbox = session.llbbox;
             // The world decides the build height.
@@ -829,7 +829,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             Ok(path) => PathBuf::from(path),
             Err(e) => {
                 eprintln!("{} {}", "Error:".red().bold(), e);
-                std::process::exit(1);
+                exit_failed();
             }
         };
         println!(
@@ -1155,7 +1155,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             &mut ground,
         ) {
             eprintln!("{} Rotation failed: {}", "Error:".red().bold(), e);
-            std::process::exit(1);
+            exit_failed();
         }
     }
 
@@ -1166,7 +1166,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
 
             let llpoint = LLPoint::new(lat, lng).unwrap_or_else(|e| {
                 eprintln!("{} Invalid spawn coordinates: {}", "Error:".red().bold(), e);
-                std::process::exit(1);
+                exit_failed();
             });
 
             let (transformer, pre_rot_bbox) = projection::ProjectionSpec::from_args(&args)
@@ -1177,7 +1177,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                         "Error:".red().bold(),
                         e
                     );
-                    std::process::exit(1);
+                    exit_failed();
                 });
 
             let xzpoint = transformer.transform_point(llpoint);
@@ -1241,7 +1241,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                 "{} --mapillary-probe needs a token; pass --mapillary-token or set MAPILLARY_TOKEN.",
                 "Error:".red().bold()
             );
-            std::process::exit(1);
+            exit_failed();
         };
         let debug_dir = args.mapillary_debug_dir.clone();
         match mapillary::sample_area(
@@ -1256,7 +1256,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("{} Mapillary probe failed: {e}", "Error:".red().bold());
-                std::process::exit(1);
+                exit_failed();
             }
         }
     }
