@@ -1,69 +1,82 @@
-//! Experimental `--climate-mode per-position`: the Köppen climate read at every
-//! block instead of once at the origin, so a large world crosses climate zones.
-//! `--climate-map` renders that layout for `--bbox` and exits.
-//!
-//! A sample is a pure function of the block's place in the projection, so One
-//! World pieces and areas agree on it. Borders are warped like the ecoregion
-//! borders, so they wander instead of tracing the 0.1 degree raster.
+//! Experimental `--climate-mode per-position`: the Köppen climate read per position
+//! instead of once per area, so a large world crosses climate zones. `--climate-map`
+//! renders that layout for `--bbox` and exits.
 
 use crate::args::Args;
 use crate::climate::Climate;
 use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
-use crate::ground::GroundFrame;
+use crate::ground::{Geo, GroundFrame};
 use image::{Rgb, RgbImage};
+use rayon::prelude::*;
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ClimateMode {
-    /// One climate for the whole world, read at its origin (bbox centre, or
-    /// the One World origin).
+    /// One climate per area, read at its centre.
     #[default]
     Origin,
-    /// Climate and biome latitude read per block (experimental).
+    /// Climate and biome latitude read per position (experimental).
     PerPosition,
 }
 
-type Geo = Box<dyn Fn(f64, f64) -> (f64, f64) + Send + Sync>;
+/// Smallest and largest grid cell, in blocks.
+const MIN_CELL: i32 = 4;
+const MAX_CELL: i32 = 32;
 
-/// Latitude and longitude under a ground coordinate, laid out as `EcoMap` is.
+/// Climate over one run's ground, a cell per `cell` x `cell` blocks, aligned to world blocks
+/// so pieces and areas agree.
 pub struct ClimateField {
     geo: Geo,
+    cell: i32,
+    origin: (i32, i32),
+    w: usize,
+    h: usize,
+    climates: Vec<Climate>,
 }
 
 impl ClimateField {
     pub fn new(frame: &GroundFrame, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Self {
-        let geo: Geo = match frame.mercator {
-            Some(proj) => {
-                // Projection coordinates are the world's own, so pieces agree.
-                let x0 = crate::projection::snap_edge(proj.x_for_lon(bbox.min().lng()), false);
-                let z0 = crate::projection::snap_edge(proj.z_for_lat(bbox.max().lat()), false);
-                Box::new(move |gx, gz| {
-                    (
-                        proj.lat_for_z(f64::from(z0) + gz),
-                        proj.lon_for_x(f64::from(x0) + gx),
-                    )
-                })
-            }
-            None => {
-                let (top, left) = (bbox.max().lat(), bbox.min().lng());
-                let (dlat, dlon) = (top - bbox.min().lat(), bbox.max().lng() - left);
-                let (w, h) = (world_w.max(1) as f64, world_h.max(1) as f64);
-                Box::new(move |gx, gz| (top - gz / h * dlat, left + gx / w * dlon))
-            }
+        let (geo, align) = frame.geo(bbox, (world_w, world_h));
+        // Taken from the projection where there is one, so every piece picks the same cell.
+        let lon_per_block = match frame.mercator {
+            Some(proj) => proj.lon_for_x(1.0) - proj.lon_for_x(0.0),
+            None => geo(1.0, 0.0).1 - geo(0.0, 0.0).1,
         };
-        Self { geo }
-    }
-
-    fn lat_lon(&self, coord: XZPoint) -> (f64, f64) {
-        (self.geo)(f64::from(coord.x) + 0.5, f64::from(coord.z) + 0.5)
+        // About the warp's finest step, a 64th of a Köppen cell, as a power of two.
+        let step = crate::climate::koppen_cell_degrees() / lon_per_block.abs() / 64.0;
+        let cell = 1 << (31 - (step as i32).clamp(MIN_CELL, MAX_CELL).leading_zeros());
+        let origin = (-align.0.rem_euclid(cell), -align.1.rem_euclid(cell));
+        let span = |len: usize, from: i32| ((len as i32 - from + cell - 1) / cell).max(1) as usize;
+        let (w, h) = (span(world_w, origin.0), span(world_h, origin.1));
+        let half = f64::from(cell) / 2.0;
+        let climates = (0..w * h)
+            .into_par_iter()
+            .map(|i| {
+                let gx = f64::from(origin.0 + (i % w) as i32 * cell) + half;
+                let gz = f64::from(origin.1 + (i / w) as i32 * cell) + half;
+                let (lat, lon) = geo(gx, gz);
+                Climate::classify_warped(lat, lon)
+            })
+            .collect();
+        Self {
+            geo,
+            cell,
+            origin,
+            w,
+            h,
+            climates,
+        }
     }
 
     pub fn climate(&self, coord: XZPoint) -> Climate {
-        let (lat, lon) = self.lat_lon(coord);
-        Climate::classify_warped(lat, lon)
+        let k = |v: i32, from: i32, len: usize| {
+            (v - from).div_euclid(self.cell).clamp(0, len as i32 - 1) as usize
+        };
+        self.climates
+            [k(coord.z, self.origin.1, self.h) * self.w + k(coord.x, self.origin.0, self.w)]
     }
 
     pub fn lat(&self, coord: XZPoint) -> f64 {
-        self.lat_lon(coord).0
+        (self.geo)(f64::from(coord.x) + 0.5, f64::from(coord.z) + 0.5).0
     }
 }
 
@@ -154,28 +167,38 @@ mod tests {
     }
 
     #[test]
-    fn per_block_mode_crosses_zones() {
-        // Sahara up into the Mediterranean, at 1:20.
-        let bbox = LLBBox::new(22.0, 10.0, 37.0, 11.0).unwrap();
+    fn per_position_mode_crosses_zones_and_pieces_agree() {
+        // Sahara up into the Mediterranean, at 1:500.
+        let proj = crate::projection::WebMercatorProjection::new(22.0, 10.0, 0.002);
         let mut frame = GroundFrame::local();
-        let proj = crate::projection::WebMercatorProjection::new(22.0, 10.0, 0.05);
         frame.mercator = Some(proj);
-        let whole = ClimateField::new(&frame, &bbox, (0, 0));
-        let z_end = proj.z_for_lat(22.0) - proj.z_for_lat(37.0);
+        let dims = |b: &LLBBox| {
+            let w = proj.x_for_lon(b.max().lng()) - proj.x_for_lon(b.min().lng());
+            let h = proj.z_for_lat(b.min().lat()) - proj.z_for_lat(b.max().lat());
+            (w.ceil() as usize, h.ceil() as usize)
+        };
+        let bbox = LLBBox::new(22.0, 10.0, 37.0, 11.0).unwrap();
+        let whole = ClimateField::new(&frame, &bbox, dims(&bbox));
+        assert_eq!(whole.cell, MIN_CELL);
+        let z_end = dims(&bbox).1 as i32;
         let mut seen: Vec<_> = (0..64)
-            .map(|i| whole.climate(XZPoint::new(10, (z_end * f64::from(i) / 64.0) as i32)))
+            .map(|i| whole.climate(XZPoint::new(10, z_end * i / 64)))
             .collect();
         seen.dedup();
         assert!(seen.len() >= 2, "{seen:?}");
         // A piece starting further south reads the same block the same way.
-        let piece_bbox = LLBBox::new(22.0, 10.0, 30.0, 11.0).unwrap();
-        let piece = ClimateField::new(&frame, &piece_bbox, (0, 0));
-        let snap = |lat| crate::projection::snap_edge(proj.z_for_lat(lat), false);
-        let dz = snap(30.0) - snap(37.0);
-        for z in (0..z_end as i32 - dz).step_by(97) {
-            let (a, b) = (XZPoint::new(5, z + dz), XZPoint::new(5, z));
-            assert_eq!(whole.climate(a), piece.climate(b));
-            assert_eq!(whole.lat(a), piece.lat(b));
+        let piece_bbox = LLBBox::new(22.0, 10.3, 30.0, 11.0).unwrap();
+        let piece = ClimateField::new(&frame, &piece_bbox, dims(&piece_bbox));
+        let snap = |v| crate::projection::snap_edge(v, false);
+        let dz = snap(proj.z_for_lat(30.0)) - snap(proj.z_for_lat(37.0));
+        let dx = snap(proj.x_for_lon(10.3)) - snap(proj.x_for_lon(10.0));
+        let (piece_w, piece_h) = dims(&piece_bbox);
+        for z in (0..piece_h as i32 - 3).step_by(7) {
+            for x in (0..piece_w as i32 - 3).step_by(5) {
+                let (a, b) = (XZPoint::new(x + dx, z + dz), XZPoint::new(x, z));
+                assert_eq!(whole.climate(a), piece.climate(b));
+                assert_eq!(whole.lat(a), piece.lat(b));
+            }
         }
     }
 }

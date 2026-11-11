@@ -19,6 +19,11 @@ static KOPPEN_TILES: LazyLock<Vec<KoppenTile>> = LazyLock::new(|| {
     (0..tiles).map(|_| OnceLock::new()).collect()
 });
 
+/// Side of a Köppen grid cell in degrees.
+pub(crate) fn koppen_cell_degrees() -> f64 {
+    KOPPEN.as_ref().map_or(0.1, |g| 1.0 / g.cells_per_degree())
+}
+
 fn koppen_class(lat: f64, lon: f64) -> u8 {
     koppen_class_where(|grid| {
         let (col, row) = grid.position(lat, lon);
@@ -89,8 +94,7 @@ impl Climate {
         Climate::from_class(koppen_class(lat, lon))
     }
 
-    /// Like `classify_at`, with borders wandering as the ecoregion borders do;
-    /// read per position by `--climate-mode per-position`.
+    /// The class at a point, with borders wandering as the ecoregion borders do.
     pub fn classify_warped(lat: f64, lon: f64) -> Climate {
         Climate::from_class(koppen_class_where(|grid| {
             crate::ecoregion::warped_cell(grid, lat, lon)

@@ -69,6 +69,8 @@ pub struct Ground {
     origin: (i32, i32),
 }
 
+pub(crate) type Geo = Box<dyn Fn(f64, f64) -> (f64, f64) + Send + Sync>;
+
 /// Layout of a run's ground grids. A projected run takes its size from the
 /// projected rectangle and re-spaces rows to Mercator, so every cell sits on
 /// its block.
@@ -137,28 +139,38 @@ impl GroundFrame {
         })
     }
 
-    /// Ecoregions over the area, at the geography the land cover is laid out on.
-    fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
-        let map = match &self.mercator {
+    /// (lat, lon) under a ground coordinate, laid out as the land cover is, and the world
+    /// block at ground (0, 0).
+    pub(crate) fn geo(
+        &self,
+        bbox: &LLBBox,
+        (world_w, world_h): (usize, usize),
+    ) -> (Geo, (i32, i32)) {
+        match self.mercator {
             Some(proj) => {
                 let (x0, z0) = self.origin(bbox);
-                EcoMap::build(world_w, world_h, (x0, z0), |gx, gz| {
+                let geo: Geo = Box::new(move |gx, gz| {
                     (
                         proj.lat_for_z(f64::from(z0) + gz),
                         proj.lon_for_x(f64::from(x0) + gx),
                     )
-                })
+                });
+                (geo, (x0, z0))
             }
             None => {
                 let (top, left) = (bbox.max().lat(), bbox.min().lng());
                 let (dlat, dlon) = (top - bbox.min().lat(), bbox.max().lng() - left);
-                let (w, h) = (world_w as f64, world_h as f64);
-                EcoMap::build(world_w, world_h, (0, 0), move |gx, gz| {
-                    (top - gz / h * dlat, left + gx / w * dlon)
-                })
+                let (w, h) = (world_w.max(1) as f64, world_h.max(1) as f64);
+                let geo: Geo = Box::new(move |gx, gz| (top - gz / h * dlat, left + gx / w * dlon));
+                (geo, (0, 0))
             }
-        };
-        map.map(Arc::new)
+        }
+    }
+
+    /// Ecoregions over the area, at the geography the land cover is laid out on.
+    fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
+        let (geo, align) = self.geo(bbox, (world_w, world_h));
+        EcoMap::build(world_w, world_h, align, geo).map(Arc::new)
     }
 
     /// The padding is dropped when the padded grid would be capped, since the
