@@ -56,9 +56,18 @@ pub fn fetch_data_from_pbf(src: &Source, bbox: LLBBox) -> Result<OsmData> {
     println!("{} Reading data from the .pbf extract...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Reading the .pbf extract...");
     let want = E7Box::around(&bbox, src.pad_m);
-    let bake = bake(src, want)?;
+    let (bake, of) = bake(src, want)?;
     emit_gui_progress_update(5.0, "");
-    Ok(cut(bake.elements(), want))
+    // A bake of exactly `want` is already its cut.
+    let data = if of == want {
+        bake
+    } else {
+        cut(bake.elements(), want)
+    };
+    if data.is_empty() {
+        no_data(src)?;
+    }
+    Ok(data)
 }
 
 /// Bakes a whole job before its pieces start, so each piece cuts its own area from the
@@ -66,7 +75,27 @@ pub fn fetch_data_from_pbf(src: &Source, bbox: LLBBox) -> Result<OsmData> {
 pub fn bake_for_job(src: &Source, selection: LLBBox) -> Result<()> {
     // Twice the pad: a piece first snaps outward to the chunk grid (under 16 blocks), then
     // adds its own pad.
-    bake(src, E7Box::around(&selection, 2.0 * src.pad_m)).map(drop)
+    let (data, _) = bake(src, E7Box::around(&selection, 2.0 * src.pad_m))?;
+    if data.is_empty() {
+        no_data(src)?;
+    }
+    Ok(())
+}
+
+/// Nothing in the area most likely means the extract does not cover it: Region Download
+/// falls back to the default source, a file the user named only warns.
+fn no_data(src: &Source) -> Result<()> {
+    let e = "the extract holds no OpenStreetMap data for this area";
+    if fallback_allowed(src, crate::net::offline()) {
+        return Err(e.to_string());
+    }
+    eprintln!(
+        "{}",
+        format!("Warning: {e}; check that it covers the selection.")
+            .yellow()
+            .bold()
+    );
+    Ok(())
 }
 
 fn cache_root() -> Result<PathBuf> {
@@ -127,12 +156,12 @@ pub fn plan(root: &Path, src: &Source, selection: LLBBox) -> ExtractPlan {
         let Some((region, url)) = picked else {
             return ExtractPlan::default();
         };
-        let Some(file) = download_name(&url) else {
+        let Some(dest) = download_path(&cache, &url) else {
             return ExtractPlan::default();
         };
-        let region = region.or_else(|| Some(file.to_string()));
+        let region = region.or_else(|| download_name(&url).map(str::to_string));
         url_of = Some(url.clone());
-        (region, cache.join("downloads").join(file))
+        (region, dest)
     } else {
         let p = PathBuf::from(&src.spec);
         (p.file_name().map(|n| n.to_string_lossy().into_owned()), p)
@@ -143,13 +172,14 @@ pub fn plan(root: &Path, src: &Source, selection: LLBBox) -> ExtractPlan {
         .map(|m| m.len());
     let bake = bytes
         .and_then(|_| pbf_key(&pbf).ok())
-        .and_then(|key| find_bake(&cache.join("bakes").join(key), &want));
+        .and_then(|key| find_bake(&cache.join("bakes").join(key), &want))
+        .map(|(path, _)| path);
     let bake_bytes = bake
         .and_then(|b| std::fs::metadata(b).ok())
         .map(|m| m.len());
     let download_bytes = bytes.or_else(|| {
         let name = pbf.file_name()?.to_string_lossy().into_owned();
-        read_sizes(&cache.join("downloads"))
+        read_sizes(pbf.parent()?)
             .get(&name)
             .copied()
             .filter(|&b| b > 0)
@@ -169,13 +199,13 @@ pub fn plan(root: &Path, src: &Source, selection: LLBBox) -> ExtractPlan {
     }
 }
 
-/// The bake of `want`, read from disk when an earlier one covers it.
-fn bake(src: &Source, want: E7Box) -> Result<OsmData> {
+/// The bake of `want`, read from disk when an earlier one covers it, and the box it holds.
+fn bake(src: &Source, want: E7Box) -> Result<(OsmData, E7Box)> {
     let pbf = locate(src, &want)?;
     let dir = cache_root()?.join("bakes").join(pbf_key(&pbf)?);
-    if let Some(hit) = find_bake(&dir, &want) {
+    if let Some((hit, of)) = find_bake(&dir, &want) {
         println!("Reading the bake {}", hit.display());
-        return read_bake(&hit);
+        return Ok((read_bake(&hit)?, of));
     }
     let t = Instant::now();
     let data = cut_pbf(&pbf, want)?;
@@ -188,6 +218,11 @@ fn bake(src: &Source, want: E7Box) -> Result<OsmData> {
         t.elapsed().as_secs_f64(),
         rayon::current_num_threads()
     );
+    // An empty cut is not kept: the extract most likely misses the area.
+    if data.is_empty() {
+        report_bake(&label, Stage::Finalize, 1.0, 0, 0);
+        return Ok((data, want));
+    }
     let mut enc = zstd::stream::Encoder::new(Vec::new(), 3).map_err(|e| e.to_string())?;
     serde_json::to_writer(&mut enc, &data).map_err(|e| e.to_string())?;
     let bytes = enc.finish().map_err(|e| e.to_string())?;
@@ -200,7 +235,7 @@ fn bake(src: &Source, want: E7Box) -> Result<OsmData> {
         bytes.len() as u64,
         bytes.len() as u64,
     );
-    Ok(data)
+    Ok((data, want))
 }
 
 /// The extract's short name: `liechtenstein` for `liechtenstein-latest.osm.pbf`.
@@ -247,18 +282,17 @@ fn read_bake(path: &Path) -> Result<OsmData> {
         .map_err(|e| format!("bad bake {}: {e}", path.display()))
 }
 
-/// The smallest bake in `dir` holding all of `want`.
-fn find_bake(dir: &Path, want: &E7Box) -> Option<PathBuf> {
+/// The smallest bake in `dir` holding all of `want`, and its box.
+fn find_bake(dir: &Path, want: &E7Box) -> Option<(PathBuf, E7Box)> {
     std::fs::read_dir(dir)
         .ok()?
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
             let b = E7Box::from_file_name(&name)?;
-            b.contains(want).then(|| (b.area(), e.path()))
+            b.contains(want).then(|| (e.path(), b))
         })
-        .min_by_key(|(area, _)| *area)
-        .map(|(_, p)| p)
+        .min_by_key(|(_, b)| b.area())
 }
 
 /// Names one version of an extract: a re-download gets a new size or time, and its bakes.
@@ -286,16 +320,50 @@ fn locate(src: &Source, want: &E7Box) -> Result<PathBuf> {
             Err(format!("--osm-pbf: {} is not a file", p.display()))
         };
     }
-    let url = match &src.url {
-        Some(url) => url.clone(),
-        None => geofabrik_url(&fetch_index()?, want)?,
+    // A picked extract is held to a size the bake can hold in memory; a named one is not.
+    let (url, cap) = match &src.url {
+        Some(url) => (url.clone(), None),
+        None => (
+            geofabrik_url(&fetch_index()?, want)?,
+            Some(MAX_PICKED_EXTRACT_BYTES),
+        ),
     };
-    let name = download_name(&url).ok_or_else(|| format!("not a .pbf url: {url}"))?;
-    let dest = cache_root()?.join("downloads").join(name);
+    let dest =
+        download_path(&cache_root()?, &url).ok_or_else(|| format!("not a .pbf url: {url}"))?;
     if !dest.is_file() {
-        download(&url, &dest)?;
+        download(&url, &dest, cap)?;
+    } else if let Some(cap) = cap {
+        let bytes = std::fs::metadata(&dest).map_or(0, |m| m.len());
+        check_extract_size(&extract_label(&dest), bytes, cap)?;
     }
     Ok(dest)
+}
+
+/// Largest extract `--osm-pbf geofabrik` picks on its own: a bake indexes every node of it in
+/// memory, about twice the file, so Germany (4.4 GB) or Europe (31 GB) would run out.
+const MAX_PICKED_EXTRACT_BYTES: u64 = 1_500_000_000;
+
+fn check_extract_size(label: &str, bytes: u64, cap: u64) -> Result<()> {
+    if bytes <= cap {
+        return Ok(());
+    }
+    Err(format!(
+        "the smallest Geofabrik extract holding the selection, {label}, is {:.1} GB, past the {:.1} GB \
+         Arnis picks on its own; name a smaller one with --osm-pbf-url or pass a .pbf file",
+        bytes as f64 / 1e9,
+        cap as f64 / 1e9
+    ))
+}
+
+/// Where the extract at `url` is kept: in a folder named for the whole url, so two regions
+/// sharing a file name (the US state of Georgia and the country) never share a download.
+pub(crate) fn download_path(cache: &Path, url: &str) -> Option<PathBuf> {
+    let name = download_name(url)?;
+    let key: String = Sha256::digest(url.as_bytes())[..6]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Some(cache.join("downloads").join(key).join(name))
 }
 
 /// The file name a downloaded extract is kept under: the url's last part,
@@ -356,8 +424,8 @@ fn client() -> Result<reqwest::blocking::Client> {
 
 /// The Region Download extract: [`fetch_extract`] as the first 40 % of its
 /// job, on the prewarm bar's 1-4 %.
-fn download(url: &str, dest: &Path) -> Result<()> {
-    fetch_extract(url, dest, (1, 1), (0.0, 40.0), None, Some((1.0, 4.0))).map(drop)
+fn download(url: &str, dest: &Path, cap: Option<u64>) -> Result<()> {
+    fetch_extract(url, dest, (1, 1), (0.0, 40.0), None, Some((1.0, 4.0)), cap).map(drop)
 }
 
 fn dir_of(path: &Path) -> Result<&Path> {
@@ -439,14 +507,9 @@ fn fetch_span(
     Ok(())
 }
 
-/// Streams the extract at `url` to `<dest>.part`, over several connections
-/// at once when the server takes byte ranges (Geofabrik does; four measured
-/// 1.6-2.1x one), then renames: a half file never wears the real name. Each
-/// connection takes a --max-downloads permit. Reports a download transfer for
-/// `item` (1-based, of that many) twice a second, moving the job's percent
-/// across `span`, and the main bar across `bar` or, without one, with the
-/// job's percent and a status line. `Ok(false)` when `cancel` stopped it;
-/// nothing is left behind then.
+/// Streams `url` to `<dest>.part` over byte-range connections, one --max-downloads permit
+/// each, then renames it into place; reports progress for `item` across `span` (and `bar`).
+/// `Ok(false)` when `cancel` stopped it; a HEAD size past `cap` is refused.
 pub fn fetch_extract(
     url: &str,
     dest: &Path,
@@ -454,6 +517,7 @@ pub fn fetch_extract(
     span: (f64, f64),
     cancel: Option<&std::sync::atomic::AtomicBool>,
     bar: Option<(f64, f64)>,
+    cap: Option<u64>,
 ) -> Result<bool> {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     crate::net::ensure_online("OpenStreetMap extract (.pbf)")?;
@@ -470,6 +534,9 @@ pub fn fetch_extract(
             .map_err(|e| format!("{url}: {e}"))?
     };
     let total = content_length_header(head.headers()).unwrap_or(0);
+    if let Some(cap) = cap {
+        check_extract_size(&extract_label(dest), total, cap)?;
+    }
     let ranges = head
         .headers()
         .get(reqwest::header::ACCEPT_RANGES)
@@ -903,7 +970,7 @@ fn wanted<'a>(kind: Kind, any_tag: bool, tag: impl Fn(&str) -> Option<&'a str>) 
     ANY_VALUE.iter().any(|k| tag(k).is_some())
         || match kind {
             Kind::Way => any_tag,
-            Kind::Node => rail_stop() || place(),
+            Kind::Node => rail_stop() || place() || tag("raceway").is_some(),
             Kind::Relation => tag("type") == Some("building"),
         }
 }
@@ -1288,6 +1355,47 @@ mod tests {
         assert!(fallback_allowed(&src(GEOFABRIK), false));
         assert!(!fallback_allowed(&src(GEOFABRIK), true));
         assert!(!fallback_allowed(&src("berlin.osm.pbf"), false));
+    }
+
+    #[test]
+    fn an_empty_cut_falls_back_only_for_geofabrik() {
+        // Held by the tests that switch --offline on, which changes the answer.
+        let _net = crate::net::PERMIT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _floor = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let src = |spec: &str| Source {
+            spec: spec.into(),
+            url: None,
+            pad_m: 0.0,
+        };
+        assert!(no_data(&src(GEOFABRIK)).is_err());
+        assert!(no_data(&src("berlin.osm.pbf")).is_ok());
+    }
+
+    #[test]
+    fn downloads_are_kept_per_url_and_a_picked_one_is_capped() {
+        let cache = Path::new("/c");
+        let us = download_path(cache, "https://d/north-america/us/georgia-latest.osm.pbf");
+        let country = download_path(cache, "https://d/asia/georgia-latest.osm.pbf").unwrap();
+        assert_ne!(us.as_deref(), Some(country.as_path()));
+        assert!(country.ends_with("georgia-latest.osm.pbf"));
+        assert_eq!(extract_label(&country), "georgia");
+        assert!(download_path(cache, "https://d/index.html").is_none());
+
+        assert!(check_extract_size("liechtenstein", 3_463_268, MAX_PICKED_EXTRACT_BYTES).is_ok());
+        let e = check_extract_size("germany", 4_400_000_000, MAX_PICKED_EXTRACT_BYTES).unwrap_err();
+        assert!(e.contains("germany") && e.contains("4.4 GB"), "{e}");
+    }
+
+    #[test]
+    fn raceway_nodes_are_wanted_like_overpass_asks() {
+        let tags = [("raceway", "start_line")];
+        let find = |k: &str| tags.iter().find(|t| t.0 == k).map(|t| t.1);
+        assert!(wanted(Kind::Node, true, find));
+        assert!(!wanted(Kind::Node, true, |k| (k == "name").then_some("x")));
     }
 
     #[test]

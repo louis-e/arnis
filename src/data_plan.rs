@@ -285,9 +285,13 @@ mod tests {
         );
         assert_eq!((e.download_bytes, e.bake_estimate), (None, None));
         // A size a HEAD saw names the download before it happens.
-        touch(&osm_pbf.join("downloads").join("sizes.json"), 0);
+        let download =
+            crate::osm_pbf::download_path(&osm_pbf, "https://example.invalid/test-latest.osm.pbf")
+                .unwrap();
+        let downloads = download.parent().unwrap();
+        touch(&downloads.join("sizes.json"), 0);
         std::fs::write(
-            osm_pbf.join("downloads").join("sizes.json"),
+            downloads.join("sizes.json"),
             r#"{"test-latest.osm.pbf": 2000000000}"#,
         )
         .unwrap();
@@ -299,7 +303,7 @@ mod tests {
         // The selection is a sliver of the 2 deg² region: its bake is too.
         let bake = e.bake_estimate.unwrap();
         assert!(bake > 0 && bake < 10_000_000, "{bake}");
-        touch(&osm_pbf.join("downloads").join("test-latest.osm.pbf"), 4321);
+        touch(&download, 4321);
         let p = plan(root, &pbf, bbox);
         assert_eq!(p.extract.as_ref().unwrap().bytes, Some(4321));
         assert_eq!(p.extract.as_ref().unwrap().download_bytes, Some(4321));
