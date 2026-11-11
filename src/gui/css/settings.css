@@ -1080,18 +1080,9 @@ body.meld-off .meld-only {
   display: none !important;
 }
 
-.settings-page .meld-card {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--ui-tile-border);
-  border-radius: 12px;
-}
-
-.settings-page .meld-card-title {
-  margin: 0;
+/* Heading of a group of tiles inside one section */
+.settings-page .settings-group-title {
+  margin: 14px 0 -2px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -1100,7 +1091,7 @@ body.meld-off .meld-only {
 }
 
 .settings-page input.meld-short,
-.settings-page .meld-card input[type="number"] {
+.settings-page .settings-section.meld-only input[type="number"] {
   width: 120px;
   text-align: center;
 }
@@ -1108,10 +1099,6 @@ body.meld-off .meld-only {
 /* LAT,LON needs room for two signed decimals. */
 .settings-page input.meld-coords {
   width: 170px;
-}
-
-.settings-page .meld-card .setting-grid {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 /* Data panel: Prepare Countries and Download Plan */
@@ -1148,29 +1135,13 @@ body.meld-off .meld-only {
   display: none;
 }
 
-/* Meld settings (and the switch that shows them) carry gold viewfinder corners: the tile's own
-   rounded border in gold, masked to four corner arcs that fade out along each edge. */
-.settings-page .setting-tile.meld-only,
-.settings-page .meld-card,
-.settings-page .setting-tile:has(#advanced-meld-features-toggle) {
-  position: relative;
+/* The switch that shows the advanced sections takes the accent while it is on, and so do their nav icons. */
+.settings-page .setting-tile:has(#advanced-meld-features-toggle:checked) {
+  border-color: var(--primary-accent);
 }
 
-.settings-page .setting-tile.meld-only::after,
-.settings-page .meld-card::after,
-.settings-page .setting-tile:has(#advanced-meld-features-toggle)::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border: 2px solid var(--primary-accent);
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0.85;
-  mask:
-    radial-gradient(circle at 0 0, #000 9px, transparent 22px),
-    radial-gradient(circle at 100% 0, #000 9px, transparent 22px),
-    radial-gradient(circle at 0 100%, #000 9px, transparent 22px),
-    radial-gradient(circle at 100% 100%, #000 9px, transparent 22px);
+.settings-nav-item.meld-only:not(.active) .icon {
+  color: var(--primary-accent);
 }
 
 /* Projects: one row per One World in the save folder */
