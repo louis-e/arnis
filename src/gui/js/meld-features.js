@@ -525,7 +525,7 @@ function skipLocal(list, include) {
 
 // The job the cells on the map belong to: the run's, else the plan's.
 let pieceJob = '';
-const cellsJob = () => (pieces.size ? pieceJob : lastPlan?.job) || '';
+const cellsJob = () => (pieces.size && pieceJob) || lastPlan?.job || '';
 
 // A menu action on `cells` (plan indexes). A running job takes it through the engine; between
 // runs Skip, Include and Retry are the next run's, and Rebuild and Remove delete built land
