@@ -719,6 +719,11 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             Err(e) if e == scale::PARTIAL => println!("{e}"),
             Err(e) => {
                 eprintln!("{} {}", "Error:".red().bold(), e);
+                // A world with a finished piece in it stays for the resume; doubt keeps it too.
+                if !matches!(one_world::Manifest::load(&world_dir), Ok(Some(m)) if m.areas.is_empty())
+                {
+                    keep_one_world();
+                }
                 exit_failed();
             }
             Ok(()) => {}

@@ -609,6 +609,7 @@ pub fn prepare_unit(
     if Manifest::load(world_dir)?.is_none() {
         return Err(format!("{} is not a One World.", world_dir.display()));
     }
+    #[cfg(any(test, debug_assertions))]
     crate::scale::child::fail_for_test(lease.piece as usize);
     crate::map_item::leave_counter_to_coordinator(
         lease.first_map_id + crate::scale::MAP_IDS_PER_PIECE - 1,

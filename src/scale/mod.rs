@@ -984,7 +984,6 @@ pub fn run_with(
             .map_err(|e| format!("The area was written but could not be recorded: {e}"))?;
         }
         write(&job.done_path(unit), &json!(r))?;
-        crate::keep_one_world();
         let pieces_done = finished.fetch_add(1, Ordering::Relaxed) + 1;
         record_job(None);
         piece_record(
@@ -1937,9 +1936,9 @@ second
     }
 
     /// Builds the parity area as a job, kills one piece, resumes, and compares with an
-    /// uninterrupted job. Needs network, python with nbtlib, the arnis binary
-    /// (`ARNIS_BIN`) and chunkdiff.py (`CHUNKDIFF`):
-    /// `cargo test --release scale::tests::resume -- --ignored`
+    /// uninterrupted job. Needs network, python with nbtlib, a debug build of arnis, which has
+    /// the test hook (`ARNIS_BIN`), and chunkdiff.py (`CHUNKDIFF`):
+    /// `cargo test scale::tests::resume -- --ignored`
     #[test]
     #[ignore]
     fn resume_after_kill_matches_full_run() {

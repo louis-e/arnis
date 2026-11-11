@@ -10,21 +10,11 @@
 
 use std::process::{Child, Command};
 
-/// Set up `cmd` so the piece it starts can be tied to this process.
+/// Set up `cmd` so the piece it starts can be tied to this process: no console window, its
+/// own process group, and a stdin pipe it watches.
 pub fn prepare(cmd: &mut Command) {
     cmd.stdin(std::process::Stdio::piped());
-    // A piece of a job started from the window must not open a console of
-    // its own (a release build has none to open; a debug build would).
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
+    crate::live::server::detach(cmd);
 }
 
 /// Ties a started piece to this process's lifetime.
@@ -82,10 +72,9 @@ pub fn watch_parent() {
     });
 }
 
-/// Test hook for a piece that dies mid-build. `ARNIS_TEST_FAIL_PIECE` names a
-/// file holding a piece number (from 1) and a delay in seconds: that piece
-/// exits as a panic does once the delay is up, and the file is removed first,
-/// so the piece's retry builds. Unset, it costs one environment lookup.
+/// Test hook, debug builds only: `ARNIS_TEST_FAIL_PIECE` names a file holding a piece number
+/// (from 1) and a delay in seconds; that piece then exits as a panic does, once.
+#[cfg(any(test, debug_assertions))]
 pub fn fail_for_test(piece: usize) {
     let Some(path) = std::env::var_os("ARNIS_TEST_FAIL_PIECE") else {
         return;
