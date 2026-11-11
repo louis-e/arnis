@@ -26,10 +26,7 @@ pub fn generate_waterways(
         if !is_channel_waterway(waterway_type) {
             return;
         }
-        let mut waterway_width = waterway_width(waterway_type, &element.tags);
-        if let Some(cap) = width_cap {
-            waterway_width = waterway_width.min(cap);
-        }
+        let waterway_width = capped_waterway_width(waterway_type, &element.tags, width_cap);
 
         // Culverts and pipes are not open water; they would cut channels through banks.
         if is_underground_waterway(&element.tags) {
@@ -140,6 +137,21 @@ pub fn waterway_width(waterway_type: &str, tags: &HashMap<String, String>) -> i3
     match tagged {
         Some(w) if w >= 1 => w.min(i64::from(MAX_WATERWAY_WIDTH)) as i32,
         _ => get_waterway_width(waterway_type),
+    }
+}
+
+/// `waterway_width` under the small-map cap: `cap` for rivers and canals, and the narrowest
+/// channel for streams and ditches, so the two still read apart.
+pub fn capped_waterway_width(
+    waterway_type: &str,
+    tags: &HashMap<String, String>,
+    cap: Option<i32>,
+) -> i32 {
+    let width = waterway_width(waterway_type, tags);
+    match cap {
+        Some(cap) if get_waterway_width(waterway_type) <= 3 => width.min(cap).min(1),
+        Some(cap) => width.min(cap),
+        None => width,
     }
 }
 

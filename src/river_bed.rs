@@ -1,8 +1,6 @@
 //! `--river-bed v1`: a U-shaped bed for rivers, canals and streams, deeper where they are wider.
-//!
-//! Depth only, read by the existing carve paths. Lakes, the sea and unmapped land-cover water
-//! keep their bed, and a river blends to it where the two meet. Everything is a function of
-//! element geometry, block coordinates and scale, so pieces and tiles agree.
+//! Lakes, the sea and unmapped water keep their bed. Everything is a function of element
+//! geometry, block coordinates and scale, so pieces and tiles agree.
 
 use crate::block_definitions::{
     Block, ANDESITE, CLAY, COARSE_DIRT, DIRT, GRAVEL, MOSSY_COBBLESTONE, MUD, SAND, STONE,
@@ -11,7 +9,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::water_areas::PolygonEdges;
 use crate::element_processing::waterways::{
-    is_channel_waterway, is_underground_waterway, waterway_width,
+    capped_waterway_width, is_channel_waterway, is_underground_waterway,
 };
 use crate::ground::Ground;
 use crate::ground_generation::ground_noise;
@@ -31,8 +29,7 @@ const RIVER_WATER_VALUES: &[&str] = &["river", "canal", "stream"];
 const BAND_MIN: f64 = 8.0;
 const BAND_MAX: f64 = 32.0;
 
-/// Slack over the tagged half-width before a centreline-only column counts as embedded in a
-/// wider water body.
+/// Slack over the tagged half-width before a centreline counts as inside a wider water body.
 const EMBED_MARGIN: f64 = 4.0;
 
 /// u8 chamfer distances saturate here (85 blocks); the depth cap saturates at hw 30.
@@ -133,8 +130,7 @@ impl RiverBedField {
     }
 }
 
-/// Build the field once per run. `clip_bbox` is the area plus the One World clip pad, inside
-/// which element geometry is complete.
+/// Build the field once per run. Element geometry is complete inside `clip_bbox`.
 #[allow(clippy::too_many_arguments)]
 pub fn compute_river_bed_field(
     mode: RiverBed,
@@ -324,9 +320,8 @@ struct Geometry<'a> {
     nonriver_polys: &'a [PolyRings],
 }
 
-/// Depths of the tile at (`core_x`, `core_z`), or `None` when no river crosses it. Worked out
-/// on the tile grown by `halo`, which holds everything its cells read, so the result does not
-/// depend on the tiling.
+/// Depths of one tile, or `None` without a river. The tile grown by `halo` holds everything
+/// its cells read, so the result does not depend on the tiling.
 fn build_tile(
     geo: &Geometry,
     work: &TileWork,
@@ -392,8 +387,7 @@ fn build_tile(
         }
     }
 
-    // A centreline deeper inside land-cover water than its tagged width explains is a wide
-    // body the tags under-describe; a narrow ribbon there would leave a stripe.
+    // A centreline deep inside wider land-cover water would carve a stripe through it.
     if line_mask.contains(&true) {
         let mut land_dt: Vec<u8> = (0..n)
             .map(|i| if lc_water[i] { DT_MAX } else { 0 })
@@ -421,8 +415,7 @@ fn build_tile(
     let mut dt: Vec<u8> = (0..n).map(|i| if mask[i] { DT_MAX } else { 0 }).collect();
     chamfer_3_4_dt(&mut dt, lat.w, lat.h);
 
-    // Local half-width: line rivers carry a tagged one; polygons use a windowed max of the
-    // bank distance.
+    // Local half-width: tagged for lines, a windowed max of the bank distance for polygons.
     let d_in_mask: Vec<u8> = (0..n)
         .map(|i| {
             if mask[i] {
@@ -457,8 +450,7 @@ fn build_tile(
     // Rounds the chamfer's octagonal facets off the depth contours.
     let depth_f = tent3(&depth_f, lat.w, lat.h);
 
-    // Distance to foreign water: at 0 the blend returns the legacy depth, so the river
-    // arrives at the lake bed instead of stepping into it.
+    // Distance to foreign water, so the river arrives at a lake's bed instead of a step.
     let mut m_dt = vec![DT_MAX; n];
     for j in 0..lat.h {
         for i in 0..lat.w {
@@ -512,18 +504,15 @@ const SALT_ROCK: u32 = 0x5256_0006;
 const SALT_CLAY: u32 = 0x5256_0007;
 const SALT_SILT: u32 = 0x5256_0008;
 
-/// Pools and shallows along the river, and a ripple that bends the depth contours off the
-/// bank lines. The bank itself stays at the profile's depth.
+/// Pools along the river and a ripple that bends the depth contours off the bank lines.
 fn natural_depth(d: f64, x: i32, z: i32) -> f64 {
     let pool = 0.88 + 0.24 * ground_noise(x, z, 36, SALT_POOL);
     let ripple = (ground_noise(x, z, 5, SALT_RIPPLE) - 0.5) * 0.8;
     d * pool + ripple * d.min(1.0)
 }
 
-/// Bed and the block under it for a river column `depth` deep; `sandy` beside a beach. Earth
-/// at the banks gives way to sand, then gravel and rock with depth. Each material has its
-/// own noise field over a noisy depth, so they lie in ragged patches, not in bands along
-/// the banks.
+/// Bed and the block under it for a river column; `sandy` beside a beach. Earth, sand, gravel
+/// and rock each have a noise field over a noisy depth: ragged patches, no bands along the banks.
 pub fn bed_blocks(x: i32, z: i32, depth: i32, sandy: bool) -> (Block, Block) {
     let dither = (coord_hash(x ^ 0x52B3, z ^ 0x1F7D) % 1000) as f64 / 1000.0 - 0.5;
     let zone = f64::from(depth) + (ground_noise(x, z, 9, SALT_ZONE) - 0.5) * 2.4 + dither * 0.8;
@@ -570,9 +559,8 @@ fn river_depth_cap_for_hw(hw: f64) -> f64 {
     (6.0 * (hw / 30.0).powf(0.7)).clamp(1.0, f64::from(MAX_WATER_DEPTH))
 }
 
-/// Bed depth `d_blocks` from the bank of a channel of half-width `hw`: half smoothstep, half
-/// parabola. A shallow step at the shore, then a bank that drops within a few blocks to a
-/// broad bottom. The slope peaks at `1.33 * D / hw` per block, under a block a column.
+/// Bed depth `d_blocks` from the bank: half smoothstep, half parabola, so the bank drops
+/// within a few blocks to a broad bottom. Peak slope `1.33 * D / hw`, under a block a column.
 fn river_profile_depth(d_blocks: f64, hw: f64) -> f64 {
     let t = (d_blocks / hw.max(1.0)).clamp(0.0, 1.0);
     let u = 0.5 * smoothstep(t) + 0.5 * (1.0 - (1.0 - t) * (1.0 - t));
@@ -620,8 +608,7 @@ fn relation_rings(rel: &crate::osm_parser::ProcessedRelation) -> Option<PolyRing
     (!outers.is_empty()).then(|| PolyRings::new(outers, inners))
 }
 
-/// Tag scan of every element. The dispatch can't be reused: it sends a way carrying any
-/// `natural` key to `natural.rs`, including `natural=water` + `water=river`.
+/// Tag scan of every element; the dispatch sends `natural=water` + `water=river` elsewhere.
 fn classify<'a>(
     elements: &'a [ProcessedElement],
     channel_width_cap: Option<i32>,
@@ -656,10 +643,7 @@ fn classify<'a>(
                 {
                     continue;
                 }
-                let mut width = waterway_width(wt, &way.tags);
-                if let Some(cap) = channel_width_cap {
-                    width = width.min(cap);
-                }
+                let width = capped_waterway_width(wt, &way.tags, channel_width_cap);
                 lines.push(LineRiver {
                     way,
                     hw_stamp: width / 2,
