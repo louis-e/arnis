@@ -563,6 +563,11 @@ pub(crate) fn cache_files(root: &Path, bbox: &LLBBox) -> Vec<PathBuf> {
         if lx0 >= lx1 || ly0 >= ly1 {
             continue;
         }
+        let marker = missing_marker_path(&dir, &url);
+        if marker.exists() {
+            out.push(marker);
+            continue;
+        }
         let name = url
             .rsplit('/')
             .next()
@@ -576,6 +581,24 @@ pub(crate) fn cache_files(root: &Path, bbox: &LLBBox) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+/// A 404 for an ESA tile: the product has none there (open ocean).
+#[derive(Debug)]
+struct TileAbsent;
+
+impl std::fmt::Display for TileAbsent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no ESA tile here (HTTP 404)")
+    }
+}
+
+impl std::error::Error for TileAbsent {}
+
+/// Marks an ESA tile the bucket does not have.
+fn missing_marker_path(cache_dir: &Path, url: &str) -> PathBuf {
+    let name = url.rsplit('/').next().unwrap_or("tile.tif");
+    cache_dir.join(name.replace(".tif", ".missing"))
 }
 
 fn get_cache_dir() -> PathBuf {
@@ -831,15 +854,25 @@ fn read_esa_tile_into_raster(
         .unwrap_or("tile.tif")
         .replace(".tif", "_header.bin");
     let header_cache_path = cache_dir.join(&cache_filename);
+    let marker = missing_marker_path(cache_dir, url);
+    if crate::elevation::cache::missing_marker_holds(&marker) {
+        return Ok(());
+    }
 
     // Step 1: Read the TIFF/BigTIFF header to get IFD location
     // Read first 64KB which should contain the IFD for COG files
     let header_bytes = if header_cache_path.exists() {
         std::fs::read(&header_cache_path)?
     } else {
-        let bytes = fetch_range(client, url, 0, 65536)?;
-        // Cache the header for future use
-        let _ = std::fs::write(&header_cache_path, &bytes);
+        let bytes = match fetch_range(client, url, 0, 65536) {
+            // Open ocean has no tile; remembered so neither a later run nor --offline asks.
+            Err(e) if e.is::<TileAbsent>() => {
+                crate::elevation::cache::write_atomic(&marker, b"");
+                return Ok(());
+            }
+            r => r?,
+        };
+        crate::elevation::cache::write_atomic(&header_cache_path, &bytes);
         bytes
     };
 
@@ -950,7 +983,7 @@ fn read_esa_tile_into_raster(
                 std::fs::read(&tile_cache_file)?
             } else {
                 let data = fetch_range(client, url, offset, byte_count)?;
-                let _ = std::fs::write(&tile_cache_file, &data);
+                crate::elevation::cache::write_atomic(&tile_cache_file, &data);
                 data
             };
 
@@ -1002,6 +1035,9 @@ fn fetch_range(
         .send()?;
 
     let status = response.status();
+    if status.as_u16() == 404 {
+        return Err(Box::new(TileAbsent));
+    }
     // Must be 206 Partial Content. If the server ignores the Range header and
     // sends 200 OK, it would return the entire ~500MB GeoTIFF file.
     if status.as_u16() != 206 {
@@ -1886,5 +1922,25 @@ mod inland_water_tests {
         assert!(m.get(1, 1));
         assert!(!m.get(1, 3) && !m.get(4, 0));
         assert!(!m.get(usize::MAX, 0) && !m.get(0, usize::MAX));
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn a_tile_marked_missing_stands_in_for_its_files() {
+        let root = tempfile::tempdir().unwrap();
+        // Open Atlantic: one ESA tile, which the bucket does not have.
+        let bbox = LLBBox::new(1.0, -29.0, 1.01, -28.99).unwrap();
+        let before = cache_files(root.path(), &bbox);
+        assert!(before.len() >= 2, "header and a block: {before:?}");
+        let (_, _, url) = get_esa_tile_specs(&bbox).remove(0);
+        let marker = missing_marker_path(&root.path().join(LAND_COVER_CACHE_DIR), &url);
+        assert!(marker.to_string_lossy().ends_with("_N00W030_Map.missing"));
+        std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        std::fs::write(&marker, b"").unwrap();
+        assert_eq!(cache_files(root.path(), &bbox), vec![marker]);
     }
 }

@@ -17,9 +17,7 @@
 //! concurrent Arnis processes can never leave a truncated file that a later run
 //! reads back as valid data.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::elevation::cache::CacheClearStats;
 
@@ -75,46 +73,7 @@ pub fn read(path: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
-/// Write `bytes` to `path` atomically.
-///
-/// The temp name carries the process id and a per-write counter, so no two
-/// writers ever share one. Both halves are needed: the pid separates processes,
-/// and the counter separates writers inside a process, which happens whenever
-/// the 3D preview and a generation open the same release at once. Sharing a
-/// temp path would let one writer truncate a file another is still writing and
-/// then publish it.
-///
-/// The rename makes whichever finishes last visible, and since both writers
-/// hold identical bytes for a given path, either is correct.
-///
-/// Every failure is silent by design. The cache is an optimisation, and a
-/// read-only or full disk must not fail a generation.
-pub fn write_atomic(path: &Path, bytes: &[u8]) {
-    static WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-    let Some(parent) = path.parent() else {
-        return;
-    };
-    if std::fs::create_dir_all(parent).is_err() {
-        return;
-    }
-    let tmp = parent.join(format!(
-        ".{}.{}.{}.tmp",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("cache"),
-        std::process::id(),
-        WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    let written = std::fs::File::create(&tmp).and_then(|mut f| {
-        f.write_all(bytes)?;
-        // The rename below only orders the directory entry, not the file's own
-        // data, so without this a crash can leave a correctly named file whose
-        // contents are still in the page cache.
-        f.sync_all()
-    });
-    if written.is_err() || std::fs::rename(&tmp, path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-}
+pub use crate::elevation::cache::write_atomic;
 
 /// The release that last served data on this machine, if it is still a
 /// well-formed name.

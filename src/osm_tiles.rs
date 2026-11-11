@@ -368,8 +368,7 @@ fn manifest(client: &Client, base_url: &str) -> Result<Manifest> {
         serde_json::from_slice(&body).map_err(|e| format!("bad archive index: {e}"))?;
     if let Some(p) = &cached {
         if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
-            let _ = std::fs::write(p, &body);
+            crate::elevation::cache::write_atomic(p, &body);
             prune_stale(
                 dir,
                 &parsed.archives.iter().map(|a| a.file.as_str()).collect(),

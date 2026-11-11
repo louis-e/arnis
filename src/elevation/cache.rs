@@ -67,6 +67,52 @@ impl CacheClearStats {
     }
 }
 
+/// Writes `bytes` to `path` through a temporary sibling and a rename, so a reader sees the old
+/// file or all of the new one. The temporary carries the pid and a per-process counter, so
+/// neither two processes nor two threads share one. Silent on failure: a cache write is only
+/// an optimisation. Returns whether the file landed.
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> bool {
+    use std::io::Write;
+    static WRITE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return false;
+    }
+    let tmp = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("cache"),
+        std::process::id(),
+        WRITE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let written = std::fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(bytes)?;
+        // The rename orders only the directory entry, not the file's data.
+        f.sync_all()
+    });
+    if written.is_err() || std::fs::rename(&tmp, path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return false;
+    }
+    true
+}
+
+/// How long a marker for a tile a server does not have is trusted online.
+pub const MISSING_MARKER_MAX_AGE: std::time::Duration =
+    std::time::Duration::from_secs(TILE_CACHE_MAX_AGE_DAYS * 24 * 60 * 60);
+
+/// Whether the marker at `path` still says the tile does not exist: younger than
+/// [`MISSING_MARKER_MAX_AGE`], or of any age offline, where it cannot be asked again.
+pub fn missing_marker_holds(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .is_ok_and(|t| {
+            crate::net::offline() || t.elapsed().is_ok_and(|age| age < MISSING_MARKER_MAX_AGE)
+        })
+}
+
 /// Bytes held by every regular file under `dir`, symlinks counted but not
 /// followed, so the number cannot run off into a directory the cache merely
 /// points at. A missing directory is zero rather than an error: the settings
@@ -408,6 +454,36 @@ fn cleanup_dir_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_marker_expires_online_but_not_offline() {
+        // Same locks as the net test: offline refuses downloads elsewhere while it is on.
+        let _net = crate::net::PERMIT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _floor = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("t.missing");
+        assert!(!missing_marker_holds(&marker));
+        assert!(write_atomic(&marker, b""));
+        assert!(missing_marker_holds(&marker));
+        let old = std::time::SystemTime::now()
+            - MISSING_MARKER_MAX_AGE
+            - std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(!missing_marker_holds(&marker));
+        crate::net::set_offline(true);
+        let offline = missing_marker_holds(&marker);
+        crate::net::set_offline(false);
+        assert!(offline);
+    }
 
     #[test]
     fn sweep_due_without_stamp_then_throttled() {

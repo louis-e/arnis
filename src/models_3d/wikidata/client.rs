@@ -79,8 +79,7 @@ pub fn fetch_model(url: &str) -> Result<Vec<u8>, String> {
         return Err(format!("model {url}: HTTP {}", resp.status()));
     }
     let bytes = read_capped(resp, MAX_MODEL_BYTES)?;
-    let _ = fs::create_dir_all(&dir);
-    let _ = fs::write(&path, &bytes);
+    crate::elevation::cache::write_atomic(&path, &bytes);
     Ok(bytes)
 }
 

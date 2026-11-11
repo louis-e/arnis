@@ -31,6 +31,9 @@ const ROW_BLOCK: usize = 128;
 /// Cached row blocks older than this are deleted at the start of a fetch.
 const ROW_CACHE_MAX_AGE_DAYS: u64 = 30;
 
+/// The error for a tile the dataset does not have (a 404: open ocean).
+const ABSENT: &str = "no canopy tile here";
+
 /// No measurement here. A measured zero means bare ground.
 pub const CANOPY_NODATA: u8 = 255;
 
@@ -223,6 +226,9 @@ fn fetch_range(
         .header("Range", format!("bytes={start}-{end}"))
         .send()
         .map_err(|e| e.to_string())?;
+    if response.status().as_u16() == 404 {
+        return Err(ABSENT.into());
+    }
     // A 200 here would mean the server ignored the range and is sending 450 MB.
     if response.status().as_u16() != 206 {
         return Err(format!("HTTP {} (expected 206)", response.status()));
@@ -333,10 +339,19 @@ fn cached_strip_index(
         }
         let _ = std::fs::remove_file(&path);
     }
-    let index = read_strip_index(client, url)?;
-    if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = std::fs::write(&path, index.encode());
+    let marker = dir.join(format!("{key}.missing"));
+    if crate::elevation::cache::missing_marker_holds(&marker) {
+        return Err(ABSENT.into());
     }
+    let index = match read_strip_index(client, url) {
+        // Open ocean has no tile; remembered so neither a later run nor --offline asks.
+        Err(e) if e == ABSENT => {
+            write_whole(&marker, b"");
+            return Err(e);
+        }
+        r => r?,
+    };
+    write_whole(&path, &index.encode());
     Ok(index)
 }
 
@@ -684,6 +699,7 @@ pub fn fetch_canopy_data(
         for xt in x0.min(x1)..=x0.max(x1) {
             match fill_from_tile(&client, xt, yt, bbox, grid_width, grid_height, &mut grid) {
                 Ok(_) => tiles += 1,
+                Err(e) if e == ABSENT => {}
                 Err(e) => failures.push(format!("{}: {}", quadkey_of(xt, yt), e)),
             }
         }

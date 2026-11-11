@@ -117,8 +117,7 @@ pub fn fetch_info(id: u64) -> Result<ModelInfo, String> {
     let info: ModelInfo =
         serde_json::from_slice(&bytes).map_err(|e| format!("3DMR info {id} parse: {e}"))?;
 
-    let _ = fs::create_dir_all(&dir);
-    let _ = fs::write(&info_path, &bytes);
+    crate::elevation::cache::write_atomic(&info_path, &bytes);
 
     Ok(info)
 }
@@ -144,8 +143,7 @@ pub fn fetch_glb(id: u64) -> Result<Vec<u8>, String> {
     }
     let bytes = read_capped(resp, MAX_GLB_BYTES)?;
 
-    let _ = fs::create_dir_all(&dir);
-    let _ = fs::write(&glb_path, &bytes);
+    crate::elevation::cache::write_atomic(&glb_path, &bytes);
 
     Ok(bytes)
 }

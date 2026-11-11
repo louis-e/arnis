@@ -300,8 +300,8 @@ impl SourceWindow {
         }
 
         let bytes: Vec<u8> = out.iter().flat_map(|v| v.to_le_bytes()).collect();
-        if let Err(e) = std::fs::write(&cached, &bytes) {
-            eprintln!("Warning: could not cache PDS window: {e}");
+        if !crate::elevation::cache::write_atomic(&cached, &bytes) {
+            eprintln!("Warning: could not cache PDS window");
         }
         Ok(out)
     }
