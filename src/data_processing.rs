@@ -759,7 +759,7 @@ pub fn set_ram_budget_mb(mb: u64) {
 }
 
 /// Free RAM in MB, or the `--ram-budget-mb` the caller promised.
-fn available_memory_mb() -> u64 {
+pub(crate) fn available_memory_mb() -> u64 {
     let budget = RAM_BUDGET_MB.load(std::sync::atomic::Ordering::Relaxed);
     if budget > 0 {
         return budget;

@@ -661,6 +661,8 @@ pub fn run_with(
 
     let largest = units.iter().map(|u| u.regions).max().unwrap_or(1);
     let sizing = budget::sizing(args, queue.len() + usize::from(head.is_some()), largest);
+    // The head piece runs alone, so it gets the job's whole budget.
+    let alone = head.map(|_| budget::sizing(args, 1, largest));
     if sizing.workers > 1 {
         println!(
             "  {} pieces at a time, {} threads each",
@@ -681,11 +683,6 @@ pub fn run_with(
                 .then(crate::overture::shared_releases_env)
                 .flatten(),
         )
-        .collect();
-    let child_env: Vec<(&str, String)> = sizing
-        .child_env()
-        .into_iter()
-        .chain(token.iter().cloned())
         .collect();
     let lease_for = |i: usize| UnitLease {
         piece: i as u32,
@@ -728,7 +725,10 @@ pub fn run_with(
             // Warm what the piece will build: its rect plus the halo.
             let (lease, bbox) = piece_child(i)?;
             let mut warm_argv = child_args(argv.iter().cloned(), &bbox, &lease, false);
-            let downloads = args.max_downloads.unwrap_or(16).to_string();
+            let downloads = args
+                .max_downloads
+                .unwrap_or(crate::net::MAX_CONCURRENT_REQUESTS as u32)
+                .to_string();
             warm_argv.extend([
                 "--prewarm".into(),
                 "--max-downloads".into(),
@@ -837,12 +837,21 @@ pub fn run_with(
         let unit = &units[i];
         // The piece builds its halo too; its lease says which part it writes.
         let (lease, bbox) = piece_child(i)?;
+        let sizing = alone
+            .as_ref()
+            .filter(|_| head == Some(i))
+            .unwrap_or(&sizing);
         let argv = sizing.child_args(child_args(
             argv.iter().cloned(),
             &bbox,
             &lease,
             spawn_piece == Some(i),
         ));
+        let child_env: Vec<(&str, String)> = sizing
+            .child_env()
+            .into_iter()
+            .chain(token.iter().cloned())
+            .collect();
         let end = |how: Outcome| lock(&queue).finish(i, how);
         let killed = || STOP.load(Ordering::Acquire) || lock(&queue).cancelled(i);
         let mut attempt = 0;
