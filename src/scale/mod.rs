@@ -328,7 +328,14 @@ fn done_key(u: &WorkUnit) -> String {
 }
 
 impl Job {
-    fn open(world_dir: &Path, name: String, units: &[WorkUnit]) -> Result<Self, String> {
+    /// `options` are what decides the world (`generation_options`): kept with a new job, and
+    /// a resume with others is warned about.
+    fn open(
+        world_dir: &Path,
+        name: String,
+        units: &[WorkUnit],
+        options: &[String],
+    ) -> Result<Self, String> {
         let pieces = units.len();
         let dir = world_dir.join(one_world::JOBS_DIR).join(&name);
         std::fs::create_dir_all(&dir)
@@ -353,6 +360,22 @@ impl Job {
                         dir.display(),
                         u.region_key()
                     ));
+                }
+                let started: Vec<String> = kept.as_ref().map_or_else(Vec::new, |v| {
+                    v["argv"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|o| o.as_str().map(str::to_owned))
+                        .collect()
+                });
+                let changed = changed_options(&started, options);
+                if !changed.is_empty() {
+                    eprintln!(
+                        "Warning: this job was started with other settings ({}); the pieces \
+                         still to build use the new ones.",
+                        changed.join(", ")
+                    );
                 }
                 (a as u32, m as i32, slots)
             }
@@ -384,7 +407,8 @@ impl Job {
                     .collect();
                 write(
                     &state,
-                    &json!({ "area_base": area_base, "map_base": map_base, "slots": slots }),
+                    &json!({ "area_base": area_base, "map_base": map_base, "slots": slots,
+                             "argv": options }),
                 )?;
                 (area_base, map_base, slots)
             }
@@ -555,7 +579,7 @@ pub fn run_with(
              of this job and is ignored."
         );
     }
-    let mut job = Job::open(world_dir, plan.name, &units)?;
+    let mut job = Job::open(world_dir, plan.name, &units, &generation_options(&argv))?;
     // `--skip-cells` replaces the cells the job kept out, an empty list none.
     if let Some(cells) = &args.units.skip_cells {
         job.save_skip(cells.iter().map(|&c| c as usize).collect())?;
@@ -1162,6 +1186,49 @@ const PER_PIECE_SWITCHES: &[&str] = &[
 /// and a run refuses a spawn outside its area.
 const SPAWN: &[&str] = &["--spawn-lat", "--spawn-lng"];
 
+/// Options that leave the world as it is, so a resume may change them freely.
+const MACHINE: &[&str] = &["--output-dir", "--path", "--world-name", "--downloader"];
+const MACHINE_SWITCHES: &[&str] = &[
+    "--debug",
+    "--benchmark",
+    "--offline",
+    "--no-update-check",
+    "--no-cache-sweep",
+];
+
+/// What in a job's command line decides its world: each option as `--name=value`, sorted.
+fn generation_options(argv: &[OsString]) -> Vec<String> {
+    let names = [PER_PIECE, MACHINE].concat();
+    let switches = [PER_PIECE_SWITCHES, MACHINE_SWITCHES].concat();
+    let mut out: Vec<String> = Vec::new();
+    for arg in without_options(argv.to_vec(), &names, &switches) {
+        let arg = arg.to_string_lossy().into_owned();
+        match out.last_mut() {
+            Some(last) if !arg.starts_with("--") => {
+                last.push(if last.contains('=') { ',' } else { '=' });
+                last.push_str(&arg);
+            }
+            _ => out.push(arg),
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The names of the options `a` and `b` disagree on.
+fn changed_options(a: &[String], b: &[String]) -> Vec<String> {
+    let only = |x: &[String], y: &[String]| -> Vec<String> {
+        x.iter()
+            .filter(|o| !y.contains(o))
+            .map(|o| o.split('=').next().unwrap_or_default().to_string())
+            .collect()
+    };
+    let mut names = [only(a, b), only(b, a)].concat();
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// `argv` without the options `names` and their values, and without the `switches`.
 fn without_options(argv: Vec<OsString>, names: &[&str], switches: &[&str]) -> Vec<OsString> {
     let mut skip_value = false;
@@ -1481,11 +1548,11 @@ second
         let dir = tmp.path().join(one_world::JOBS_DIR).join("j");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("job.json"), job_state(&units).to_string()).unwrap();
-        let mut job = Job::open(tmp.path(), "j".into(), &units).unwrap();
+        let mut job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
         assert!(job.skip.is_empty());
         job.save_skip(BTreeSet::from([1, 3])).unwrap();
         // A restart reads it back; the reserved ids stay.
-        let job = Job::open(tmp.path(), "j".into(), &units).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
         assert_eq!(job.skip, BTreeSet::from([1, 3]));
         assert_eq!(job.area_id(&units[2]), 7);
         let parse = |argv: &[&str]| <Args as clap::Parser>::try_parse_from(argv).unwrap();
@@ -1600,7 +1667,7 @@ second
         let dir = tmp.path().join(one_world::JOBS_DIR).join("j");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("job.json"), job_state(&units).to_string()).unwrap();
-        let job = Job::open(tmp.path(), "j".into(), &units).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
         assert!(job.finished(&units[1]).is_none());
         assert_eq!(job.area_id(&units[2]), 7);
         assert_eq!(job.first_map_id(&units[2]), 100 + 2 * MAP_IDS_PER_PIECE);
@@ -1634,7 +1701,7 @@ second
         slots.insert(done_key(&units[2]), json!(11));
         let state = json!({"area_base": 5, "map_base": 100, "slots": slots});
         std::fs::write(dir.join("job.json"), state.to_string()).unwrap();
-        let job = Job::open(tmp.path(), "j".into(), &units).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
         assert_eq!(job.area_id(&units[2]), 16);
         assert_eq!(job.first_map_id(&units[2]), 100 + 11 * MAP_IDS_PER_PIECE);
         assert_eq!(job.area_id(&units[3]), 8);
@@ -1642,8 +1709,62 @@ second
         slots.remove(&done_key(&units[3]));
         let state = json!({"area_base": 5, "map_base": 100, "slots": slots});
         std::fs::write(dir.join("job.json"), state.to_string()).unwrap();
-        let err = Job::open(tmp.path(), "j".into(), &units).err().unwrap();
+        let err = Job::open(tmp.path(), "j".into(), &units, &[])
+            .err()
+            .unwrap();
         assert!(err.contains("planned with other pieces"), "{err}");
+    }
+
+    #[test]
+    fn a_resume_names_the_settings_that_changed() {
+        let opts = |argv: &[&str]| {
+            generation_options(&argv.iter().map(OsString::from).collect::<Vec<_>>())
+        };
+        let first = opts(&[
+            "--one-world",
+            "--output-dir",
+            "saves",
+            "--scale",
+            "1",
+            "--threads=8",
+            "--winter",
+            "--spawn-lat",
+            "-44.4",
+            "--debug",
+        ]);
+        assert_eq!(
+            first,
+            ["--one-world", "--scale=1", "--spawn-lat=-44.4", "--winter"]
+        );
+        // Same settings in another order and on another machine: nothing to say.
+        let same = opts(&[
+            "--spawn-lat=-44.4",
+            "--winter",
+            "--threads",
+            "2",
+            "--scale=1",
+        ]);
+        assert!(changed_options(&first, &[&same[..], &["--one-world".into()]].concat()).is_empty());
+        let other = opts(&["--one-world", "--scale=2", "--spawn-lat=-44.4", "--caves"]);
+        assert_eq!(
+            changed_options(&first, &other),
+            ["--caves", "--scale", "--winter"]
+        );
+        // Kept with a new job, read back on a resume.
+        let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
+        let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
+        let (world, _) = crate::projection::snap_bbox_to_chunks(&proj, &req).unwrap();
+        let units = work_units::plan_units(&proj, &world, 1).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let w = tmp.path().join("W");
+        let mut args = <Args as clap::Parser>::parse_from(["arnis", "--bbox", &req.arg()]);
+        drop(one_world::prepare(&w, &req, &mut args).unwrap());
+        Job::open(&w, "j".into(), &units, &first).unwrap();
+        let state: Value = serde_json::from_str(
+            &std::fs::read_to_string(w.join(one_world::JOBS_DIR).join("j/job.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(state["argv"], json!(first));
     }
 
     #[test]
