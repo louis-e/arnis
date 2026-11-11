@@ -546,8 +546,7 @@ pub fn fetch_land_cover_data(
 /// The files a read of `bbox` takes from the land cover cache under `root`: each ESA tile's
 /// header and the 1024 px blocks of it the box touches.
 pub(crate) fn cache_files(root: &Path, bbox: &LLBBox) -> Vec<PathBuf> {
-    // ponytail: the product's fixed layout (36000 px tiles cut in 1024 px COG tiles), not
-    // read from each header; parse the header if ESA ever re-cuts it.
+    // ESA's fixed layout (36000 px tiles cut in 1024 px COG tiles), not read from each header.
     const PPD: f64 = 12_000.0;
     const COG_TILE: i64 = 1024;
     let dir = root.join(LAND_COVER_CACHE_DIR);

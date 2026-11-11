@@ -67,10 +67,8 @@ impl CacheClearStats {
     }
 }
 
-/// Writes `bytes` to `path` through a temporary sibling and a rename, so a reader sees the old
-/// file or all of the new one. The temporary carries the pid and a per-process counter, so
-/// neither two processes nor two threads share one. Silent on failure: a cache write is only
-/// an optimisation. Returns whether the file landed.
+/// Writes `bytes` to `path` via a temporary (pid + counter, so no two writers share one) and a
+/// rename, so readers never see half a file. Whether it landed; a cache write never fails a run.
 pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> bool {
     use std::io::Write;
     static WRITE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
