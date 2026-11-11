@@ -644,6 +644,15 @@ pub struct Args {
     /// at any scale, so on a small-scale world they tower over the buildings around them.
     #[arg(long, value_parser = parse_props_min_scale)]
     pub props_min_scale: Option<f64>,
+
+    /// Chest loot table (JSON) for --interior, in place of the built-in one. A file that
+    /// cannot be read or fails validation is reported and the built-in table is used.
+    #[arg(long, value_name = "FILE")]
+    pub loot_table: Option<PathBuf>,
+
+    /// Write the built-in chest loot table to FILE as JSON to start from, and exit.
+    #[arg(long, value_name = "FILE")]
+    pub dump_loot_table: Option<PathBuf>,
     // --- end confluence:build ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -1021,6 +1030,8 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (!args.buildings, "--no-buildings"),
         (args.props.is_some(), "--props"),
         (args.props_min_scale.is_some(), "--props-min-scale"),
+        (args.loot_table.is_some(), "--loot-table"),
+        (args.dump_loot_table.is_some(), "--dump-loot-table"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),

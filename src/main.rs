@@ -279,6 +279,32 @@ fn run_cli() {
         }
         return;
     }
+    if let Some(path) = &args.dump_loot_table {
+        if let Err(e) = fs::write(
+            path,
+            element_processing::subprocessor::buildings_loot::BUILT_IN_JSON,
+        ) {
+            eprintln!(
+                "{} Cannot write {}: {e}",
+                "Error:".red().bold(),
+                path.display()
+            );
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Some(path) = &args.loot_table {
+        match element_processing::subprocessor::buildings_loot::load_loot_table(path) {
+            Ok(table) => {
+                element_processing::subprocessor::buildings_loot::set_loot_table(Some(table))
+            }
+            Err(e) => eprintln!(
+                "{} --loot-table {}: {e}; using the built-in loot table",
+                "Warning:".yellow().bold(),
+                path.display()
+            ),
+        }
+    }
     // Configure thread pool with 90% CPU cap to keep system responsive
     match args.thread_count() {
         Some(threads) => floodfill_cache::configure_rayon_threads(threads),
