@@ -1689,8 +1689,17 @@ fn smooth_class_boundaries(
 /// Simple deterministic hash from coordinates (for dithering and block variety).
 /// Mixes in `--seed` (none by default) before the final multiply.
 pub fn coord_hash(x: i32, z: i32) -> u64 {
-    let mut h =
-        crate::deterministic_rng::seeded((x as u32 as u64).wrapping_mul(0x9E3779B97F4A7C15));
+    coord_hash_with(x, z, crate::deterministic_rng::seeded)
+}
+
+/// `coord_hash` without `--seed`, for geography every seed shares.
+pub fn geo_coord_hash(x: i32, z: i32) -> u64 {
+    coord_hash_with(x, z, |h| h)
+}
+
+#[inline(always)]
+fn coord_hash_with(x: i32, z: i32, seed: impl Fn(u64) -> u64) -> u64 {
+    let mut h = seed((x as u32 as u64).wrapping_mul(0x9E3779B97F4A7C15));
     h ^= (z as u32 as u64).wrapping_mul(0x517CC1B727220A95);
     h = h.wrapping_mul(0x6C62272E07BB0142);
     h ^ (h >> 32)

@@ -1594,6 +1594,16 @@ pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
 /// about 27 degrees to the block grid, so patches don't come out boxy and
 /// lined up with the axes.
 pub(crate) fn value_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
+    salted_noise_with(x, z, scale, salt, land_cover::coord_hash)
+}
+
+/// `value_noise_salted` that `--seed` leaves alone, for geography such as climate borders.
+pub(crate) fn geo_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
+    salted_noise_with(x, z, scale, salt, land_cover::geo_coord_hash)
+}
+
+#[inline(always)]
+fn salted_noise_with(x: i32, z: i32, scale: i32, salt: u32, hash: impl Fn(i32, i32) -> u64) -> f64 {
     const COS: f64 = 0.891_006_524_188_368;
     const SIN: f64 = 0.453_990_499_739_547;
     let s = f64::from(scale.max(1));
@@ -1607,9 +1617,7 @@ pub(crate) fn value_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
     let (cu, cv) = (u0 as i32, v0 as i32);
     let salt_x = salt as i32;
     let salt_z = salt.rotate_left(16) as i32;
-    let sample = |cx: i32, cz: i32| {
-        (land_cover::coord_hash(cx ^ salt_x, cz ^ salt_z) % 1000) as f64 / 1000.0
-    };
+    let sample = |cx: i32, cz: i32| (hash(cx ^ salt_x, cz ^ salt_z) % 1000) as f64 / 1000.0;
     let a = sample(cu, cv) * (1.0 - su) + sample(cu + 1, cv) * su;
     let b = sample(cu, cv + 1) * (1.0 - su) + sample(cu + 1, cv + 1) * su;
     a * (1.0 - sv) + b * sv
