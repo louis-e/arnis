@@ -61,6 +61,7 @@
 /* Sidebar */
 
 .settings-sidebar {
+  position: relative;
   width: 250px;
   flex-shrink: 0;
   display: flex;
@@ -426,8 +427,11 @@ label[for].setting-label {
 }
 
 /* Inline, so the tooltip and revert icons follow the last word when a long name wraps. */
+/* A row, so the tooltip and revert icons stay beside the name when it wraps. */
 .setting-heading {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
@@ -435,7 +439,13 @@ label[for].setting-label {
 
 /* A long compound word, as in German or Finnish, breaks rather than overflowing. */
 .setting-heading > [data-localize] {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.setting-heading > .tooltip-icon,
+.setting-heading > .setting-revert {
+  margin-top: 1px;
 }
 
 .setting-heading > .tooltip-icon,
@@ -567,21 +577,21 @@ label[for].setting-label {
    the script (left/top), no shadow. The image box has a fixed 4:3 size, so nothing moves when the picture
    loads, and the popover ignores the pointer so it never steals the hover from the control. */
 .preview-popover {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: fit-content;
-  height: fit-content;
+  position: absolute;
+  left: 12px;
+  bottom: 64px;
+  width: 264px;
+  z-index: 5;
   box-sizing: border-box;
-  padding: 10px 10px 6px;
+  padding: 8px 8px 6px;
   background-color: #2a2a2a;
   border: 1px solid #fecc44;
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition: opacity 0.15s ease, visibility 0.15s ease;
-  z-index: 30000;
 }
 
 .preview-popover.is-visible {
@@ -591,9 +601,10 @@ label[for].setting-label {
 
 .preview-popover img {
   display: block;
-  width: min(340px, 45vw, calc((100vh - 110px) * 4 / 3));
+  width: 100%;
   height: auto;
   aspect-ratio: 4 / 3;
+  border-radius: 4px;
 }
 
 .preview-popover-caption {
