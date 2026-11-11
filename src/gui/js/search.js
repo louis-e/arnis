@@ -164,15 +164,16 @@ var citySearch = {
             html += '<div class="search-result-item" data-index="' + index + '" data-lat="' + result.lat + '" data-lon="' + result.lon + '">';
             html += '<div class="search-result-text"><div class="search-result-name">' + self.escapeHtml(mainName) + '</div>';
             html += '<div class="search-result-details">' + self.escapeHtml(details) + '</div></div>';
-            // A place with an area (Advanced features or the map-first page): its box can be
-            // selected, a click on the result only flies there.
-            if ((window.arnisMeldOn || window.arnisMapFirst) && self.selectable(result)) {
-                html += '<button type="button" class="search-select-area" data-index="' + index + '"></button>';
+            // Advanced features only: a place's box or outline can be selected (a search box is often a whole
+            // district, far more than a new user means to build); a click on the result only flies there.
+            var acts = '';
+            if (window.arnisMeldOn && self.selectable(result)) {
+                acts += '<button type="button" class="search-select-area" data-index="' + index + '"></button>';
             }
-            // Advanced features: a place with an outline (country, county, city) can be selected by it.
             if (window.arnisMeldOn && result.geojson && /^(Multi)?Polygon$/.test(result.geojson.type)) {
-                html += '<button type="button" class="search-select-area search-use-outline" data-index="' + index + '"></button>';
+                acts += '<button type="button" class="search-select-area search-use-outline" data-index="' + index + '"></button>';
             }
+            if (acts) html += '<div class="search-result-actions">' + acts + '</div>';
             html += '</div>';
         });
         

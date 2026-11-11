@@ -105,13 +105,22 @@
     min-width: 0;
 }
 
+/* A result's buttons share one line under its text. */
+.search-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex-basis: 100%;
+    margin-top: 6px;
+}
+
 .search-select-area {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     flex: none;
-    min-height: 32px;
-    padding: 4px 10px;
+    min-height: 26px;
+    padding: 2px 9px;
     border: 1px solid #fecc44;
     border-radius: 3px;
     background: transparent;

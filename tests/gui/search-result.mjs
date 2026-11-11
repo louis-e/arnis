@@ -22,7 +22,7 @@ assert.strictEqual(parseFloat(attrs['data-lat']), 44.4361, tag);
 assert.strictEqual(parseFloat(attrs['data-lon']), 26.1027, tag);
 assert.match(tag, /^<div( [\w-]+="[^"]*")*>$/, 'stray text in ' + tag);
 
-// "Select this area" is offered only with Advanced features or the map-first page, and only for a
+// "Select this area" is offered only with Advanced features (never to a new user), and only for a
 // place with an area; a shop's box is a few metres.
 const city = { display_name: 'Berlin, Germany', lat: '52.5', lon: '13.4', boundingbox: ['52.33', '52.68', '13.08', '13.76'] };
 const shop = { display_name: 'Bakery, Berlin', lat: '52.5', lon: '13.4', boundingbox: ['52.50000', '52.50005', '13.40000', '13.40008'] };
@@ -33,6 +33,6 @@ const offered = (flags) => {
   return (html.match(/class="search-select-area"/g) || []).length;
 };
 assert.strictEqual(offered({}), 0, 'Advanced off, Classic: as before, no button');
-assert.strictEqual(offered({ arnisMapFirst: true }), 1, 'map-first: the city only');
-assert.strictEqual(offered({ arnisMeldOn: true }), 1);
+assert.strictEqual(offered({ arnisMapFirst: true }), 0, 'map-first alone: no button either');
+assert.strictEqual(offered({ arnisMeldOn: true }), 1, 'Advanced: the city only');
 console.log('search-result ok');
