@@ -47,6 +47,8 @@ const SALT_BARE_EARTH: u32 = 0xBA4E_EA27;
 const SALT_SWARD: u32 = 0x5A7D_0001;
 const SALT_TALL_SWARD: u32 = 0x5A7D_0002;
 const SALT_WETLAND_POOLS: u32 = 0x9001_5E75;
+const SALT_PAVING_WEAR: u32 = 0xBA7E_3EA1;
+const SALT_PAVING_KIND: u32 = 0xBA7E_3EA2;
 
 /// Per-chunk cache of ground Y values.
 ///
@@ -771,6 +773,11 @@ pub fn generate_ground_region(
                                             }
                                             _ => (FARMLAND, DIRT),
                                         },
+                                        // Ground reads the flag from args; roads and roofs read the
+                                        // process flag set from the same args (surfaces::patches).
+                                        land_cover::LC_BUILT_UP if args.surface_patches => {
+                                            built_up_patch(x, z)
+                                        }
                                         land_cover::LC_BUILT_UP => {
                                             let h = land_cover::coord_hash(x, z) % 100;
                                             if h < 72 {
@@ -1606,6 +1613,23 @@ pub(crate) fn value_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
     let a = sample(cu, cv) * (1.0 - su) + sample(cu + 1, cv) * su;
     let b = sample(cu, cv + 1) * (1.0 - su) + sample(cu + 1, cv + 1) * su;
     a * (1.0 - sv) + b * sv
+}
+
+/// Built-up paving for `--surface-patches`: stone bricks with worn patches of
+/// cracked bricks, stone and cobblestone, in about the shares of the speckle.
+fn built_up_patch(x: i32, z: i32) -> (Block, Block) {
+    if ground_noise(x, z, 5, SALT_PAVING_WEAR) >= 0.28 {
+        return (STONE_BRICKS, STONE);
+    }
+    let kind = ground_noise(x, z, 12, SALT_PAVING_KIND);
+    let top = if kind < 0.54 {
+        CRACKED_STONE_BRICKS
+    } else if kind < 0.71 {
+        STONE
+    } else {
+        COBBLESTONE
+    };
+    (top, STONE)
 }
 
 /// `patch_noise` bent by a coarser field and mixed with a finer octave: irregular, still uniform.

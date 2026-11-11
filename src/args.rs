@@ -621,6 +621,12 @@ pub struct Args {
     /// sidewalks go at every scale).
     #[arg(long, value_enum, default_value_t = RoadDetail::Max)]
     pub road_detail: RoadDetail,
+
+    /// Lay asphalt, concrete and paving mixes and built-up stone ground in patches a few
+    /// blocks across instead of a per-block speckle, and give pitched clay roofs a full
+    /// block in their stairs' colour, so no single block stands out as a dot.
+    #[arg(long)]
+    pub surface_patches: bool,
     // --- end confluence:build ---
     // --- confluence:data ---
     /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
@@ -994,6 +1000,7 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.cave_style.is_some(), "--cave-style"),
         (args.cave_ores.is_some(), "--cave-ores"),
         (args.road_detail != RoadDetail::Max, "--road-detail"),
+        (args.surface_patches, "--surface-patches"),
         (args.osm_pbf.is_some(), "--osm-pbf"),
         (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
         (!args.overpass_url.is_empty(), "--overpass-url"),

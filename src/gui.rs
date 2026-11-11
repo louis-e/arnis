@@ -1961,6 +1961,7 @@ const WINDOW_FLAGS: &[&str] = &[
     "min-y",
     "max-y",
     "road-detail",
+    "surface-patches",
     "rocks",
     "rock-density",
     "bushes",
@@ -2709,6 +2710,7 @@ fn gui_start_generation(
                 cave_seed: None,
                 cave_datum_y: None,
                 road_detail: crate::element_processing::road_detail::RoadDetail::Max,
+                surface_patches: false,
             };
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.

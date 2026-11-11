@@ -5,6 +5,7 @@ use crate::block_definitions::{
 };
 use crate::osm_parser::ProcessedWay;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Red paving for bicycle paths, the way the Netherlands, Denmark and much of Germany lay
 /// them: brick-red asphalt flecked with a deeper red, the same speckle the road mix uses.
@@ -113,14 +114,39 @@ pub fn get_blocks_for_surface_way<'a>(way: &ProcessedWay, default: &'a [Block]) 
 /// later overwrite pass sees a stable result), while adjacent cells
 /// scatter across the palette for a varied, speckled look.
 /// A 1-element slice effectively returns that single block everywhere.
+/// With `--surface-patches` the palette is laid in patches a few blocks across
+/// instead (see [`patch_surface`]).
 #[inline]
 pub fn semirandom_surface(x: i32, z: i32, block_types: &[Block]) -> Block {
+    if block_types.len() > 1 && patches() {
+        return patch_surface(x, z, block_types);
+    }
     // Combine coordinates into a single value and apply bit mixing for a scattered look
     let mut h = (x as u32).wrapping_mul(0x9E3779B9) ^ (z as u32).wrapping_mul(0x517CC1B7);
     h ^= h >> 16;
     h = h.wrapping_mul(0x45D9F3B);
     h ^= h >> 16;
     block_types[(h as usize) % block_types.len()]
+}
+
+// Process-wide like `net::set_offline`: set from `Args` at the start of each generation.
+static PATCHES: AtomicBool = AtomicBool::new(false);
+
+/// Turns `--surface-patches` on or off for the next generation.
+pub fn set_patches(on: bool) {
+    PATCHES.store(on, Ordering::Relaxed);
+}
+
+/// Whether `--surface-patches` is on.
+pub fn patches() -> bool {
+    PATCHES.load(Ordering::Relaxed)
+}
+
+/// `block_types` laid in patches about 5 blocks across, in the palette's shares. The
+/// patches follow world coordinates, so One World pieces and overlapping ways agree.
+pub fn patch_surface(x: i32, z: i32, block_types: &[Block]) -> Block {
+    let n = crate::ground_generation::ground_noise(x, z, 5, 0x5A7F_ACE5);
+    block_types[((n * block_types.len() as f64) as usize).min(block_types.len() - 1)]
 }
 
 #[cfg(test)]
@@ -156,6 +182,24 @@ mod tests {
                 "{s} should use the asphalt mix"
             );
         }
+    }
+
+    #[test]
+    fn patches_are_coherent_and_keep_the_mix() {
+        let mix = get_blocks_for_surface("asphalt").unwrap();
+        let (mut dots, mut first) = (0, 0);
+        for x in 0..200 {
+            for z in 0..200 {
+                let b = patch_surface(x, z, mix);
+                first += usize::from(b == mix[0]);
+                let around = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .map(|(dx, dz)| patch_surface(x + dx, z + dz, mix));
+                dots += usize::from(around.iter().all(|&n| n != b));
+            }
+        }
+        // Both blocks keep a fair share, and almost no block stands alone.
+        assert!((12_000..28_000).contains(&first), "{first}");
+        assert!(dots < 200, "{dots} single-block dots");
     }
 
     #[test]

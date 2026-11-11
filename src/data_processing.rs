@@ -845,6 +845,8 @@ pub fn generate_world_with_options(
     // A peak's summit cross that is also mapped on its own stands once, as the mapped one.
     man_made::drop_doubled_summit_crosses(&mut elements, args.scale);
 
+    crate::element_processing::surfaces::set_patches(args.surface_patches);
+
     // --road-detail compact leaves the minor ways out before anything sees them.
     if args.road_detail != road_detail::RoadDetail::Max {
         elements.retain(|element| !args.road_detail.drops_element(element));

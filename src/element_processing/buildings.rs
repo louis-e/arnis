@@ -8453,6 +8453,36 @@ const COPPER_ROOF: Block = WAXED_OXIDIZED_COPPER;
 const METAL_GREEN: Block = DARK_PRISMARINE;
 const METAL_RED: Block = RED_NETHER_BRICKS;
 
+/// For `--surface-patches`: the full block in the colour of a family's stairs and
+/// slabs, so a ridge or hip block left showing does not read as a dot.
+fn full_block_like_its_stairs(roof: Block) -> Block {
+    match roof {
+        TILE_RED | ORANGE_TERRACOTTA => BRICK,
+        TILE_ORANGE => GRANITE,
+        _ => roof,
+    }
+}
+
+/// The roof block under `--surface-patches`: stair-built roofs that are not mapped
+/// take [`full_block_like_its_stairs`]; domes, cones and mapped roofs keep theirs.
+fn patched_roof_block(roof: Block, roof_type: RoofType, mapped: bool) -> Block {
+    let stair_built = matches!(
+        roof_type,
+        RoofType::Gabled
+            | RoofType::Hipped
+            | RoofType::HalfHipped
+            | RoofType::Gambrel
+            | RoofType::Mansard
+            | RoofType::Skillion
+            | RoofType::Pyramidal
+    );
+    if stair_built && !mapped {
+        full_block_like_its_stairs(roof)
+    } else {
+        roof
+    }
+}
+
 /// The clay tile families, which `roof:material=tile` and warm `roof:colour`
 /// values choose among.
 const TILE_FAMILIES: [Block; 5] = [TILE_RED, TILE_BRICK, TILE_DARK, TILE_BROWN, TILE_ORANGE];
@@ -17859,6 +17889,10 @@ fn generate_roof(
     } else if let Some(override_block) = roof_block_override {
         config.roof_block = override_block;
     }
+    if crate::element_processing::surfaces::patches() {
+        config.roof_block =
+            patched_roof_block(config.roof_block, roof_type, osm_roof_block.is_some());
+    }
 
     config.add_dormers = add_dormers;
     config.trim = trim;
@@ -22211,6 +22245,38 @@ mod style_tests {
         ] {
             assert_eq!(roof_slab_for_stair(stairs), Some(slab), "{}", stairs.name());
         }
+    }
+
+    #[test]
+    fn surface_patches_roof_full_block_shares_its_stairs() {
+        for family in TILE_FAMILIES
+            .iter()
+            .chain(&[ORANGE_TERRACOTTA, SLATE, ZINC])
+        {
+            let full = full_block_like_its_stairs(*family);
+            assert_eq!(
+                get_stair_block_for_material(full),
+                get_stair_block_for_material(*family),
+                "{family:?}"
+            );
+            assert_eq!(
+                roof_slab_for_stair(get_stair_block_for_material(full)),
+                roof_slab_for_stair(get_stair_block_for_material(*family))
+            );
+        }
+        assert_eq!(full_block_like_its_stairs(TILE_RED), BRICK);
+        assert_eq!(full_block_like_its_stairs(TILE_ORANGE), GRANITE);
+        assert_eq!(patched_roof_block(TILE_RED, RoofType::Gabled, false), BRICK);
+        // Domes and mapped roofs keep their block.
+        assert_eq!(
+            patched_roof_block(TILE_RED, RoofType::Dome, false),
+            TILE_RED
+        );
+        assert_eq!(
+            patched_roof_block(TILE_ORANGE, RoofType::Gabled, true),
+            TILE_ORANGE
+        );
+        assert_eq!(patched_roof_block(TILE_RED, RoofType::Dome, true), TILE_RED);
     }
 
     #[test]
