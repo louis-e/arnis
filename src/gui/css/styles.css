@@ -1261,14 +1261,14 @@ input[type="range"] {
   cursor: pointer;
 }
 
-/* A pointer in front of it says it can be clicked, without an underline. */
-#bbox-features-cta::before {
+/* An arrow into a corner after it says it leads somewhere, without an underline. */
+#bbox-features-cta::after {
   content: "";
   flex: none;
   width: 13px;
   height: 13px;
   background: currentColor;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 #bbox-features-cta[hidden] {

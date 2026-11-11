@@ -743,15 +743,12 @@ export function schedulePlan(fresh = false) {
   planTimer = setTimeout(updatePlan, 250);
 }
 
-// The benchmark winner (Nov 2026): cells of 8 regions, 4 workers, from this area up. Below it
-// Auto builds in one plain run, so Auto stays.
-export const RECOMMENDED_FROM_KM2 = 220;
-export function useRecommended(areaKm2) {
-  const big = areaKm2 >= RECOMMENDED_FROM_KM2;
+// Auto is the recommendation: it fits the cell size and the worker count to this computer.
+export function useRecommended() {
   const workers = el('meld-workers-select');
-  workers.value = big ? '4' : 'auto';
+  workers.value = 'auto';
   workers.dispatchEvent(new Event('change', { bubbles: true }));
-  document.querySelector(`#meld-piece-size-group .segment[data-v="${big ? '8' : 'auto'}"]`)?.click();
+  document.querySelector('#meld-piece-size-group .segment[data-v="auto"]')?.click();
 }
 
 // Selects `bounds` ([south, west, north, east]) with a ring of regions around it: a job in

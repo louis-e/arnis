@@ -1497,10 +1497,7 @@ function initSettings() {
     redrawProjects();
   });
   document.getElementById('meld-snap-group')?.addEventListener('click', () => setTimeout(pushMeldToMap));
-  document.getElementById('meld-recommended-btn')?.addEventListener('click', () => {
-    const [a, b, c, d] = (selectedBBox || '').split(/[\s,]+/).map(Number);
-    useRecommended(calculateBBoxSize(a, b, c, d) / 1e6); // no selection: NaN, so Auto
-  });
+  document.getElementById('meld-recommended-btn')?.addEventListener('click', () => useRecommended());
   getMapFrame()?.addEventListener('load', pushMeldToMap);
   pushMeldToMap();
   // A One World's built land, and a ring of regions around it to build next.
@@ -3819,6 +3816,11 @@ async function refreshOneWorldState() {
     return;
   }
   if (seq !== oneWorldRefreshSeq) return;
+  if (oneWorldPicked && info && !info.exists) {
+    // The world picked in Projects is gone (deleted outside Arnis): back to the default name.
+    setOneWorldName('');
+    return refreshOneWorldState();
+  }
   oneWorldInfo = info;
   applyOneWorldPins(info);
   refreshWorldRulesRows();

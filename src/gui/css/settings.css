@@ -1177,9 +1177,9 @@ body.meld-off .meld-only {
   display: none;
 }
 
-/* The Advanced switch stands out by a soft accent tint; the sections it shows have an accent frame. */
-.settings-page .setting-tile:has(#advanced-meld-features-toggle) {
-  background: color-mix(in srgb, var(--ui-accent) 9%, var(--ui-tile));
+/* The Advanced switch stands out by its accent icon; the sections it shows have an accent frame. */
+.settings-page .setting-tile:has(#advanced-meld-features-toggle) .setting-icon {
+  color: var(--ui-accent);
 }
 
 .settings-section.meld-only {

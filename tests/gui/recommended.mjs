@@ -15,16 +15,12 @@ globalThis.document = {
   getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node(id)), nodes.get(id))),
 };
 globalThis.window = { addEventListener() {} };
-const { initRunControls, initJobPlan, schedulePlan, useRecommended, RECOMMENDED_FROM_KM2, planPieces } = await import('../../src/gui/js/meld-features.js');
+const { initRunControls, initJobPlan, schedulePlan, useRecommended, planPieces } = await import('../../src/gui/js/meld-features.js');
 
 const workers = document.getElementById('meld-workers-select');
-assert.equal(RECOMMENDED_FROM_KM2, 220);
-useRecommended(220);
-assert.deepStrictEqual([workers.value, sizeChoice], ['4', '8'], '220 km2: 8 regions, 4 workers');
-useRecommended(219.9);
-assert.deepStrictEqual([workers.value, sizeChoice], ['auto', 'auto'], 'below: Auto/Auto');
-useRecommended(NaN);
-assert.deepStrictEqual([workers.value, sizeChoice], ['auto', 'auto'], 'no selection: Auto/Auto');
+workers.value = '4';
+useRecommended();
+assert.deepStrictEqual([workers.value, sizeChoice], ['auto', 'auto'], 'the recommendation is Auto, which fits this computer');
 
 // A plan with and without `single`.
 const sent = [];

@@ -43,7 +43,7 @@ function currentSectionIndex() {
   const top = scroller.getBoundingClientRect().top + SPY_OFFSET_PX;
   let index = 0;
   sections.forEach((section, i) => {
-    if (section.getBoundingClientRect().top <= top) index = i;
+    if (section.offsetParent !== null && section.getBoundingClientRect().top <= top) index = i;
   });
   return index;
 }
