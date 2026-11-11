@@ -64,9 +64,16 @@ pub fn set_progress_suppressed(suppressed: bool) {
 
 // Terminal messages always pass: a generation finishing or failing while a
 // preview fetch holds the mute must still reach the GUI, or the Generate
-// button stays locked forever (main.js re-enables it on "Error!"/"Done!").
+// button stays locked forever (main.js re-enables it on these four).
 fn emits_suppressed(progress: f64, message: &str) -> bool {
-    SUPPRESS_COUNT.load(Ordering::Relaxed) > 0 && progress < 100.0 && !message.starts_with("Error!")
+    SUPPRESS_COUNT.load(Ordering::Relaxed) > 0 && !ends_run(progress, message)
+}
+
+fn ends_run(progress: f64, message: &str) -> bool {
+    progress >= 100.0
+        || ["Error!", "Stopped.", "The retried cells are built"]
+            .iter()
+            .any(|end| message.starts_with(end))
 }
 
 /// Resets the monotonic progress floor at the start of a generation.
@@ -283,6 +290,22 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    /// What ends a run (and frees Start in the window) passes a preview fetch's mute.
+    #[test]
+    fn the_end_of_a_run_is_never_muted() {
+        assert!(ends_run(100.0, "Done! World generation completed."));
+        assert!(ends_run(0.0, "Error! Failed"));
+        assert!(ends_run(
+            MESSAGE_ONLY,
+            "Stopped. Finished cells are kept; starting again resumes them."
+        ));
+        assert!(ends_run(
+            MESSAGE_ONLY,
+            "The retried cells are built; starting again builds the rest."
+        ));
+        assert!(!ends_run(40.0, "Generating area..."));
     }
 
     #[test]

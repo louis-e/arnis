@@ -93,6 +93,31 @@ fn names_output(prewarm: bool) -> bool {
     !prewarm
 }
 
+/// Runs `f` in the run's own pool (`--threads`), else where it is.
+fn in_pool<R: Send>(pool: Option<&rayon::ThreadPool>, f: impl FnOnce() -> R + Send) -> R {
+    match pool {
+        Some(p) => p.install(f),
+        None => f(),
+    }
+}
+
+/// Runs `f` on a thread of its own when called on a pool worker, which meanwhile helps with the
+/// pool's jobs: what `f` waits for may be one of them, in a pool of one thread too.
+fn off_worker<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+    if rayon::current_thread_index().is_none() {
+        return f();
+    }
+    std::thread::scope(|s| {
+        let h = s.spawn(f);
+        while !h.is_finished() {
+            if rayon::yield_now() != Some(rayon::Yield::Executed) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+        h.join().unwrap_or_else(|p| std::panic::resume_unwind(p))
+    })
+}
+
 /// The folder a run works in: the selected world, or the One World named in its saves folder.
 /// A prewarm writes no world, so its path never comes from `selected_world` (the window sends
 /// none): it works in `scratch`, a folder under the OS temp directory that the run removes.
@@ -2664,6 +2689,10 @@ fn gui_start_generation(
         Ok(extra) => extra,
         Err(msg) => {
             emit_gui_error(&msg);
+            // The frontend made a new world for this run.
+            if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
+                remove_new_java_world(&PathBuf::from(&selected_world));
+            }
             return Err(msg);
         }
     };
@@ -2675,7 +2704,8 @@ fn gui_start_generation(
     // The global pool was built at startup; a thread count asked for here gets its own.
     let pool = extra
         .thread_count()
-        .and_then(|n| rayon::ThreadPoolBuilder::new().num_threads(n).build().ok());
+        .and_then(|n| rayon::ThreadPoolBuilder::new().num_threads(n).build().ok())
+        .map(std::sync::Arc::new);
     crate::data_processing::set_ram_budget_mb(extra.ram_budget_mb.unwrap_or(0));
     crate::net::set_max_requests(
         extra
@@ -2762,6 +2792,7 @@ fn gui_start_generation(
         // Held until the worker finishes, on every path, so the globals stay this run's.
         let _generation_slot = generation_slot;
         let _presence = presence;
+        let run_pool = pool.clone();
         let work = move || -> Result<(), String> {
             // Declared first, so it is removed last: after the lock and the cleanup guard.
             let scratch = match extra.prewarm.then(prewarm_scratch).transpose() {
@@ -3017,6 +3048,8 @@ fn gui_start_generation(
                     Err(e) => {
                         eprintln!("{e}");
                         emit_gui_error(&e);
+                        // The whole reason, for the One World line under Start.
+                        emit_gui_progress_update(progress::MESSAGE_ONLY, &format!("Error! {e}"));
                         return Err(e);
                     }
                 };
@@ -3328,62 +3361,73 @@ fn gui_start_generation(
 
             // OSM, Overture and elevation/land-cover fetches only need the bbox, run them in parallel
             let (peak_tx, peaks) = crate::elevation::PeakSource::channel();
-            let (fetch_result, overture_data, ground) = std::thread::scope(|s| {
-                let overture_handle = s.spawn(|| {
-                    if args.overture && !args.skip_objects() {
-                        overture::fetch_overture_buildings(
-                            &bbox,
-                            &crate::projection::ProjectionSpec::from_args(&args),
-                            args.overture_source,
-                            args.debug,
-                        )
-                    } else {
+            // Terrain works in the run's pool; the downloads wait on each other, so they stay out.
+            let fetch_all = || {
+                std::thread::scope(|s| {
+                    let overture_handle = s.spawn(|| {
+                        if args.overture && !args.skip_objects() {
+                            overture::fetch_overture_buildings(
+                                &bbox,
+                                &crate::projection::ProjectionSpec::from_args(&args),
+                                args.overture_source,
+                                args.debug,
+                            )
+                        } else {
+                            overture::OvertureData::default()
+                        }
+                    });
+                    let ground_handle = s.spawn(|| {
+                        in_pool(run_pool.as_deref(), || {
+                            ground::generate_ground_data(&args, bbox, &peaks)
+                        })
+                    });
+                    let fetch_result = retrieve_data::fetch_osm_data(
+                        bbox,
+                        args.scale,
+                        args.debug,
+                        "requests",
+                        None,
+                        &args.osm_tiles_url,
+                        !args.no_tile_archive,
+                        crate::osm_pbf::Source::from_args(&args).as_ref(),
+                    );
+                    // The terrain thread waits on this before fitting its height range. Overture's
+                    // building heights follow once it is in, for the thread to wait on only if
+                    // needed. Without OSM there is nothing to follow, so the sender goes now.
+                    let peak_tx = match fetch_result.as_ref() {
+                        Ok(raw) => {
+                            let _ =
+                                peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args));
+                            Some(peak_tx)
+                        }
+                        Err(_) => {
+                            drop(peak_tx);
+                            None
+                        }
+                    };
+                    // A panicked worker already reported itself through the panic hook.
+                    // Overture is supplementary, so drop it and keep going; terrain is
+                    // not, so hand the failure back instead of taking the app down.
+                    let overture_data = overture_handle.join().unwrap_or_else(|_| {
+                        eprintln!("Overture fetch failed, continuing without Overture buildings.");
                         overture::OvertureData::default()
+                    });
+                    if let (Some(tx), Ok(raw)) = (&peak_tx, fetch_result.as_ref()) {
+                        if crate::elevation::TerrainHints::wants_overture(&args) {
+                            let _ = tx.send(crate::elevation::TerrainHints::from_overture(
+                                raw,
+                                &args,
+                                &overture_data,
+                            ));
+                        }
                     }
-                });
-                let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox, &peaks));
-                let fetch_result = retrieve_data::fetch_osm_data(
-                    bbox,
-                    args.scale,
-                    args.debug,
-                    "requests",
-                    None,
-                    &args.osm_tiles_url,
-                    !args.no_tile_archive,
-                    crate::osm_pbf::Source::from_args(&args).as_ref(),
-                );
-                // The terrain thread waits on this before fitting its height range. Overture's
-                // building heights follow once it is in, for the thread to wait on only if
-                // needed. Without OSM there is nothing to follow, so the sender goes now.
-                let peak_tx = match fetch_result.as_ref() {
-                    Ok(raw) => {
-                        let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args));
-                        Some(peak_tx)
-                    }
-                    Err(_) => {
-                        drop(peak_tx);
-                        None
-                    }
-                };
-                // A panicked worker already reported itself through the panic hook.
-                // Overture is supplementary, so drop it and keep going; terrain is
-                // not, so hand the failure back instead of taking the app down.
-                let overture_data = overture_handle.join().unwrap_or_else(|_| {
-                    eprintln!("Overture fetch failed, continuing without Overture buildings.");
-                    overture::OvertureData::default()
-                });
-                if let (Some(tx), Ok(raw)) = (&peak_tx, fetch_result.as_ref()) {
-                    if crate::elevation::TerrainHints::wants_overture(&args) {
-                        let _ = tx.send(crate::elevation::TerrainHints::from_overture(
-                            raw,
-                            &args,
-                            &overture_data,
-                        ));
-                    }
-                }
-                drop(peak_tx);
-                (fetch_result, overture_data, ground_handle.join().ok())
-            });
+                    drop(peak_tx);
+                    // The error as its text, which is all that is read of it, so it can cross threads.
+                    let fetch_result = fetch_result.map_err(|e| e.to_string());
+                    (fetch_result, overture_data, ground_handle.join().ok())
+                })
+            };
+            let (fetch_result, overture_data, ground) = off_worker(fetch_all);
 
             offline_complete()?;
             let Some(ground) = ground else {
