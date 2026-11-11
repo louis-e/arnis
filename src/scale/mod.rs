@@ -24,8 +24,9 @@ pub mod child;
 
 /// Map ids each piece may use. A piece needing more would run into the next one's range.
 pub(crate) const MAP_IDS_PER_PIECE: i32 = 1 << 16;
-/// Pieces one job's map ids have room for.
-pub const MAX_PIECES: usize = (i32::MAX / MAP_IDS_PER_PIECE) as usize;
+/// Pieces one job's map ids have room for in a fresh world.
+pub const MAX_PIECES: usize =
+    ((i32::MAX - crate::map_item::FIRST_MAP_ID) / MAP_IDS_PER_PIECE) as usize;
 
 /// Pieces whose map ids fit from `map_base` up.
 fn pieces_with_map_ids(map_base: i32) -> usize {
@@ -1783,7 +1784,7 @@ second
     #[test]
     fn map_ids_bound_the_pieces_a_job_reserves() {
         let first = crate::map_item::FIRST_MAP_ID;
-        assert_eq!(pieces_with_map_ids(first), 32_752);
+        assert_eq!(pieces_with_map_ids(first), MAX_PIECES);
         // Earlier jobs' reservations leave less room.
         assert_eq!(pieces_with_map_ids(i32::MAX - 2 * MAP_IDS_PER_PIECE), 2);
         assert_eq!(pieces_with_map_ids(i32::MAX), 0);
