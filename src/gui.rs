@@ -2481,7 +2481,8 @@ fn gui_cancel_bake() {
 }
 
 /// The end of a `--prewarm` run: the caches are filled and no world is kept.
-fn prewarmed() -> Result<(), String> {
+fn prewarmed(args: &Args, bbox: LLBBox) -> Result<(), String> {
+    crate::data_plan::refresh(&cache_root(), args, bbox);
     emit_gui_progress_update(100.0, "Done! Inputs for this area are cached.");
     println!(
         "{}",
@@ -3121,7 +3122,7 @@ fn gui_start_generation(
                         return Err(e);
                     }
                     if !pieces_job_keeps_world(args.prewarm) {
-                        return prewarmed();
+                        return prewarmed(&args, bbox);
                     }
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
@@ -3297,7 +3298,7 @@ fn gui_start_generation(
                     &crate::elevation::PeakSource::none(),
                 );
                 if args.prewarm {
-                    return prewarmed();
+                    return prewarmed(&args, bbox);
                 }
                 let mut args = args;
                 settle(&mut args, &ground)?;
@@ -3449,7 +3450,7 @@ fn gui_start_generation(
                     )
                     .prewarm();
                 }
-                return prewarmed();
+                return prewarmed(&args, bbox);
             }
             // Nothing to settle when the fetch failed: the run ends below.
             let mut args = args;

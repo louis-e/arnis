@@ -126,9 +126,34 @@ fn count(source: &'static str, files: Option<Vec<PathBuf>>, typical: u64) -> Ite
     }
 }
 
+/// The elevation tiles (or their 404 markers) a run reads, when it reads any.
+fn elevation_files(root: &Path, args: &Args, bbox: &LLBBox) -> Option<Vec<PathBuf>> {
+    if !(args.terrain() && args.body.is_earth()) {
+        return None;
+    }
+    Some(if args.aws_only_elevation {
+        let dir = crate::elevation::cache::provider_cache_dir(root, "aws");
+        crate::elevation::providers::aws_terrain::cache_files(&dir, bbox)
+    } else {
+        let (_, _, grid_w, grid_h) = crate::elevation::compute_grid_dims(bbox, args.scale);
+        let dir = crate::elevation::cache::provider_cache_dir(root, "mapterhorn");
+        crate::elevation::providers::mapterhorn::cache_files(&dir, bbox, grid_w, grid_h)
+    })
+}
+
+/// Marks the cached files of `plan` that the startup sweep would delete once a month old (the
+/// elevation tiles) as used now, so what a prewarm reported ready stays.
+pub fn refresh(root: &Path, args: &Args, bbox: LLBBox) {
+    let now = std::time::SystemTime::now();
+    for f in elevation_files(root, args, &bbox).unwrap_or_default() {
+        if let Ok(file) = std::fs::File::options().write(true).open(&f) {
+            let _ = file.set_modified(now);
+        }
+    }
+}
+
 /// The plan for a run of `bbox` with `args`, from the caches under `root`.
 pub fn plan(root: &Path, args: &Args, bbox: LLBBox) -> DataPlan {
-    let (_, _, grid_w, grid_h) = crate::elevation::compute_grid_dims(&bbox, args.scale);
     let earth = args.body.is_earth();
     let mut out = DataPlan {
         cache_root: root.display().to_string(),
@@ -183,14 +208,7 @@ pub fn plan(root: &Path, args: &Args, bbox: LLBBox) -> DataPlan {
             out.items.push(count("osm", files, TYPICAL_OSM_TILE));
         }
     }
-    if args.terrain() && earth {
-        let files = if args.aws_only_elevation {
-            let dir = crate::elevation::cache::provider_cache_dir(root, "aws");
-            crate::elevation::providers::aws_terrain::cache_files(&dir, &bbox)
-        } else {
-            let dir = crate::elevation::cache::provider_cache_dir(root, "mapterhorn");
-            crate::elevation::providers::mapterhorn::cache_files(&dir, &bbox, grid_w, grid_h)
-        };
+    if let Some(files) = elevation_files(root, args, &bbox) {
         out.items
             .push(count("elevation", Some(files), TYPICAL_ELEVATION_TILE));
     }
@@ -334,6 +352,32 @@ mod tests {
         let p = plan(dir.path(), &args(&["--canopy-height=true"]), bbox);
         assert_eq!(p.cache_root, dir.path().display().to_string());
         assert!(p.items.iter().all(|i| i.source != "canopy"));
+    }
+
+    #[test]
+    fn a_refresh_keeps_counted_tiles_from_the_age_sweep() {
+        let dir = tempfile::tempdir().unwrap();
+        let bbox = LLBBox::from_str(BBOX).unwrap();
+        let a = args(&[]);
+        let files = elevation_files(dir.path(), &a, &bbox).unwrap();
+        touch(&files[0], 10);
+        let month_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 86_400);
+        let file = std::fs::File::options()
+            .write(true)
+            .open(&files[0])
+            .unwrap();
+        file.set_modified(month_ago).unwrap();
+        drop(file);
+        refresh(dir.path(), &a, bbox);
+        let age = std::fs::metadata(&files[0])
+            .unwrap()
+            .modified()
+            .unwrap()
+            .elapsed()
+            .unwrap();
+        assert!(age < std::time::Duration::from_secs(3600));
+        // Files not there stay not there.
+        assert!(files[1..].iter().all(|f| !f.exists()));
     }
 
     #[test]

@@ -1004,6 +1004,9 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             eprintln!("An --offline run of this area would stop on these.");
             exit_failed();
         }
+        if let Some(root) = elevation::cache::user_cache_dir() {
+            data_plan::refresh(&root, &args, effective_bbox);
+        }
         println!(
             "{} Inputs for this area are cached; no world was written.",
             "Done!".green().bold()
