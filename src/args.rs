@@ -453,7 +453,9 @@ pub struct Args {
     pub progress: Option<ProgressFormat>,
 
     /// Worker threads for generation. Defaults to 90% of the cores, or to RAYON_NUM_THREADS
-    /// when that is set; this flag wins over both.
+    /// when that is set; this flag wins over both. In a --one-world job built in pieces it is
+    /// the count for each piece, several of which run at once, and RAYON_NUM_THREADS is not
+    /// read.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=4096))]
     pub threads: Option<u32>,
 
@@ -762,9 +764,10 @@ pub struct UnitArgs {
     pub one_world_unit: Option<PathBuf>,
 
     /// Build a --one-world selection in pieces, this many at once, each in its own process
-    /// sharing the job's threads, memory and downloads. auto picks 2 to 6 from the free RAM
-    /// and cores. Pieces are 8 x 8 regions unless --unit-regions says otherwise; run the same
-    /// command again to resume an interrupted job.
+    /// with all of --threads and a share of the job's memory and downloads. auto picks 1 to 6
+    /// from the free RAM and cores: 1 with six cores or fewer, or too little memory for a piece.
+    /// Pieces are 8 x 8 regions unless --unit-regions says otherwise; run the same command
+    /// again to resume an interrupted job.
     #[arg(long, value_name = "auto|N", value_parser = parse_workers)]
     pub one_world_workers: Option<Workers>,
 
