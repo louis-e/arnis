@@ -1871,25 +1871,18 @@ fn remove_old_plan_masks(dir: &Path, max_age: std::time::Duration) {
 fn gui_show_in_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // OneDrive files can be cloud placeholders / mid-sync that `start` can't launch
+        // Explorer opens a file with its default app (e.g. .mcworld with Minecraft Bedrock) and a
+        // folder in place; no shell reads the path, so `&` in a world name stays a character.
+        let mut explorer = std::process::Command::new("explorer");
+        // OneDrive files can be cloud placeholders / mid-sync that cannot be launched
         // ("Windows cannot find <path>"), so reveal-and-highlight instead of opening.
         if path.to_lowercase().contains("onedrive") {
-            std::process::Command::new("explorer")
-                .args(["/select,", &path])
-                .spawn()
-                .map_err(|e| format!("Failed to open explorer: {}", e))?;
-        } else if std::process::Command::new("cmd")
-            // Otherwise open with the default app (e.g. .mcworld with Minecraft Bedrock);
-            // for directories `start ""` opens Explorer. Falls back to explorer /select.
-            .args(["/C", "start", "", &path])
-            .spawn()
-            .is_err()
-        {
-            std::process::Command::new("explorer")
-                .args(["/select,", &path])
-                .spawn()
-                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+            explorer.arg("/select,");
         }
+        explorer
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open explorer: {}", e))?;
     }
 
     #[cfg(target_os = "macos")]
