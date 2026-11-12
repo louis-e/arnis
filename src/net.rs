@@ -57,6 +57,19 @@ pub fn offline() -> bool {
     OFFLINE.load(Ordering::Relaxed)
 }
 
+/// The window's saved Offline Mode, which holds between runs too.
+static OFFLINE_MODE: AtomicBool = AtomicBool::new(false);
+
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn set_offline_mode(on: bool) {
+    OFFLINE_MODE.store(on, Ordering::Relaxed);
+}
+
+/// Whether what is not a run's data stays in as well: telemetry and the update check.
+pub fn offline_mode() -> bool {
+    offline() || OFFLINE_MODE.load(Ordering::Relaxed)
+}
+
 /// A window run's `--offline` and `--prewarm`, which end with it: both are process-wide, and
 /// the previews between two runs read them too.
 #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
@@ -251,6 +264,24 @@ mod tests {
         assert!(refused.0.unwrap_err().contains(what));
         assert!(refused.1.is_err());
         assert!(offline_misses().contains(&(what.to_string(), 2)));
+    }
+
+    #[test]
+    fn offline_mode_is_the_saved_setting_or_an_offline_run() {
+        let _guard = SERIALIZE.lock().unwrap_or_else(|e| e.into_inner());
+        let _floor = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(!offline_mode());
+        set_offline_mode(true);
+        let saved = (offline_mode(), offline());
+        set_offline_mode(false);
+        // The setting alone refuses no download: that is the run's `--offline`.
+        assert_eq!(saved, (true, false));
+        let run = begin_run(true, false);
+        assert!(offline_mode());
+        drop(run);
+        assert!(!offline_mode());
     }
 
     #[test]

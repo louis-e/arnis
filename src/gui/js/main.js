@@ -2245,8 +2245,9 @@ function syncDiscordStatus() {
   Promise.resolve(invoke('gui_set_discord_status', { enabled })).catch(() => {});
 }
 
-// The backend is told Offline Mode once the store has restored it, and on every change: it
-// leaves old cached tiles alone while it is on. Off with the Advanced switch, as the flag is.
+// The backend is told Offline Mode once the store has restored it, and on every change: while
+// it is on it leaves old cached tiles alone and sends no telemetry or update check. Off with
+// the Advanced switch, as the flag is.
 function initOfflineModeSync() {
   const toggles = ['advanced-meld-features-toggle', 'meld-offline-toggle'].map((id) => document.getElementById(id));
   const sync = () => {

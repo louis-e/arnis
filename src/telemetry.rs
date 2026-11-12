@@ -76,9 +76,9 @@ pub fn set_telemetry_consent(consent: bool) {
     TELEMETRY_CONSENT.store(consent, Ordering::Relaxed);
 }
 
-/// Gets the user's telemetry consent preference
+/// Whether reports may go out: the user agreed, and Offline Mode is off.
 fn get_telemetry_consent() -> bool {
-    TELEMETRY_CONSENT.load(Ordering::Relaxed)
+    TELEMETRY_CONSENT.load(Ordering::Relaxed) && !crate::net::offline_mode()
 }
 
 /// Determines the current platform as a string

@@ -742,10 +742,12 @@ fn gui_set_discord_status(enabled: bool) {
     crate::discord::set_enabled(enabled);
 }
 
-/// The Offline Mode setting, sent at start-up and on every change. The start-up sweep of old
-/// elevation tiles waits for the first one: offline, the cache is all there is.
+/// The Offline Mode setting, sent at start-up and on every change: on, telemetry and the
+/// update check stay in. The start-up sweep of old elevation tiles waits for the first one:
+/// offline, the cache is all there is.
 #[tauri::command]
 fn gui_set_offline_mode(offline: bool) {
+    crate::net::set_offline_mode(offline);
     static STARTUP: std::sync::Once = std::sync::Once::new();
     STARTUP.call_once(|| {
         if !offline {
