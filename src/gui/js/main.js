@@ -1494,7 +1494,9 @@ function initSettings() {
   // Advanced off: a finished One World's name is no longer the world under Start.
   meldToggle.addEventListener('change', () => {
     if (!meldToggle.checked && (lastRunOneWorld || oneWorldPicked)) setWorldNameLabel("");
-    redrawProjects();
+    // A world picked in Projects is the target only with the switch on: read the target again.
+    oneWorldOverlayKey = null;
+    refreshOneWorldState();
   });
   document.getElementById('meld-snap-group')?.addEventListener('click', () => setTimeout(pushMeldToMap));
   getMapFrame()?.addEventListener('load', pushMeldToMap);
