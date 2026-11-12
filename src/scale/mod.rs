@@ -842,6 +842,19 @@ pub fn run_with(
             }
             // Warm what the piece will build: its rect plus the halo.
             let (lease, bbox) = piece_child(i)?;
+            // The job's bar: the pieces warmed so far plus this one's share.
+            let report = |f: f64| {
+                let pct = (k as f64 + f) / warm.len() as f64 * warm_share;
+                crate::progress::emit_gui_progress_update(pct, "");
+            };
+            // Before a build, warming only spares it downloads: none are left to spare.
+            let cached = crate::coordinate_system::geographic::LLBBox::from_str(&bbox)
+                .is_ok_and(|area| inputs_cached(args, area));
+            if cached && !args.prewarm {
+                println!("  piece {}/{of}: already cached", i + 1);
+                report(1.0);
+                continue;
+            }
             let mut warm_argv = child_args(argv.iter().cloned(), &bbox, &lease, false);
             let downloads = args
                 .max_downloads
@@ -853,11 +866,6 @@ pub fn run_with(
                 downloads.into(),
             ]);
             println!("  piece {}/{of}: warming the caches", i + 1);
-            // The job's bar: the pieces warmed so far plus this one's share.
-            let report = |f: f64| {
-                let pct = (k as f64 + f) / warm.len() as f64 * warm_share;
-                crate::progress::emit_gui_progress_update(pct, "");
-            };
             let log = piece_log_path(&job.dir, i);
             let env = piece_env();
             if let Err(f) = run_piece_until(&warm_argv, &env, &stopped, Path::new(&log), report) {
@@ -1224,6 +1232,17 @@ pub fn run_with(
     let _ = std::fs::remove_dir_all(&job.dir);
     let _ = std::fs::remove_dir(world_dir.join(one_world::JOBS_DIR));
     Ok(())
+}
+
+/// Whether the caches hold every input of `area` that is counted on disk: the OSM, elevation,
+/// land cover and Overture tiles. What is not counted, a build fetches.
+fn inputs_cached(args: &Args, area: crate::coordinate_system::geographic::LLBBox) -> bool {
+    crate::elevation::cache::user_cache_dir()
+        .is_some_and(|root| all_cached(&crate::data_plan::plan(&root, args, area).items))
+}
+
+fn all_cached(items: &[crate::data_plan::Item]) -> bool {
+    !items.is_empty() && items.iter().all(|i| i.total > 0 && i.cached == i.total)
 }
 
 /// Where piece `i`'s output is kept (absolute), in the job folder.
@@ -1759,6 +1778,22 @@ second
         // A cell that ends in its prologue stops holding the queue.
         q.finish(1, Outcome::Failed);
         assert!(q.admits(2));
+    }
+
+    #[test]
+    fn only_a_piece_with_every_counted_input_cached_skips_its_warming() {
+        let item = |cached, total| crate::data_plan::Item {
+            source: "osm",
+            cached,
+            cached_bytes: 0,
+            total,
+            missing_bytes: None,
+        };
+        assert!(all_cached(&[item(4, 4), item(169, 169)]));
+        assert!(!all_cached(&[item(4, 4), item(168, 169)]));
+        // A source that cannot be counted (Overpass) may still have to download.
+        assert!(!all_cached(&[item(4, 4), item(0, 0)]));
+        assert!(!all_cached(&[]));
     }
 
     #[test]
