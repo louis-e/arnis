@@ -37,7 +37,7 @@ const TAIL_LINES: usize = 40;
 /// Further attempts at a piece that failed for a reason that may pass.
 const MAX_RETRIES: u32 = 2;
 /// Piece size when only `--one-world-workers` is given.
-pub const DEFAULT_UNIT_REGIONS: i32 = 4;
+pub const DEFAULT_UNIT_REGIONS: i32 = 8;
 /// Percent of the job's bar `--prewarm-first` fills before the build, as downloads take of a run.
 const WARM_SHARE: f64 = 20.0;
 
@@ -653,10 +653,8 @@ pub fn run_with(
     let wanted =
         |i: usize| !job.skip.contains(&i) && only.is_none_or(|p| p.contains(&(i as u32 + 1)));
 
-    match size {
-        UnitSize::N(n) => println!("One World: building {of} piece(s) of up to {n}x{n} regions"),
-        UnitSize::Auto => println!("One World: building {of} piece(s) of up to 8x8 regions"),
-    }
+    let side = units.iter().map(|u| u.size).max().unwrap_or(1);
+    println!("One World: building {of} piece(s) of up to {side}x{side} regions");
     // The extract is read once, here; each piece then cuts its own area from the bake.
     let mut argv = argv;
     if let Some(src) = crate::osm_pbf::Source::from_args(args).filter(|_| !args.skip_osm()) {

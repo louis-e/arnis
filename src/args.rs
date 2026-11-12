@@ -751,9 +751,9 @@ pub struct UnitArgs {
     #[arg(long, value_name = "auto|N", value_parser = parse_unit_size)]
     pub plan_units: Option<UnitSize>,
 
-    /// Piece size of a --one-world job, at most N x N regions. auto takes 8 x 8 pieces, or 4 x 4
-    /// or 2 x 2 short of memory, split smaller along a --plan-mask; with --one-world-workers
-    /// auto a small selection is built in one run.
+    /// Piece size of a --one-world job, at most N x N regions. auto takes 8 x 8 pieces, 12 x 12
+    /// or 16 x 16 with memory to spare, 4 x 4 or 2 x 2 short of it, split smaller along a
+    /// --plan-mask; with --one-world-workers auto a small selection is built in one run.
     #[arg(long, value_name = "auto|N", value_parser = parse_unit_size)]
     pub unit_regions: Option<UnitSize>,
 
@@ -763,7 +763,7 @@ pub struct UnitArgs {
 
     /// Build a --one-world selection in pieces, this many at once, each in its own process
     /// sharing the job's threads, memory and downloads. auto picks 2 to 6 from the free RAM
-    /// and cores. Pieces are 4 x 4 regions unless --unit-regions says otherwise; run the same
+    /// and cores. Pieces are 8 x 8 regions unless --unit-regions says otherwise; run the same
     /// command again to resume an interrupted job.
     #[arg(long, value_name = "auto|N", value_parser = parse_workers)]
     pub one_world_workers: Option<Workers>,

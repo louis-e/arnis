@@ -247,8 +247,16 @@ fn poly_rings(text: &str) -> Vec<crate::osm_pbf::Ring> {
     rings
 }
 
-/// Sizes `--unit-regions auto` mixes, largest first.
-const AUTO_SIZES: [i32; 3] = [8, 4, 2];
+/// Sizes `--unit-regions auto` cuts a `max` piece into along an outline, smallest first:
+/// halves, down to 2 or an odd side.
+fn auto_leaves(max: i32) -> Vec<i32> {
+    let mut sizes = vec![max];
+    while let Some(&s) = sizes.last().filter(|&&s| s > 2 && s % 2 == 0) {
+        sizes.push(s / 2);
+    }
+    sizes.reverse();
+    sizes
+}
 
 /// `--unit-regions auto`: a quadtree on the `max`-region lattice anchored at block 0. A
 /// lattice cell wholly inside `world` is one piece; one that is not splits into four, down
@@ -373,10 +381,13 @@ pub fn plan(
     use crate::args::SnapRegions;
     let units = &args.units;
     let (requested, _) = snap_bbox_to_chunks(proj, selection)?;
+    // The largest auto size follows the memory, so it names the job: a resume on a machine
+    // that picks another size opens another folder instead of misreading this one's pieces.
+    let auto_max = (size == UnitSize::Auto).then(|| crate::scale::budget::auto_max_regions(args));
     // Mixed sizes snap to the smallest, so every leaf of a covered job is whole.
-    let n = match size {
-        UnitSize::N(n) => n,
-        UnitSize::Auto => AUTO_SIZES[2],
+    let n = match (size, auto_max) {
+        (UnitSize::N(n), _) => n,
+        (UnitSize::Auto, max) => auto_leaves(max.unwrap_or(8))[0],
     };
     let side = REGION_BLOCKS * n;
     let axis = |lo: i32, hi: i32| match units.snap_regions {
@@ -407,13 +418,10 @@ pub fn plan(
         .as_deref()
         .map(|path| Mask::load(path, proj, &rect))
         .transpose()?;
-    // The largest auto size follows the memory, so it names the job: a resume on a machine
-    // that picks another size opens another folder instead of misreading this one's pieces.
-    let auto_max = (size == UnitSize::Auto).then(|| crate::scale::budget::auto_max_regions(args));
     // Counted before any piece is built: a continent in small cells would hold the window.
     let coarsest = match size {
         UnitSize::N(n) => n,
-        UnitSize::Auto => auto_max.unwrap_or(AUTO_SIZES[0]),
+        UnitSize::Auto => auto_max.unwrap_or(8),
     };
     let count = lattice_cells(&rect, coarsest);
     if count > crate::scale::MAX_PIECES as u64 {
@@ -426,13 +434,13 @@ pub fn plan(
     let mut cut = match (size, auto_max) {
         (UnitSize::N(n), _) => plan_cells(proj, &rect, n, merge)?,
         (UnitSize::Auto, max) => {
-            let max = max.unwrap_or(AUTO_SIZES[0]);
+            let max = max.unwrap_or(8);
             // Whole `max` pieces clipped at the edges: smaller edge pieces cost more than they
             // save (256 km2: 136 mixed pieces 93 s, 16 of 8 x 8 65 s). An outline still
             // splits, larger leaves until the map ids go round.
             let mut cut = Vec::new();
-            let leaves = AUTO_SIZES.into_iter().rev();
-            for min in leaves.filter(|&s| s <= max && (mask.is_some() || s == max)) {
+            let leaves = auto_leaves(max).into_iter();
+            for min in leaves.filter(|&s| mask.is_some() || s == max) {
                 cut = auto_cells(proj, &rect, max, min, mask.as_ref())?;
                 if cut.len() <= crate::scale::MAX_PIECES {
                     break;
@@ -863,6 +871,14 @@ mod tests {
         assert_eq!(r(&p.rect), [-2000, -1120, 1999, 1119]);
     }
 
+    #[test]
+    fn auto_pieces_split_in_halves_down_to_two_or_an_odd_side() {
+        assert_eq!(auto_leaves(16), [2, 4, 8, 16]);
+        assert_eq!(auto_leaves(12), [3, 6, 12]);
+        assert_eq!(auto_leaves(8), [2, 4, 8]);
+        assert_eq!(auto_leaves(2), [2]);
+    }
+
     fn sizes(units: &[WorkUnit]) -> Vec<(i32, i32)> {
         let mut v: Vec<_> = units
             .iter()
@@ -960,13 +976,16 @@ mod tests {
                     margin_regions: margin,
                     ..Default::default()
                 });
-                args.ram_budget_mb = Some(4000);
-                for size in [
-                    UnitSize::N(1),
-                    UnitSize::N(2),
-                    UnitSize::N(4),
-                    UnitSize::Auto,
+                // Auto at 8, 12 and 16 regions.
+                for (size, mb) in [
+                    (UnitSize::N(1), 4000),
+                    (UnitSize::N(2), 4000),
+                    (UnitSize::N(4), 4000),
+                    (UnitSize::Auto, 4000),
+                    (UnitSize::Auto, 10176),
+                    (UnitSize::Auto, 16224),
                 ] {
+                    args.ram_budget_mb = Some(mb);
                     let p = plan(&proj, &req, &args, size).unwrap();
                     let area: u64 = p.units.iter().map(WorkUnit::chunks).sum();
                     let [x0, z0, x1, z1] = r(&p.rect);
@@ -1115,6 +1134,16 @@ mod tests {
         // Mixed sizes split what the mask only partly holds.
         let auto = masked(&geojson, UnitSize::Auto).unwrap();
         assert!(auto.units.iter().all(|u| u.rect.max_x() < 0));
+        // 12 x 12 pieces split to 6 and 3.
+        let mut args = args_with(UnitArgs {
+            plan_mask: Some(geojson.clone()),
+            ..Default::default()
+        });
+        args.ram_budget_mb = Some(10176);
+        let twelve = plan(&proj, &req, &args, UnitSize::Auto).unwrap();
+        assert!(twelve.name.contains("_nauto12"));
+        assert!(twelve.units.iter().all(|u| [12, 6, 3].contains(&u.size)));
+        assert!(twelve.units.iter().all(|u| u.rect.max_x() < 0));
         // A polygon elsewhere holds nothing.
         let far = tmp.path().join("far.geojson");
         let far_ring = serde_json::json!({"type": "Polygon",

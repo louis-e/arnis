@@ -26,9 +26,9 @@ pub fn estimate_piece_mb(regions: u64, scale: f64) -> u64 {
     400 + per_region * regions
 }
 
-/// Largest side, in regions, that `--unit-regions auto` gives a piece: 8, 4 or 2, the largest
-/// of which two pieces fit in `--ram-budget-mb`, else in the machine's memory less the
-/// reserve. Total memory rather than free, so a resumed job cuts the same pieces.
+/// Largest side, in regions, that `--unit-regions auto` gives a piece: 16 or 12 when
+/// `MAX_WORKERS` such pieces fit `--ram-budget-mb`, else 8 or 4 when two do, else 2. Without a
+/// budget, the machine's memory less the reserve: total, so a resumed job cuts the same pieces.
 pub fn auto_max_regions(args: &Args) -> i32 {
     let budget = args.ram_budget_mb.unwrap_or_else(|| {
         let mut sys = sysinfo::System::new();
@@ -36,10 +36,15 @@ pub fn auto_max_regions(args: &Args) -> i32 {
         let total = sys.total_memory() / (1024 * 1024);
         total.saturating_sub(reserve_mb(total))
     });
-    [8, 4]
-        .into_iter()
-        .find(|&s| estimate_piece_mb(s * s, args.scale) * MIN_WORKERS as u64 <= budget)
-        .map_or(2, |s| s as i32)
+    [
+        (16, MAX_WORKERS),
+        (12, MAX_WORKERS),
+        (8, MIN_WORKERS),
+        (4, MIN_WORKERS),
+    ]
+    .into_iter()
+    .find(|&(s, pieces)| estimate_piece_mb(s * s, args.scale) * pieces as u64 <= budget)
+    .map_or(2, |(s, _)| s as i32)
 }
 
 /// Memory kept free for the system and everything else running.
@@ -271,9 +276,14 @@ mod tests {
     }
 
     #[test]
-    fn auto_pieces_are_as_large_as_two_fit_the_memory() {
-        // Two 8 x 8 pieces at scale 1 need 2 x 976 MB, two 4 x 4 2 x 544 MB.
+    fn auto_pieces_are_as_large_as_the_memory_fits() {
+        // Six 16 x 16 pieces at scale 1 need 6 x 2704 MB, six 12 x 12 6 x 1696 MB; two
+        // 8 x 8 2 x 976 MB, two 4 x 4 2 x 544 MB.
         for (mb, side) in [
+            (16224, 16),
+            (16223, 12),
+            (10176, 12),
+            (10175, 8),
             (4000, 8),
             (1952, 8),
             (1951, 4),
@@ -367,15 +377,12 @@ mod tests {
     fn auto_plan_picks_measured_sweet_spot() {
         let total = 31 * 1024;
         let usable = total - reserve_mb(total);
-        let side = auto_max_regions(&parse(&["--ram-budget-mb", &usable.to_string()]));
-        assert_eq!(side, 8);
-        let regions = (side * side) as u64;
         // 16 pieces of up to 8 x 8.
         let plan = auto_plan(
             24 * CPU_TARGET / 100,
             16,
             usable,
-            estimate_piece_mb(regions, 1.0),
+            estimate_piece_mb(64, 1.0),
         );
         assert_eq!(plan, 4);
     }
