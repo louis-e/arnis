@@ -371,24 +371,10 @@ pub struct Plan {
     pub name: String,
 }
 
-/// The plan a job runs and `--plan-units` prints: both call this, so they agree.
-pub fn plan(
-    proj: &WebMercatorProjection,
-    selection: &LLBBox,
-    args: &crate::args::Args,
-    size: UnitSize,
-) -> Result<Plan, String> {
+/// What a job builds: `requested` after `--snap-regions`, to pieces of `n` regions, and
+/// `--margin-regions`.
+fn job_rect(requested: &XZBBox, units: &crate::args::UnitArgs, n: i32) -> Result<XZBBox, String> {
     use crate::args::SnapRegions;
-    let units = &args.units;
-    let (requested, _) = snap_bbox_to_chunks(proj, selection)?;
-    // The largest auto size follows the memory, so it names the job: a resume on a machine
-    // that picks another size opens another folder instead of misreading this one's pieces.
-    let auto_max = (size == UnitSize::Auto).then(|| crate::scale::budget::auto_max_regions(args));
-    // Mixed sizes snap to the smallest, so every leaf of a covered job is whole.
-    let n = match (size, auto_max) {
-        (UnitSize::N(n), _) => n,
-        (UnitSize::Auto, max) => auto_leaves(max.unwrap_or(8))[0],
-    };
     let side = REGION_BLOCKS * n;
     let axis = |lo: i32, hi: i32| match units.snap_regions {
         Some(SnapRegions::Cover) => (
@@ -411,7 +397,119 @@ pub fn plan(
     let m = units.margin_regions * REGION_BLOCKS;
     let (x0, x1) = axis(requested.min_x(), requested.max_x());
     let (z0, z1) = axis(requested.min_z(), requested.max_z());
-    let rect = XZBBox::rect_from_min_max(x0 - m, z0 - m, x1 + m, z1 + m)?;
+    XZBBox::rect_from_min_max(x0 - m, z0 - m, x1 + m, z1 + m)
+}
+
+/// A job's folder name: its rectangle, piece size (auto: the largest), and what else cuts
+/// other pieces over the same rectangle, merged edges and the mask's hash.
+fn job_name(
+    rect: &XZBBox,
+    size: UnitSize,
+    auto_max: Option<i32>,
+    merge: bool,
+    mask: Option<u64>,
+) -> String {
+    let mut name = format!(
+        "{}_{}_{}_{}_n{size}",
+        rect.min_x(),
+        rect.min_z(),
+        rect.max_x(),
+        rect.max_z()
+    );
+    if let Some(max) = auto_max {
+        name.push_str(&max.to_string());
+    }
+    if merge {
+        name.push_str("_merge");
+    }
+    if let Some(hash) = mask {
+        name.push_str(&format!("_m{hash:016x}"));
+    }
+    name
+}
+
+/// The largest piece size of the auto job the world at `world_dir` has over `selection`,
+/// when the size the memory gives now would start another one: the job that ran last.
+fn kept_auto_max(
+    world_dir: &std::path::Path,
+    proj: &WebMercatorProjection,
+    selection: &LLBBox,
+    args: &crate::args::Args,
+) -> Option<i32> {
+    let units = &args.units;
+    let (requested, _) = snap_bbox_to_chunks(proj, selection).ok()?;
+    let mask = match &units.plan_mask {
+        Some(path) => Some(Mask::read(path).ok()?.1),
+        None => None,
+    };
+    let merge = units.snap_regions == Some(crate::args::SnapRegions::Merge);
+    let jobs = crate::one_world::Manifest::load(world_dir)
+        .ok()
+        .flatten()
+        .map_or_else(Vec::new, |m| m.jobs);
+    // When the job cut with `max` last ran; 0 for a folder no run recorded yet.
+    let ran = |max: i32| {
+        let rect = job_rect(&requested, units, auto_leaves(max)[0]).ok()?;
+        let name = job_name(&rect, UnitSize::Auto, Some(max), merge, mask);
+        let record = jobs.iter().find(|j| j.name == name);
+        let folder = world_dir.join(crate::one_world::JOBS_DIR).join(&name);
+        record
+            .map(|j| j.status.last_run_ms)
+            .or_else(|| folder.is_dir().then_some(0))
+    };
+    if ran(crate::scale::budget::auto_max_regions(args)).is_some() {
+        return None;
+    }
+    let sizes = crate::scale::budget::AUTO_SIZES.iter();
+    let last = sizes.filter_map(|&max| ran(max).map(|at| (at, max))).max();
+    last.map(|(_, max)| max)
+}
+
+/// The plan a job runs and `--plan-units` prints: both call `plan_in`, so they agree.
+pub fn plan(
+    proj: &WebMercatorProjection,
+    selection: &LLBBox,
+    args: &crate::args::Args,
+    size: UnitSize,
+) -> Result<Plan, String> {
+    let auto_max = (size == UnitSize::Auto).then(|| crate::scale::budget::auto_max_regions(args));
+    plan_sized(proj, selection, args, size, auto_max)
+}
+
+/// `plan` in the world at `world_dir`: an auto job the world already has over the selection
+/// keeps its piece size, so a changed memory budget resumes it instead of starting another.
+pub fn plan_in(
+    world_dir: &std::path::Path,
+    proj: &WebMercatorProjection,
+    selection: &LLBBox,
+    args: &crate::args::Args,
+    size: UnitSize,
+) -> Result<Plan, String> {
+    let auto_max = (size == UnitSize::Auto).then(|| {
+        kept_auto_max(world_dir, proj, selection, args)
+            .unwrap_or_else(|| crate::scale::budget::auto_max_regions(args))
+    });
+    plan_sized(proj, selection, args, size, auto_max)
+}
+
+/// `plan` with the largest auto size given. It follows the memory and cuts other pieces,
+/// so it is part of the job's name.
+fn plan_sized(
+    proj: &WebMercatorProjection,
+    selection: &LLBBox,
+    args: &crate::args::Args,
+    size: UnitSize,
+    auto_max: Option<i32>,
+) -> Result<Plan, String> {
+    use crate::args::SnapRegions;
+    let units = &args.units;
+    let (requested, _) = snap_bbox_to_chunks(proj, selection)?;
+    // Mixed sizes snap to the smallest, so every leaf of a covered job is whole.
+    let n = match (size, auto_max) {
+        (UnitSize::N(n), _) => n,
+        (UnitSize::Auto, max) => auto_leaves(max.unwrap_or(8))[0],
+    };
+    let rect = job_rect(&requested, units, n)?;
     let merge = units.snap_regions == Some(SnapRegions::Merge);
     let mask = units
         .plan_mask
@@ -449,27 +547,13 @@ pub fn plan(
             cut
         }
     };
-    let mut name = format!(
-        "{}_{}_{}_{}_n{size}",
-        rect.min_x(),
-        rect.min_z(),
-        rect.max_x(),
-        rect.max_z()
-    );
-    if let Some(max) = auto_max {
-        name.push_str(&max.to_string());
-    }
-    // Merged edges cut other pieces than a plain job over the same rectangle.
-    if merge {
-        name.push_str("_merge");
-    }
+    let name = job_name(&rect, size, auto_max, merge, mask.as_ref().map(|m| m.hash));
     if let Some(mask) = &mask {
         cut.retain(|u| mask.touches(&u.rect));
         if cut.is_empty() {
             return Err("--plan-mask: the polygon holds no piece of this job.".to_string());
         }
         order_centre_out(&rect, &mut cut);
-        name.push_str(&format!("_m{:016x}", mask.hash));
     }
     Ok(Plan {
         requested,
@@ -555,7 +639,7 @@ pub fn plan_line(
         rect: world,
         units,
         name,
-    } = plan(&proj, requested, args, size)?;
+    } = plan_in(world_dir, &proj, requested, args, size)?;
     let mut existing = 0;
     // The runner's own decision: Auto below the break-even is one plain run, so one worker.
     let single =
@@ -871,6 +955,53 @@ mod tests {
         let p = plan(&proj, &req, &args, UnitSize::Auto).unwrap();
         assert_eq!(p.units.len(), 4);
         assert_eq!(r(&p.rect), [-2000, -1120, 1999, 1119]);
+    }
+
+    #[test]
+    fn an_auto_job_keeps_its_piece_size_when_the_memory_budget_changes() {
+        use crate::args::{SnapRegions, UnitArgs};
+        let tmp = tempfile::tempdir().unwrap();
+        let w = tmp.path().join("W");
+        let wide = LLBBox::new(44.38, 26.00, 44.49, 26.21).unwrap();
+        let mut args = args_with(UnitArgs {
+            snap_regions: Some(SnapRegions::Cover),
+            ..Default::default()
+        });
+        args.bbox = Some(wide);
+        drop(crate::one_world::prepare(&w, &wide, &mut args).unwrap());
+        let proj = crate::one_world::Manifest::load(&w)
+            .unwrap()
+            .unwrap()
+            .projection();
+        let name = |mb: u64, args: &mut crate::args::Args| {
+            args.ram_budget_mb = Some(mb);
+            plan_in(&w, &proj, &wide, args, UnitSize::Auto)
+                .unwrap()
+                .name
+        };
+        // No job yet: the size follows the memory.
+        let (twelve, eight, four) = (
+            name(12600, &mut args),
+            name(4000, &mut args),
+            name(2000, &mut args),
+        );
+        assert!(twelve.ends_with("_nauto12") && eight.ends_with("_nauto8"));
+        assert!(four.ends_with("_nauto4"));
+        // The job ran with 8 x 8 pieces: less or more memory resumes it.
+        crate::one_world::record_job(&w, &eight, None, None, 1, 4, false).unwrap();
+        assert_eq!(name(2000, &mut args), eight);
+        assert_eq!(name(12600, &mut args), eight);
+        // A job at the size the memory gives is that job; else the one that ran last.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        crate::one_world::record_job(&w, &twelve, None, None, 1, 4, false).unwrap();
+        assert_eq!(name(4000, &mut args), eight);
+        assert_eq!(name(2000, &mut args), twelve);
+        // A folder no run recorded yet counts too.
+        std::fs::create_dir_all(w.join(crate::one_world::JOBS_DIR).join(&four)).unwrap();
+        assert_eq!(name(2000, &mut args), four);
+        // A fixed size is never changed.
+        let fixed = plan_in(&w, &proj, &wide, &args, UnitSize::N(2)).unwrap();
+        assert!(fixed.name.ends_with("_n2"));
     }
 
     #[test]

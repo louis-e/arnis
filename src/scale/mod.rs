@@ -660,7 +660,7 @@ pub fn run_with(
     let manifest = Manifest::load(world_dir)?
         .ok_or_else(|| format!("{} is not a One World.", world_dir.display()))?;
     let proj = manifest.projection();
-    let plan = work_units::plan(&proj, &selection, args, size)?;
+    let plan = work_units::plan_in(world_dir, &proj, &selection, args, size)?;
     // A snapped job reaches past the selection, and its data must too.
     let bake_area = if corners(&plan.rect) == corners(&plan.requested) {
         selection

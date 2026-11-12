@@ -27,6 +27,9 @@ pub fn estimate_piece_mb(regions: u64, scale: f64) -> u64 {
     660 + per_region * regions
 }
 
+/// Every side `auto_max_regions` can give.
+pub const AUTO_SIZES: [i32; 5] = [16, 12, 8, 4, 2];
+
 /// Largest side, in regions, that `--unit-regions auto` gives a piece: 16 or 12 when
 /// `MAX_WORKERS` such pieces fit `--ram-budget-mb`, else 8 or 4 when two do, else 2. Without a
 /// budget, the machine's memory less the reserve: total, so a resumed job cuts the same pieces.
@@ -306,6 +309,7 @@ mod tests {
         ] {
             let args = parse(&["--ram-budget-mb", &mb.to_string()]);
             assert_eq!(auto_max_regions(&args), side, "{mb} MB");
+            assert!(AUTO_SIZES.contains(&side));
         }
     }
 
