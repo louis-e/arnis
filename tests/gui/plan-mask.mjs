@@ -4,10 +4,10 @@
 import assert from 'node:assert';
 
 const nodes = new Map();
-const node = () => ({ value: '', checked: false, hidden: false, textContent: '', dataset: {}, classList: { toggle() {}, remove() {}, contains: () => false }, setAttribute() {}, addEventListener() {}, append() {}, replaceChildren() {} });
-globalThis.document = { querySelector: () => null, addEventListener() {}, createElement: node, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
+const node = () => ({ value: '', checked: false, hidden: false, textContent: '', dataset: {}, style: {}, listeners: {}, classList: { toggle() {}, remove() {}, contains: () => false }, setAttribute() {}, addEventListener(type, f) { this.listeners[type] = f; }, append() {}, replaceChildren() {} });
+globalThis.document = { body: node(), querySelector: () => null, addEventListener() {}, createElement: node, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
 globalThis.window = { addEventListener() {} };
-const { initRunControls, initJobPlan, meldFlags, setPlanMask, hasPlanMask } = await import('../../src/gui/js/meld-features.js');
+const { initMeldFeatures, initRunControls, initJobPlan, meldFlags, setPlanMask, hasPlanMask, useJobMask } = await import('../../src/gui/js/meld-features.js');
 
 const sent = [];
 const calls = [];
@@ -40,5 +40,14 @@ assert.ok(!meldFlags({ oneWorld: true, java: true }).some((f) => f.startsWith('-
 initRunControls({ key: () => 'k', map: () => ({}), invoke: async () => { throw new Error('too big'); }, post() {}, start: async () => {}, localize: () => {} });
 assert.match(await setPlanMask(square), /too big/);
 assert.ok(!hasPlanMask());
+
+// A job's kept outline (Resume, Rebuild) is not on the map, which clears its own: Advanced off clears it here.
+const advanced = document.getElementById('advanced-meld-features-toggle');
+initMeldFeatures();
+useJobMask('/w/arnis/jobs/j_m01.geojson', '1 2 3 4');
+assert.ok(hasPlanMask());
+advanced.checked = false;
+advanced.listeners.change();
+assert.ok(!hasPlanMask(), 'no outline is left to warn about');
 console.log('plan-mask: ok');
 process.exit(0);

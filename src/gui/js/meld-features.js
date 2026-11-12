@@ -118,6 +118,11 @@ export function initMeldFeatures() {
     }
     // Off, a finished job's pieces leave the map with the rest of Advanced features.
     if (!toggle.checked && !running && pieces.size) resetPieces();
+    // So does the outline a Resume or Rebuild put back: the map never drew it, so cannot clear it.
+    if (!toggle.checked && maskArea) {
+      maskArea = maskPath = '';
+      maskSeq++;
+    }
   };
   toggle.addEventListener('change', apply);
   if (layout) layout.addEventListener('change', apply);
