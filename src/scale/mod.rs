@@ -1549,7 +1549,7 @@ fn without_options(argv: Vec<OsString>, names: &[&str], switches: &[&str]) -> Ve
 
 /// A piece's command line: the job's own, minus what is decided per piece, plus the
 /// piece's bbox at full precision and its lease.
-fn child_args(
+pub(crate) fn child_args(
     argv: impl Iterator<Item = OsString>,
     bbox: &str,
     lease: &Path,

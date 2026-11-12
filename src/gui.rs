@@ -2332,7 +2332,9 @@ fn piece_argv(args: &Args, world_path: &Path, flags: &[String]) -> Vec<std::ffi:
     if let Some(t) = args.timeout {
         values.push(format!("--timeout={}", t.as_secs()));
     }
+    // Without a token a piece refuses the facades it is asked for; the window builds without.
     if let Some(on) = args.mapillary_facades {
+        let on = on && args.mapillary_api_token().is_some();
         values.push(format!("--mapillary-facades={on}"));
     }
     // The Mapillary token is not here: the coordinator hands it to each piece in its
@@ -4207,6 +4209,21 @@ mod tests {
         assert!(!argv
             .iter()
             .any(|a| a.to_string_lossy().contains("MLY|secret")));
+        // Mapillary chosen with no token saved: what a piece is given passes its own check.
+        args.mapillary_token = None;
+        args.mapillary_facades = Some(true);
+        let argv = piece_argv(&args, Path::new("saves/World"), &flags);
+        assert!(argv.iter().any(|a| a == "--mapillary-facades=false"));
+        let piece = crate::scale::child_args(
+            argv.into_iter(),
+            "44.44,26.09,44.45,26.1",
+            Path::new("lease.json"),
+            false,
+        );
+        let piece =
+            Args::try_parse_from(std::iter::once(std::ffi::OsString::from("arnis")).chain(piece))
+                .unwrap();
+        crate::args::validate_args(&piece).unwrap();
     }
 
     #[test]
