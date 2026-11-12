@@ -686,9 +686,10 @@ fn sample_grid(
         .map(|z| source_pixel_m(bbox, z, zoom) as f32)
         .collect();
 
+    let mut tiles = FnvHashMap::default();
     for chunk_start in (0..grid_height).step_by(SAMPLE_CHUNK_ROWS) {
         let chunk_end = (chunk_start + SAMPLE_CHUNK_ROWS).min(grid_height);
-        let tiles = load_chunk_tiles(
+        tiles = load_chunk_tiles(
             outcome,
             cache_dir,
             bbox,
@@ -698,6 +699,7 @@ fn sample_grid(
             chunk_end,
             grid_height,
             &mut unreadable,
+            tiles,
         );
 
         let rows: Vec<(Vec<f64>, SourceRow)> = (chunk_start..chunk_end)
@@ -770,7 +772,8 @@ fn tap_tile_range(z: u8, lo: f64, hi: f64) -> (u32, u32) {
     )
 }
 
-/// Decode the available tiles a row chunk can touch, across all pyramid levels.
+/// Decode the available tiles a row chunk can touch, across all pyramid levels. Those the
+/// chunk before decoded (`carried`) are kept as they are.
 #[allow(clippy::too_many_arguments)]
 fn load_chunk_tiles(
     outcome: &FetchOutcome,
@@ -782,13 +785,14 @@ fn load_chunk_tiles(
     chunk_end: usize,
     grid_height: usize,
     unreadable: &mut FnvHashSet<TileKey>,
+    carried: FnvHashMap<TileKey, TileImage>,
 ) -> FnvHashMap<TileKey, TileImage> {
     let norm_y_top = norm_y_for_lat(row_lat(bbox, chunk_start, grid_height));
     let norm_y_bot = norm_y_for_lat(row_lat(bbox, chunk_end.saturating_sub(1), grid_height));
     let norm_x_min = (bbox.min().lng() + 180.0) / 360.0;
     let norm_x_max = (bbox.max().lng() + 180.0) / 360.0;
 
-    let mut tiles: FnvHashMap<TileKey, TileImage> = FnvHashMap::default();
+    let mut wanted: Vec<TileKey> = Vec::new();
     for z in floor..=zoom {
         let (ty_min, ty_max) = tap_tile_range(z, norm_y_top, norm_y_bot);
         let (tx_min, tx_max) = tap_tile_range(z, norm_x_min, norm_x_max);
@@ -796,21 +800,34 @@ fn load_chunk_tiles(
         for ty in ty_min..=ty_max {
             for tx in tx_min..=tx_max {
                 let key = TileKey { z, x: tx, y: ty };
-                if !outcome.available.contains(&key) || unreadable.contains(&key) {
-                    continue;
+                if outcome.available.contains(&key) && !unreadable.contains(&key) {
+                    wanted.push(key);
                 }
-                match image::open(key.cache_path(cache_dir)) {
-                    Ok(img) => {
-                        tiles.insert(key, img.to_rgb8());
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: cached Mapterhorn tile z{} x{} y{} unreadable during sampling: {e}",
-                            key.z, key.x, key.y
-                        );
-                        unreadable.insert(key);
-                    }
-                }
+            }
+        }
+    }
+    let mut tiles = carried;
+    let keep: FnvHashSet<TileKey> = wanted.iter().copied().collect();
+    tiles.retain(|key, _| keep.contains(key));
+    let decoded: Vec<(TileKey, image::ImageResult<TileImage>)> = wanted
+        .into_par_iter()
+        .filter(|key| !tiles.contains_key(key))
+        .map(|key| {
+            let tile = image::open(key.cache_path(cache_dir)).map(|img| img.to_rgb8());
+            (key, tile)
+        })
+        .collect();
+    for (key, tile) in decoded {
+        match tile {
+            Ok(tile) => {
+                tiles.insert(key, tile);
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: cached Mapterhorn tile z{} x{} y{} unreadable during sampling: {e}",
+                    key.z, key.x, key.y
+                );
+                unreadable.insert(key);
             }
         }
     }
@@ -1204,6 +1221,49 @@ mod tests {
                 assert!((v - 300.0).abs() < 0.51, "got {v}");
             }
         }
+    }
+
+    #[test]
+    fn a_tile_two_chunks_share_is_decoded_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        // The z6 tile rows 22/23 meet at lat 45.0879, inside the bbox.
+        let bbox = LLBBox::new(45.0, 7.7, 45.2, 7.72).unwrap();
+        let north = TileKey { z: 6, x: 33, y: 22 };
+        let south = TileKey { z: 6, x: 33, y: 23 };
+        for key in [north, south] {
+            flat_tile(300.0).save(key.cache_path(tmp.path())).unwrap();
+        }
+        let outcome = FetchOutcome {
+            available: [north, south].into_iter().collect(),
+            confirmed_missing: FnvHashSet::default(),
+            failed_downloads: 0,
+        };
+        let mut unreadable = FnvHashSet::default();
+        let mut load = |rows: std::ops::Range<usize>, carried| {
+            let (dir, h) = (tmp.path(), 2500);
+            load_chunk_tiles(
+                &outcome,
+                dir,
+                &bbox,
+                6,
+                6,
+                rows.start,
+                rows.end,
+                h,
+                &mut unreadable,
+                carried,
+            )
+        };
+        let both = load(0..2500, FnvHashMap::default());
+        assert_eq!(both.len(), 2);
+        // With the files gone, a chunk keeps what the one before decoded and drops the
+        // tile it does not touch.
+        for key in [north, south] {
+            std::fs::remove_file(key.cache_path(tmp.path())).unwrap();
+        }
+        let top = load(0..512, both);
+        assert!(top.len() == 1 && top.contains_key(&north));
+        assert!(unreadable.is_empty());
     }
 
     #[test]
