@@ -1,10 +1,10 @@
 //! How many pieces of a job run at once, and what each may use.
 //!
-//! A fixed count (`--one-world-workers N`) splits what one run would take: `--threads` else
-//! 90% of the cores, `--ram-budget-mb` else free memory, `--max-downloads` else the default.
+//! A fixed count (`--one-world-workers N`) splits what one run would take: `--ram-budget-mb`
+//! else free memory, `--max-downloads` else the default. Every piece gets all the threads
+//! (`--threads` else 90% of the cores); the system shares the cores between them.
 //! `auto` picks W = clamp(min(pieces, threads / MIN_THREADS, free RAM / piece RAM), 2, 6), or 1
-//! below `TWO_WORKERS_FROM` threads or one piece's RAM, each with threads / W: a few fat workers
-//! beat many thin ones.
+//! below `TWO_WORKERS_FROM` threads or one piece's RAM: a few fat workers beat many thin ones.
 
 use crate::args::{Args, UnitSize, Workers};
 use std::ffi::OsString;
@@ -19,8 +19,8 @@ pub const MAX_WORKERS: usize = 6;
 const CPU_TARGET: usize = 90;
 
 /// Peak memory of one piece of `regions` regions before any has reported. Measured with warm
-/// caches and 5 threads a piece: 8 x 8 regions 825 MB, 4 x 4 529 MB. More threads raise it,
-/// which `Sizing::cap_for` catches once a piece reports.
+/// caches and 5 threads a piece: 8 x 8 regions 825 MB, 4 x 4 529 MB. More threads raise it
+/// (about a fifth at 9), which `Sizing::cap_for` catches once a piece reports.
 pub fn estimate_piece_mb(regions: u64, scale: f64) -> u64 {
     let per_region = if scale >= 0.5 { 9 } else { 8 };
     400 + per_region * regions
@@ -87,30 +87,24 @@ pub fn single_below_break_even(args: &mut Args) {
     }
 }
 
-/// W and T for `auto`: two workers at least once the threads and memory allow it, as
+/// W for `auto`: two workers at least once the threads and memory allow it, as
 /// overlapping two pieces is about as fast as one run on far less memory.
-pub fn auto_plan(
-    budget_threads: usize,
-    pieces: usize,
-    usable_mb: u64,
-    piece_mb: u64,
-) -> (usize, usize) {
+pub fn auto_plan(budget_threads: usize, pieces: usize, usable_mb: u64, piece_mb: u64) -> usize {
     let by_ram = (usable_mb / piece_mb.max(1)) as usize;
-    let workers = if budget_threads < TWO_WORKERS_FROM || by_ram == 0 {
-        1
-    } else {
-        let by_cpu = budget_threads / MIN_THREADS;
-        pieces
-            .min(by_cpu)
-            .min(by_ram)
-            .clamp(MIN_WORKERS, MAX_WORKERS)
-    };
-    (workers, (budget_threads / workers).max(1))
+    if budget_threads < TWO_WORKERS_FROM || by_ram == 0 {
+        return 1;
+    }
+    let by_cpu = budget_threads / MIN_THREADS;
+    pieces
+        .min(by_cpu)
+        .min(by_ram)
+        .clamp(MIN_WORKERS, MAX_WORKERS)
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Sizing {
     pub workers: usize,
+    /// Per piece: the job's whole budget, as pieces are rarely all in their parallel part.
     pub threads: usize,
     pub ram_mb: Option<u64>,
     pub downloads: u32,
@@ -132,15 +126,8 @@ impl Sizing {
         argv
     }
 
-    pub fn child_env(&self) -> [(&'static str, String); 2] {
-        [
-            ("RAYON_NUM_THREADS", self.threads.to_string()),
-            // The stock writer sizing, on this piece's share of the cores.
-            (
-                "ARNIS_FLUSH_THREADS",
-                self.threads.div_ceil(4).clamp(1, 6).to_string(),
-            ),
-        ]
+    pub fn child_env(&self) -> [(&'static str, String); 1] {
+        [("RAYON_NUM_THREADS", self.threads.to_string())]
     }
 
     /// Pieces that may run together once a piece peaked at `peak_mb`.
@@ -175,10 +162,10 @@ pub fn sizing(args: &Args, pieces: usize, piece_regions: u64) -> Sizing {
                 let total = sys.total_memory() / (1024 * 1024);
                 crate::data_processing::available_memory_mb().saturating_sub(reserve_mb(total))
             });
-            let workers = auto_plan(budget, pieces, free, piece_mb).0.min(pieces);
+            let workers = auto_plan(budget, pieces, free, piece_mb).min(pieces);
             Sizing {
                 workers,
-                threads: (budget / workers).max(1),
+                threads: budget,
                 ram_mb: piece_share(free, workers, piece_mb, given),
                 downloads: downloads(workers),
                 usable_mb: Some(free),
@@ -195,7 +182,7 @@ pub fn sizing(args: &Args, pieces: usize, piece_regions: u64) -> Sizing {
                 .or_else(|| (workers > 1).then(crate::data_processing::available_memory_mb));
             Sizing {
                 workers,
-                threads: (budget / workers).max(1),
+                threads: budget,
                 ram_mb: ram_mb.and_then(|mb| piece_share(mb, workers, piece_mb, given)),
                 downloads: downloads(workers),
                 usable_mb: None,
@@ -221,18 +208,18 @@ mod tests {
 
     #[test]
     fn auto_plans_one_to_six_workers() {
-        // 24 cores at 90%: 21 threads, 4 workers of 5+ threads.
-        assert_eq!(auto_plan(21, 16, 30_000, 976), (4, 5));
+        // 24 cores at 90%: 21 threads, 4 workers.
+        assert_eq!(auto_plan(21, 16, 30_000, 976), 4);
         // Never more than six, however big the machine.
-        assert_eq!(auto_plan(96, 100, 500_000, 720), (6, 16));
+        assert_eq!(auto_plan(96, 100, 500_000, 720), 6);
         // Short on pieces, or memory for two: still two. Not for one: one.
-        assert_eq!(auto_plan(18, 1, 30_000, 720).0, 2);
-        assert_eq!(auto_plan(18, 16, 1000, 720).0, 2);
-        assert_eq!(auto_plan(18, 16, 100, 720), (1, 18));
-        // 10 cores: two of four threads; under six threads, one piece with all of them.
-        assert_eq!(auto_plan(9, 16, 7_000, 976), (2, 4));
-        assert_eq!(auto_plan(6, 16, 7_000, 976), (2, 3));
-        assert_eq!(auto_plan(5, 16, 500_000, 720), (1, 5));
+        assert_eq!(auto_plan(18, 1, 30_000, 720), 2);
+        assert_eq!(auto_plan(18, 16, 1000, 720), 2);
+        assert_eq!(auto_plan(18, 16, 100, 720), 1);
+        // 10 cores: two; under six threads, one piece at a time.
+        assert_eq!(auto_plan(9, 16, 7_000, 976), 2);
+        assert_eq!(auto_plan(6, 16, 7_000, 976), 2);
+        assert_eq!(auto_plan(5, 16, 500_000, 720), 1);
     }
 
     #[test]
@@ -300,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fixed_count_splits_the_jobs_budget() {
+    fn a_fixed_count_splits_memory_and_downloads_not_threads() {
         let s = sizing(
             &parse(&[
                 "--one-world-workers",
@@ -317,19 +304,24 @@ mod tests {
             s,
             Sizing {
                 workers: 4,
-                threads: 5,
+                threads: 20,
                 ram_mb: Some(2000),
                 downloads: 4,
                 usable_mb: None,
             }
         );
-        // Never more workers than pieces, never less than a thread each.
+        // The stock region writers, not a count cut down per piece.
+        assert!(s
+            .child_env()
+            .iter()
+            .all(|(k, _)| *k != "ARNIS_FLUSH_THREADS"));
+        // Never more workers than pieces.
         let s = sizing(
             &parse(&["--one-world-workers", "8", "--threads", "3"]),
             2,
             16,
         );
-        assert_eq!((s.workers, s.threads), (2, 1));
+        assert_eq!((s.workers, s.threads), (2, 3));
         // One at a time: the job's own knobs, nothing invented.
         let s = sizing(&parse(&["--unit-regions", "2", "--threads", "6"]), 9, 4);
         assert_eq!((s.workers, s.threads, s.ram_mb), (1, 6, None));
@@ -350,7 +342,7 @@ mod tests {
             16,
         );
         // 16 threads allow 3 workers, 6000 MB at ~544 MB a piece allow 11.
-        assert_eq!((s.workers, s.threads, s.ram_mb), (3, 5, Some(2000)));
+        assert_eq!((s.workers, s.threads, s.ram_mb), (3, 16, Some(2000)));
         assert_eq!(s.usable_mb, Some(6000));
         // Less than one piece needs: one at a time, never with less than that need.
         let s = sizing(
@@ -385,7 +377,7 @@ mod tests {
             usable,
             estimate_piece_mb(regions, 1.0),
         );
-        assert_eq!(plan, (4, 5));
+        assert_eq!(plan, 4);
     }
 
     #[test]
@@ -402,18 +394,18 @@ mod tests {
 
     #[test]
     fn a_small_machine_plans_small() {
-        // 8 threads, 16 GB: two workers of three threads, not the 24-thread four of five.
+        // 8 threads, 16 GB: two workers, not the 24-thread four.
         let total = 16 * 1024;
         let usable = 12_000 - reserve_mb(total);
         assert_eq!(
             auto_plan(8 * CPU_TARGET / 100, 16, usable, estimate_piece_mb(64, 1.0)),
-            (2, 3)
+            2
         );
-        // 4 cores, 3 GB to spare: one piece at a time, with all three threads.
+        // 4 cores, 3 GB to spare: one piece at a time.
         assert_eq!(auto_max_regions(&parse(&["--ram-budget-mb", "1500"])), 4);
         assert_eq!(
             auto_plan(4 * CPU_TARGET / 100, 16, 1500, estimate_piece_mb(16, 1.0)),
-            (1, 3)
+            1
         );
     }
 
