@@ -2186,22 +2186,12 @@ fn window_flag_args(
     Ok(extra)
 }
 
-/// Window flags whose value is a path on this machine: not kept with a job.
-const PATH_FLAGS: &[&str] = &["plan-mask", "tree-pack-dir", "osm-pbf"];
-
-/// `flags` as a job keeps them for a later Resume or Rebuild: without paths.
+/// `flags` as a job keeps them for a later Resume or Rebuild: without paths, and servers
+/// without credentials or query.
 fn job_settings(flags: &[String]) -> Vec<String> {
     flags
         .iter()
-        .filter(|f| {
-            let name = f
-                .trim_start_matches("--")
-                .split('=')
-                .next()
-                .unwrap_or_default();
-            !PATH_FLAGS.contains(&name)
-        })
-        .cloned()
+        .filter_map(|f| crate::scale::kept_option(f))
         .collect()
 }
 
@@ -4169,8 +4159,13 @@ mod tests {
             "--plan-mask=C:/tmp/m.geojson".into(),
             "--tree-pack-dir=/packs".into(),
             "--osm-pbf=x.pbf".into(),
+            "--osm-tiles-url=/Users/me/archive".into(),
+            "--overpass-url=https://me:pw@x.org/api?key=1".into(),
         ]);
-        assert_eq!(flags, ["--unit-regions=8"]);
+        assert_eq!(
+            flags,
+            ["--unit-regions=8", "--overpass-url=https://x.org/api"]
+        );
         crate::one_world::record_job(
             &world,
             "j",

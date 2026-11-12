@@ -1307,8 +1307,59 @@ fn generation_options(argv: &[OsString]) -> Vec<String> {
             _ => out.push(arg),
         }
     }
+    let mut out: Vec<String> = out.iter().filter_map(|o| kept_option(o)).collect();
     out.sort();
     out
+}
+
+/// Options whose value is a path on this machine. A job does not keep them: a world may be shared.
+const PATH_OPTIONS: &[&str] = &[
+    "--file",
+    "--polygon-file",
+    "--osm-pbf",
+    "--osm-tiles-url",
+    "--plan-mask",
+    "--tree-pack-dir",
+    "--climate-map",
+    "--cave-asset-pack",
+    "--cave-zone-map",
+    "--loot-table",
+    "--building-facades-dir",
+    "--mapillary-facades-dir",
+    "--mapillary-debug-dir",
+    "--mapillary-facade-debug-dir",
+];
+
+/// Options whose value is a server, which a job keeps without user name, password or query.
+const URL_OPTIONS: &[&str] = &["--overpass-url", "--osm-pbf-url"];
+
+/// `--name` or `--name=value` as a job keeps it: none for a path, a server without its
+/// credentials or query.
+pub(crate) fn kept_option(opt: &str) -> Option<String> {
+    let (name, value) = opt.split_once('=').unwrap_or((opt, ""));
+    if PATH_OPTIONS.contains(&name) {
+        return None;
+    }
+    if !URL_OPTIONS.contains(&name) || value.is_empty() {
+        return Some(opt.to_string());
+    }
+    let urls: Vec<String> = value.split(',').map(bare_url).collect();
+    Some(format!("{name}={}", urls.join(",")))
+}
+
+/// `url` without user name, password, query or fragment.
+fn bare_url(url: &str) -> String {
+    let url = url.split(['?', '#']).next().unwrap_or_default();
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if scheme.is_empty() {
+        format!("{host}{path}")
+    } else {
+        format!("{scheme}://{host}{path}")
+    }
 }
 
 /// Options the One World keeps from its first area (`one_world::prepare`), whatever a resume says.
@@ -1761,6 +1812,32 @@ second
         assert!(std::fs::read_to_string(&p)
             .unwrap()
             .contains("no-such-flag"));
+    }
+
+    #[test]
+    fn a_job_keeps_no_paths_or_server_credentials() {
+        let argv: Vec<OsString> = [
+            "--scale=1",
+            "--osm-pbf",
+            "/home/me/x.pbf",
+            "--file=/home/me/a.json",
+            "--osm-tiles-url=/home/me/archive",
+            "--overpass-url=https://me:pw@a.org/api?key=1,b.org/x#f",
+            "--osm-pbf-url",
+            "https://d.org/x.osm.pbf?token=2",
+        ]
+        .map(OsString::from)
+        .to_vec();
+        assert_eq!(
+            generation_options(&argv),
+            [
+                "--osm-pbf-url=https://d.org/x.osm.pbf",
+                "--overpass-url=https://a.org/api,b.org/x",
+                "--scale=1",
+            ]
+        );
+        assert_eq!(bare_url("me@host:8080"), "host:8080");
+        assert_eq!(bare_url("http://h/p@q"), "http://h/p@q");
     }
 
     #[test]
