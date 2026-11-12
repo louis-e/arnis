@@ -1423,11 +1423,7 @@ fn run_piece_until(
         };
         for line in BufReader::new(out).split(b'\n').map_while(Result::ok) {
             let line = String::from_utf8_lossy(&line).trim_end().to_string();
-            let Some(record) = line
-                .starts_with(r#"{"v":1"#)
-                .then(|| serde_json::from_str::<Value>(&line).ok())
-                .flatten()
-            else {
+            let Some(record) = piece_record_of(&line) else {
                 push(&tail, &log, line);
                 continue;
             };
@@ -1469,6 +1465,13 @@ fn run_piece_until(
         transient: is_transient(status.code(), kind.as_deref()),
         message: format!("{status}; last output:\n{}", tail.join("\n")),
     })
+}
+
+/// A `--progress json` record in a piece's output line; `None` for plain output.
+fn piece_record_of(line: &str) -> Option<Value> {
+    line.starts_with(r#"{"v":1"#)
+        .then(|| serde_json::from_str(line).ok())
+        .flatten()
 }
 
 /// A piece's `phase` the job passes on as its own: a Region Download fallback notice.
@@ -1965,6 +1968,16 @@ second
         assert!(!is_transient(Some(101), net));
         assert!(!is_transient(None, net));
         assert!(!is_transient(Some(0xC000_0005u32 as i32), net));
+    }
+
+    #[test]
+    fn a_piece_reads_kind_from_its_error_record() {
+        let read = |kind| piece_record_of(&progress_json::error_line("timed out", kind).unwrap());
+        let net = read(Some(progress_json::NETWORK)).unwrap();
+        assert_eq!(net["type"], "error");
+        assert!(is_transient(Some(1), net["kind"].as_str()));
+        assert!(!is_transient(Some(1), read(None).unwrap()["kind"].as_str()));
+        assert!(piece_record_of("Error: timed out").is_none());
     }
 
     /// Builds the parity area as a job, kills one piece, resumes, and compares with an

@@ -106,14 +106,15 @@ pub fn set_error_kind(kind: &'static str) {
 }
 
 pub fn error(message: &str) {
-    if let Some(line) = enabled().then(|| error_line(message)).flatten() {
+    let kind = *ERROR_KIND.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(line) = enabled().then(|| error_line(message, kind)).flatten() {
         println!("{line}");
     }
 }
 
-fn error_line(message: &str) -> Option<String> {
+pub(crate) fn error_line(message: &str, kind: Option<&str>) -> Option<String> {
     let mut body = json!({ "message": message });
-    if let Some(kind) = *ERROR_KIND.lock().unwrap_or_else(|e| e.into_inner()) {
+    if let Some(kind) = kind {
         body["kind"] = json!(kind);
     }
     line("error", body)
@@ -205,7 +206,10 @@ mod tests {
 
     #[test]
     fn an_error_carries_its_kind_once_set() {
-        let read = |m: &str| serde_json::from_str::<Value>(&error_line(m).unwrap()).unwrap();
+        let read = |m: &str| {
+            let kind = *ERROR_KIND.lock().unwrap();
+            serde_json::from_str::<Value>(&error_line(m, kind).unwrap()).unwrap()
+        };
         assert!(read("bad flag").get("kind").is_none());
         set_error_kind(NETWORK);
         let v = read("timed out");
