@@ -28,9 +28,9 @@ pub(crate) const MAP_IDS_PER_PIECE: i32 = 1 << 16;
 pub const MAX_PIECES: usize =
     ((i32::MAX - crate::map_item::FIRST_MAP_ID) / MAP_IDS_PER_PIECE) as usize;
 
-/// Pieces whose map ids fit from `map_base` up.
-fn pieces_with_map_ids(map_base: i32) -> usize {
-    (i32::MAX.saturating_sub(map_base) / MAP_IDS_PER_PIECE) as usize
+/// Pieces whose map ids fit from `next` up.
+fn pieces_with_map_ids(next: i32) -> usize {
+    (i32::MAX.saturating_sub(next) / MAP_IDS_PER_PIECE) as usize
 }
 /// Lines of a failed piece's output shown with its error.
 const TAIL_LINES: usize = 40;
@@ -328,9 +328,10 @@ struct Job {
     name: String,
     dir: PathBuf,
     area_base: u32,
-    map_base: i32,
-    /// Each piece's share of the reserved ids, by region key.
+    /// Each piece's share of the reserved area ids, by region key.
     slots: serde_json::Map<String, Value>,
+    /// False in a prewarm, which takes no ids.
+    reserve: bool,
     /// Cells left out, by plan index: `--skip-cells`, kept in `job.json`.
     skip: BTreeSet<usize>,
     /// The head piece an earlier run chose and did not build, kept in `job.json`.
@@ -341,14 +342,10 @@ struct Job {
 
 type Slots = serde_json::Map<String, Value>;
 
-/// The ids a kept job state reserved, `None` when it holds none. Numbers no piece's ids fit
-/// in mean a damaged file: an error, where using them would overflow.
-fn reserved_ids(v: &Value, state: &Path) -> Result<Option<(u32, i32, Slots)>, String> {
-    let (Some(a), Some(m), Some(slots)) = (
-        v["area_base"].as_u64(),
-        v["map_base"].as_i64(),
-        v["slots"].as_object(),
-    ) else {
+/// The area ids a kept job state reserved, `None` when it holds none. Numbers no piece's ids
+/// fit in mean a damaged file: an error, where using them would overflow.
+fn reserved_ids(v: &Value, state: &Path) -> Result<Option<(u32, Slots)>, String> {
+    let (Some(a), Some(slots)) = (v["area_base"].as_u64(), v["slots"].as_object()) else {
         return Ok(None);
     };
     let damaged = || {
@@ -358,28 +355,14 @@ fn reserved_ids(v: &Value, state: &Path) -> Result<Option<(u32, i32, Slots)>, St
         )
     };
     let area_base = u32::try_from(a).map_err(|_| damaged())?;
-    let map_base = i32::try_from(m)
-        .ok()
-        .filter(|&m| m >= 0)
-        .ok_or_else(damaged)?;
-    let per_piece = MAP_IDS_PER_PIECE as u64;
     for slot in slots.values() {
         let s = slot.as_u64().ok_or_else(damaged)?;
-        let area_fits = u32::try_from(s)
-            .ok()
-            .and_then(|s| area_base.checked_add(s))
-            .is_some();
-        // The piece's last map id: map_base + (s + 1) * per_piece - 1.
-        let maps_fit = s
-            .checked_add(1)
-            .and_then(|k| k.checked_mul(per_piece))
-            .and_then(|ids| ids.checked_add(map_base as u64))
-            .is_some_and(|end| end - 1 <= i32::MAX as u64);
-        if !(area_fits && maps_fit) {
+        let fits = u32::try_from(s).ok().and_then(|s| area_base.checked_add(s));
+        if fits.is_none() {
             return Err(damaged());
         }
     }
-    Ok(Some((area_base, map_base, slots.clone())))
+    Ok(Some((area_base, slots.clone())))
 }
 
 /// A finished piece's file names its regions and size, so it stays its own whatever order
@@ -393,8 +376,8 @@ fn done_key(u: &WorkUnit) -> String {
 
 impl Job {
     /// `options` are what decides the world (`generation_options`): kept with a new job, and
-    /// a resume with others is warned about. Without `reserve` (a prewarm) a new job takes its
-    /// ids without reserving them and writes no state.
+    /// a resume with others is warned about. Without `reserve` (a prewarm) a new job reserves
+    /// no ids and writes no state.
     fn open(
         world_dir: &Path,
         name: String,
@@ -411,8 +394,8 @@ impl Job {
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok());
         let reserved = kept.as_ref().map(|v| reserved_ids(v, &state));
-        let (area_base, map_base, slots) = match reserved.transpose()?.flatten() {
-            Some((a, m, slots)) => {
+        let (area_base, slots) = match reserved.transpose()?.flatten() {
+            Some((a, slots)) => {
                 if let Some(u) = units.iter().find(|u| !slots.contains_key(&done_key(u))) {
                     return Err(format!(
                         "{} was planned with other pieces (none at region {}); delete it or run \
@@ -437,20 +420,11 @@ impl Job {
                         changed.join(", ")
                     );
                 }
-                (a, m, slots)
+                (a, slots)
             }
             _ => {
-                // Reserved once, so a run in between cannot take a piece's ids.
+                // Reserved once, so a run in between cannot take a piece's area id.
                 let _guard = lock(&MANIFEST);
-                let maps = crate::world_utils::WorldLayout::of(world_dir).maps_dir(world_dir);
-                let map_base = crate::map_item::next_map_id(&maps);
-                let room = pieces_with_map_ids(map_base);
-                if pieces > room {
-                    return Err(format!(
-                        "This world has map ids left for {room} pieces and the job has {pieces}; \
-                         use larger pieces (--unit-regions) or a new One World."
-                    ));
-                }
                 let mut manifest = Manifest::load(world_dir)?.ok_or("The One World vanished.")?;
                 let fresh = starts_over(&manifest, &name, None);
                 let area_base = manifest.next_area_id;
@@ -461,19 +435,13 @@ impl Job {
                 if reserve {
                     manifest.next_area_id += pieces as u32;
                     manifest.save(world_dir)?;
-                    // Before any piece starts: a job interrupted and run again, or another
-                    // run, must not hand out these ids to something else.
-                    crate::map_item::set_map_counter(
-                        world_dir,
-                        map_base + pieces as i32 * MAP_IDS_PER_PIECE - 1,
-                    )?;
                     write(
                         &state,
-                        &json!({ "area_base": area_base, "map_base": map_base, "slots": slots,
-                                 "argv": options, "fresh": fresh }),
+                        &json!({ "area_base": area_base, "slots": slots, "argv": options,
+                                 "fresh": fresh }),
                     )?;
                 }
-                (area_base, map_base, slots)
+                (area_base, slots)
             }
         };
         let skip = kept
@@ -488,8 +456,8 @@ impl Job {
             name,
             dir,
             area_base,
-            map_base,
             slots,
+            reserve,
             skip,
             head,
             recorded,
@@ -503,7 +471,7 @@ impl Job {
         Ok(())
     }
 
-    /// The piece's share of the job's area and map ids.
+    /// The piece's share of the job's area ids.
     fn slot(&self, u: &WorkUnit) -> u32 {
         self.slots
             .get(&done_key(u))
@@ -515,8 +483,37 @@ impl Job {
         self.area_base + self.slot(u)
     }
 
-    fn first_map_id(&self, u: &WorkUnit) -> i32 {
-        self.map_base + self.slot(u) as i32 * MAP_IDS_PER_PIECE
+    /// The map ids piece `i` took when an earlier run started it, from its lease.
+    fn kept_map_id(&self, i: usize) -> Option<i32> {
+        let lease = std::fs::read_to_string(self.lease_path(i)).ok()?;
+        let first = serde_json::from_str::<UnitLease>(&lease).ok()?.first_map_id;
+        let range = crate::map_item::FIRST_MAP_ID..=i32::MAX - MAP_IDS_PER_PIECE + 1;
+        range.contains(&first).then_some(first)
+    }
+
+    /// Piece `i`'s own range of map ids: the one it has, else the next off the world's
+    /// counter, taken as it starts, so the world spends ids only on the cells a run builds.
+    fn first_map_id(&self, world_dir: &Path, i: usize) -> Result<i32, String> {
+        static COUNTER: Mutex<()> = Mutex::new(());
+        if let Some(first) = self.kept_map_id(i) {
+            return Ok(first);
+        }
+        // A prewarm writes no maps.
+        if !self.reserve {
+            return Ok(0);
+        }
+        let _guard = lock(&COUNTER);
+        let maps = crate::world_utils::WorldLayout::of(world_dir).maps_dir(world_dir);
+        let first = crate::map_item::next_map_id(&maps);
+        if pieces_with_map_ids(first) == 0 {
+            return Err(
+                "This world has no map ids left for another piece; use a new One World."
+                    .to_string(),
+            );
+        }
+        // Before the piece starts: no other piece or run may be handed these ids.
+        crate::map_item::set_map_counter(world_dir, first + MAP_IDS_PER_PIECE - 1)?;
+        Ok(first)
     }
 
     fn lease_path(&self, piece: usize) -> PathBuf {
@@ -811,6 +808,18 @@ pub fn run_with(
         save_state(&job.dir, "head", json!(head))?;
     }
 
+    // Refused before any piece starts, not when the ids run out halfway.
+    let to_build = head.iter().chain(&queue);
+    let need = to_build.filter(|&&i| job.kept_map_id(i).is_none()).count();
+    let maps = crate::world_utils::WorldLayout::of(world_dir).maps_dir(world_dir);
+    let room = pieces_with_map_ids(crate::map_item::next_map_id(&maps));
+    if need > room && !args.prewarm {
+        return Err(format!(
+            "This world has map ids left for {room} pieces and this run builds {need}; use \
+             larger pieces (--unit-regions) or a new One World."
+        ));
+    }
+
     let largest = units.iter().map(|u| u.regions).max().unwrap_or(1);
     let sizing = budget::sizing(args, queue.len() + usize::from(head.is_some()), largest);
     if sizing.workers > 1 {
@@ -844,21 +853,23 @@ pub fn run_with(
         let listing = releases.get().cloned().flatten();
         token.iter().cloned().chain(listing).collect()
     };
-    let lease_for = |i: usize| UnitLease {
-        piece: i as u32,
-        area_id: job.area_id(&units[i]),
-        extending: head != Some(i),
-        first_map_id: job.first_map_id(&units[i]),
-        rect: corners(&units[i].rect),
-        job: corners(&rect),
-        tiled: crate::tile::create_tiles(&rect, crate::tile::DEFAULT_TILE_SIZE).len() >= 3,
+    let lease_for = |i: usize| -> Result<UnitLease, String> {
+        Ok(UnitLease {
+            piece: i as u32,
+            area_id: job.area_id(&units[i]),
+            extending: head != Some(i),
+            first_map_id: job.first_map_id(world_dir, i)?,
+            rect: corners(&units[i].rect),
+            job: corners(&rect),
+            tiled: crate::tile::create_tiles(&rect, crate::tile::DEFAULT_TILE_SIZE).len() >= 3,
+        })
     };
     // Writes piece `i`'s lease; returns it with the bbox the piece builds, halo included.
     let piece_child = |i: usize| -> Result<(PathBuf, String), String> {
         let lease = job.lease_path(i);
         write(
             &lease,
-            &serde_json::to_value(lease_for(i)).map_err(|e| e.to_string())?,
+            &serde_json::to_value(lease_for(i)?).map_err(|e| e.to_string())?,
         )?;
         let built = one_world::piece_build_rect(&units[i].rect, &rect);
         let bbox = crate::projection::llbbox_for_rect(&proj, &built)?.arg();
@@ -2049,13 +2060,13 @@ second
         assert_eq!(args.unwrap().units.only_pieces, Some(vec![3, 7]));
     }
 
-    /// A job's state as `Job::open` writes it: area ids from 5, map ids from 100.
+    /// A job's state as `Job::open` writes it: area ids from 5.
     fn job_state(units: &[WorkUnit]) -> Value {
         let slots: serde_json::Map<String, Value> = units
             .iter()
             .map(|u| (done_key(u), json!(u.index)))
             .collect();
-        json!({"area_base": 5, "map_base": 100, "slots": slots})
+        json!({"area_base": 5, "slots": slots})
     }
 
     #[test]
@@ -2071,7 +2082,6 @@ second
         let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
         assert!(job.finished(&units[1]).is_none());
         assert_eq!(job.area_id(&units[2]), 7);
-        assert_eq!(job.first_map_id(&units[2]), 100 + 2 * MAP_IDS_PER_PIECE);
         // Pieces finish under their region key.
         let key = units[1].region_key();
         let (rx, rest) = key.split_once(',').unwrap();
@@ -2100,15 +2110,14 @@ second
             .map(|u| (done_key(u), json!(u.index)))
             .collect();
         slots.insert(done_key(&units[2]), json!(11));
-        let state = json!({"area_base": 5, "map_base": 100, "slots": slots});
+        let state = json!({"area_base": 5, "slots": slots});
         std::fs::write(dir.join("job.json"), state.to_string()).unwrap();
         let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
         assert_eq!(job.area_id(&units[2]), 16);
-        assert_eq!(job.first_map_id(&units[2]), 100 + 11 * MAP_IDS_PER_PIECE);
         assert_eq!(job.area_id(&units[3]), 8);
         // Slots kept but one of this plan's pieces missing: another plan, refused.
         slots.remove(&done_key(&units[3]));
-        let state = json!({"area_base": 5, "map_base": 100, "slots": slots});
+        let state = json!({"area_base": 5, "slots": slots});
         std::fs::write(dir.join("job.json"), state.to_string()).unwrap();
         let err = Job::open(tmp.path(), "j".into(), &units, &[], true)
             .err()
@@ -2173,13 +2182,9 @@ second
         let good = job_state(&units);
         let mut huge_slot = good.clone();
         huge_slot["slots"][done_key(&units[1])] = json!(1u64 << 40);
-        let mut last_ids = good.clone();
-        last_ids["map_base"] = json!(i32::MAX - MAP_IDS_PER_PIECE);
         for (k, v) in [
             ("area_base", json!(u32::MAX)),
             ("area_base", json!(1u64 << 33)),
-            ("map_base", json!(-1)),
-            ("map_base", json!(i64::from(i32::MAX) + 1)),
         ]
         .into_iter()
         .map(|(k, v)| {
@@ -2187,7 +2192,7 @@ second
             s[k] = v;
             (k, s)
         })
-        .chain([("slots", huge_slot), ("map_base", last_ids)])
+        .chain([("slots", huge_slot)])
         {
             std::fs::write(dir.join("job.json"), v.to_string()).unwrap();
             let err = Job::open(tmp.path(), "j".into(), &units, &[], true)
@@ -2195,12 +2200,61 @@ second
                 .unwrap();
             assert!(err.contains("damaged"), "{k}: {err}");
         }
-        // The last piece's ids reach i32::MAX exactly: fine.
+        // The last piece's area id reaches u32::MAX exactly: fine.
         let mut edge = good.clone();
-        let last = (units.len() as i32) * MAP_IDS_PER_PIECE;
-        edge["map_base"] = json!(i32::MAX - last + 1);
+        edge["area_base"] = json!(u32::MAX - units.len() as u32 + 1);
         std::fs::write(dir.join("job.json"), edge.to_string()).unwrap();
         assert!(Job::open(tmp.path(), "j".into(), &units, &[], true).is_ok());
+    }
+
+    #[test]
+    fn a_piece_takes_its_map_ids_when_it_first_starts() {
+        let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
+        let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
+        let (world, _) = crate::projection::snap_bbox_to_chunks(&proj, &req).unwrap();
+        let units = work_units::plan_units(&proj, &world, 1).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let w = tmp.path().join("W");
+        let mut args = <Args as clap::Parser>::parse_from(["arnis", "--bbox", &req.arg()]);
+        drop(one_world::prepare(&w, &req, &mut args).unwrap());
+        let maps = crate::world_utils::WorldLayout::of(&w).maps_dir(&w);
+        let next = || crate::map_item::next_map_id(&maps);
+        let start = next();
+        // Opening the job costs the world no map ids, however many pieces it has.
+        let job = Job::open(&w, "j".into(), &units, &[], true).unwrap();
+        assert_eq!(next(), start);
+        let lease = |job: &Job, i: usize, first: i32| {
+            let lease = UnitLease {
+                piece: i as u32,
+                area_id: 0,
+                extending: true,
+                first_map_id: first,
+                rect: corners(&units[i].rect),
+                job: corners(&world),
+                tiled: false,
+            };
+            std::fs::write(job.lease_path(i), json!(lease).to_string()).unwrap();
+        };
+        // Each piece that starts takes one range; started again, it keeps it.
+        for (i, first) in [(2, start), (0, start + MAP_IDS_PER_PIECE)] {
+            assert_eq!(job.first_map_id(&w, i).unwrap(), first);
+            lease(&job, i, first);
+        }
+        assert_eq!(next(), start + 2 * MAP_IDS_PER_PIECE);
+        let job = Job::open(&w, "j".into(), &units, &[], true).unwrap();
+        assert_eq!(job.first_map_id(&w, 2).unwrap(), start);
+        assert_eq!(next(), start + 2 * MAP_IDS_PER_PIECE);
+        // A prewarm takes none, and the lease it leaves holds none for the build.
+        let warm = Job::open(&w, "j".into(), &units, &[], false).unwrap();
+        assert_eq!(warm.first_map_id(&w, 1).unwrap(), 0);
+        lease(&warm, 1, 0);
+        assert_eq!(
+            (warm.kept_map_id(1), next()),
+            (None, start + 2 * MAP_IDS_PER_PIECE)
+        );
+        // No room for another piece: an error, not ids past the end.
+        crate::map_item::set_map_counter(&w, i32::MAX - MAP_IDS_PER_PIECE).unwrap();
+        assert!(job.first_map_id(&w, 3).unwrap_err().contains("no map ids"));
     }
 
     #[test]
@@ -2259,15 +2313,13 @@ second
         let w = tmp.path().join("W");
         let mut args = <Args as clap::Parser>::parse_from(["arnis", "--bbox", &req.arg()]);
         drop(one_world::prepare(&w, &req, &mut args).unwrap());
-        // A prewarm takes the ids a build would, but reserves none and keeps no state.
+        // A prewarm takes the area ids a build would, but reserves none and keeps no state.
         let next_area = || Manifest::load(&w).unwrap().unwrap().next_area_id;
-        let maps = crate::world_utils::WorldLayout::of(&w).maps_dir(&w);
-        let (area_base, map_base) = (next_area(), crate::map_item::next_map_id(&maps));
+        let area_base = next_area();
         let warm = Job::open(&w, "j".into(), &units, &first, false).unwrap();
-        assert_eq!((warm.area_base, warm.map_base), (area_base, map_base));
+        assert_eq!(warm.area_base, area_base);
         assert!(!w.join(one_world::JOBS_DIR).join("j/job.json").exists());
         assert_eq!(next_area(), area_base);
-        assert_eq!(crate::map_item::next_map_id(&maps), map_base);
         Job::open(&w, "j".into(), &units, &first, true).unwrap();
         assert_eq!(next_area(), area_base + units.len() as u32);
         let state: Value = serde_json::from_str(
