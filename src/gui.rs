@@ -2480,8 +2480,22 @@ fn gui_cancel_bake() {
     BAKE_CANCEL.store(true, std::sync::atomic::Ordering::Release);
 }
 
+/// What a prewarm says when not everything reached the cache, as the CLI does.
+fn uncached_error(uncached: &[String]) -> Option<String> {
+    (!uncached.is_empty()).then(|| {
+        format!(
+            "Not cached: {}. An Offline Mode run would stop on these.",
+            uncached.join(", ")
+        )
+    })
+}
+
 /// The end of a `--prewarm` run: the caches are filled and no world is kept.
 fn prewarmed(args: &Args, bbox: LLBBox) -> Result<(), String> {
+    if let Some(msg) = uncached_error(&crate::net::uncached()) {
+        progress::emit_gui_error(&msg);
+        return Err(msg);
+    }
     crate::data_plan::refresh(&cache_root(), args, bbox);
     emit_gui_progress_update(100.0, "Done! Inputs for this area are cached.");
     println!(
@@ -3884,6 +3898,14 @@ mod tests {
             one_world_dir("saves", &name)
         );
         assert_eq!(run_world_path("w", None, None), PathBuf::from("w"));
+    }
+
+    /// A prewarm that left something out of the cache says what, not "Done!".
+    #[test]
+    fn a_prewarm_names_what_it_could_not_cache() {
+        assert_eq!(uncached_error(&[]), None);
+        let said = uncached_error(&["canopy height".into(), "land cover".into()]).unwrap();
+        assert!(said.contains("canopy height, land cover"), "{said}");
     }
 
     /// A Bedrock or Luanti prewarm names no output: no place-name request, no worlds folder.

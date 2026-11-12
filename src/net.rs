@@ -41,7 +41,11 @@ pub fn set_offline(on: bool) {
 /// `--prewarm`: the run is there to fill the caches.
 static PREWARM: AtomicBool = AtomicBool::new(false);
 
+/// Turning it on forgets what an earlier run in this process could not cache.
 pub fn set_prewarm(on: bool) {
+    if on {
+        UNCACHED.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
     PREWARM.store(on, Ordering::Relaxed);
 }
 
@@ -266,8 +270,12 @@ mod tests {
 
         let run = begin_run(false, true);
         assert!(prewarm() && !offline());
+        note_uncached("net test run");
         drop(run);
         assert!(!prewarm());
+        // The next prewarm starts with nothing held against it.
+        drop(begin_run(false, true));
+        assert!(uncached().is_empty());
     }
 
     #[test]
