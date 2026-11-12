@@ -83,12 +83,12 @@ fn straight_polygon_river(width: i32) -> Vec<ProcessedElement> {
 
 #[test]
 fn cross_section_is_a_u_that_deepens_with_width() {
-    // Centre depth off the cap table: hw 3 -> 1.2, hw 6 -> 1.9, hw 20 -> 4.5; pools and
-    // ripples move it by less than a block.
-    for (width, want_centre) in [(6i32, 1i32), (12, 2), (40, 5)] {
+    // Centre depth off the cap table: hw 3 -> 1.2, hw 6 -> 1.9, hw 10 -> 2.8, hw 20 -> 4.5;
+    // pools and ripples move it by less than a block. Every row away from the ends.
+    for (width, want_centre) in [(6i32, 1i32), (12, 2), (20, 3), (40, 5)] {
         let f = build(&straight_polygon_river(width), 1.0, &no_lc, &no_legacy);
         let x0 = 100 - width / 2;
-        for z in [60, 100, 140] {
+        for z in 60..=140 {
             let row: Vec<_> = (x0 - 2..=x0 + width + 1)
                 .map(|x| f.depth_override(x, z))
                 .collect();
