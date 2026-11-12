@@ -22,6 +22,8 @@ let sections = [];
 // the next scroll the user makes themselves.
 let pinned = null;
 
+let activeIndex = -1;
+
 function setActive(index) {
   items.forEach((item, i) => {
     const on = i === index;
@@ -32,6 +34,20 @@ function setActive(index) {
       item.removeAttribute('aria-current');
     }
   });
+  if (index !== activeIndex) {
+    activeIndex = index;
+    revealInNav(items[index]);
+  }
+}
+
+// The list can be longer than the sidebar: it scrolls along with the page.
+function revealInNav(item) {
+  const nav = item?.closest('.settings-nav');
+  if (!nav || item.offsetParent === null) return;
+  const box = nav.getBoundingClientRect();
+  const row = item.getBoundingClientRect();
+  if (row.top < box.top) nav.scrollTop -= box.top - row.top + 6;
+  else if (row.bottom > box.bottom) nav.scrollTop += row.bottom - box.bottom + 6;
 }
 
 function currentSectionIndex() {

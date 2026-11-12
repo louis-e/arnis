@@ -1393,7 +1393,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="meld_threads">Threads</span>
-                        <span class="tooltip-icon" data-tooltip-key="meld_threads_tip" data-tooltip="Left empty, it uses 90% of the cores. A job in cells splits it between the cells.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_threads_tip" data-tooltip="Left empty, it uses 90% of the cores.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="meld_threads_desc">Exact number of worker threads.</span>
                     </span>
@@ -1458,7 +1458,7 @@
                     </span>
                   </label>
                   <div class="settings-control">
-                    <div class="segmented-control" id="meld-osm-source-group"><button type="button" class="segment active" data-default data-v="default" data-localize="meld_osm_source_default">Default</button><button type="button" class="segment" data-v="archive" data-localize="meld_osm_source_archive">Local Archive (Experimental)</button><button type="button" class="segment" data-v="region" data-localize="meld_osm_source_region">Region Download</button></div>
+                    <div class="segmented-control" id="meld-osm-source-group"><button type="button" class="segment active" data-default data-v="default" data-localize="meld_osm_source_default">Default</button><button type="button" class="segment" data-v="archive" data-localize="meld_osm_source_archive">Local Archive (Experimental)</button><button type="button" class="segment" data-v="region" data-localize="meld_osm_source_region">Region Download (Experimental)</button></div>
                   </div>
                 </div>
                 <div class="settings-row setting-tile is-wide meld-only">
@@ -1469,7 +1469,7 @@
                         <span data-localize="meld_archive_folder">Archive Folder</span>
                         <span class="tooltip-icon" data-tooltip-key="meld_archive_folder_tip" data-tooltip="Experimental. Where Download &amp; Bake writes and Local Archive reads. Empty uses the default folder in the cache.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="meld_archive_folder_desc">Folder of the local tile archive.</span>
+                      <span class="setting-desc" data-localize="meld_archive_folder_desc">Folder of the local tile archive. Experimental.</span>
                     </span>
                   </label>
                   <div class="settings-control">
@@ -1484,7 +1484,7 @@
                         <span data-localize="meld_pbf_url">Extract URL</span>
                         <span class="tooltip-icon" data-tooltip-key="meld_pbf_url_tip" data-tooltip="A .osm.pbf URL for Region Download, instead of the smallest region holding the area.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="meld_pbf_url_desc">Pick the Geofabrik extract yourself.</span>
+                      <span class="setting-desc" data-localize="meld_pbf_url_desc">Pick the Geofabrik extract yourself. Experimental.</span>
                     </span>
                   </label>
                   <div class="settings-control">
@@ -1529,7 +1529,7 @@
                         <span data-localize="meld_prepare">Prepare Countries</span>
                         <span class="tooltip-icon" data-tooltip-key="meld_prepare_tip" data-tooltip="Experimental. Lists the Geofabrik countries that cover the selected area, then downloads and bakes them into the archive folder with arnis-tiles. The bake makes an older archive format, so it is sparser than the public tiles. Needs arnis-tiles next to Arnis or on PATH.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="meld_prepare_desc">Download and bake the countries your area covers.</span>
+                      <span class="setting-desc" data-localize="meld_prepare_desc">Download and bake the countries your area covers. Experimental.</span>
                     </span>
                   </label>
                   <div class="settings-control">

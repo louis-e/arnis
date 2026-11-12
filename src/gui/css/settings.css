@@ -720,6 +720,11 @@ label[for].setting-label {
   background: var(--ui-field);
 }
 
+/* Three long names: they wrap in the languages where they do not fit. */
+.settings-page #meld-osm-source-group {
+  flex-wrap: wrap;
+}
+
 .settings-page .segmented-control .segment {
   all: unset;
   box-sizing: border-box;
