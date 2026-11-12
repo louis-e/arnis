@@ -1244,12 +1244,25 @@ fn generation_options(argv: &[OsString]) -> Vec<String> {
     out
 }
 
-/// The names of the options `a` and `b` disagree on.
+/// Options the One World keeps from its first area (`one_world::prepare`), whatever a resume says.
+const PINNED: &[&str] = &[
+    "--seed",
+    "--cave-seed",
+    "--cave-datum-y",
+    "--height-multiplier",
+    "--disable-height-limit",
+    "--aws-only-elevation",
+    "--origin",
+    "--projection",
+];
+
+/// The names of the options `a` and `b` disagree on, other than pinned ones and the spawn.
 fn changed_options(a: &[String], b: &[String]) -> Vec<String> {
     let only = |x: &[String], y: &[String]| -> Vec<String> {
         x.iter()
             .filter(|o| !y.contains(o))
             .map(|o| o.split('=').next().unwrap_or_default().to_string())
+            .filter(|name| !PINNED.contains(&name.as_str()) && !SPAWN.contains(&name.as_str()))
             .collect()
     };
     let mut names = [only(a, b), only(b, a)].concat();
@@ -1779,6 +1792,18 @@ second
             changed_options(&first, &other),
             ["--caves", "--scale", "--winter"]
         );
+        // What the world keeps from its start, and the spawn, a resume cannot change.
+        let pinned = opts(&[
+            "--one-world",
+            "--scale=1",
+            "--winter",
+            "--seed",
+            "9",
+            "--cave-seed=3",
+            "--spawn-lng",
+            "26.1",
+        ]);
+        assert!(changed_options(&first, &pinned).is_empty());
         // Kept with a new job, read back on a resume.
         let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
         let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
