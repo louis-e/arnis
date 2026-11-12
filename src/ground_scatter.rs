@@ -1,4 +1,4 @@
-//! Small rocks and bushes from bundled schematics on natural dry cropland and grassland.
+//! Small rocks and bushes from bundled schematics on dry cropland and grassland outside towns.
 //! Each chunk rolls once for each, seeded by its coordinates, and keeps its piece inside
 //! itself, so any tile or One World piece builds the same.
 
@@ -12,7 +12,7 @@ use crate::block_definitions::{
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::ground::Ground;
 use crate::ground_decoration::{LOOSE_PLANTS, PLANT_LOWER_HALVES, STACKED_PLANT_PARTS};
-use crate::land_cover::{LC_CROPLAND, LC_GRASSLAND};
+use crate::land_cover::{LC_BUILT_UP, LC_CROPLAND, LC_GRASSLAND};
 use crate::structures::schematic::{load_structure, place_structure, StructureSchematic};
 use crate::trees::schematic::rotate_xz;
 use crate::world_editor::WorldEditor;
@@ -28,6 +28,8 @@ const ROCK_SOIL: &[Block] = &[GRASS_BLOCK, COARSE_DIRT, DIRT, MOSS_BLOCK, PODZOL
 const CROPS: &[Block] = &[WHEAT, CARROTS, POTATOES];
 /// Most the ground may rise across a piece's base before it is left out.
 const MAX_BASE_STEP: i32 = 2;
+/// No further than a piece's halo, so every cell layout sees the same land cover.
+const TOWN_REACH: i32 = 32;
 
 macro_rules! bushes {
     ($($species:literal),*) => {
@@ -159,6 +161,17 @@ fn chunk_piece(
     Some((schem, rock_hit, rot, x, z))
 }
 
+/// Whether built-up land lies within `TOWN_REACH` blocks: lawns and gardens stay clear.
+fn near_town(ground: &Ground, xzbbox: &XZBBox, x: i32, z: i32) -> bool {
+    let reach = (-TOWN_REACH..=TOWN_REACH).step_by(8);
+    reach.clone().any(|dz| {
+        reach.clone().any(|dx| {
+            let at = XZPoint::new(x + dx - xzbbox.min_x(), z + dz - xzbbox.min_z());
+            ground.cover_class(at) == LC_BUILT_UP
+        })
+    })
+}
+
 /// Scatters rocks and bushes over `[min_x..=max_x] x [min_z..=max_z]`, once the
 /// ground there is finished. Needs land cover; does nothing unless asked for.
 #[allow(clippy::too_many_arguments)]
@@ -205,6 +218,9 @@ pub fn scatter_region(
             };
             let cover = ground.cover_class(XZPoint::new(ax - xzbbox.min_x(), az - xzbbox.min_z()));
             if cover != LC_CROPLAND && cover != LC_GRASSLAND {
+                continue;
+            }
+            if near_town(ground, xzbbox, ax, az) {
                 continue;
             }
             let offsets = rotated_offsets(schem, rot);
@@ -350,11 +366,40 @@ mod tests {
         }
     }
 
+    fn land_cover(grid: Vec<Vec<u8>>, side: usize) -> crate::land_cover::LandCoverData {
+        crate::land_cover::LandCoverData {
+            grid,
+            water_distance: vec![vec![0u8; side]; side],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
+            width: side,
+            height: side,
+            cells_per_meter: 1.0,
+        }
+    }
+
+    #[test]
+    fn towns_keep_their_lawns_clear() {
+        use crate::ground::test_support::ground_with_land_cover_and_elevation;
+        let side = 128usize;
+        let row = |_| {
+            (0..side)
+                .map(|x| if x < 64 { LC_GRASSLAND } else { LC_BUILT_UP })
+                .collect()
+        };
+        let grid: Vec<Vec<u8>> = (0..side).map(row).collect();
+        let ground = ground_with_land_cover_and_elevation(land_cover(grid, side), side, side);
+        let max = side as i32 - 1;
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, max, max).unwrap();
+        assert!(!near_town(&ground, &xzbbox, 24, 64));
+        assert!(near_town(&ground, &xzbbox, 40, 64));
+    }
+
     #[test]
     fn scatter_is_piece_invariant() {
         use crate::coordinate_system::geographic::LLBBox;
         use crate::ground::test_support::ground_with_land_cover_and_elevation;
-        use crate::land_cover::LandCoverData;
         use clap::Parser;
         use std::sync::Arc;
 
@@ -372,17 +417,11 @@ mod tests {
                     .collect()
             })
             .collect();
-        let lc = LandCoverData {
-            grid,
-            water_distance: vec![vec![0u8; side]; side],
-            water_blend_cache: once_cell::sync::OnceCell::new(),
-            beach_tiles: once_cell::sync::OnceCell::new(),
-            inland_water: Default::default(),
-            width: side,
-            height: side,
-            cells_per_meter: 1.0,
-        };
-        let ground = Arc::new(ground_with_land_cover_and_elevation(lc, side, side));
+        let ground = Arc::new(ground_with_land_cover_and_elevation(
+            land_cover(grid, side),
+            side,
+            side,
+        ));
         let max = side as i32 - 1;
         let xzbbox = XZBBox::rect_from_min_max(0, 0, max, max).unwrap();
         let llbbox = LLBBox::new(48.0, 11.0, 48.01, 11.01).unwrap();
@@ -482,11 +521,14 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_placed_unless_asked_for() {
+    fn both_are_on_until_turned_off() {
         use clap::Parser;
-        let args = Args::parse_from(["arnis", "--bbox", "48.0,11.0,48.01,11.01"]);
-        assert!(!args.scatter.rocks && !args.scatter.bushes);
+        let bbox = ["--bbox", "48.0,11.0,48.01,11.01"];
+        let args = Args::parse_from(["arnis", bbox[0], bbox[1]]);
+        assert!(args.scatter.rocks && args.scatter.bushes);
         assert_eq!(args.scatter.rock_density, 0.02);
         assert_eq!(args.scatter.bush_density, 0.05);
+        let args = Args::parse_from(["arnis", bbox[0], bbox[1], "--rocks=false", "--bushes"]);
+        assert!(!args.scatter.rocks && args.scatter.bushes);
     }
 }

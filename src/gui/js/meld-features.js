@@ -146,8 +146,8 @@ let skipKey = '';
 export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = false, forKey = false }) {
   // Rocks and Bushes are regular settings; everything else needs the Advanced switch.
   const f = [];
-  if (on('meld-rocks-toggle')) f.push('--rocks');
-  if (on('meld-bushes-toggle')) f.push('--bushes');
+  if (!on('meld-rocks-toggle')) f.push('--rocks=false');
+  if (!on('meld-bushes-toggle')) f.push('--bushes=false');
   if (!on('advanced-meld-features-toggle')) return f;
   // Never for another selection or world than the pieces came from.
   if (!plan) {
@@ -239,8 +239,8 @@ const FLAG_CONTROLS = [
   ['--min-y', 'meld-min-y-input', 'value', ''], ['--max-y', 'meld-max-y-input', 'value', ''],
   ['--road-detail', 'meld-road-detail-group', 'group', 'max'], ['--surface-patches', 'meld-surface-patches-toggle', 'toggle'],
   ['--no-buildings', 'meld-buildings-toggle', 'untoggle'], ['--props', 'meld-props-group', 'group', 'auto'],
-  ['--rocks', 'meld-rocks-toggle', 'toggle'], ['--rock-density', 'meld-rock-density-input', 'value', '0.02'],
-  ['--bushes', 'meld-bushes-toggle', 'toggle'], ['--bush-density', 'meld-bush-density-input', 'value', '0.05'],
+  ['--rocks', 'meld-rocks-toggle', 'on'], ['--rock-density', 'meld-rock-density-input', 'value', '0.02'],
+  ['--bushes', 'meld-bushes-toggle', 'on'], ['--bush-density', 'meld-bush-density-input', 'value', '0.05'],
   ['--tree-realm', 'meld-tree-realm-select', 'value', 'auto'], ['--cave-style', 'meld-cave-style-select', 'value', 'all-mix'],
   ['--cave-ores', 'meld-cave-ores-group', 'group', 'normal'], ['--river-bed', 'meld-river-bed-group', 'group', 'off'],
   ['--water-detail', 'meld-water-detail-group', 'group', 'default'], ['--climate-mode', 'meld-climate-mode-group', 'group', 'origin'],
@@ -281,6 +281,7 @@ export function applyFlags(flags, rebuild = false) {
     if (flag === '--osm-pbf-url' || flag === '--overpass-url' || flag === '--offline') continue;
     const v = kept.get(flag);
     if (kind === 'value' || kind === 'group') set(id, kind, v === undefined ? fallback : String(v));
+    else if (kind === 'on') set(id, 'toggle', v !== 'false');
     else set(id, 'toggle', kind === 'untoggle' ? v === undefined : v !== undefined);
   }
 }

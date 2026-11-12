@@ -702,24 +702,24 @@ impl WaterArgs {
     }
 }
 
-/// Rocks and bushes on open land. Off unless asked for.
+/// Rocks and bushes on open land. On unless turned off.
 #[derive(clap::Args, Debug)]
 pub struct ScatterArgs {
-    /// Scatter small andesite and tuff rocks over open grassland and cropland.
-    /// Needs land cover.
-    #[arg(long)]
+    /// Scatter small andesite and tuff rocks over grassland and cropland outside towns
+    /// (--rocks false turns it off). Needs land cover.
+    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub rocks: bool,
 
-    /// Share of 16x16 chunks that get a rock with --rocks, from 0.0 to 1.0.
+    /// Share of 16x16 chunks that get a rock, from 0.0 to 1.0.
     #[arg(long, default_value_t = 0.02, value_parser = parse_density)]
     pub rock_density: f64,
 
-    /// Scatter small bushes of ten species over open grassland and cropland.
-    /// Needs land cover.
-    #[arg(long)]
+    /// Scatter small bushes of ten species over grassland and cropland outside towns
+    /// (--bushes false turns it off). Needs land cover.
+    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub bushes: bool,
 
-    /// Share of 16x16 chunks that get a bush with --bushes, from 0.0 to 1.0.
+    /// Share of 16x16 chunks that get a bush, from 0.0 to 1.0.
     /// Where a chunk rolls both, the rock wins.
     #[arg(long, default_value_t = 0.05, value_parser = parse_density)]
     pub bush_density: f64,
@@ -728,9 +728,9 @@ pub struct ScatterArgs {
 impl Default for ScatterArgs {
     fn default() -> Self {
         Self {
-            rocks: false,
+            rocks: true,
             rock_density: 0.02,
-            bushes: false,
+            bushes: true,
             bush_density: 0.05,
         }
     }
@@ -964,12 +964,10 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.climate_map.is_some(), "--climate-map"),
         (args.min_y.is_some(), "--min-y"),
         (args.max_y.is_some(), "--max-y"),
-        (sc.rocks, "--rocks"),
         (
             sc.rock_density != ScatterArgs::default().rock_density,
             "--rock-density",
         ),
-        (sc.bushes, "--bushes"),
         (
             sc.bush_density != ScatterArgs::default().bush_density,
             "--bush-density",
