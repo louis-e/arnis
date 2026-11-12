@@ -3,7 +3,8 @@
 //! A fixed count (`--one-world-workers N`) splits what one run would take: `--threads` else
 //! 90% of the cores, `--ram-budget-mb` else free memory, `--max-downloads` else the default.
 //! `auto` picks W = clamp(min(pieces, threads / MIN_THREADS, free RAM / piece RAM), 2, 6), or 1
-//! below `TWO_WORKERS_FROM` threads, each with threads / W: a few fat workers beat many thin ones.
+//! below `TWO_WORKERS_FROM` threads or one piece's RAM, each with threads / W: a few fat workers
+//! beat many thin ones.
 
 use crate::args::{Args, UnitSize, Workers};
 use std::ffi::OsString;
@@ -86,19 +87,19 @@ pub fn single_below_break_even(args: &mut Args) {
     }
 }
 
-/// W and T for `auto`: two workers at least once the threads allow it, as overlapping two
-/// pieces is about as fast as one run on far less memory.
+/// W and T for `auto`: two workers at least once the threads and memory allow it, as
+/// overlapping two pieces is about as fast as one run on far less memory.
 pub fn auto_plan(
     budget_threads: usize,
     pieces: usize,
     usable_mb: u64,
     piece_mb: u64,
 ) -> (usize, usize) {
-    let workers = if budget_threads < TWO_WORKERS_FROM {
+    let by_ram = (usable_mb / piece_mb.max(1)) as usize;
+    let workers = if budget_threads < TWO_WORKERS_FROM || by_ram == 0 {
         1
     } else {
         let by_cpu = budget_threads / MIN_THREADS;
-        let by_ram = (usable_mb / piece_mb.max(1)) as usize;
         pieces
             .min(by_cpu)
             .min(by_ram)
@@ -180,8 +181,7 @@ pub fn sizing(args: &Args, pieces: usize, piece_regions: u64) -> Sizing {
                 threads: (budget / workers).max(1),
                 ram_mb: piece_share(free, workers, piece_mb, given),
                 downloads: downloads(workers),
-                // A reading too low for one piece is not one to plan by.
-                usable_mb: (given || free >= piece_mb).then_some(free),
+                usable_mb: Some(free),
             }
         }
         fixed => {
@@ -225,9 +225,10 @@ mod tests {
         assert_eq!(auto_plan(21, 16, 30_000, 976), (4, 5));
         // Never more than six, however big the machine.
         assert_eq!(auto_plan(96, 100, 500_000, 720), (6, 16));
-        // Short on memory or pieces: still two.
-        assert_eq!(auto_plan(18, 16, 100, 720).0, 2);
+        // Short on pieces, or memory for two: still two. Not for one: one.
         assert_eq!(auto_plan(18, 1, 30_000, 720).0, 2);
+        assert_eq!(auto_plan(18, 16, 1000, 720).0, 2);
+        assert_eq!(auto_plan(18, 16, 100, 720), (1, 18));
         // 10 cores: two of four threads; under six threads, one piece with all of them.
         assert_eq!(auto_plan(9, 16, 7_000, 976), (2, 4));
         assert_eq!(auto_plan(6, 16, 7_000, 976), (2, 3));
@@ -351,6 +352,21 @@ mod tests {
         // 16 threads allow 3 workers, 6000 MB at ~544 MB a piece allow 11.
         assert_eq!((s.workers, s.threads, s.ram_mb), (3, 5, Some(2000)));
         assert_eq!(s.usable_mb, Some(6000));
+        // Less than one piece needs: one at a time, never with less than that need.
+        let s = sizing(
+            &parse(&[
+                "--one-world-workers",
+                "auto",
+                "--threads",
+                "16",
+                "--ram-budget-mb",
+                "300",
+            ]),
+            16,
+            16,
+        );
+        assert_eq!((s.workers, s.threads, s.ram_mb), (1, 16, Some(544)));
+        assert_eq!(s.usable_mb, Some(300));
     }
 
     // 256 km2 of Bucharest, warm caches, 24 threads, 31 GB: fastest at 8 x 8 regions with 4
