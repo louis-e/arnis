@@ -38,6 +38,8 @@ fn locate_in(exe_dir: Option<&Path>, path: Option<&OsStr>) -> Option<PathBuf> {
         .chain(
             path.into_iter()
                 .flat_map(std::env::split_paths)
+                // An empty or relative entry is the working directory, which anyone may fill.
+                .filter(|d| d.is_absolute())
                 .map(|d| d.join(EXE)),
         )
         .find(|p| p.is_file())
@@ -101,7 +103,8 @@ pub fn dry_run(
     bbox: &crate::coordinate_system::geographic::LLBBox,
 ) -> Result<Prepare, String> {
     let mut cmd = command(exe, state, &state.join("out"))?;
-    cmd.args(["prepare", "--dry-run", "--bbox", &bbox.arg()]);
+    // One argument: a south latitude starts with `-` and would read as a flag.
+    cmd.args(["prepare", "--dry-run", &format!("--bbox={}", bbox.arg())]);
     let out = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -418,7 +421,7 @@ pub fn bake(
     let published = Published::take(folder);
     let since = std::time::SystemTime::now();
     let mut cmd = command(exe, state, folder)?;
-    cmd.args(["prepare", "--bbox", &bbox.arg(), "--threads"])
+    cmd.args(["prepare", &format!("--bbox={}", bbox.arg()), "--threads"])
         .arg(threads.max(1).to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -567,6 +570,15 @@ mod tests {
         assert_eq!(find(), None);
         std::fs::write(on_path.join(EXE), b"").unwrap();
         assert_eq!(find(), Some(on_path.join(EXE)));
+        // The same folder named from the working directory is not looked in.
+        #[cfg(unix)]
+        {
+            let cwd = std::env::current_dir().unwrap();
+            let up: PathBuf = cwd.components().skip(1).map(|_| "..").collect();
+            let rel = up.join(on_path.strip_prefix("/").unwrap());
+            assert!(rel.is_relative() && rel.join(EXE).is_file());
+            assert_eq!(locate_in(None, Some(rel.as_os_str())), None);
+        }
         std::fs::write(exe_dir.join(EXE), b"").unwrap();
         assert_eq!(find(), Some(exe_dir.join(EXE)));
     }
