@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Mape, kurā tiek saglabāts Bedrock .mcworld fails. Atveriet failu, lai importētu pasauli Minecraft.",
   "clear_tile_cache_tip": "Dzēš visas kešotās kartes flīzes un fasāžu tekstūras, lai atbrīvotu parādīto vietu. Tās tiek lejupielādētas atkārtoti, kad vajadzīgas.",
   "advanced_meld_features_tip": "Parāda sadaļas Projekti, Lielas pasaules, Datu avoti un Precīza pielāgošana. Izslēdzot tās tiek paslēptas un netiek izmantots neviens to iestatījums. Eksperimentāls.",
-  "meld_workers_tip": "Sadala Vienas pasaules izvēli šūnās līdz 8 × 8 reģioniem un būvē vairākas vienlaikus, katru savā procesā. Auto izvēlas no 2 līdz 6 pēc brīvās RAM un kodoliem. Ģenerējot to pašu apgabalu vēlreiz, darbs tiek atsākts. Tikai Viena pasaule.",
+  "meld_workers_tip": "Sadala Vienas pasaules izvēli šūnās līdz 8 × 8 reģioniem un būvē vairākas vienlaikus, katru savā procesā. Auto izvēlas no 1 līdz 6 pēc brīvās RAM un kodoliem. Ģenerējot to pašu apgabalu vēlreiz, darbs tiek atsākts. Tikai Viena pasaule.",
   "plan_single": "Neliela teritorija: tiek būvēta vienā piegājienā.",
   "meld_ram_budget_tip": "Paralēlo darbu mēroga nosaka pēc šī atmiņas apjoma, nevis izmērītās brīvās RAM, lai vairākas palaišanas varētu dalīties vienā datorā. Ja tukšs, mēra brīvo RAM.",
   "meld_threads_tip": "Ja tukšs, izmanto 90% kodolu.",

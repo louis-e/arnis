@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Aplankas, į kurį įrašomas Bedrock .mcworld failas. Atidarykite failą, kad importuotumėte pasaulį į Minecraft.",
   "clear_tile_cache_tip": "Ištrina visas talpykloje esančias žemėlapio plyteles ir fasadų tekstūras, kad atlaisvintų parodytą vietą. Prireikus jos atsisiunčiamos iš naujo.",
   "advanced_meld_features_tip": "Rodo skiltis Projektai, Dideli pasauliai, Duomenų šaltiniai ir Tikslusis derinimas. Išjungus jos paslepiamos ir nenaudojamas nė vienas jų nustatymas. Eksperimentinė.",
-  "meld_workers_tip": "Vienas pasaulis pasirinkimą padalija į langelius iki 8 × 8 regionų ir stato kelis vienu metu, kiekvieną savo procese. Automatinis parenka nuo 2 iki 6 pagal laisvą RAM ir branduolius. Dar kartą generuojant tą pačią sritį darbas tęsiamas. Tik Vienas pasaulis.",
+  "meld_workers_tip": "Vienas pasaulis pasirinkimą padalija į langelius iki 8 × 8 regionų ir stato kelis vienu metu, kiekvieną savo procese. Automatinis parenka nuo 1 iki 6 pagal laisvą RAM ir branduolius. Dar kartą generuojant tą pačią sritį darbas tęsiamas. Tik Vienas pasaulis.",
   "plan_single": "Maža vietovė: statoma vienu paleidimu.",
   "meld_ram_budget_tip": "Lygiagretų darbą pritaiko šiam atminties kiekiui, o ne išmatuotam laisvam RAM, kad kelios paleistys galėtų dalytis vienu kompiuteriu. Tuščia matuoja laisvą RAM.",
   "meld_threads_tip": "Tuščia naudoja 90 % branduolių.",

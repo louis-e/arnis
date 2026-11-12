@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Carpeta donde se guarda el archivo .mcworld de Bedrock. Abre el archivo para importar el mundo en Minecraft.",
   "clear_tile_cache_tip": "Borra todas las teselas de mapa y texturas de fachada en caché para liberar el espacio indicado. Se vuelven a descargar cuando hacen falta.",
   "advanced_meld_features_tip": "Muestra las secciones Proyectos, Mundos grandes, Fuentes de datos y Ajuste fino. Al desactivarlo se ocultan y no se usa ninguno de sus ajustes. Experimental.",
-  "meld_workers_tip": "Divide una selección de Un solo mundo en celdas de hasta 8 × 8 regiones y construye varias a la vez, cada una en su propio proceso. Automático elige de 2 a 6 según la RAM libre y los núcleos. Volver a generar la misma área la reanuda. Solo Un solo mundo.",
+  "meld_workers_tip": "Divide una selección de Un solo mundo en celdas de hasta 8 × 8 regiones y construye varias a la vez, cada una en su propio proceso. Automático elige de 1 a 6 según la RAM libre y los núcleos. Volver a generar la misma área la reanuda. Solo Un solo mundo.",
   "plan_single": "Zona pequeña: se construye de una vez.",
   "meld_ram_budget_tip": "Dimensiona el trabajo en paralelo a esta cantidad de memoria en lugar de a la RAM libre medida, para que varias ejecuciones puedan compartir una máquina. Vacío mide la RAM libre.",
   "meld_threads_tip": "Vacío usa el 90 % de los núcleos.",

@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Folder the Bedrock .mcworld file is saved to. Open the file to import the world into Minecraft.",
   "clear_tile_cache_tip": "Deletes all cached map tiles and facade textures to free the space shown. They are downloaded again when needed.",
   "advanced_meld_features_tip": "Shows the Projects, Large Worlds, Data Sources and Fine Tuning sections. Turning it off hides them and uses none of their settings. Experimental.",
-  "meld_workers_tip": "Splits a One World selection into cells of up to 8 × 8 regions and builds several at once, each in its own process. Auto picks 2 to 6 from free RAM and cores. Generating the same area again resumes it. One World only.",
+  "meld_workers_tip": "Splits a One World selection into cells of up to 8 × 8 regions and builds several at once, each in its own process. Auto picks 1 to 6 from free RAM and cores. Generating the same area again resumes it. One World only.",
   "plan_single": "Small area: built in one run.",
   "meld_ram_budget_tip": "Sizes parallel work to this much memory instead of the free RAM measured, so several runs can share a machine. Empty measures free RAM.",
   "meld_threads_tip": "Left empty, it uses 90% of the cores.",

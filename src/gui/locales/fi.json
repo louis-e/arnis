@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Kansio, johon Bedrockin .mcworld-tiedosto tallennetaan. Avaa tiedosto tuodaksesi maailman Minecraftiin.",
   "clear_tile_cache_tip": "Poistaa kaikki välimuistissa olevat karttalaatat ja julkisivutekstuurit näytetyn tilan vapauttamiseksi. Ne ladataan uudelleen tarvittaessa.",
   "advanced_meld_features_tip": "Näyttää osiot Projektit, Suuret maailmat, Datalähteet ja Hienosäätö. Pois päältä ne piilotetaan eikä mitään niiden asetuksista käytetä. Kokeellinen.",
-  "meld_workers_tip": "Jakaa Yksi maailma -valinnan enintään 8 × 8 alueen ruutuihin ja rakentaa useita kerralla, kukin omassa prosessissaan. Auto valitsee 2-6 vapaan RAM-muistin ja ytimien mukaan. Saman alueen luominen uudelleen jatkaa työtä. Vain Yksi maailma.",
+  "meld_workers_tip": "Jakaa Yksi maailma -valinnan enintään 8 × 8 alueen ruutuihin ja rakentaa useita kerralla, kukin omassa prosessissaan. Auto valitsee 1-6 vapaan RAM-muistin ja ytimien mukaan. Saman alueen luominen uudelleen jatkaa työtä. Vain Yksi maailma.",
   "plan_single": "Pieni alue: rakennetaan yhdellä ajolla.",
   "meld_ram_budget_tip": "Mitoittaa rinnakkaisen työn tähän muistimäärään mitatun vapaan RAM-muistin sijaan, jotta useampi ajo voi jakaa koneen. Tyhjänä mitataan vapaa RAM.",
   "meld_threads_tip": "Tyhjänä käytetään 90 % ytimistä.",

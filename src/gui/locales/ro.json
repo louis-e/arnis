@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Directorul în care se salvează fișierul Bedrock .mcworld. Deschide fișierul pentru a importa lumea în Minecraft.",
   "clear_tile_cache_tip": "Șterge toate dalele de hartă și texturile fațadelor din cache pentru a elibera spațiul afișat. Sunt descărcate din nou când e nevoie.",
   "advanced_meld_features_tip": "Afișează secțiunile Proiecte, Lumi mari, Surse de date și Reglaj fin. Dezactivarea le ascunde și nu folosește niciuna dintre setările lor. Experimental.",
-  "meld_workers_tip": "Împarte o selecție O singură lume în celule de până la 8 × 8 regiuni și construiește mai multe deodată, fiecare în propriul proces. Automat alege între 2 și 6 în funcție de RAM-ul liber și de nuclee. Generarea aceleiași zone din nou o reia. Doar O singură lume.",
+  "meld_workers_tip": "Împarte o selecție O singură lume în celule de până la 8 × 8 regiuni și construiește mai multe deodată, fiecare în propriul proces. Automat alege între 1 și 6 în funcție de RAM-ul liber și de nuclee. Generarea aceleiași zone din nou o reia. Doar O singură lume.",
   "plan_single": "Zonă mică: se construiește dintr-o dată.",
   "meld_ram_budget_tip": "Dimensionează lucrul paralel după această cantitate de memorie, în loc de RAM-ul liber măsurat, ca mai multe rulări să poată împărți un computer. Gol măsoară RAM-ul liber.",
   "meld_threads_tip": "Lăsat gol, folosește 90% din nuclee.",

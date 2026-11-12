@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Pasta onde o arquivo .mcworld do Bedrock é salvo. Abra o arquivo para importar o mundo no Minecraft.",
   "clear_tile_cache_tip": "Apaga todos os tiles de mapa e texturas de fachada em cache para liberar o espaço mostrado. Eles são baixados de novo quando necessário.",
   "advanced_meld_features_tip": "Mostra as seções Projetos, Mundos grandes, Fontes de dados e Ajuste fino. Desligar oculta todas e não usa nenhuma das configurações delas. Experimental.",
-  "meld_workers_tip": "Divide uma seleção de Mundo único em células de até 8 × 8 regiões e gera várias ao mesmo tempo, cada uma em seu próprio processo. Automático escolhe de 2 a 6 conforme a RAM livre e os núcleos. Gerar a mesma área de novo a retoma. Só Mundo único.",
+  "meld_workers_tip": "Divide uma seleção de Mundo único em células de até 8 × 8 regiões e gera várias ao mesmo tempo, cada uma em seu próprio processo. Automático escolhe de 1 a 6 conforme a RAM livre e os núcleos. Gerar a mesma área de novo a retoma. Só Mundo único.",
   "plan_single": "Área pequena: construída de uma só vez.",
   "meld_ram_budget_tip": "Dimensiona o trabalho paralelo para esta quantidade de memória em vez da RAM livre medida, para que várias execuções possam dividir uma máquina. Vazio mede a RAM livre.",
   "meld_threads_tip": "Vazio usa 90% dos núcleos.",

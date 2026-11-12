@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Mapa, v katero se shrani datoteka .mcworld za Bedrock. Odprite datoteko, da uvozite svet v Minecraft.",
   "clear_tile_cache_tip": "Izbriše vse predpomnjene ploščice zemljevida in teksture fasad, da sprosti prikazani prostor. Po potrebi se znova prenesejo.",
   "advanced_meld_features_tip": "Pokaže razdelke Projekti, Veliki svetovi, Viri podatkov in Natančna prilagoditev. Izklop jih skrije in ne uporabi nobene od njihovih nastavitev. Eksperimentalno.",
-  "meld_workers_tip": "Izbor En svet razdeli na celice do 8 × 8 regij in jih gradi več hkrati, vsako v svojem procesu. Samodejno izbere od 2 do 6 glede na prosti RAM in jedra. Ponovno ustvarjanje istega območja ga nadaljuje. Samo En svet.",
+  "meld_workers_tip": "Izbor En svet razdeli na celice do 8 × 8 regij in jih gradi več hkrati, vsako v svojem procesu. Samodejno izbere od 1 do 6 glede na prosti RAM in jedra. Ponovno ustvarjanje istega območja ga nadaljuje. Samo En svet.",
   "plan_single": "Majhno območje: zgrajeno v enem teku.",
   "meld_ram_budget_tip": "Vzporedno delo prilagodi tej količini pomnilnika namesto izmerjenemu prostemu RAM-u, tako da si lahko več zagonov deli računalnik. Prazno izmeri prosti RAM.",
   "meld_threads_tip": "Prazno uporabi 90 % jeder.",

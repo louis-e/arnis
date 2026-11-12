@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "A mappa, ahová a Bedrock .mcworld fájl mentődik. Nyisd meg a fájlt a világ Minecraftba importálásához.",
   "clear_tile_cache_tip": "Törli az összes gyorsítótárazott térképcsempét és homlokzattextúrát a megjelenített hely felszabadításához. Szükség esetén újra letöltődnek.",
   "advanced_meld_features_tip": "Megjeleníti a Projektek, Nagy világok, Adatforrások és Finomhangolás szakaszokat. Kikapcsolva elrejti őket, és egyik beállításukat sem használja. Kísérleti.",
-  "meld_workers_tip": "Az Egy világ kijelölést legfeljebb 8 × 8 régiós cellákra osztja, és többet épít egyszerre, mindegyiket külön folyamatban. Az Automatikus a szabad RAM és a magok alapján 2 és 6 között választ. Ugyanazon terület újragenerálása folytatja azt. Csak Egy világ.",
+  "meld_workers_tip": "Az Egy világ kijelölést legfeljebb 8 × 8 régiós cellákra osztja, és többet épít egyszerre, mindegyiket külön folyamatban. Az Automatikus a szabad RAM és a magok alapján 1 és 6 között választ. Ugyanazon terület újragenerálása folytatja azt. Csak Egy világ.",
   "plan_single": "Kis terület: egy menetben épül.",
   "meld_ram_budget_tip": "A párhuzamos munkát erre a memóriamennyiségre méretezi a mért szabad RAM helyett, így több futtatás megoszthat egy gépet. Üresen a szabad RAM-ot méri.",
   "meld_threads_tip": "Üresen a magok 90%-át használja.",

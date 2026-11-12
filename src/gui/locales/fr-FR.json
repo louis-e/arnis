@@ -626,7 +626,7 @@
   "bedrock_save_path_tip": "Dossier où le fichier Bedrock .mcworld est enregistré. Ouvrez le fichier pour importer le monde dans Minecraft.",
   "clear_tile_cache_tip": "Supprime toutes les tuiles de carte et textures de façade en cache pour libérer l'espace affiché. Elles sont retéléchargées en cas de besoin.",
   "advanced_meld_features_tip": "Affiche les sections Projets, Grands mondes, Sources de données et Réglage fin. Le désactiver les masque et n'utilise aucun de leurs réglages. Expérimental.",
-  "meld_workers_tip": "Découpe une sélection de Monde unique en cellules allant jusqu'à 8 × 8 régions et en construit plusieurs à la fois, chacune dans son propre processus. Auto choisit de 2 à 6 selon la RAM libre et les cœurs. Générer à nouveau la même zone la reprend. Monde unique uniquement.",
+  "meld_workers_tip": "Découpe une sélection de Monde unique en cellules allant jusqu'à 8 × 8 régions et en construit plusieurs à la fois, chacune dans son propre processus. Auto choisit de 1 à 6 selon la RAM libre et les cœurs. Générer à nouveau la même zone la reprend. Monde unique uniquement.",
   "plan_single": "Petite zone : construite en une seule passe.",
   "meld_ram_budget_tip": "Dimensionne le travail parallèle sur cette quantité de mémoire plutôt que sur la RAM libre mesurée, pour que plusieurs exécutions puissent partager une machine. Vide, la RAM libre est mesurée.",
   "meld_threads_tip": "Vide, 90 % des cœurs sont utilisés.",
