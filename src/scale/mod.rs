@@ -770,15 +770,30 @@ pub fn run_with(
                 crate::progress::emit_gui_progress_update(pct, "");
             };
             let log = piece_log_path(&job.dir, i);
-            run_piece_until(&warm_argv, &token, &stopped, Path::new(&log), report).map_err(
-                |f| {
-                    if STOP.load(Ordering::Acquire) {
-                        STOPPED.to_string()
-                    } else {
-                        format!("warming piece {} failed: {}", i + 1, f.message)
-                    }
-                },
-            )?;
+            if let Err(f) = run_piece_until(&warm_argv, &token, &stopped, Path::new(&log), report) {
+                if STOP.load(Ordering::Acquire) {
+                    return Err(STOPPED.to_string());
+                }
+                if args.prewarm {
+                    return Err(format!("warming piece {} failed: {}", i + 1, f.message));
+                }
+                // The build fetches what is missing; the warm step lists each as "  - what".
+                let missed: Vec<&str> = f
+                    .message
+                    .lines()
+                    .filter_map(|l| l.strip_prefix("  - "))
+                    .collect();
+                let what = if missed.is_empty() {
+                    format!("see {log}")
+                } else {
+                    missed.join(", ")
+                };
+                eprintln!(
+                    "Warning: piece {} could not cache everything ({what}); it downloads the rest \
+                     while it builds.",
+                    i + 1
+                );
+            }
         }
         if args.prewarm {
             // Only the leases it wrote: a job already under way keeps its resume records.
