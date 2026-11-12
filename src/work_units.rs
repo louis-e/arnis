@@ -58,6 +58,15 @@ pub fn plan_units(
     plan_cells(proj, world, n, false)
 }
 
+/// Lattice cells of `n` regions that `rect` touches: the pieces a plain cut at that size makes.
+fn lattice_cells(rect: &XZBBox, n: i32) -> u64 {
+    let side = i64::from(REGION_BLOCKS) * i64::from(n.max(1));
+    let span = |lo: i32, hi: i32| {
+        (i64::from(hi).div_euclid(side) - i64::from(lo).div_euclid(side) + 1) as u64
+    };
+    span(rect.min_x(), rect.max_x()) * span(rect.min_z(), rect.max_z())
+}
+
 /// Edge strips thinner than this join their neighbour under `--snap-regions merge`.
 const SLIVER_BLOCKS: i32 = REGION_BLOCKS / 4;
 
@@ -401,6 +410,19 @@ pub fn plan(
     // The largest auto size follows the memory, so it names the job: a resume on a machine
     // that picks another size opens another folder instead of misreading this one's pieces.
     let auto_max = (size == UnitSize::Auto).then(|| crate::scale::budget::auto_max_regions(args));
+    // Counted before any piece is built: a continent in small cells would hold the window.
+    let coarsest = match size {
+        UnitSize::N(n) => n,
+        UnitSize::Auto => auto_max.unwrap_or(AUTO_SIZES[0]),
+    };
+    let count = lattice_cells(&rect, coarsest);
+    if count > crate::scale::MAX_PIECES as u64 {
+        return Err(format!(
+            "This selection makes {count} cells, more than the {} one job can hold; use a larger \
+             cell size (--unit-regions).",
+            crate::scale::MAX_PIECES
+        ));
+    }
     let mut cut = match (size, auto_max) {
         (UnitSize::N(n), _) => plan_cells(proj, &rect, n, merge)?,
         (UnitSize::Auto, max) => {
@@ -851,6 +873,21 @@ mod tests {
             .collect();
         v.sort_unstable();
         v
+    }
+
+    #[test]
+    fn too_many_cells_are_refused_before_any_is_built() {
+        let (proj, _) = doc18();
+        let args = args_with(Default::default());
+        let europe = LLBBox::new(36.0, -10.0, 60.0, 30.0).unwrap();
+        let started = std::time::Instant::now();
+        let err = plan(&proj, &europe, &args, UnitSize::N(1)).err().unwrap();
+        assert!(err.contains("larger cell size"), "{err}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        // The same count as the cut makes.
+        let (proj, req) = doc18();
+        let p = plan(&proj, &req, &args, UnitSize::N(2)).unwrap();
+        assert_eq!(lattice_cells(&p.rect, 2), p.units.len() as u64);
     }
 
     #[test]
