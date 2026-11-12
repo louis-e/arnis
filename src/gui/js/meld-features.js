@@ -259,14 +259,17 @@ export function applyFlags(flags, rebuild = false) {
     kept.set(i < 0 ? f : f.slice(0, i), i < 0 ? true : f.slice(i + 1));
   }
   if (rebuild) kept.delete('--skip-built');
+  // The flags come from a world's manifest, which may be someone else's: a value is only taken when
+  // the control offers it, and it never becomes part of a selector.
   const set = (id, kind, v) => {
     if (kind === 'group') {
-      const seg = document.querySelector(`#${id} .segment[data-v="${v}"]`);
+      const seg = Array.from(document.querySelectorAll(`#${id} .segment`)).find((s) => s.dataset.v === v);
       if (seg && choice(id) !== v) seg.click();
       return;
     }
     const box = el(id);
     if (!box) return;
+    if (kind === 'value' && box.options && !Array.from(box.options).some((o) => o.value === v)) return;
     const prop = kind === 'value' ? 'value' : 'checked';
     if (box[prop] !== v) {
       box[prop] = v;
@@ -274,12 +277,12 @@ export function applyFlags(flags, rebuild = false) {
     }
   };
   for (const [flag, id, kind, fallback] of FLAG_CONTROLS) {
+    // Where the data comes from stays the user's own choice: a job never brings its servers along.
+    if (flag === '--osm-pbf-url' || flag === '--overpass-url' || flag === '--offline') continue;
     const v = kept.get(flag);
     if (kind === 'value' || kind === 'group') set(id, kind, v === undefined ? fallback : String(v));
     else set(id, 'toggle', kind === 'untoggle' ? v === undefined : v !== undefined);
   }
-  // Region Download is the one data source a job keeps; any other source goes back to the default.
-  set('meld-osm-source-group', 'group', kept.get('--osm-pbf') === 'geofabrik' ? 'region' : 'default');
 }
 
 // Selects `bounds` ([south, west, north, east]) exactly, with no ring around it.
@@ -1240,9 +1243,10 @@ export function placeForRun(found, bboxText) {
   return found && found.name && found.lat >= s && found.lat <= n && found.lon >= w && found.lon <= e ? found.name : '';
 }
 
-// The same geocoder, language and browser identity as the search box; only the coordinates leave.
+// The same geocoder, language and browser identity as the search box; only the coordinates leave,
+// rounded to about a kilometre.
 const nominatim = async (lat, lon, zoom) => {
-  const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}&zoom=${zoom}&accept-language=en`);
+  const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat.toFixed(2)}&lon=${lon.toFixed(2)}&zoom=${zoom}&accept-language=en`);
   if (!r.ok) return '';
   const j = await r.json();
   return String(j.name || String(j.display_name || '').split(',')[0]).trim();
@@ -1362,7 +1366,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   const misses = () => { try { return JSON.parse(localStorage.getItem(MISS_KEY) || '{}'); } catch (_) { return {}; } };
   let filling = false;
   async function fillPlaces(worlds) {
-    if (filling) return;
+    // Offline Mode means no request leaves, this one included.
+    if (filling || on('meld-offline-toggle')) return;
     filling = true;
     let first = true;
     try {

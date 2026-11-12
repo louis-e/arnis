@@ -13,8 +13,15 @@ const control = (id) => {
   if (!controls.has(id)) controls.set(id, { value: defaults[id] ?? '', checked: id === 'meld-buildings-toggle' || id === 'advanced-meld-features-toggle', dispatchEvent() {} });
   return controls.get(id);
 };
+// The choices each button group offers: a job's value is only taken when its group has it.
+const offered = { 'meld-snap-group': ['off', 'cover', 'fit', 'merge'], 'meld-piece-size-group': ['auto', '2', '4', '8'], 'meld-road-detail-group': ['max', 'clean', 'compact'], 'meld-props-group': ['auto', 'all', 'none'], 'meld-tree-pack-mode-group': ['add', 'replace'], 'meld-cave-ores-group': ['normal', 'more'], 'meld-river-bed-group': ['off', 'v1'], 'meld-water-detail-group': ['default', 'scaled'], 'meld-climate-mode-group': ['origin', 'per-position'], 'meld-region-format-group': ['mca', 'blinear'], 'meld-osm-source-group': ['default', 'archive', 'region'] };
+let clicks = 0;
 globalThis.document = {
   getElementById: control,
+  querySelectorAll(sel) {
+    const m = /^#(\S+) \.segment$/.exec(sel);
+    return m ? (offered[m[1]] || []).map((v) => ({ dataset: { v }, click() { clicks++; groups[m[1]] = v; } })) : [];
+  },
   querySelector(sel) {
     let m = /^#(\S+) \.segment\.active$/.exec(sel);
     if (m) return { dataset: { v: groups[m[1]] } };
@@ -27,7 +34,7 @@ globalThis.window = {};
 const { applyFlags, meldFlags } = await import('../../src/gui/js/meld-features.js');
 const out = () => meldFlags({ oneWorld: true, java: true, caves: true, extendHeight: true, lods: false }).sort();
 
-const job = ['--one-world-workers=4', '--snap-regions=cover', '--margin-regions=1', '--unit-regions=8', '--piece-order=spiral', '--skip-built', '--stitch-map', '--threads=5', '--ram-budget-mb=8000', '--seed=7', '--min-y=-100', '--max-y=500', '--road-detail=low', '--surface-patches', '--no-buildings', '--props=off', '--rocks', '--rock-density=0.05', '--bushes', '--tree-realm=forest', '--cave-style=lush', '--cave-ores=rich', '--river-bed=deep', '--water-detail=high', '--climate-mode=local', '--overpass-url=http://x', '--offline', '--origin=44.4', '--world-border', '--region-format=blinear', '--blinear-level=7', '--osm-pbf=geofabrik', '--osm-pbf-url=http://y'];
+const job = ['--one-world-workers=4', '--snap-regions=cover', '--margin-regions=1', '--unit-regions=8', '--piece-order=spiral', '--skip-built', '--stitch-map', '--threads=5', '--ram-budget-mb=8000', '--seed=7', '--min-y=-100', '--max-y=500', '--road-detail=clean', '--surface-patches', '--no-buildings', '--props=none', '--rocks', '--rock-density=0.05', '--bushes', '--tree-realm=forest', '--cave-style=lush', '--cave-ores=more', '--river-bed=v1', '--water-detail=scaled', '--climate-mode=per-position', '--origin=44.4', '--world-border', '--region-format=blinear', '--blinear-level=7'];
 // meldFlags builds a Region Format flag only for a world that is not One World: check it apart.
 reset();
 applyFlags(job);
@@ -36,6 +43,14 @@ const oneWorld = meldFlags({ oneWorld: true, java: true, caves: true, extendHeig
 const got = new Set([...flags, ...oneWorld]);
 for (const f of job) assert.ok(got.has(f), `${f} survives the round trip`);
 assert.strictEqual([...got].length, job.length, 'and nothing else appears');
+
+// Where the data comes from is never taken from a job (its world may be someone else's), and a value
+// its control does not offer is ignored instead of becoming part of a selector.
+reset();
+clicks = 0;
+applyFlags(['--overpass-url=http://x', '--osm-pbf=geofabrik', '--osm-pbf-url=http://y', '--offline', '--snap-regions=x"],#telemetry-toggle,[data-v="y']);
+assert.deepStrictEqual(out(), [], 'no server, source or offline switch comes back');
+assert.strictEqual(clicks, 0, 'and nothing was clicked');
 
 // Flags a job did not send put the controls back to their defaults.
 applyFlags([]);
