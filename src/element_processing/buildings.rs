@@ -4064,11 +4064,7 @@ pub(crate) fn is_underground_building(tags: &HashMap<String, String>) -> bool {
     }
 
     // Check building:levels:underground, if this is the only levels tag, it's underground
-    if tags.contains_key("building:levels:underground") && !tags.contains_key("building:levels") {
-        return true;
-    }
-
-    false
+    tags.contains_key("building:levels:underground") && !tags.contains_key("building:levels")
 }
 
 /// Calculates the starting Y offset based on terrain and min_level

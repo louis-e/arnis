@@ -712,7 +712,7 @@ pub fn weighted_median(
     for i in 0..n {
         let half = 0.5 * total[i];
         let px = out.get_pixel_mut((i % w) as u32, (i / w) as u32);
-        for c in 0..3 {
+        for (c, channel) in px.0.iter_mut().enumerate() {
             entries.clear();
             for (v, tex) in textures.iter().enumerate() {
                 let value = f64::from(tex.as_raw()[i * 3 + c]);
@@ -728,7 +728,7 @@ pub fn weighted_median(
                     break;
                 }
             }
-            px.0[c] = imgops::round_half_even(pick).clamp(0.0, 255.0) as u8;
+            *channel = imgops::round_half_even(pick).clamp(0.0, 255.0) as u8;
         }
         if !valid[i] {
             px.0 = [0, 0, 0];
@@ -1559,11 +1559,11 @@ mod tests {
         let mut state = 0x2545_f491_4f6c_dd1du64;
         let mut noise = RgbImage::new(w, h);
         for p in noise.pixels_mut() {
-            for c in 0..3 {
+            for channel in p.0.iter_mut() {
                 state ^= state << 13;
                 state ^= state >> 7;
                 state ^= state << 17;
-                p.0[c] = (state >> 33) as u8;
+                *channel = (state >> 33) as u8;
             }
         }
         let valid = vec![true; (w * h) as usize];

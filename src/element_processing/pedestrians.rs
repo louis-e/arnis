@@ -878,9 +878,8 @@ impl WalkNetwork {
                     };
                     let mut marks: Vec<Mark> =
                         vec![(0.0, None, false), (path.length(), None, false)];
-                    for k in 1..path.points.len().saturating_sub(1) {
-                        marks.push((path.at[k], None, false));
-                    }
+                    let inner = path.at.iter().take(path.points.len().saturating_sub(1));
+                    marks.extend(inner.skip(1).map(|&at| (at, None, false)));
                     let heading = |k: usize| {
                         let (a, b) = (
                             path.points[k.saturating_sub(1).min(path.points.len() - 2)],
