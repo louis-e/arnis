@@ -795,6 +795,7 @@
   "cell_not_built": "Sin construir, así que no se quitaron: {n}.",
   "projects_mask_lost": "Este trabajo se recortó a un contorno que no se guardó con él. Vuelve a seleccionar el área y su contorno para construirlo.",
   "projects_live_off": "No disponible con One World en modo En vivo.",
+  "projects_settings_unknown": "Este trabajo usa ajustes que esta ventana no ofrece, así que no se puede ejecutar desde aquí.",
   "shapes_rectangles_only": "Un solo mundo genera rectángulos. Dibuja un rectángulo o desactiva Un solo mundo.",
   "map_tool_shape_rectangles_only": "Un solo mundo solo genera rectángulos.",
   "hold_again": "Pulsa de nuevo para confirmar",

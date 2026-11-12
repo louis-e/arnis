@@ -250,21 +250,35 @@ const FLAG_CONTROLS = [
   ['--blinear-level', 'meld-blinear-level-input', 'value', '6'],
 ];
 
-// Puts a job's flags back into the controls (the Start path in reverse); a flag the job did not
-// send puts its control back to the default. `rebuild` leaves out what would skip built cells.
-export function applyFlags(flags, rebuild = false) {
+const SOURCE_FLAGS = new Set(['--osm-pbf-url', '--overpass-url', '--offline']);
+
+// flag -> value (true for a switch) of a job's kept flags.
+function keptFlags(flags) {
   const kept = new Map();
   for (const f of flags || []) {
     const i = f.indexOf('=');
     kept.set(i < 0 ? f : f.slice(0, i), i < 0 ? true : f.slice(i + 1));
   }
+  return kept;
+}
+
+// Puts a job's flags back into the controls (the Start path in reverse); a flag the job did not
+// send puts its control back to the default. `rebuild` leaves out what would skip built cells.
+export function applyFlags(flags, rebuild = false) {
+  const kept = keptFlags(flags);
   if (rebuild) kept.delete('--skip-built');
   // The flags come from a world's manifest, which may be someone else's: a value is only taken when
   // the control offers it, and it never becomes part of a selector.
   const set = (id, kind, v) => {
     if (kind === 'group') {
       const seg = Array.from(document.querySelectorAll(`#${id} .segment`)).find((s) => s.dataset.v === v);
-      if (seg && choice(id) !== v) seg.click();
+      if (seg && choice(id) !== v) {
+        // A greyed group's buttons ignore click(): lifted for the one call, as settings-store.js does.
+        const greyed = seg.disabled;
+        seg.disabled = false;
+        seg.click();
+        seg.disabled = greyed;
+      }
       return;
     }
     const box = el(id);
@@ -278,12 +292,26 @@ export function applyFlags(flags, rebuild = false) {
   };
   for (const [flag, id, kind, fallback] of FLAG_CONTROLS) {
     // Where the data comes from stays the user's own choice: a job never brings its servers along.
-    if (flag === '--osm-pbf-url' || flag === '--overpass-url' || flag === '--offline') continue;
+    if (SOURCE_FLAGS.has(flag)) continue;
     const v = kept.get(flag);
     if (kind === 'value' || kind === 'group') set(id, kind, v === undefined ? fallback : String(v));
     else if (kind === 'on') set(id, 'toggle', v !== 'false');
     else set(id, 'toggle', kind === 'untoggle' ? v === undefined : v !== undefined);
   }
+}
+
+// Whether applyFlags can put all of a job's settings back, so a Resume runs that job and not
+// another: it was built in cells, and every value it kept is one its control offers.
+export function jobFits(flags) {
+  const kept = keptFlags(flags);
+  if (!kept.has('--one-world-workers')) return false;
+  return FLAG_CONTROLS.every(([flag, id, kind]) => {
+    const v = kept.get(flag);
+    if (v === undefined || SOURCE_FLAGS.has(flag)) return true;
+    if (kind === 'group') return Array.from(document.querySelectorAll(`#${id} .segment`)).some((s) => s.dataset.v === v);
+    const options = kind === 'value' && el(id)?.options;
+    return !options || Array.from(options).some((o) => o.value === v);
+  });
 }
 
 // Selects `bounds` ([south, west, north, east]) exactly, with no ring around it.
@@ -1487,9 +1515,12 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
         const go = async (rebuild) => { await pick(w.name, false); await resume(w, job, rebuild); };
         // Without its outline the job would run again as a new, larger one.
         const lost = Boolean(job.masked && !job.mask);
+        // Settings the controls cannot take would run as another job.
+        const foreign = !jobFits(job.settings);
         const why = lost ? t('projects_mask_lost', 'This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.')
+          : foreign ? t('projects_settings_unknown', 'This job uses settings this window does not offer, so it cannot be run from here.')
           : !canRun() ? t('projects_live_off', 'Not while One World is set to Live.') : '';
-        const runOff = held || lost || !canRun();
+        const runOff = held || lost || foreign || !canRun();
         let b;
         if (!job.finished) b = button('projects_resume', 'Resume', runOff, () => go(false));
         else {

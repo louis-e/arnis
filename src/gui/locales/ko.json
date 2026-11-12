@@ -795,6 +795,7 @@
   "cell_not_built": "지어지지 않아 제거하지 않은 셀: {n}개.",
   "projects_mask_lost": "이 작업은 함께 저장되지 않은 윤곽선으로 잘렸습니다. 빌드하려면 영역과 윤곽선을 다시 선택하세요.",
   "projects_live_off": "One World가 라이브로 설정된 동안에는 사용할 수 없습니다.",
+  "projects_settings_unknown": "이 작업은 이 창에서 제공하지 않는 설정을 사용하므로 여기에서 실행할 수 없습니다.",
   "shapes_rectangles_only": "하나의 월드는 직사각형만 생성합니다. 직사각형을 그리거나 하나의 월드를 끄세요.",
   "map_tool_shape_rectangles_only": "하나의 월드는 직사각형만 생성합니다.",
   "hold_again": "다시 눌러 확인",

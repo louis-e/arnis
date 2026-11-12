@@ -795,6 +795,7 @@
   "cell_not_built": "Nesukurta, todėl nepašalinta: {n}.",
   "projects_mask_lost": "Ši užduotis buvo apkirpta pagal kontūrą, kuris su ja neišsaugotas. Pasirinkite sritį ir jos kontūrą iš naujo, kad ją sukurtumėte.",
   "projects_live_off": "Negalima, kai One World nustatytas į Gyvai.",
+  "projects_settings_unknown": "Ši užduotis naudoja nustatymus, kurių šis langas nesiūlo, todėl iš čia jos paleisti negalima.",
   "shapes_rectangles_only": "Vieno pasaulio režimas generuoja stačiakampius. Nubrėžkite stačiakampį arba išjunkite Vieno pasaulio režimą.",
   "map_tool_shape_rectangles_only": "Vieno pasaulio režimas generuoja tik stačiakampius.",
   "hold_again": "Paspauskite dar kartą, kad patvirtintumėte",

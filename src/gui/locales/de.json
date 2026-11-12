@@ -795,6 +795,7 @@
   "cell_not_built": "Nicht gebaut, daher nicht entfernt: {n}.",
   "projects_mask_lost": "Dieser Auftrag war auf einen Umriss zugeschnitten, der nicht mit ihm gespeichert wurde. Gebiet und Umriss erneut auswählen, um ihn zu bauen.",
   "projects_live_off": "Nicht, solange One World auf Live steht.",
+  "projects_settings_unknown": "Dieser Auftrag nutzt Einstellungen, die dieses Fenster nicht anbietet, und lässt sich von hier aus nicht starten.",
   "shapes_rectangles_only": "Eine Welt generiert nur Rechtecke. Zeichne ein Rechteck oder schalte Eine Welt aus.",
   "map_tool_shape_rectangles_only": "Eine Welt generiert nur Rechtecke.",
   "hold_again": "Zum Bestätigen erneut drücken",

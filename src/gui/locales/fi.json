@@ -795,6 +795,7 @@
   "cell_not_built": "Ei rakennettu, joten ei poistettu: {n}.",
   "projects_mask_lost": "Tämä työ rajattiin ääriviivaan, jota ei tallennettu sen mukana. Valitse alue ja sen ääriviiva uudelleen, jotta voit rakentaa sen.",
   "projects_live_off": "Ei käytettävissä, kun One World on Live-tilassa.",
+  "projects_settings_unknown": "Tämä työ käyttää asetuksia, joita tässä ikkunassa ei ole, joten sitä ei voi ajaa täältä.",
   "shapes_rectangles_only": "Yksi maailma generoi suorakulmioita. Piirrä suorakulmio tai poista Yksi maailma käytöstä.",
   "map_tool_shape_rectangles_only": "Yksi maailma generoi vain suorakulmioita.",
   "hold_again": "Vahvista painamalla uudelleen",

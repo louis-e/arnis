@@ -795,6 +795,7 @@
   "cell_not_built": "Niezbudowane, więc nieusunięte: {n}.",
   "projects_mask_lost": "To zadanie zostało przycięte do obrysu, który nie został z nim zachowany. Zaznacz ponownie obszar i jego obrys, aby je zbudować.",
   "projects_live_off": "Niedostępne, gdy One World ma ustawienie Na żywo.",
+  "projects_settings_unknown": "To zadanie używa ustawień, których to okno nie oferuje, więc nie można go stąd uruchomić.",
   "shapes_rectangles_only": "Jeden świat generuje prostokąty. Narysuj prostokąt lub wyłącz Jeden świat.",
   "map_tool_shape_rectangles_only": "Jeden świat generuje tylko prostokąty.",
   "hold_again": "Naciśnij ponownie, aby potwierdzić",

@@ -795,6 +795,7 @@
   "cell_not_built": "Nem épült meg, így nincs eltávolítva: {n}.",
   "projects_mask_lost": "Ez a feladat egy olyan körvonalra lett vágva, amely nem maradt meg vele. Az építéshez jelöld ki újra a területet és a körvonalát.",
   "projects_live_off": "Nem érhető el, amíg a One World Élő módban van.",
+  "projects_settings_unknown": "Ez a feladat olyan beállításokat használ, amelyeket ez az ablak nem kínál, ezért innen nem futtatható.",
   "shapes_rectangles_only": "Az Egy világ téglalapokat generál. Rajzolj téglalapot, vagy kapcsold ki az Egy világot.",
   "map_tool_shape_rectangles_only": "Az Egy világ csak téglalapokat generál.",
   "hold_again": "Nyomd meg újra a megerősítéshez",

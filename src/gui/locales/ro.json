@@ -795,6 +795,7 @@
   "cell_not_built": "Neconstruite, deci neeliminate: {n}.",
   "projects_mask_lost": "Această lucrare a fost tăiată după un contur care nu a fost păstrat cu ea. Selectează din nou zona și conturul ei ca s-o construiești.",
   "projects_live_off": "Indisponibil cât timp O singură lume este setată pe Live.",
+  "projects_settings_unknown": "Această lucrare folosește setări pe care fereastra nu le oferă, așa că nu poate fi rulată de aici.",
   "shapes_rectangles_only": "O singură lume generează dreptunghiuri. Desenează un dreptunghi sau dezactivează O singură lume.",
   "map_tool_shape_rectangles_only": "O singură lume generează doar dreptunghiuri.",
   "hold_again": "Apasă din nou ca să confirmi",

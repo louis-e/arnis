@@ -795,6 +795,7 @@
   "cell_not_built": "未构建，因此未移除：{n} 个。",
   "projects_mask_lost": "此任务按一个未随之保存的轮廓裁剪。请重新选择该区域及其轮廓后再构建。",
   "projects_live_off": "One World 设为实时时不可用。",
+  "projects_settings_unknown": "此任务使用了本窗口未提供的设置，因此无法从这里运行。",
   "shapes_rectangles_only": "单一世界只生成矩形。请绘制矩形，或关闭单一世界。",
   "map_tool_shape_rectangles_only": "单一世界只生成矩形。",
   "hold_again": "再按一次以确认",

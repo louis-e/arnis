@@ -795,6 +795,7 @@
   "cell_not_built": "Non construites, donc non retirées : {n}.",
   "projects_mask_lost": "Cette tâche a été découpée selon un contour qui n'a pas été conservé avec elle. Sélectionnez à nouveau la zone et son contour pour la construire.",
   "projects_live_off": "Indisponible tant que One World est sur Direct.",
+  "projects_settings_unknown": "Cette tâche utilise des réglages que cette fenêtre ne propose pas ; elle ne peut pas être lancée d'ici.",
   "shapes_rectangles_only": "Monde unique génère des rectangles. Dessinez un rectangle ou désactivez Monde unique.",
   "map_tool_shape_rectangles_only": "Monde unique ne génère que des rectangles.",
   "hold_again": "Appuyez à nouveau pour confirmer",

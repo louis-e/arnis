@@ -98,10 +98,11 @@ assert.strictEqual(asked2.length, 0);
 // Resume (unfinished job) and Rebuild (finished area, held as the cell menu's Rebuild).
 store.clear();
 const jobs = [
-  { name: 'Open', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j1', settings: ['--threads=2'], done: 1204, total: 61747, finished: false, last_run_ms: 5 }] },
-  { name: 'Done', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j2', settings: ['--seed=3'], done: 9, total: 9, finished: true, last_run_ms: 5 }] },
+  { name: 'Open', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j1', settings: ['--one-world-workers=4', '--threads=2'], done: 1204, total: 61747, finished: false, last_run_ms: 5 }] },
+  { name: 'Done', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j2', settings: ['--one-world-workers=4', '--seed=3'], done: 9, total: 9, finished: true, last_run_ms: 5 }] },
   { name: 'Plain', area_count: 1, scale: 1, locked: false, modified_ms: 1 },
   { name: 'Cut', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j3_m0123456789abcdef', settings: [], done: 1, total: 4, finished: false, last_run_ms: 5, masked: true, mask: null }] },
+  { name: 'Cli', area_count: 1, scale: 1, locked: false, modified_ms: 1, jobs: [{ name: 'j4', settings: [], done: 1, total: 4, finished: false, last_run_ms: 5 }] },
 ];
 const started = [];
 let busy = false;
@@ -117,8 +118,9 @@ assert.ok(label(cards[1]).includes('Rebuild') && !label(cards[1]).includes('Resu
 assert.deepStrictEqual(label(cards[2]).filter((x) => /Resume|Rebuild/.test(x)), [], 'a plain world has neither');
 const btn = (r, name) => flat(r).find((c) => c.textContent === name || c.textContent.startsWith(name));
 assert.ok(btn(cards[3], 'Resume').disabled && btn(cards[3], 'Resume').title.includes('outline'), 'a job whose outline was not kept is refused, and says why');
+assert.ok(btn(cards[4], 'Resume').disabled && btn(cards[4], 'Resume').title.includes('settings'), 'a job whose settings the window cannot restore is refused, and says why');
 await btn(cards[0], 'Resume').listeners.click();
-assert.deepStrictEqual(started.at(-1), ['Open', ['--threads=2'], false]);
+assert.deepStrictEqual(started.at(-1), ['Open', ['--one-world-workers=4', '--threads=2'], false]);
 assert.strictEqual(store.get('arnis-one-world-name'), 'Open', 'the world is picked first');
 const rebuild = btn(cards[1], 'Rebuild');
 await rebuild.listeners.click?.({ detail: 1 });
@@ -128,7 +130,7 @@ globalThis.setTimeout = (f, ms) => (ms === 1500 ? (f(), 1) : realTimeout(f, ms))
 rebuild.listeners.pointerdown({ button: 0 });
 globalThis.setTimeout = realTimeout;
 await settle();
-assert.deepStrictEqual(started.at(-1), ['Done', ['--seed=3'], true], 'held, it rebuilds');
+assert.deepStrictEqual(started.at(-1), ['Done', ['--one-world-workers=4', '--seed=3'], true], 'held, it rebuilds');
 // During a run, and in Live, nothing is run from here.
 busy = true;
 await withJobs();

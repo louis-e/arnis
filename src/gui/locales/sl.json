@@ -795,6 +795,7 @@
   "cell_not_built": "Niso zgrajene, zato niso odstranjene: {n}.",
   "projects_mask_lost": "To opravilo je bilo obrezano na obris, ki ni bil shranjen z njim. Znova izberite območje in njegov obris, da ga zgradite.",
   "projects_live_off": "Ni na voljo, ko je One World nastavljen na V živo.",
+  "projects_settings_unknown": "To opravilo uporablja nastavitve, ki jih to okno ne ponuja, zato ga od tu ni mogoče zagnati.",
   "shapes_rectangles_only": "En svet ustvarja pravokotnike. Narišite pravokotnik ali izklopite En svet.",
   "map_tool_shape_rectangles_only": "En svet ustvarja samo pravokotnike.",
   "hold_again": "Pritisnite znova za potrditev",
