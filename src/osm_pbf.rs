@@ -506,29 +506,78 @@ fn segments(total: u64, n: usize) -> Vec<(u64, u64)> {
         .collect()
 }
 
+/// The file a HEAD saw: where the link led, its size, and what names its version.
+struct Remote {
+    url: String,
+    total: u64,
+    version: Option<reqwest::header::HeaderValue>,
+}
+
+/// What `If-Range` takes of a HEAD's headers: a strong ETag, else Last-Modified.
+fn version_header(headers: &reqwest::header::HeaderMap) -> Option<reqwest::header::HeaderValue> {
+    use reqwest::header::{ETAG, LAST_MODIFIED};
+    [ETAG, LAST_MODIFIED]
+        .iter()
+        .filter_map(|name| headers.get(name))
+        .find(|v| !v.as_bytes().starts_with(b"W/"))
+        .cloned()
+}
+
+/// Whether a 206's Content-Range is `span` of a file of `total` bytes.
+fn is_span_of(content_range: &str, (start, end): (u64, u64), total: u64) -> bool {
+    content_range
+        .strip_prefix("bytes ")
+        .and_then(|r| r.split_once('/'))
+        .is_some_and(|(range, size)| {
+            range == format!("{start}-{end}") && (size == "*" || size.parse() == Ok(total))
+        })
+}
+
+/// Whether the file is whole blobs to its end, which a download cut short is not.
+fn ends_on_a_blob(pbf: &Path) -> bool {
+    std::fs::File::open(pbf).is_ok_and(|f| {
+        let mut blobs = BlobReader::new(std::io::BufReader::new(f)).peekable();
+        blobs.peek().is_some() && blobs.all(|b| b.is_ok())
+    })
+}
+
 /// One connection's share of a download: `span` (or the whole file) into
 /// `part` at its offset, counting into `done`. Stops early, without error,
 /// once `quit` says so.
 fn fetch_span(
     client: &reqwest::blocking::Client,
-    source: &str,
+    remote: &Remote,
     part: &Path,
     span: Option<(u64, u64)>,
     done: &std::sync::atomic::AtomicU64,
     quit: &dyn Fn() -> bool,
 ) -> Result<()> {
+    use reqwest::header::{CONTENT_RANGE, IF_RANGE, RANGE};
     use std::io::{Seek, SeekFrom};
     let _permit = crate::net::request_permit();
+    let source = remote.url.as_str();
     let mut req = client.get(source);
     if let Some((start, end)) = span {
-        req = req.header(reqwest::header::RANGE, format!("bytes={start}-{end}"));
+        req = req.header(RANGE, format!("bytes={start}-{end}"));
+        // A file replaced since the HEAD then answers 200, not a range of another version.
+        if let Some(version) = &remote.version {
+            req = req.header(IF_RANGE, version);
+        }
     }
     let mut resp = req
         .send()
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("{source}: {e}"))?;
-    if span.is_some() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        return Err(format!("{source}: the server ignored the byte range"));
+    if let Some(span) = span {
+        let range = resp.headers().get(CONTENT_RANGE);
+        let range = range.and_then(|v| v.to_str().ok()).unwrap_or_default();
+        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT
+            || !is_span_of(range, span, remote.total)
+        {
+            return Err(format!(
+                "{source}: the server did not send the byte range asked for; the file may have changed"
+            ));
+        }
     }
     let mut out = std::fs::OpenOptions::new()
         .write(true)
@@ -591,7 +640,11 @@ pub fn fetch_extract(
         .headers()
         .get(reqwest::header::ACCEPT_RANGES)
         .is_some_and(|v| v.as_bytes() == b"bytes");
-    let source = head.url().to_string();
+    let remote = Remote {
+        url: head.url().to_string(),
+        total,
+        version: version_header(head.headers()),
+    };
     let n = segment_count(total, ranges, crate::net::max_requests());
     let dir = dir_of(dest)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -658,10 +711,10 @@ pub fn fetch_extract(
         let workers: Vec<_> = spans
             .iter()
             .map(|&span| {
-                let (client, source, part, done, failed, quit) =
-                    (&client, &source, &part, &done, &failed, &quit);
+                let (client, remote, part, done, failed, quit) =
+                    (&client, &remote, &part, &done, &failed, &quit);
                 scope.spawn(move || {
-                    let r = fetch_span(client, source, part, span, done, quit);
+                    let r = fetch_span(client, remote, part, span, done, quit);
                     // A failed connection stops the others.
                     if r.is_err() {
                         failed.store(true, Ordering::Release);
@@ -697,6 +750,10 @@ pub fn fetch_extract(
             let d = done.load(Ordering::Relaxed);
             if total > 0 && d != total {
                 return Err(format!("{url}: got {d} of {total} bytes"));
+            }
+            // No size was declared to hold it to.
+            if total == 0 && !ends_on_a_blob(&part) {
+                return Err(format!("{url}: the download ended early"));
             }
             Ok(true)
         })
@@ -1517,6 +1574,42 @@ mod tests {
             None,
             "no size, not an empty extract"
         );
+    }
+
+    #[test]
+    fn ranges_are_held_to_the_version_the_head_saw() {
+        use reqwest::header::{HeaderMap, HeaderValue, ETAG, LAST_MODIFIED};
+        let mut h = HeaderMap::new();
+        assert_eq!(version_header(&h), None);
+        let date = HeaderValue::from_static("Wed, 11 Nov 2026 21:20:00 GMT");
+        h.insert(LAST_MODIFIED, date.clone());
+        // A weak ETag is no validator for If-Range.
+        h.insert(ETAG, HeaderValue::from_static("W/\"abc\""));
+        assert_eq!(version_header(&h), Some(date));
+        let etag = HeaderValue::from_static("\"abc\"");
+        h.insert(ETAG, etag.clone());
+        assert_eq!(version_header(&h), Some(etag));
+
+        assert!(is_span_of("bytes 0-99/1000", (0, 99), 1000));
+        assert!(is_span_of("bytes 0-99/*", (0, 99), 1000));
+        // Another file's size, another range, or no header at all.
+        assert!(!is_span_of("bytes 0-99/1004", (0, 99), 1000));
+        assert!(!is_span_of("bytes 0-49/1000", (0, 99), 1000));
+        assert!(!is_span_of("", (0, 99), 1000));
+    }
+
+    #[test]
+    fn an_extract_cut_short_does_not_end_on_a_blob() {
+        let whole =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/osmpbf-test.osm.pbf");
+        assert!(ends_on_a_blob(&whole));
+        let bytes = std::fs::read(&whole).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let cut = tmp.path().join("cut.osm.pbf");
+        std::fs::write(&cut, &bytes[..bytes.len() - 7]).unwrap();
+        assert!(!ends_on_a_blob(&cut));
+        std::fs::write(&cut, b"").unwrap();
+        assert!(!ends_on_a_blob(&cut));
     }
 
     fn node(id: u64, lat: f64, lon: f64, tags: &[(&str, &str)]) -> OsmElement {
