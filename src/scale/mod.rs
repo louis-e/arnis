@@ -335,6 +335,8 @@ struct Job {
     skip: BTreeSet<usize>,
     /// The head piece an earlier run chose and did not build, kept in `job.json`.
     head: Option<usize>,
+    /// Cells built by an earlier run whose record went with the job folder (`built_cells`).
+    recorded: BTreeSet<usize>,
 }
 
 type Slots = serde_json::Map<String, Value>;
@@ -450,6 +452,7 @@ impl Job {
                     ));
                 }
                 let mut manifest = Manifest::load(world_dir)?.ok_or("The One World vanished.")?;
+                let fresh = starts_over(&manifest, &name, None);
                 let area_base = manifest.next_area_id;
                 let slots: serde_json::Map<String, Value> = units
                     .iter()
@@ -467,7 +470,7 @@ impl Job {
                     write(
                         &state,
                         &json!({ "area_base": area_base, "map_base": map_base, "slots": slots,
-                                 "argv": options }),
+                                 "argv": options, "fresh": fresh }),
                     )?;
                 }
                 (area_base, map_base, slots)
@@ -480,6 +483,7 @@ impl Job {
             .as_ref()
             .and_then(|v| v["head"].as_u64())
             .map(|h| h as usize);
+        let recorded = built_cells(world_dir, &name);
         Ok(Self {
             name,
             dir,
@@ -488,6 +492,7 @@ impl Job {
             slots,
             skip,
             head,
+            recorded,
         })
     }
 
@@ -531,9 +536,49 @@ impl Job {
 
     /// What the piece reported, if it is built.
     fn finished(&self, u: &WorkUnit) -> Option<PieceResult> {
-        let text = std::fs::read_to_string(self.done_path(u)).ok()?;
-        serde_json::from_str(&text).ok()
+        std::fs::read_to_string(self.done_path(u))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .or_else(|| {
+                let recorded = self.recorded.contains(&(u.index as usize));
+                recorded.then(PieceResult::default)
+            })
     }
+}
+
+/// Whether a run of job `name` builds every cell again: a job that finished, as its folder
+/// (`kept` is its state) noted when the run began, else as the manifest says.
+fn starts_over(manifest: &Manifest, name: &str, kept: Option<&Value>) -> bool {
+    match kept.filter(|v| v["slots"].is_object()) {
+        Some(v) => v["fresh"] == true,
+        None => manifest
+            .jobs
+            .iter()
+            .any(|j| j.name == name && j.status.finished),
+    }
+}
+
+/// Cells of job `name` the manifest holds an area for, by plan index: built, though the job
+/// folder that recorded them is gone. None for a job that starts over.
+pub fn built_cells(world_dir: &Path, name: &str) -> BTreeSet<usize> {
+    let Ok(Some(manifest)) = Manifest::load(world_dir) else {
+        return BTreeSet::new();
+    };
+    let state = world_dir
+        .join(one_world::JOBS_DIR)
+        .join(name)
+        .join("job.json");
+    let kept = std::fs::read_to_string(state)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    if starts_over(&manifest, name, kept.as_ref()) {
+        return BTreeSet::new();
+    }
+    let pieces = manifest.areas.iter().filter_map(|a| a.piece.as_ref());
+    pieces
+        .filter(|p| p.job == name)
+        .map(|p| p.index as usize)
+        .collect()
 }
 
 /// Whether the job folder `name` holds `u` as built, read as a resume reads it.
@@ -2069,6 +2114,51 @@ second
             .err()
             .unwrap();
         assert!(err.contains("planned with other pieces"), "{err}");
+    }
+
+    #[test]
+    fn cells_the_manifest_records_stay_built_once_the_job_folder_is_gone() {
+        let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
+        let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
+        let (world, _) = crate::projection::snap_bbox_to_chunks(&proj, &req).unwrap();
+        let units = work_units::plan_units(&proj, &world, 1).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let w = tmp.path().join("W");
+        let mut args = <Args as clap::Parser>::parse_from(["arnis", "--bbox", &req.arg()]);
+        drop(one_world::prepare(&w, &req, &mut args).unwrap());
+        let ctx = args.one_world_run.clone().unwrap();
+        for u in &units {
+            let run = RunContext {
+                area_id: 10 + u.index,
+                piece: Some(PieceRef {
+                    job: "j".into(),
+                    index: u.index,
+                }),
+                ..ctx.clone()
+            };
+            one_world::record_area(&run, &u.bbox, &u.rect, None, None).unwrap();
+        }
+        let of = units.len() as u32;
+        one_world::record_job(&w, "j", None, None, of, of, true).unwrap();
+        // A finished job run again builds every cell, also once the run has marked it unfinished.
+        assert!(built_cells(&w, "j").is_empty());
+        let job = Job::open(&w, "j".into(), &units, &[], true).unwrap();
+        one_world::record_job(&w, "j", None, None, 0, of, false).unwrap();
+        assert!(built_cells(&w, "j").is_empty() && job.finished(&units[0]).is_none());
+        let job = Job::open(&w, "j".into(), &units, &[], true).unwrap();
+        assert!(job.finished(&units[0]).is_none());
+        std::fs::remove_dir_all(&job.dir).unwrap();
+        // One cell removed from the finished job: only that one is to build.
+        one_world::record_job(&w, "j", None, None, of, of, true).unwrap();
+        one_world::remove_cells(&w, "j", &[1]).unwrap();
+        let job = Job::open(&w, "j".into(), &units, &[], true).unwrap();
+        let built: Vec<u32> = units
+            .iter()
+            .filter(|u| job.finished(u).is_some())
+            .map(|u| u.index)
+            .collect();
+        assert_eq!(built.len(), units.len() - 1);
+        assert!(!built.contains(&1) && built_cells(&w, "j").len() == built.len());
     }
 
     #[test]
