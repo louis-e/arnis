@@ -3,11 +3,11 @@
 import assert from 'node:assert';
 
 const defaults = { 'meld-margin-input': '0', 'meld-piece-order-select': 'centre', 'meld-tree-realm-select': 'auto', 'meld-cave-style-select': 'all-mix', 'meld-rock-density-input': '0.02', 'meld-bush-density-input': '0.05', 'meld-blinear-level-input': '6' };
-const groups = { 'meld-snap-group': 'off', 'meld-piece-size-group': '4', 'meld-road-detail-group': 'max', 'meld-props-group': 'auto', 'meld-tree-pack-mode-group': 'add', 'meld-cave-ores-group': 'normal', 'meld-river-bed-group': 'off', 'meld-water-detail-group': 'default', 'meld-climate-mode-group': 'origin', 'meld-osm-source-group': 'default', 'meld-region-format-group': 'mca' };
+const groups = { 'meld-snap-group': 'off', 'meld-piece-size-group': '8', 'meld-road-detail-group': 'max', 'meld-props-group': 'auto', 'meld-tree-pack-mode-group': 'add', 'meld-cave-ores-group': 'normal', 'meld-river-bed-group': 'off', 'meld-water-detail-group': 'default', 'meld-climate-mode-group': 'origin', 'meld-osm-source-group': 'default', 'meld-region-format-group': 'mca' };
 const controls = new Map();
 const reset = () => {
   controls.clear();
-  Object.assign(groups, { 'meld-snap-group': 'off', 'meld-piece-size-group': '4', 'meld-road-detail-group': 'max', 'meld-props-group': 'auto', 'meld-cave-ores-group': 'normal', 'meld-river-bed-group': 'off', 'meld-water-detail-group': 'default', 'meld-climate-mode-group': 'origin', 'meld-osm-source-group': 'default', 'meld-region-format-group': 'mca' });
+  Object.assign(groups, { 'meld-snap-group': 'off', 'meld-piece-size-group': '8', 'meld-road-detail-group': 'max', 'meld-props-group': 'auto', 'meld-cave-ores-group': 'normal', 'meld-river-bed-group': 'off', 'meld-water-detail-group': 'default', 'meld-climate-mode-group': 'origin', 'meld-osm-source-group': 'default', 'meld-region-format-group': 'mca' });
 };
 const control = (id) => {
   if (!controls.has(id)) controls.set(id, { value: defaults[id] ?? '', checked: id === 'meld-buildings-toggle' || id === 'advanced-meld-features-toggle', dispatchEvent() {} });
@@ -34,7 +34,7 @@ globalThis.window = {};
 const { applyFlags, meldFlags } = await import('../../src/gui/js/meld-features.js');
 const out = () => meldFlags({ oneWorld: true, java: true, caves: true, extendHeight: true, lods: false }).sort();
 
-const job = ['--one-world-workers=4', '--snap-regions=cover', '--margin-regions=1', '--unit-regions=8', '--piece-order=spiral', '--skip-built', '--stitch-map', '--threads=5', '--ram-budget-mb=8000', '--seed=7', '--min-y=-100', '--max-y=500', '--road-detail=clean', '--surface-patches', '--no-buildings', '--props=none', '--rocks', '--rock-density=0.05', '--bushes', '--tree-realm=forest', '--cave-style=lush', '--cave-ores=more', '--river-bed=v1', '--water-detail=scaled', '--climate-mode=per-position', '--origin=44.4', '--world-border', '--region-format=blinear', '--blinear-level=7'];
+const job = ['--one-world-workers=4', '--snap-regions=cover', '--margin-regions=1', '--unit-regions=4', '--piece-order=spiral', '--skip-built', '--stitch-map', '--threads=5', '--ram-budget-mb=8000', '--seed=7', '--min-y=-100', '--max-y=500', '--road-detail=clean', '--surface-patches', '--no-buildings', '--props=none', '--rocks', '--rock-density=0.05', '--bushes', '--tree-realm=forest', '--cave-style=lush', '--cave-ores=more', '--river-bed=v1', '--water-detail=scaled', '--climate-mode=per-position', '--origin=44.4', '--world-border', '--region-format=blinear', '--blinear-level=7'];
 // meldFlags builds a Region Format flag only for a world that is not One World: check it apart.
 reset();
 applyFlags(job);

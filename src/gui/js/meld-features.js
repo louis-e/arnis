@@ -162,7 +162,7 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
   if (oneWorld && value('meld-workers-select')) {
     if (choice('meld-snap-group') !== 'off') add('--snap-regions', choice('meld-snap-group'));
     if (value('meld-margin-input') !== '0') add('--margin-regions', value('meld-margin-input'));
-    if (choice('meld-piece-size-group') !== '4') add('--unit-regions', choice('meld-piece-size-group'));
+    if (choice('meld-piece-size-group') !== '8') add('--unit-regions', choice('meld-piece-size-group'));
     if (value('meld-piece-order-select') !== 'centre') add('--piece-order', value('meld-piece-order-select'));
     if (on('meld-skip-built-toggle')) f.push('--skip-built');
     // Cells the menu skipped or included before this run; the run takes them (then the engine keeps them).
@@ -232,7 +232,7 @@ export const cellsKey = (bbox, world) =>
 // mask) are not kept by a job, so they are not here.
 const FLAG_CONTROLS = [
   ['--one-world-workers', 'meld-workers-select', 'value', ''], ['--snap-regions', 'meld-snap-group', 'group', 'off'],
-  ['--margin-regions', 'meld-margin-input', 'value', '0'], ['--unit-regions', 'meld-piece-size-group', 'group', '4'],
+  ['--margin-regions', 'meld-margin-input', 'value', '0'], ['--unit-regions', 'meld-piece-size-group', 'group', '8'],
   ['--piece-order', 'meld-piece-order-select', 'value', 'centre'], ['--skip-built', 'meld-skip-built-toggle', 'toggle'],
   ['--stitch-map', 'meld-stitch-map-toggle', 'toggle'], ['--threads', 'meld-threads-input', 'value', ''],
   ['--ram-budget-mb', 'meld-ram-budget-input', 'value', ''], ['--seed', 'meld-seed-input', 'value', ''],

@@ -1104,11 +1104,8 @@ pub fn update_player_spawn_y_after_generation(
     };
 
     // Write the updated level.dat file
-    if let Err(e) = std::fs::write(level_path, compressed_data) {
-        return Err(format!("Failed to write updated level.dat: {e}"));
-    }
-
-    Ok(())
+    crate::world_utils::replace_file_atomically(&level_path, &compressed_data)
+        .map_err(|e| format!("Failed to write updated level.dat: {e}"))
 }
 
 /// Fetches a reduced-resolution elevation + land-cover grid for the 3D

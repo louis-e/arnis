@@ -1273,7 +1273,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="meld_workers">Parallel cells</span>
-                        <span class="tooltip-icon" data-tooltip-key="meld_workers_tip" data-tooltip="Splits a One World selection into cells of up to 4 × 4 regions and builds several at once, each in its own process. Auto picks 2 to 6 from free RAM and cores. Generating the same area again resumes it. One World only.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_workers_tip" data-tooltip="Splits a One World selection into cells of up to 8 × 8 regions and builds several at once, each in its own process. Auto picks 2 to 6 from free RAM and cores. Generating the same area again resumes it. One World only.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="meld_workers_desc">Build a One World in cells, several at a time.</span>
                     </span>
@@ -1288,13 +1288,13 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="meld_piece_size">Cell Size</span>
-                        <span class="tooltip-icon" data-tooltip-key="meld_piece_size_tip" data-tooltip="Largest cell, in regions per side. Auto mixes 8 × 8, 4 × 4 and 2 × 2 cells, as large as fit the selection and the memory. Parallel cells only.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_piece_size_tip" data-tooltip="Largest cell, in regions per side. Auto mixes 16 × 16, 12 × 12, 8 × 8, 4 × 4 and 2 × 2 cells, as large as fit the selection and the memory. Parallel cells only.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="meld_piece_size_desc">Regions per side of each cell.</span>
                     </span>
                   </label>
                   <div class="settings-control">
-                    <div class="segmented-control" id="meld-piece-size-group"><button type="button" class="segment" data-v="auto" data-localize="meld_piece_size_auto">Auto (recommended)</button><button type="button" class="segment" data-v="2">2</button><button type="button" class="segment active" data-default data-v="4">4</button><button type="button" class="segment" data-v="8">8</button></div>
+                    <div class="segmented-control" id="meld-piece-size-group"><button type="button" class="segment" data-v="auto" data-localize="meld_piece_size_auto">Auto (recommended)</button><button type="button" class="segment" data-v="2">2</button><button type="button" class="segment" data-v="4">4</button><button type="button" class="segment active" data-default data-v="8">8</button></div>
                   </div>
                 </div>
                 <div class="settings-row setting-tile is-wide">
