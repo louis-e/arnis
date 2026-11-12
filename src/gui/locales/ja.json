@@ -796,6 +796,7 @@
   "projects_mask_lost": "このジョブは、一緒に保存されなかった輪郭で切り抜かれています。構築するには、範囲とその輪郭をもう一度選択してください。",
   "projects_live_off": "One World がライブのときは使えません。",
   "projects_settings_unknown": "このジョブは、このウィンドウにない設定を使っているため、ここからは実行できません。",
+  "settings_changed": "変更した設定: {list}",
   "shapes_rectangles_only": "ワンワールドは長方形のみ生成します。長方形を描くか、ワンワールドをオフにしてください。",
   "map_tool_shape_rectangles_only": "ワンワールドは長方形のみ生成します。",
   "hold_again": "もう一度押して確定",

@@ -796,6 +796,7 @@
   "projects_mask_lost": "This job was cut to an outline that was not kept with it. Select the area and its outline again to build it.",
   "projects_live_off": "Not while One World is set to Live.",
   "projects_settings_unknown": "This job uses settings this window does not offer, so it cannot be run from here.",
+  "settings_changed": "Settings changed: {list}",
   "shapes_rectangles_only": "One World generates rectangles. Draw a rectangle, or turn One World off.",
   "map_tool_shape_rectangles_only": "One World generates rectangles only.",
   "hold_again": "Press again to confirm",

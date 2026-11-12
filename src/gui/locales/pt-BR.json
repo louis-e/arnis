@@ -796,6 +796,7 @@
   "projects_mask_lost": "Este trabalho foi recortado por um contorno que não foi guardado com ele. Selecione a área e o contorno dela de novo para construí-lo.",
   "projects_live_off": "Indisponível enquanto o One World estiver em Ao vivo.",
   "projects_settings_unknown": "Este trabalho usa configurações que esta janela não oferece, então não pode ser executado daqui.",
+  "settings_changed": "Configurações alteradas: {list}",
   "shapes_rectangles_only": "O Mundo único gera retângulos. Desenhe um retângulo ou desative o Mundo único.",
   "map_tool_shape_rectangles_only": "O Mundo único gera apenas retângulos.",
   "hold_again": "Pressione de novo para confirmar",

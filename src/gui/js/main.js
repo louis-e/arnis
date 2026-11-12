@@ -862,9 +862,9 @@ function registerMessageEvent() {
       displayBboxInfoText(bboxText, event.data.shapes);
     }
 
-    // "Select this area" on a search result: the area and a ring of regions around it.
+    // "Select this area" on a search result: the area and, in a One World, a ring of regions around it.
     if (event.data && event.data.type === 'selectArea' && event.source === getMapFrame()?.contentWindow) {
-      selectWithRing(event.data.bounds);
+      selectWithRing(event.data.bounds, isOneWorldEnabled());
     }
 
     // The search result the selection came from: its name goes to the world a build makes.
@@ -1505,7 +1505,7 @@ function initSettings() {
   document.getElementById('plan-expand-button').addEventListener('click', () => {
     if (!builtAreas.length) return;
     const pick = (f, key) => f(...builtAreas.map((a) => a[key]));
-    selectWithRing([pick(Math.min, 'min_lat'), pick(Math.min, 'min_lon'), pick(Math.max, 'max_lat'), pick(Math.max, 'max_lon')], true);
+    selectWithRing([pick(Math.min, 'min_lat'), pick(Math.min, 'min_lon'), pick(Math.max, 'max_lat'), pick(Math.max, 'max_lon')], isOneWorldEnabled(), true);
     askRunConfirm();
   });
   // Cancel (or Escape) closes the panel and gives the focus back to Start.

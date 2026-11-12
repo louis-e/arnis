@@ -796,6 +796,7 @@
   "projects_mask_lost": "Det här jobbet beskars efter en kontur som inte sparades med det. Välj området och dess kontur igen för att bygga det.",
   "projects_live_off": "Inte när One World står på Live.",
   "projects_settings_unknown": "Det här jobbet använder inställningar som det här fönstret inte har, så det kan inte köras härifrån.",
+  "settings_changed": "Ändrade inställningar: {list}",
   "shapes_rectangles_only": "En värld genererar rektanglar. Rita en rektangel eller stäng av En värld.",
   "map_tool_shape_rectangles_only": "En värld genererar bara rektanglar.",
   "hold_again": "Tryck igen för att bekräfta",

@@ -788,10 +788,10 @@ export function schedulePlan(fresh = false) {
   planTimer = setTimeout(updatePlan, 250);
 }
 
-// Selects `bounds` ([south, west, north, east]) with a ring of regions around it: a job in
-// pieces with a margin of at least one region. `skipBuilt` leaves out what the world has.
-// Returns the names of the settings it changed: they stay so, and the caller says it.
-export function selectWithRing(bounds, skipBuilt = false) {
+// Selects `bounds` ([south, west, north, east]); in a One World with a ring of regions around
+// it: a job in cells with a margin of at least one region. `skipBuilt` leaves out what the world
+// has. The settings it changed stay so: their names are returned and said under the bar.
+export function selectWithRing(bounds, oneWorld, skipBuilt = false) {
   const changed = [];
   const set = (id, prop, v, key, fallback) => {
     if (!el(id) || el(id)[prop] === v) return;
@@ -799,10 +799,14 @@ export function selectWithRing(bounds, skipBuilt = false) {
     el(id).dispatchEvent(new Event('change', { bubbles: true }));
     changed.push(t(key, fallback));
   };
-  if (!value('meld-workers-select')) set('meld-workers-select', 'value', 'auto', 'meld_workers', 'Parallel cells');
-  if (value('meld-margin-input') === '0') set('meld-margin-input', 'value', '1', 'meld_margin', 'Margin Regions');
-  if (skipBuilt) set('meld-skip-built-toggle', 'checked', true, 'meld_skip_built', 'Skip Built Cells');
+  // Without One World they would only wait, saved, for the day it is turned on.
+  if (oneWorld) {
+    if (!value('meld-workers-select')) set('meld-workers-select', 'value', 'auto', 'meld_workers', 'Parallel cells');
+    if (value('meld-margin-input') === '0') set('meld-margin-input', 'value', '1', 'meld_margin', 'Margin Regions');
+    if (skipBuilt) set('meld-skip-built-toggle', 'checked', true, 'meld_skip_built', 'Skip Built Cells');
+  }
   postToMap({ type: 'setBbox', bounds });
+  if (changed.length) say(t('settings_changed', 'Settings changed: {list}', { list: changed.join(', ') }), false);
   return changed;
 }
 
