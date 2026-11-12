@@ -1923,6 +1923,7 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
     {
         // Explorer opens a file with its default app (e.g. .mcworld with Minecraft Bedrock) and a
         // folder in place; no shell reads the path, so `&` in a world name stays a character.
+        use std::os::windows::process::CommandExt;
         let mut explorer = std::process::Command::new("explorer");
         // OneDrive files can be cloud placeholders / mid-sync that cannot be launched
         // ("Windows cannot find <path>"), so reveal-and-highlight instead of opening.
@@ -1930,7 +1931,9 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
             explorer.arg("/select,");
         }
         explorer
-            .arg(&path)
+            // Quoted by hand: Rust quotes only for spaces, and explorer splits a bare path
+            // at its commas. No Windows path holds a quote.
+            .raw_arg(format!("\"{}\"", path.replace('"', "")))
             .spawn()
             .map_err(|e| format!("Failed to open explorer: {}", e))?;
     }
