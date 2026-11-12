@@ -1073,7 +1073,9 @@ pub struct RemoveReport {
     pub not_built: Vec<u32>,
     /// Files deleted, relative to the world folder, `/`-separated.
     pub deleted: Vec<String>,
-    /// Region files of the removed cells kept because an area outside them lies there too.
+    /// Region files that reach past the removed cells: only the cells' chunks left them.
+    pub trimmed: Vec<String>,
+    /// Region files of the removed cells left whole: each of their chunks there is shared.
     pub kept: Vec<String>,
 }
 
@@ -1084,10 +1086,65 @@ fn area_regions(a: &GeneratedArea) -> impl Iterator<Item = (i32, i32)> {
     (z0..=z1).flat_map(move |z| (x0..=x1).map(move |x| (x, z)))
 }
 
-/// Takes `cells` (plan indexes) of `job` out of the world: their region files, with the
-/// `entities/` and `poi/` files beside them, and their previews are deleted, their areas leave
-/// the manifest and the job counts them as not built. A region file another area also lies in
-/// is kept. Refused for a job the world does not know, and while a job or Minecraft has it.
+/// `[min_x, min_z, max_x, max_z]` of an area, in blocks.
+fn area_rect(a: &GeneratedArea) -> [i32; 4] {
+    [a.min_x, a.min_z, a.max_x, a.max_z]
+}
+
+fn overlaps(a: &[i32; 4], b: &[i32; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+}
+
+/// The chunks `(x, z)` of region `(rx, rz)` wholly inside `gone` and clear of `others`: what
+/// removing `gone` may take out of the region's files.
+fn cleared_chunks(rx: i32, rz: i32, gone: &[[i32; 4]], others: &[[i32; 4]]) -> Vec<(usize, usize)> {
+    let region = [rx * 512, rz * 512, rx * 512 + 511, rz * 512 + 511];
+    let gone: Vec<_> = gone.iter().filter(|r| overlaps(r, &region)).collect();
+    let others: Vec<_> = others.iter().filter(|r| overlaps(r, &region)).collect();
+    let mut out = Vec::new();
+    for cz in 0..32 {
+        for cx in 0..32 {
+            let (x0, z0) = (region[0] + cx as i32 * 16, region[1] + cz as i32 * 16);
+            let chunk = [x0, z0, x0 + 15, z0 + 15];
+            if others.iter().any(|r| overlaps(r, &chunk)) {
+                continue;
+            }
+            let inside = |x: i32, z: i32| {
+                gone.iter()
+                    .any(|r| (r[0]..=r[2]).contains(&x) && (r[1]..=r[3]).contains(&z))
+            };
+            if (z0..=z0 + 15).all(|z| (x0..=x0 + 15).all(|x| inside(x, z))) {
+                out.push((cx, cz));
+            }
+        }
+    }
+    out
+}
+
+/// Drops `chunks` from the region file at `path`, if it holds any.
+fn drop_chunks(path: &Path, chunks: &[(usize, usize)]) -> Result<(), String> {
+    // Shorter than the header: no chunks (Minecraft leaves empty files in entities/).
+    if std::fs::metadata(path).map_or(true, |m| !m.is_file() || m.len() < 8192) {
+        return Ok(());
+    }
+    let fail = |e: String| format!("Failed to remove chunks from {}: {e}", path.display());
+    let file = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|e| fail(e.to_string()))?;
+    let mut region = fastanvil::Region::from_stream(file).map_err(|e| fail(e.to_string()))?;
+    for &(x, z) in chunks {
+        region.remove_chunk(x, z).map_err(|e| fail(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Takes `cells` (plan indexes) of `job` out of the world: their chunks, with the `entities/`
+/// and `poi/` data beside them, and their previews are deleted, their areas leave the manifest
+/// and the job counts them as not built. A region file goes whole only when the cells hold all
+/// of it; a chunk another area or ground outside the cells shares is kept. Refused for a job
+/// the world does not know, and while a job or Minecraft has it.
 pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<RemoveReport, String> {
     if crate::scale::runs_on(world_dir) {
         return Err("A job is building this world; stop it first.".to_string());
@@ -1153,20 +1210,27 @@ pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<Remove
         }
         Ok(())
     };
-    let others: std::collections::HashSet<(i32, i32)> =
-        manifest.areas.iter().flat_map(area_regions).collect();
+    let others: Vec<[i32; 4]> = manifest.areas.iter().map(area_rect).collect();
+    let gone_rects: Vec<[i32; 4]> = gone.iter().map(area_rect).collect();
     let targets: std::collections::BTreeSet<(i32, i32)> =
         gone.iter().flat_map(area_regions).collect();
     let overworld = crate::world_utils::WorldLayout::of(world_dir).overworld_dir(world_dir);
-    let mut shared = Vec::new();
+    let (mut trimmed, mut shared) = (Vec::new(), Vec::new());
     for (rx, rz) in targets {
         let name = format!("r.{rx}.{rz}.mca");
-        if others.contains(&(rx, rz)) {
-            shared.push(rel(&overworld.join("region").join(&name)));
-            continue;
-        }
-        for folder in ["region", "entities", "poi"] {
-            delete(overworld.join(folder).join(&name))?;
+        let chunks = cleared_chunks(rx, rz, &gone_rects, &others);
+        let folders = ["region", "entities", "poi"].map(|f| overworld.join(f).join(&name));
+        if chunks.len() == 32 * 32 {
+            for path in folders {
+                delete(path)?;
+            }
+        } else if chunks.is_empty() {
+            shared.push(rel(&folders[0]));
+        } else {
+            for path in &folders {
+                drop_chunks(path, &chunks)?;
+            }
+            trimmed.push(rel(&folders[0]));
         }
     }
     let job_dir = world_dir.join(JOBS_DIR).join(&job);
@@ -1191,6 +1255,7 @@ pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<Remove
             }
         }
     }
+    report.trimmed = trimmed;
     report.kept = shared;
     Ok(report)
 }
@@ -1222,10 +1287,10 @@ mod tests {
     const MUNICH: &str = "48.130,11.560,48.145,11.590";
 
     /// A 3 x 3 grid of cells of 2 x 2 regions, the corner cell clipped mid-region, and one
-    /// plain area sharing a region with the middle cell: removing the middle and a corner
-    /// deletes exactly their files.
+    /// plain area inside the middle cell: removing the middle and a corner deletes the region
+    /// files they hold whole, and only their own chunks from the others.
     #[test]
-    fn removing_cells_deletes_only_their_region_files() {
+    fn removing_cells_deletes_only_their_chunks() {
         let tmp = tempfile::tempdir().unwrap();
         let world = tmp.path();
         let mut m = Manifest::new(&args_for(MUNICH, &[]), 48.13, 11.56);
@@ -1287,6 +1352,38 @@ mod tests {
         for f in &all {
             std::fs::write(world.join(f), b"x").unwrap();
         }
+        let write_region = |rel: &str, chunks: &[(usize, usize)]| {
+            let file = std::fs::File::options()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(world.join(rel))
+                .unwrap();
+            let mut region = fastanvil::Region::create(file).unwrap();
+            for &(x, z) in chunks {
+                region.write_chunk(x, z, b"chunk").unwrap();
+            }
+        };
+        let chunks_in = |rel: &str| {
+            let file = std::fs::File::open(world.join(rel)).unwrap();
+            let mut region = fastanvil::Region::from_stream(file).unwrap();
+            let mut out = Vec::new();
+            for z in 0..32 {
+                for x in 0..32 {
+                    if region.read_chunk(x, z).unwrap().is_some() {
+                        out.push((x, z));
+                    }
+                }
+            }
+            out
+        };
+        // Region (-2, -2): chunk 0 lies outside the corner cell, chunk 6 partly, 7 and 31 inside.
+        let corner = [(0, 0), (6, 6), (7, 7), (31, 31)];
+        write_region("region/r.-2.-2.mca", &corner);
+        write_region("entities/r.-2.-2.mca", &corner);
+        // Region (1, 0): chunk (5, 0) holds the plain area too.
+        write_region("region/r.1.0.mca", &[(5, 0), (20, 20)]);
         let jobs = world.join(JOBS_DIR).join("J");
         std::fs::create_dir_all(&jobs).unwrap();
         for f in [
@@ -1312,13 +1409,21 @@ mod tests {
         assert_eq!(report.job, "J");
         assert_eq!(report.removed, [0, 4]);
         assert_eq!(report.not_built, [12]);
-        assert_eq!(report.kept, ["region/r.1.0.mca"]);
+        assert_eq!(
+            report.trimmed,
+            [
+                "region/r.-2.-2.mca",
+                "region/r.-2.-1.mca",
+                "region/r.-1.-2.mca",
+                "region/r.1.0.mca"
+            ]
+        );
+        assert!(report.kept.is_empty());
+        assert_eq!(chunks_in("region/r.-2.-2.mca"), [(0, 0), (6, 6)]);
+        assert_eq!(chunks_in("entities/r.-2.-2.mca"), [(0, 0), (6, 6)]);
+        assert_eq!(chunks_in("region/r.1.0.mca"), [(5, 0)]);
         let mut gone: Vec<String> = [
-            "region/r.-2.-2.mca",
-            "region/r.-1.-2.mca",
-            "region/r.-2.-1.mca",
             "region/r.-1.-1.mca",
-            "entities/r.-2.-2.mca",
             "region/r.0.0.mca",
             "entities/r.0.0.mca",
             "region/r.0.1.mca",
