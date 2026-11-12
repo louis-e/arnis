@@ -1,7 +1,7 @@
 //! Large One World jobs (`--unit-regions`, `--one-world-workers`): the selection is cut into
 //! region-group pieces (`work_units`), each built by a run of this executable
 //! (`--one-world-unit <lease>`), several at once. A piece owns whole region files; the head
-//! piece makes the world's extras alone first; only the coordinator writes the manifest.
+//! piece makes the world's extras and starts first; only the coordinator writes the manifest.
 //! State lives in `arnis_one_world/jobs/<x0>_<z0>_<x1>_<z1>_n<N>/`, so the same command
 //! resumes the job.
 
@@ -40,6 +40,8 @@ const MAX_RETRIES: u32 = 2;
 pub const DEFAULT_UNIT_REGIONS: i32 = 8;
 /// Percent of the job's bar `--prewarm-first` fills before the build, as downloads take of a run.
 const WARM_SHARE: f64 = 20.0;
+/// A piece's progress at "Generating area...": from there it builds on every thread.
+const PARALLEL_FROM: f64 = 0.2;
 
 /// Pause holds the queue: no piece starts, the running ones finish, and the job stays
 /// resumable. Stop ends the job and kills its running pieces; the finished ones are kept,
@@ -65,6 +67,9 @@ pub struct Queue {
     /// Waiting to start, in build order.
     pending: VecDeque<usize>,
     running: BTreeSet<usize>,
+    /// Running cells not yet building in parallel. The next cell starts once none is left,
+    /// so one cell's fetching and parsing runs beside another's building.
+    prologue: BTreeSet<usize>,
     /// Pending cells that do not start until resumed. A held running cell finishes.
     held: BTreeSet<usize>,
     failed: BTreeSet<usize>,
@@ -109,15 +114,22 @@ impl Queue {
         match at.filter(|_| start).and_then(|p| self.pending.remove(p)) {
             Some(i) => {
                 self.running.insert(i);
+                self.prologue.insert(i);
                 Next::Cell(i)
             }
             None => Next::Wait,
         }
     }
 
+    /// Whether a cell may start: fewer than `cap` run, none of them in its prologue.
+    fn admits(&self, cap: usize) -> bool {
+        self.prologue.is_empty() && self.running.len() < cap
+    }
+
     /// Cell `i` ended; the state the window shows for it when it goes back to pending.
     fn finish(&mut self, i: usize, how: Outcome) -> Option<&'static str> {
         self.running.remove(&i);
+        self.prologue.remove(&i);
         self.cancel.remove(&i);
         if let Outcome::Cancelled = how {
             self.pending.push_back(i);
@@ -321,6 +333,8 @@ struct Job {
     slots: serde_json::Map<String, Value>,
     /// Cells left out, by plan index: `--skip-cells`, kept in `job.json`.
     skip: BTreeSet<usize>,
+    /// The head piece an earlier run chose and did not build, kept in `job.json`.
+    head: Option<usize>,
 }
 
 type Slots = serde_json::Map<String, Value>;
@@ -462,6 +476,10 @@ impl Job {
         let skip = kept
             .as_ref()
             .map_or_else(BTreeSet::new, |v| skip_set(&v["skip"]));
+        let head = kept
+            .as_ref()
+            .and_then(|v| v["head"].as_u64())
+            .map(|h| h as usize);
         Ok(Self {
             name,
             dir,
@@ -469,6 +487,7 @@ impl Job {
             map_base,
             slots,
             skip,
+            head,
         })
     }
 
@@ -533,12 +552,19 @@ fn skip_set(v: &Value) -> BTreeSet<usize> {
 
 /// Writes the cells left out into the job state in `dir`.
 fn save_skip(dir: &Path, skip: &BTreeSet<usize>) -> Result<(), String> {
+    save_state(dir, "skip", json!(skip))
+}
+
+/// Sets `key` in the job state in `dir`. One writer at a time: workers and the job's loop.
+fn save_state(dir: &Path, key: &str, value: Value) -> Result<(), String> {
+    static STATE: Mutex<()> = Mutex::new(());
+    let _guard = lock(&STATE);
     let state = dir.join("job.json");
     let mut v: Value = std::fs::read_to_string(&state)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or_else(|| json!({}));
-    v["skip"] = json!(skip);
+    v[key] = value;
     write(&state, &v)
 }
 
@@ -725,24 +751,22 @@ pub fn run_with(
         }
     }
 
-    // A fresh world gets its map item, settings and spawn from the first area built, so
-    // one piece goes first and alone: the one holding the requested spawn, else the one
-    // nearest the centre, whatever `--piece-order` says.
-    let head = (!ctx.extending && !queue.is_empty())
-        .then(|| {
-            user_spawn_xz(args, &selection)
-                .and_then(|(x, z)| queue.iter().position(|&i| contains(&units[i].rect, x, z)))
-                .or_else(|| (0..queue.len()).min_by_key(|&p| queue[p]))
-                .unwrap_or(0)
-        })
-        .and_then(|at| queue.remove(at));
     // Only the piece that holds the spawn gets it: a run refuses a spawn outside its area.
     let spawn_piece = spawn_piece(&units, user_spawn_xz(args, &selection));
+    // A fresh world gets its map item, settings and spawn from one piece, the head, which
+    // goes first whatever `--piece-order` says. A head an earlier run of the job chose and
+    // did not build is still owed: other pieces may be recorded by now.
+    let owed = job
+        .head
+        .filter(|&h| h < of && job.finished(&units[h]).is_none());
+    let head =
+        head_position(&queue, owed, spawn_piece, !ctx.extending).and_then(|at| queue.remove(at));
+    if head.is_some() && head != job.head && !args.prewarm {
+        save_state(&job.dir, "head", json!(head))?;
+    }
 
     let largest = units.iter().map(|u| u.regions).max().unwrap_or(1);
     let sizing = budget::sizing(args, queue.len() + usize::from(head.is_some()), largest);
-    // The head piece runs alone, so it gets the job's whole budget.
-    let alone = head.map(|_| budget::sizing(args, 1, largest));
     if sizing.workers > 1 {
         println!(
             "  {} pieces at a time, {} threads each",
@@ -953,10 +977,6 @@ pub fn run_with(
         let unit = &units[i];
         // The piece builds its halo too; its lease says which part it writes.
         let (lease, bbox) = piece_child(i)?;
-        let sizing = alone
-            .as_ref()
-            .filter(|_| head == Some(i))
-            .unwrap_or(&sizing);
         let argv = sizing.child_args(child_args(
             argv.iter().cloned(),
             &bbox,
@@ -982,8 +1002,13 @@ pub fn run_with(
             piece_record(i, state, json!({"worker": slot, "pct": 0}));
             // The window hears of a piece's progress once a second, or at 5 % more.
             let mut sent = (std::time::Instant::now(), 0.0f64);
+            let mut parallel = false;
             let seen = |f: f64| {
                 report(i, f);
+                if !parallel && f >= PARALLEL_FROM {
+                    parallel = true;
+                    lock(&queue).prologue.remove(&i);
+                }
                 let pct = f * 100.0;
                 if sent.0.elapsed().as_secs() >= 1 || pct - sent.1 >= 5.0 {
                     sent = (std::time::Instant::now(), pct);
@@ -1018,7 +1043,10 @@ pub fn run_with(
                 {
                     attempt += 1;
                     eprintln!("Piece {} failed, retrying: {}", i + 1, f.message);
+                    // Others may start while it waits; then it fetches again.
+                    lock(&queue).prologue.remove(&i);
                     std::thread::sleep(std::time::Duration::from_secs(5 * attempt as u64));
+                    lock(&queue).prologue.insert(i);
                 }
                 // The head piece makes the world's extras, so the job cannot go on without it.
                 Err(f) if head == Some(i) => {
@@ -1058,6 +1086,12 @@ pub fn run_with(
             .map_err(|e| format!("The area was written but could not be recorded: {e}"))?;
         }
         write(&job.done_path(unit), &json!(r))?;
+        // The world has its extras: a resume owes no head.
+        if head == Some(i) {
+            if let Err(e) = save_state(&job.dir, "head", Value::Null) {
+                eprintln!("Warning: Failed to keep the job's state: {e}");
+            }
+        }
         let pieces_done = finished.fetch_add(1, Ordering::Relaxed) + 1;
         record_job(None);
         piece_record(
@@ -1073,20 +1107,22 @@ pub fn run_with(
         Ok(Some(r))
     };
 
-    // The head piece builds alone, on worker 0, before any other starts.
-    let head_done = AtomicBool::new(head.is_none());
+    // The head piece goes first, on worker 0; like any piece, it holds the others back
+    // until it builds in parallel.
+    if let Some(i) = head {
+        let mut q = lock(&queue);
+        q.running.insert(i);
+        q.prologue.insert(i);
+    }
     let work = |w: usize| -> Result<(), String> {
         if let (0, Some(i)) = (w, head) {
             build(i, 0)?;
-            head_done.store(true, Ordering::Release);
         }
         while !aborting.load(Ordering::Relaxed) && !STOP.load(Ordering::Acquire) {
             let next = {
                 let mut q = lock(&queue);
                 // Paused: the queue waits while the running pieces finish.
-                let start = !PAUSE.load(Ordering::Acquire)
-                    && head_done.load(Ordering::Acquire)
-                    && q.running.len() < cap.load(Ordering::Relaxed);
+                let start = !PAUSE.load(Ordering::Acquire) && q.admits(cap.load(Ordering::Relaxed));
                 q.next(start)
             };
             let i = match next {
@@ -1229,6 +1265,23 @@ fn contains(r: &XZBBox, x: i32, z: i32) -> bool {
 fn spawn_piece(units: &[WorkUnit], spawn: Option<(i32, i32)>) -> Option<usize> {
     let (x, z) = spawn?;
     units.iter().position(|u| contains(&u.rect, x, z))
+}
+
+/// Where in `queue` the head piece waits: the one an earlier run still owes, else the one
+/// holding the spawn, else the one nearest the centre. None when the world has its extras.
+fn head_position(
+    queue: &VecDeque<usize>,
+    owed: Option<usize>,
+    spawn: Option<usize>,
+    fresh: bool,
+) -> Option<usize> {
+    if !fresh && owed.is_none() {
+        return None;
+    }
+    let at = |piece: Option<usize>| queue.iter().position(|&i| Some(i) == piece);
+    at(owed)
+        .or_else(|| at(spawn))
+        .or_else(|| (0..queue.len()).min_by_key(|&p| queue[p]))
 }
 
 const RESUME: &str = "Finished pieces are kept; run the same command again to resume.";
@@ -1691,6 +1744,38 @@ second
     }
 
     #[test]
+    fn the_next_cell_waits_for_the_running_ones_to_build_in_parallel() {
+        let mut q = Queue {
+            pending: VecDeque::from([0, 1, 2]),
+            ..Default::default()
+        };
+        assert!(q.admits(2));
+        assert_eq!(q.next(true), Next::Cell(0));
+        // Still fetching: nothing else starts, whatever the room.
+        assert!(!q.admits(2));
+        q.prologue.remove(&0);
+        assert!(q.admits(2) && !q.admits(1));
+        assert_eq!(q.next(true), Next::Cell(1));
+        // A cell that ends in its prologue stops holding the queue.
+        q.finish(1, Outcome::Failed);
+        assert!(q.admits(2));
+    }
+
+    #[test]
+    fn the_head_piece_is_owed_until_it_is_built() {
+        let queue = VecDeque::from([3, 1, 2]);
+        // A fresh world: the spawn's piece, else the one nearest the centre.
+        assert_eq!(head_position(&queue, None, Some(2), true), Some(2));
+        assert_eq!(head_position(&queue, None, Some(9), true), Some(1));
+        assert_eq!(head_position(&VecDeque::new(), None, None, true), None);
+        // A world with areas has its extras, unless an earlier run's head never got built.
+        assert_eq!(head_position(&queue, None, Some(2), false), None);
+        assert_eq!(head_position(&queue, Some(3), Some(2), false), Some(0));
+        // The owed piece is not built by this run: another one is the head.
+        assert_eq!(head_position(&queue, Some(7), None, false), Some(1));
+    }
+
+    #[test]
     fn skipped_cells_leave_the_queue_and_come_back() {
         let mut q = Queue {
             pending: VecDeque::from([0, 1, 2]),
@@ -1726,6 +1811,14 @@ second
         let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
         assert_eq!(job.skip, BTreeSet::from([1, 3]));
         assert_eq!(job.area_id(&units[2]), 7);
+        // The head a run chose is kept beside it until it is built.
+        assert_eq!(job.head, None);
+        save_state(&dir, "head", json!(Some(2))).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
+        assert_eq!((job.head, &job.skip), (Some(2), &BTreeSet::from([1, 3])));
+        save_state(&dir, "head", Value::Null).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
+        assert_eq!(job.head, None);
         let parse = |argv: &[&str]| <Args as clap::Parser>::try_parse_from(argv).unwrap();
         let plain = parse(&["arnis"]);
         assert_eq!(
@@ -2233,7 +2326,7 @@ second
                 .success());
         }
         assert!(arnis(&full, area, &job, &[]).status.success());
-        // Piece 2 dies with the panic code once, as it starts; piece 1 builds alone first.
+        // Piece 2 dies with the panic code once, as it starts; piece 1 starts first.
         let fail = tmp.join("fail");
         std::fs::write(&fail, "2 0").unwrap();
         let first = arnis(&resumed, area, &job, &[("ARNIS_TEST_FAIL_PIECE", &fail)]);

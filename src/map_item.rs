@@ -341,7 +341,8 @@ fn insert_into_inventory(world_path: &Path, map_id: i32) -> Result<(), String> {
         };
         items.push(map_item_entry(map_id, slot));
     }
-    write_gzip_nbt(&level_path, &root)
+    // Whole or not at all: a job's other pieces read level.dat while its head writes it.
+    crate::world_utils::replace_file_atomically(&level_path, &gzip_nbt_bytes(&level_path, &root)?)
 }
 
 // Quantize a bundled PNG to a locked 128x128 map; alpha below 128 stays transparent.
