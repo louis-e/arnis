@@ -17,7 +17,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 pub mod budget;
 pub mod child;
@@ -750,11 +750,8 @@ pub fn run_with(
         );
     }
     // `--mapillary-token` reads MAPILLARY_TOKEN, so a piece gets it without a command line.
-    // The Overture release listing too: asked once here instead of once per piece, and only
-    // when a piece is left to build and reads Overture. A piece's own environment does not
-    // count (`PIECE_ENV`), so this run's offline and Overpass settings go along too.
-    let reads_overture =
-        args.overture && !args.skip_objects() && (!queue.is_empty() || head.is_some());
+    // A piece's own environment does not count (`PIECE_ENV`), so this run's offline and
+    // Overpass settings go along too.
     let token: Vec<(&str, String)> = args
         .mapillary_api_token()
         .map(|t| ("MAPILLARY_TOKEN", t.to_string()))
@@ -764,12 +761,19 @@ pub fn run_with(
             (!args.overpass_url.is_empty())
                 .then(|| ("ARNIS_OVERPASS_URL", args.overpass_url.join(","))),
         )
-        .chain(
-            reads_overture
-                .then(crate::overture::shared_releases_env)
-                .flatten(),
-        )
         .collect();
+    // The Overture release listing is asked once for the pieces, only when one is left to
+    // build and reads Overture, and in the background: a piece started before the answer
+    // asks for itself.
+    let releases = Arc::new(OnceLock::new());
+    if args.overture && !args.skip_objects() && (!queue.is_empty() || head.is_some()) {
+        let releases = Arc::clone(&releases);
+        std::thread::spawn(move || releases.set(crate::overture::shared_releases_env()));
+    }
+    let piece_env = || -> Vec<(&str, String)> {
+        let listing = releases.get().cloned().flatten();
+        token.iter().cloned().chain(listing).collect()
+    };
     let lease_for = |i: usize| UnitLease {
         piece: i as u32,
         area_id: job.area_id(&units[i]),
@@ -831,7 +835,8 @@ pub fn run_with(
                 crate::progress::emit_gui_progress_update(pct, "");
             };
             let log = piece_log_path(&job.dir, i);
-            if let Err(f) = run_piece_until(&warm_argv, &token, &stopped, Path::new(&log), report) {
+            let env = piece_env();
+            if let Err(f) = run_piece_until(&warm_argv, &env, &stopped, Path::new(&log), report) {
                 if STOP.load(Ordering::Acquire) {
                     return Err(STOPPED.to_string());
                 }
@@ -958,11 +963,8 @@ pub fn run_with(
             &lease,
             spawn_piece == Some(i),
         ));
-        let child_env: Vec<(&str, String)> = sizing
-            .child_env()
-            .into_iter()
-            .chain(token.iter().cloned())
-            .collect();
+        let child_env: Vec<(&str, String)> =
+            sizing.child_env().into_iter().chain(piece_env()).collect();
         let end = |how: Outcome| lock(&queue).finish(i, how);
         let killed = || STOP.load(Ordering::Acquire) || lock(&queue).cancelled(i);
         let mut attempt = 0;
