@@ -152,7 +152,7 @@ pub struct JobRecord {
     pub name: String,
     /// The flags the window sent, without paths.
     pub settings: Vec<String>,
-    /// The area the job was started on, `[south, west, north, east]` in degrees.
+    /// The job's area, `[south, west, north, east]` in degrees, as `scale::kept_bbox` rounds it.
     pub bbox: Option<[f64; 4]>,
     pub status: JobStatus,
 }

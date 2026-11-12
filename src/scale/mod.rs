@@ -625,6 +625,7 @@ pub fn run_with(
     } else {
         crate::projection::llbbox_for_rect(&proj, &plan.rect)?
     };
+    let asked = kept_bbox(&proj, &plan.requested);
     let (rect, units) = (plan.rect, plan.units);
     let of = units.len();
     // `--only-pieces`: these are built, the job's other missing pieces wait.
@@ -918,10 +919,9 @@ pub fn run_with(
     ));
     let finished = AtomicUsize::new(lock(&results).iter().flatten().count());
     // How far the job is, kept in the manifest for the window's Projects list.
-    let (lo, hi) = (selection.min(), selection.max());
     // The command line has no window settings; it keeps the ones a window run recorded.
     let settings = Some(settings).filter(|s| !s.is_empty());
-    let first = Some((settings, [lo.lat(), lo.lng(), hi.lat(), hi.lng()]));
+    let first = Some((settings, asked));
     let record_job = |start: Option<(Option<&[String]>, [f64; 4])>| {
         let _guard = lock(&MANIFEST);
         let done = finished.load(Ordering::Relaxed);
@@ -1264,6 +1264,19 @@ fn failed_summary(mut failed: Vec<usize>, of: usize) -> String {
         numbers.join(", "),
         numbers.join(",")
     )
+}
+
+/// The job's area as the manifest keeps it, `[south, west, north, east]`: inside the outer
+/// chunks and at the map's six decimals, so the window's Resume snaps it to `requested` again.
+fn kept_bbox(proj: &crate::projection::WebMercatorProjection, requested: &XZBBox) -> [f64; 4] {
+    const INSET: f64 = 4.0;
+    let six = |v: f64| (v * 1e6).round() / 1e6;
+    [
+        six(proj.lat_for_z(requested.max_z() as f64 + 1.0 - INSET)),
+        six(proj.lon_for_x(requested.min_x() as f64 + INSET)),
+        six(proj.lat_for_z(requested.min_z() as f64 + INSET)),
+        six(proj.lon_for_x(requested.max_x() as f64 + 1.0 - INSET)),
+    ]
 }
 
 /// `[min_x, min_z, max_x, max_z]`.
@@ -2172,6 +2185,32 @@ second
         )
         .unwrap();
         assert_eq!(state["argv"], json!(first));
+    }
+
+    #[test]
+    fn a_kept_job_area_plans_the_same_job_after_the_map_rounds_it() {
+        let args = <Args as clap::Parser>::parse_from(["arnis"]);
+        for (lat, lon, scale, bbox) in [
+            (44.4465, 26.099, 1.0, "44.4375,26.0865,44.4555,26.1115"),
+            (-33.9, 151.2, 4.0, "-33.95,151.15,-33.9,151.25"),
+            (52.5, 13.4, 0.05, "52.4,13.2,52.6,13.6"),
+            // Far north of the origin, where a degree of latitude is the most blocks.
+            (0.0, 0.0, 1.5, "84.2,10,84.25,10.3"),
+        ] {
+            let proj = crate::projection::WebMercatorProjection::new(lat, lon, scale);
+            let req = LLBBox::from_str(bbox).unwrap();
+            let (_, snapped) = crate::projection::snap_bbox_to_chunks(&proj, &req).unwrap();
+            let first = work_units::plan(&proj, &snapped, &args, UnitSize::N(2)).unwrap();
+            let kept = kept_bbox(&proj, &first.requested);
+            // The map reports six decimals, and the run snaps what it is given.
+            let text = kept.map(|v| format!("{v:.6}")).join(",");
+            let back = LLBBox::from_str(&text).unwrap();
+            assert_eq!(back.min().lat(), kept[0]);
+            assert_eq!(back.max().lng(), kept[3]);
+            let (_, again) = crate::projection::snap_bbox_to_chunks(&proj, &back).unwrap();
+            let resumed = work_units::plan(&proj, &again, &args, UnitSize::N(2)).unwrap();
+            assert_eq!(resumed.name, first.name, "{bbox}");
+        }
     }
 
     #[test]
