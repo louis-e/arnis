@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Tämä rakennus kestää kauan ja käyttää loppuun asti suurimman osan suorittimesta ja muistista. Jätä muut raskaat työt myöhemmäksi ja tarkista, että levytilaa on tarpeeksi.",
   "plan_confirm_docs": "Lue ohjeet",
   "plan_confirm_hold": "Pidä painettuna aloittaaksesi",
-  "plan_confirm_overlap": "{n} ruutua osuu jo rakennetulle maalle, ja ne rakennetaan uudelleen.",
+  "plan_confirm_overlap": "{n} ruutua osuu jo rakennetulle maalle, ja ne rakennetaan uudelleen. Kaikki mitä niihin on Minecraftissa rakennettu korvataan.",
   "about_meld_credit": "Lisäominaisuudet ovat peräisin Teddy563:n Meld-projektista.",
   "settings_section_projects": "Projektit",
   "settings_nav_projects": "Rakentamasi maailmat",

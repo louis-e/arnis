@@ -7,7 +7,7 @@ const nodes = new Map();
 const node = () => ({ value: '', checked: false, hidden: false, textContent: '', dataset: {}, classList: { toggle() {}, remove() {}, contains: () => false }, setAttribute() {}, addEventListener() {}, append() {}, replaceChildren() {} });
 globalThis.document = { querySelector: () => null, addEventListener() {}, createElement: node, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
 globalThis.window = { addEventListener() {} };
-const { initRunControls, initJobPlan, schedulePlan, planPending } = await import('../../src/gui/js/meld-features.js');
+const { initRunControls, initJobPlan, schedulePlan, planPending, planPieces, overlapCells } = await import('../../src/gui/js/meld-features.js');
 
 const sent = [];
 const plan = { units: [{ index: 0, size: 4, regions: 16, chunks: 1024, existing_chunks: 1024, bbox: '1,2,3,4' }], estimate: { workers: 1, disk_mb: [1, 2], ram_mb: [1, 2], time_min: [1, 2] } };
@@ -25,6 +25,22 @@ const states = async (skip) => {
 };
 assert.deepStrictEqual(await states(false), ['planned'], 'a built piece is drawn as planned with Skip Built off');
 assert.deepStrictEqual(await states(true), ['skipped'], 'and as already built with it on');
+
+// The hold's overlap line counts the cells generated again over built land, as the engine decides:
+// a partly built cell is built again even with Skip Built on (Expand), a finished or left-out one never.
+const cell = (existing_chunks, more = {}) => ({ chunks: 1024, existing_chunks, ...more });
+const cells = [cell(1024), cell(100), cell(0), cell(1024, { done: true }), cell(300, { skip: true })];
+assert.strictEqual(overlapCells(cells, false), 2, 'built and partly built cells are built again');
+assert.strictEqual(overlapCells(cells, true), 1, 'Skip Built leaves out only the cell with every chunk');
+assert.strictEqual(overlapCells([cell(1024, { done: true }), cell(0)], false), 0, 'a Resume rebuilds nothing');
+plan.units.push({ index: 1, size: 4, regions: 16, chunks: 1024, existing_chunks: 7, bbox: '1,2,3,4' });
+await states(true);
+assert.strictEqual(planPieces().overlap, 1, 'the plan carries the count with Skip Built on');
+plan.single = true;
+await states(false);
+assert.strictEqual(planPieces().overlap, 0, 'one plain run has no cells: main asks its own question');
+plan.single = false;
+plan.units.pop();
 
 // A pending plan: asked for, not yet answered.
 let release;

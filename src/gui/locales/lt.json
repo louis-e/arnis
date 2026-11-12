@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Šis kūrimas užtrunka ilgai ir iki pabaigos naudoja didžiąją dalį procesoriaus ir atminties. Kitus sunkius darbus atidėkite ir patikrinkite, ar diske pakanka laisvos vietos.",
   "plan_confirm_docs": "Skaityti dokumentaciją",
   "plan_confirm_hold": "Laikykite nuspaudę, kad pradėtumėte",
-  "plan_confirm_overlap": "Langeliai, persidengiantys su jau sukurta žeme: {n}. Jie bus sukurti iš naujo.",
+  "plan_confirm_overlap": "Langeliai, persidengiantys su jau sukurta žeme: {n}. Jie bus sukurti iš naujo. Viskas, kas ten pastatyta Minecraft, pakeičiama.",
   "about_meld_credit": "Išplėstinės funkcijos perkeltos iš Teddy563 Meld projekto.",
   "settings_section_projects": "Projektai",
   "settings_nav_projects": "Jūsų sukurti pasauliai",

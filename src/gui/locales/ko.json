@@ -742,7 +742,7 @@
   "plan_confirm_warn": "이 생성은 오래 걸리며 끝날 때까지 CPU와 메모리 대부분을 사용합니다. 다른 무거운 작업은 나중으로 미루고 디스크 여유 공간이 충분한지 확인하세요.",
   "plan_confirm_docs": "문서 읽기",
   "plan_confirm_hold": "길게 눌러 시작",
-  "plan_confirm_overlap": "{n}개 셀이 이미 생성된 땅과 겹치며 다시 생성됩니다.",
+  "plan_confirm_overlap": "{n}개 셀이 이미 생성된 땅과 겹치며 다시 생성됩니다. Minecraft에서 그곳에 지은 것은 모두 바뀝니다.",
   "about_meld_credit": "고급 기능은 Teddy563의 Meld 프로젝트에서 가져왔습니다.",
   "settings_section_projects": "프로젝트",
   "settings_nav_projects": "만든 월드",

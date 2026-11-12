@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Ta generacja trwa długo i do końca używa większości procesora i pamięci. Odłóż inne ciężkie zadania na później i sprawdź, czy na dysku jest dość wolnego miejsca.",
   "plan_confirm_docs": "Przeczytaj dokumentację",
   "plan_confirm_hold": "Przytrzymaj, aby rozpocząć",
-  "plan_confirm_overlap": "Komórki nakładające się na już zbudowany teren: {n}. Zostaną zbudowane ponownie.",
+  "plan_confirm_overlap": "Komórki nakładające się na już zbudowany teren: {n}. Zostaną zbudowane ponownie. Wszystko, co tam zbudowano w Minecrafcie, zostanie zastąpione.",
   "about_meld_credit": "Funkcje zaawansowane pochodzą z projektu Meld autorstwa Teddy563.",
   "settings_section_projects": "Projekty",
   "settings_nav_projects": "Zbudowane przez ciebie światy",

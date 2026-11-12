@@ -742,7 +742,7 @@
   "plan_confirm_warn": "This build takes a long time and uses most of the CPU and memory until it ends. Leave other heavy work for later and check there is enough free disk space.",
   "plan_confirm_docs": "Read the docs",
   "plan_confirm_hold": "Hold to start",
-  "plan_confirm_overlap": "{n} cells overlap land already built and will be rebuilt.",
+  "plan_confirm_overlap": "{n} cells overlap land already built and will be rebuilt. Anything built there in Minecraft is replaced.",
   "about_meld_credit": "Advanced features are ported from the Meld project by Teddy563.",
   "settings_section_projects": "Projects",
   "settings_nav_projects": "Worlds you have built",

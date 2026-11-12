@@ -1465,7 +1465,7 @@ function initSettings() {
       // The hold is the one question: it says what the replace dialog would have asked.
       const overlap = document.getElementById('run-confirm-overlap');
       overlap.hidden = !plan?.overlap;
-      overlap.textContent = plan?.overlap ? oneWorldText('plan_confirm_overlap', '{n} cells overlap land already built and will be rebuilt.', { n: plan.overlap }) : '';
+      overlap.textContent = plan?.overlap ? oneWorldText('plan_confirm_overlap', '{n} cells overlap land already built and will be rebuilt. Anything built there in Minecraft is replaced.', { n: plan.overlap }) : '';
       if (!isPiecesJob()) document.getElementById('run-confirm').hidden = true;
     },
     // A job in pieces of a One World with a selection, as the run decides it: Live, Bedrock,
@@ -4549,10 +4549,13 @@ async function startGeneration(confirmed = false, prewarm = false) {
     }
     return;
   }
-  if (confirmed !== true && isPiecesJob()) {
+  const cells = isPiecesJob();
+  if (confirmed !== true && cells) {
     askRunConfirm();
     return;
   }
+  // The hold names the cells built again; a start that is no job in cells gets main's question.
+  const held = confirmed === true && cells && !planPieces()?.single;
   // Claim the guard before the first await. gui_create_world and gui_start_generation are
   // both awaited round-trips, so leaving the claim until after them lets a second click
   // through and starts a parallel run against the same process-global world floor.
@@ -4573,7 +4576,7 @@ async function startGeneration(confirmed = false, prewarm = false) {
     const oneWorld = isOneWorldEnabled();
     const oneWorldBBox = selectedBBox;
     // The overlap dialog leaves the page live, so the body, format or area may have changed under it.
-    if (oneWorld && (!(await prepareOneWorldRun(confirmed === true || prewarm)) || !isOneWorldEnabled() || selectedBBox !== oneWorldBBox)) {
+    if (oneWorld && (!(await prepareOneWorldRun(held || prewarm)) || !isOneWorldEnabled() || selectedBBox !== oneWorldBBox)) {
       const info = document.getElementById('progress-info');
       if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
       return;

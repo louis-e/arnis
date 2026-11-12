@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Esta generación tarda mucho y usa casi toda la CPU y la memoria hasta que termina. Deja otros trabajos pesados para después y comprueba que haya suficiente espacio libre en el disco.",
   "plan_confirm_docs": "Leer la documentación",
   "plan_confirm_hold": "Mantén pulsado para empezar",
-  "plan_confirm_overlap": "{n} celdas se superponen con terreno ya construido y se volverán a construir.",
+  "plan_confirm_overlap": "{n} celdas se superponen con terreno ya construido y se volverán a construir. Se reemplaza todo lo construido allí en Minecraft.",
   "about_meld_credit": "Las funciones avanzadas vienen del proyecto Meld de Teddy563.",
   "settings_section_projects": "Proyectos",
   "settings_nav_projects": "Mundos que has construido",

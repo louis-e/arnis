@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Det här bygget tar lång tid och använder det mesta av processorn och minnet tills det är klart. Vänta med annat tungt arbete och kontrollera att det finns tillräckligt med ledigt diskutrymme.",
   "plan_confirm_docs": "Läs dokumentationen",
   "plan_confirm_hold": "Håll in för att starta",
-  "plan_confirm_overlap": "{n} celler överlappar redan byggt land och byggs om.",
+  "plan_confirm_overlap": "{n} celler överlappar redan byggt land och byggs om. Allt som byggts där i Minecraft ersätts.",
   "about_meld_credit": "De avancerade funktionerna kommer från Meld-projektet av Teddy563.",
   "settings_section_projects": "Projekt",
   "settings_nav_projects": "Världar du har byggt",

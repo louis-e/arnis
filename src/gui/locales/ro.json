@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Construcția durează mult și folosește aproape tot procesorul și memoria până se termină. Lasă alte lucruri grele pentru mai târziu și verifică dacă ai destul spațiu liber pe disc.",
   "plan_confirm_docs": "Citește documentația",
   "plan_confirm_hold": "Ține apăsat ca să pornești",
-  "plan_confirm_overlap": "{n} celule se suprapun cu teren deja construit și vor fi reconstruite.",
+  "plan_confirm_overlap": "{n} celule se suprapun cu teren deja construit și vor fi reconstruite. Construcțiile Minecraft din ele vor fi înlocuite.",
   "about_meld_credit": "Funcțiile avansate sunt preluate din proiectul Meld de Teddy563.",
   "settings_section_projects": "Proiecte",
   "settings_nav_projects": "Lumile pe care le-ai construit",

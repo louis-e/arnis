@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Šī būvēšana ilgst ilgi un līdz beigām izmanto lielāko daļu procesora un atmiņas. Atliec citus smagus darbus un pārbaudi, vai diskā pietiek brīvas vietas.",
   "plan_confirm_docs": "Lasīt dokumentāciju",
   "plan_confirm_hold": "Turi nospiestu, lai sāktu",
-  "plan_confirm_overlap": "{n} šūnas pārklājas ar jau uzbūvētu zemi un tiks uzbūvētas no jauna.",
+  "plan_confirm_overlap": "{n} šūnas pārklājas ar jau uzbūvētu zemi un tiks uzbūvētas no jauna. Viss, kas tur uzbūvēts Minecraft, tiek aizstāts.",
   "about_meld_credit": "Papildu funkcijas ir pārņemtas no Teddy563 Meld projekta.",
   "settings_section_projects": "Projekti",
   "settings_nav_projects": "Jūsu izveidotās pasaules",

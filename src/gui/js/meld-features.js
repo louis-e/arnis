@@ -947,6 +947,11 @@ function legendCard() {
   return card;
 }
 
+// Cells the run generates again over land the world already has: not this job's finished cells,
+// nor the ones left out, nor the ones Skip Built skips (every chunk is there).
+export const overlapCells = (units, skipBuilt) =>
+  units.filter((u) => u.existing_chunks > 0 && !u.done && !u.skip && !(skipBuilt && u.existing_chunks >= u.chunks)).length;
+
 async function updatePlan() {
   const { req, flags, key } = planWanted();
   if (key === planKey) return;
@@ -976,9 +981,8 @@ async function updatePlan() {
   const e = plan.estimate || {};
   const done = units.filter((u) => u.done).length;
   // `done`: how much of this job an earlier run built (main.js says "Resume (n of m)").
-  // `overlap`: pieces on land the world already has, which the run builds again (Skip Built
-  // leaves those out, so then it is 0).
-  const overlap = on('meld-skip-built-toggle') ? 0 : units.filter((u) => u.existing_chunks > 0).length;
+  // `overlap`: what the hold warns of; one plain run has no cells, so main's question asks instead.
+  const overlap = plan.single === true ? 0 : overlapCells(units, on('meld-skip-built-toggle'));
   planAnswered = key;
   lastPlan = { n: units.length, w: e.workers, done, overlap, single: plan.single === true, job: plan.job };
   onPlan();

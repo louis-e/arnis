@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Ez az építés sokáig tart, és a végéig a processzor és a memória nagy részét használja. Hagyd későbbre a többi nehéz munkát, és ellenőrizd, hogy van-e elég szabad lemezterület.",
   "plan_confirm_docs": "Dokumentáció",
   "plan_confirm_hold": "Tartsd lenyomva az indításhoz",
-  "plan_confirm_overlap": "{n} cella átfed már megépített területet, és újra fog épülni.",
+  "plan_confirm_overlap": "{n} cella átfed már megépített területet, és újra fog épülni. Minden, amit ott a Minecraftban építettek, lecserélődik.",
   "about_meld_credit": "A haladó funkciók Teddy563 Meld projektjéből származnak.",
   "settings_section_projects": "Projektek",
   "settings_nav_projects": "Az általad épített világok",

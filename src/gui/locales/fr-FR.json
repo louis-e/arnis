@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Cette génération dure longtemps et utilise la plus grande partie du processeur et de la mémoire jusqu'à la fin. Remettez les autres tâches lourdes à plus tard et vérifiez qu'il reste assez d'espace disque.",
   "plan_confirm_docs": "Lire la documentation",
   "plan_confirm_hold": "Maintenir pour démarrer",
-  "plan_confirm_overlap": "{n} cellules chevauchent un terrain déjà construit et seront reconstruites.",
+  "plan_confirm_overlap": "{n} cellules chevauchent un terrain déjà construit et seront reconstruites. Tout ce qui y a été construit dans Minecraft est remplacé.",
   "about_meld_credit": "Les fonctions avancées viennent du projet Meld de Teddy563.",
   "settings_section_projects": "Projets",
   "settings_nav_projects": "Mondes que vous avez construits",

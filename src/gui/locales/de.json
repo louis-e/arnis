@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Dieser Bau dauert lange und nutzt bis zum Ende den Großteil von CPU und Arbeitsspeicher. Verschiebe andere rechenintensive Arbeit und prüfe, ob genug Speicherplatz frei ist.",
   "plan_confirm_docs": "Dokumentation lesen",
   "plan_confirm_hold": "Zum Starten gedrückt halten",
-  "plan_confirm_overlap": "{n} Zellen überlappen bereits gebautes Land und werden neu gebaut.",
+  "plan_confirm_overlap": "{n} Zellen überlappen bereits gebautes Land und werden neu gebaut. Alles, was dort in Minecraft gebaut wurde, wird ersetzt.",
   "about_meld_credit": "Die erweiterten Funktionen stammen aus dem Meld-Projekt von Teddy563.",
   "settings_section_projects": "Projekte",
   "settings_nav_projects": "Welten, die du gebaut hast",

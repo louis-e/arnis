@@ -742,7 +742,7 @@
   "plan_confirm_warn": "この生成は長時間かかり、終わるまで CPU とメモリの大部分を使います。ほかの重い作業は後にして、ディスクの空き容量が十分か確認してください。",
   "plan_confirm_docs": "ドキュメントを読む",
   "plan_confirm_hold": "長押しで開始",
-  "plan_confirm_overlap": "{n} セルが構築済みの土地と重なっており、再構築されます。",
+  "plan_confirm_overlap": "{n} セルが構築済みの土地と重なっており、再構築されます。Minecraft でそこに建てたものは置き換えられます。",
   "about_meld_credit": "高度な機能は Teddy563 の Meld プロジェクトから移植されました。",
   "settings_section_projects": "プロジェクト",
   "settings_nav_projects": "作成したワールド",

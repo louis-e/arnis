@@ -742,7 +742,7 @@
   "plan_confirm_warn": "Ta gradnja traja dolgo in do konca porablja večino procesorja in pomnilnika. Drugo zahtevno delo odložite in preverite, ali je na disku dovolj prostora.",
   "plan_confirm_docs": "Preberi dokumentacijo",
   "plan_confirm_hold": "Pridržite za začetek",
-  "plan_confirm_overlap": "Celice, ki prekrivajo že zgrajeno ozemlje: {n}. Zgrajene bodo znova.",
+  "plan_confirm_overlap": "Celice, ki prekrivajo že zgrajeno ozemlje: {n}. Zgrajene bodo znova. Vse, kar je bilo tam zgrajeno v Minecraftu, bo zamenjano.",
   "about_meld_credit": "Napredne funkcije izvirajo iz projekta Meld avtorja Teddy563.",
   "settings_section_projects": "Projekti",
   "settings_nav_projects": "Svetovi, ki ste jih zgradili",

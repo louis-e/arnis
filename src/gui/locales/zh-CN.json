@@ -742,7 +742,7 @@
   "plan_confirm_warn": "此次生成耗时较长，在结束前会占用大部分 CPU 和内存。请暂缓其他繁重任务，并确认磁盘有足够的可用空间。",
   "plan_confirm_docs": "阅读文档",
   "plan_confirm_hold": "长按开始",
-  "plan_confirm_overlap": "{n} 个单元格与已构建的土地重叠，将被重新构建。",
+  "plan_confirm_overlap": "{n} 个单元格与已构建的土地重叠，将被重新构建。在 Minecraft 中建造的内容都会被替换。",
   "about_meld_credit": "高级功能移植自 Teddy563 的 Meld 项目。",
   "settings_section_projects": "项目",
   "settings_nav_projects": "你建造的世界",
