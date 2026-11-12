@@ -2723,6 +2723,10 @@ fn gui_start_generation(
         Ok(slot) => slot,
         Err(msg) => {
             emit_gui_error(&msg);
+            // The frontend made a new world for this run.
+            if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
+                remove_new_java_world(&PathBuf::from(&selected_world));
+            }
             return Err(msg);
         }
     };
