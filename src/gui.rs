@@ -2361,11 +2361,14 @@ fn gui_default_archive_folder() -> String {
 /// The archive folder a Local Archive field names; empty is the default.
 fn archive_folder(folder: &str) -> Result<PathBuf, String> {
     let folder = folder.trim();
-    if folder.is_empty() {
-        return Ok(crate::arnis_tiles::default_folder(&cache_root()));
-    }
-    crate::overture::pmtiles::local_path(folder)
-        .ok_or_else(|| format!("{folder} is not a folder on this computer."))
+    let path = if folder.is_empty() {
+        crate::arnis_tiles::default_folder(&cache_root())
+    } else {
+        crate::overture::pmtiles::local_path(folder)
+            .ok_or_else(|| format!("{folder} is not a folder on this computer."))?
+    };
+    // arnis-tiles runs in a folder of its own, where a relative path is another place.
+    std::path::absolute(&path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The Download Plan panel: what a run of the selection with these settings reads, and how
@@ -3998,6 +4001,15 @@ mod tests {
         let fresh = scratch.path().join("fresh");
         seed_prewarm_world(&saves.path().join("None"), &fresh).unwrap();
         assert!(!fresh.exists());
+    }
+
+    /// A relative Local Archive folder is the same place for Arnis and for arnis-tiles.
+    #[test]
+    fn an_archive_folder_is_absolute() {
+        let typed = archive_folder(" archive ").unwrap();
+        assert_eq!(typed, env::current_dir().unwrap().join("archive"));
+        assert!(archive_folder("").unwrap().is_absolute());
+        assert!(archive_folder("https://example.com/tiles").is_err());
     }
 
     /// A prewarm that left something out of the cache says what, not "Done!".
