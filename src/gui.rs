@@ -134,11 +134,15 @@ fn run_world_path(
     }
 }
 
-/// A prewarm's scratch folder, removed with the guard.
+/// A name in the shared temp folder that no other user can guess and create first.
+fn unguessable_temp(prefix: &str, suffix: &str) -> PathBuf {
+    env::temp_dir().join(format!("{prefix}{:016x}{suffix}", rand::random::<u64>()))
+}
+
+/// A prewarm's scratch folder, removed with the guard. Made new, never taken over.
 fn prewarm_scratch() -> Result<NewWorldCleanup, String> {
-    let dir = env::temp_dir().join(format!("arnis-prewarm-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
+    let dir = unguessable_temp("arnis-prewarm-", "");
+    fs::create_dir(&dir).map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
     Ok(NewWorldCleanup::new(dir))
 }
 
@@ -1830,20 +1834,29 @@ fn gui_plan_job(
     Ok(line)
 }
 
-/// An outline picked on the map, as the file `--plan-mask` reads: named by its content in
-/// the temp folder, and read back the way the job reads it.
+/// An outline picked on the map, as the file `--plan-mask` reads: a new file in the temp
+/// folder (the same outline again keeps its file), read back the way the job reads it.
 #[tauri::command(async)]
 fn gui_write_plan_mask(geojson: String) -> Result<String, String> {
     use std::hash::Hasher;
     let mut h = fnv::FnvHasher::default();
     h.write(geojson.as_bytes());
-    let path = env::temp_dir().join(format!("arnis-plan-mask-{:016x}.geojson", h.finish()));
-    fs::write(&path, &geojson).map_err(|e| format!("{}: {e}", path.display()))?;
+    let hash = h.finish();
+    static LAST: std::sync::Mutex<Option<(PathBuf, u64)>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((path, _)) = last.as_ref().filter(|(p, h)| *h == hash && p.is_file()) {
+        return Ok(path.display().to_string());
+    }
+    let path = unguessable_temp("arnis-plan-mask-", ".geojson");
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(geojson.as_bytes()))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     crate::work_units::Mask::read(&path)?;
     // The outline it replaces is read by nothing any more: a job loads its mask as it starts.
-    static LAST: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
-    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(old) = last.replace(path.clone()).filter(|old| *old != path) {
+    if let Some((old, _)) = last.replace((path.clone(), hash)) {
         let _ = fs::remove_file(old);
     }
     Ok(path.display().to_string())
@@ -3772,6 +3785,34 @@ mod tests {
         let other = file("other.geojson", 2);
         remove_old_plan_masks(dir.path(), day);
         assert!(!old.exists() && new.exists() && other.exists());
+    }
+
+    /// Temp names are not the content or the process id, and the outline stays its file.
+    #[test]
+    fn temp_files_are_new_and_unguessable() {
+        let a = prewarm_scratch().unwrap();
+        let b = prewarm_scratch().unwrap();
+        assert!(a.path.is_dir() && b.path.is_dir() && a.path != b.path);
+        let name = a.path.file_name().unwrap().to_string_lossy().into_owned();
+        let random = name.strip_prefix("arnis-prewarm-").unwrap();
+        assert!(
+            random.len() == 16 && u64::from_str_radix(random, 16).is_ok(),
+            "{name}"
+        );
+        let (pa, pb) = (a.path.clone(), b.path.clone());
+        drop((a, b));
+        assert!(!pa.exists() && !pb.exists());
+        let square = |d: f64| {
+            serde_json::json!({"type": "Polygon", "coordinates": [[
+                [13.0, 52.0], [13.0 + d, 52.0], [13.0 + d, 52.0 + d], [13.0, 52.0]
+            ]]})
+            .to_string()
+        };
+        let first = gui_write_plan_mask(square(0.1)).unwrap();
+        assert_eq!(gui_write_plan_mask(square(0.1)).unwrap(), first);
+        let second = gui_write_plan_mask(square(0.2)).unwrap();
+        assert!(second != first && !Path::new(&first).exists());
+        let _ = fs::remove_file(second);
     }
 
     /// A prewarm leaves an existing selected world alone, even sent as a new world, and runs
