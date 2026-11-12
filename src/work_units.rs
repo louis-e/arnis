@@ -836,7 +836,7 @@ mod tests {
             snap_regions: Some(SnapRegions::Cover),
             ..Default::default()
         });
-        // Room for two 8 x 8 pieces at scale 1 (976 MB each).
+        // Room for two 8 x 8 pieces at scale 1 (1300 MB each).
         args.ram_budget_mb = Some(4000);
         let p = plan(&proj, &req, &args, UnitSize::Auto).unwrap();
         // Covered to the 2-region lattice: 8 x 8 regions around block 0.
@@ -859,7 +859,7 @@ mod tests {
         assert_eq!(area, ((x1 - x0 + 1) / 16 * ((z1 - z0 + 1) / 16)) as u64);
         // Less memory: 4 x 4 pieces, and another job folder.
         let eights = p.name.clone();
-        args.ram_budget_mb = Some(1500);
+        args.ram_budget_mb = Some(2000);
         let p = plan(&proj, &wide, &args, UnitSize::Auto).unwrap();
         assert!(p.units.iter().all(|u| u.size == 4));
         assert!(p.name.ends_with("_nauto4") && eights.ends_with("_nauto8"));
@@ -982,8 +982,8 @@ mod tests {
                     (UnitSize::N(2), 4000),
                     (UnitSize::N(4), 4000),
                     (UnitSize::Auto, 4000),
-                    (UnitSize::Auto, 10176),
-                    (UnitSize::Auto, 16224),
+                    (UnitSize::Auto, 12600),
+                    (UnitSize::Auto, 19320),
                 ] {
                     args.ram_budget_mb = Some(mb);
                     let p = plan(&proj, &req, &args, size).unwrap();
@@ -1139,7 +1139,7 @@ mod tests {
             plan_mask: Some(geojson.clone()),
             ..Default::default()
         });
-        args.ram_budget_mb = Some(10176);
+        args.ram_budget_mb = Some(12600);
         let twelve = plan(&proj, &req, &args, UnitSize::Auto).unwrap();
         assert!(twelve.name.contains("_nauto12"));
         assert!(twelve.units.iter().all(|u| [12, 6, 3].contains(&u.size)));

@@ -19,12 +19,12 @@ pub const MAX_WORKERS: usize = 6;
 /// CPU share planned for, leaving the machine usable.
 const CPU_TARGET: usize = 90;
 
-/// Peak memory of one piece of `regions` regions before any has reported. Measured with warm
-/// caches and 5 threads a piece: 8 x 8 regions 825 MB, 4 x 4 529 MB. More threads raise it
-/// (about a fifth at 9), which `Sizing::cap_for` catches once a piece reports.
+/// Peak memory of one piece of `regions` regions before any has reported. Measured in central
+/// Berlin with warm caches and 9 threads a piece: 16 x 16 regions 3,100 MB, 8 x 8 1,290 MB,
+/// 4 x 4 810 MB. More threads raise it, which `Sizing::cap_for` catches once a piece reports.
 pub fn estimate_piece_mb(regions: u64, scale: f64) -> u64 {
-    let per_region = if scale >= 0.5 { 9 } else { 8 };
-    400 + per_region * regions
+    let per_region = if scale >= 0.5 { 10 } else { 9 };
+    660 + per_region * regions
 }
 
 /// Largest side, in regions, that `--unit-regions auto` gives a piece: 16 or 12 when
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn piece_memory_follows_its_size_and_scale() {
-        assert_eq!(estimate_piece_mb(16, 1.0), 544);
+        assert_eq!(estimate_piece_mb(16, 1.0), 820);
         assert!(estimate_piece_mb(64, 1.0) > estimate_piece_mb(64, 0.05));
         assert_eq!(reserve_mb(8_000), 2048);
         assert_eq!(reserve_mb(64_000), 6400);
@@ -278,18 +278,18 @@ mod tests {
 
     #[test]
     fn auto_pieces_are_as_large_as_the_memory_fits() {
-        // Six 16 x 16 pieces at scale 1 need 6 x 2704 MB, six 12 x 12 6 x 1696 MB; two
-        // 8 x 8 2 x 976 MB, two 4 x 4 2 x 544 MB.
+        // Six 16 x 16 pieces at scale 1 need 6 x 3220 MB, six 12 x 12 6 x 2100 MB; two
+        // 8 x 8 2 x 1300 MB, two 4 x 4 2 x 820 MB.
         for (mb, side) in [
-            (16224, 16),
-            (16223, 12),
-            (10176, 12),
-            (10175, 8),
+            (19320, 16),
+            (19319, 12),
+            (12600, 12),
+            (12599, 8),
             (4000, 8),
-            (1952, 8),
-            (1951, 4),
-            (1088, 4),
-            (1087, 2),
+            (2600, 8),
+            (2599, 4),
+            (1640, 4),
+            (1639, 2),
             (10, 2),
         ] {
             let args = parse(&["--ram-budget-mb", &mb.to_string()]);
@@ -352,7 +352,7 @@ mod tests {
             16,
             16,
         );
-        // 16 threads allow 3 workers, 6000 MB at ~544 MB a piece allow 11.
+        // 16 threads allow 3 workers, 6000 MB at 820 MB a piece allow 7.
         assert_eq!((s.workers, s.threads, s.ram_mb), (3, 16, Some(2000)));
         assert_eq!(s.usable_mb, Some(6000));
         // Less than one piece needs: one at a time, never with less than that need.
@@ -368,7 +368,7 @@ mod tests {
             16,
             16,
         );
-        assert_eq!((s.workers, s.threads, s.ram_mb), (1, 16, Some(544)));
+        assert_eq!((s.workers, s.threads, s.ram_mb), (1, 16, Some(820)));
         assert_eq!(s.usable_mb, Some(300));
     }
 
@@ -388,10 +388,10 @@ mod tests {
         assert_eq!(plan, 4);
     }
 
+    // The largest peak a piece of central Berlin reported with 9 threads; 16 x 16 is one run.
     #[test]
     fn estimate_tracks_measured_peak() {
-        for (regions, job_peak_mb, workers) in [(64, 3298.0, 4.0), (16, 2116.0, 4.0)] {
-            let peak = job_peak_mb / workers;
+        for (regions, peak) in [(256, 3100.0), (64, 1290.0), (16, 810.0)] {
             let est = estimate_piece_mb(regions, 1.0) as f64;
             assert!(
                 est >= peak && est <= peak * 1.3,
@@ -410,9 +410,9 @@ mod tests {
             2
         );
         // 4 cores, 3 GB to spare: one piece at a time.
-        assert_eq!(auto_max_regions(&parse(&["--ram-budget-mb", "1500"])), 4);
+        assert_eq!(auto_max_regions(&parse(&["--ram-budget-mb", "2000"])), 4);
         assert_eq!(
-            auto_plan(4 * CPU_TARGET / 100, 16, 1500, estimate_piece_mb(16, 1.0)),
+            auto_plan(4 * CPU_TARGET / 100, 16, 2000, estimate_piece_mb(16, 1.0)),
             1
         );
     }
