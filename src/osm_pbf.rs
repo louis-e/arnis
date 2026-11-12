@@ -109,6 +109,19 @@ fn cache_root_in(root: &Path) -> PathBuf {
     root.join("arnis").join("osm-pbf")
 }
 
+/// The extract cache, for the settings panel's size and Clear Cache.
+pub fn cache_dir() -> Option<PathBuf> {
+    crate::elevation::cache::user_cache_dir().map(|d| cache_root_in(&d))
+}
+
+/// Clears the downloaded extracts and their bakes.
+pub fn clear_osm_pbf_cache() -> crate::elevation::cache::CacheClearStats {
+    match cache_dir() {
+        Some(d) => crate::elevation::cache::clear_cache_dir(&d),
+        None => Default::default(),
+    }
+}
+
 /// What `--osm-pbf` needs for a selection, as the caches hold it.
 #[derive(serde::Serialize, Debug, Default, PartialEq)]
 pub struct ExtractPlan {
@@ -330,7 +343,7 @@ fn locate(src: &Source, want: &E7Box) -> Result<PathBuf> {
     };
     let dest =
         download_path(&cache_root()?, &url).ok_or_else(|| format!("not a .pbf url: {url}"))?;
-    if !dest.is_file() {
+    if !downloaded_whole(&dest) {
         download(&url, &dest, cap)?;
     } else if let Some(cap) = cap {
         let bytes = std::fs::metadata(&dest).map_or(0, |m| m.len());
@@ -364,6 +377,43 @@ pub(crate) fn download_path(cache: &Path, url: &str) -> Option<PathBuf> {
         .map(|b| format!("{b:02x}"))
         .collect();
     Some(cache.join("downloads").join(key).join(name))
+}
+
+/// Whether the extract is at `dest` and as long as its server declared, when it declared it:
+/// a short one is fetched again.
+fn downloaded_whole(dest: &Path) -> bool {
+    let Ok(m) = std::fs::metadata(dest) else {
+        return false;
+    };
+    let declared = dest
+        .parent()
+        .zip(dest.file_name())
+        .and_then(|(dir, name)| read_sizes(dir).get(&*name.to_string_lossy()).copied());
+    m.is_file() && declared.is_none_or(|bytes| m.len() == bytes)
+}
+
+/// A download's partial file, one per process: two runs fetching one extract never share it.
+fn part_path(dest: &Path) -> PathBuf {
+    dest.with_extension(format!("pbf.{}.part", std::process::id()))
+}
+
+/// Removes the partial files a killed download left beside `dest`. A running one writes at
+/// least once per read timeout, so a day without a write means none is.
+fn remove_stale_parts(dest: &Path) {
+    let (Some(dir), Some(name)) = (dest.parent(), dest.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}.", name.to_string_lossy());
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        let stale = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| {
+            t.elapsed()
+                .is_ok_and(|age| age > Duration::from_secs(86_400))
+        });
+        if stale && file.starts_with(&prefix) && file.ends_with(".part") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// The file name a downloaded extract is kept under: the url's last part,
@@ -507,7 +557,7 @@ fn fetch_span(
     Ok(())
 }
 
-/// Streams `url` to `<dest>.part` over byte-range connections, one --max-downloads permit
+/// Streams `url` to this process's `.part` beside `dest` over byte-range connections, one --max-downloads permit
 /// each, then renames it into place; reports progress for `item` across `span` (and `bar`).
 /// `Ok(false)` when `cancel` stopped it; a HEAD size past `cap` is refused.
 pub fn fetch_extract(
@@ -589,7 +639,8 @@ pub fn fetch_extract(
     };
     report(0, 0.0);
 
-    let part = dest.with_extension("pbf.part");
+    remove_stale_parts(dest);
+    let part = part_path(dest);
     let file = std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
     if total > 0 {
         file.set_len(total).map_err(|e| e.to_string())?;
@@ -1388,6 +1439,39 @@ mod tests {
         assert!(check_extract_size("liechtenstein", 3_463_268, MAX_PICKED_EXTRACT_BYTES).is_ok());
         let e = check_extract_size("germany", 4_400_000_000, MAX_PICKED_EXTRACT_BYTES).unwrap_err();
         assert!(e.contains("germany") && e.contains("4.4 GB"), "{e}");
+    }
+
+    #[test]
+    fn a_short_extract_is_fetched_again_and_parts_are_per_process() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("liechtenstein-latest.osm.pbf");
+        assert!(!downloaded_whole(&dest));
+        std::fs::write(&dest, [0u8; 10]).unwrap();
+        // No size on record: taken as it is.
+        assert!(downloaded_whole(&dest));
+        remember_size(tmp.path(), "liechtenstein-latest.osm.pbf", 10);
+        assert!(downloaded_whole(&dest));
+        remember_size(tmp.path(), "liechtenstein-latest.osm.pbf", 12);
+        assert!(!downloaded_whole(&dest));
+        let part = part_path(&dest);
+        let name = part.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(
+            name,
+            format!("liechtenstein-latest.osm.pbf.{}.part", std::process::id())
+        );
+        // A part nothing wrote to for a day goes; a fresh one stays.
+        let old = tmp.path().join("liechtenstein-latest.osm.pbf.1.part");
+        std::fs::write(&old, b"x").unwrap();
+        std::fs::write(&part, b"x").unwrap();
+        let day_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(day_ago)
+            .unwrap();
+        remove_stale_parts(&dest);
+        assert!(!old.exists() && part.exists() && dest.exists());
     }
 
     #[test]

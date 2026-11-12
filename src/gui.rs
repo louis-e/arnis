@@ -1226,7 +1226,10 @@ fn cache_size_string() -> String {
     total = total.saturating_add(dir_size_bytes(&crate::canopy::canopy_cache_dir()));
     // Its own root beside the tile cache, and Clear Cache deletes it.
     total = total.saturating_add(dir_size_bytes(&crate::overture::cache_root()));
-    if let Some(d) = crate::osm_tiles::cache_root() {
+    for d in [crate::osm_tiles::cache_root(), crate::osm_pbf::cache_dir()]
+        .into_iter()
+        .flatten()
+    {
         total = total.saturating_add(dir_size_bytes(&d));
     }
     for root in crate::models_3d::model_cache_roots() {
@@ -1303,6 +1306,7 @@ fn clear_tile_caches_now() -> Result<String, String> {
         .combined(crate::canopy::clear_canopy_cache())
         .combined(crate::overture::clear_overture_cache())
         .combined(crate::osm_tiles::clear_osm_tiles_cache())
+        .combined(crate::osm_pbf::clear_osm_pbf_cache())
         .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
