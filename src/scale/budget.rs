@@ -31,12 +31,7 @@ pub fn estimate_piece_mb(regions: u64, scale: f64) -> u64 {
 /// `MAX_WORKERS` such pieces fit `--ram-budget-mb`, else 8 or 4 when two do, else 2. Without a
 /// budget, the machine's memory less the reserve: total, so a resumed job cuts the same pieces.
 pub fn auto_max_regions(args: &Args) -> i32 {
-    let budget = args.ram_budget_mb.unwrap_or_else(|| {
-        let mut sys = sysinfo::System::new();
-        sys.refresh_memory();
-        let total = sys.total_memory() / (1024 * 1024);
-        total.saturating_sub(reserve_mb(total))
-    });
+    let budget = memory_budget_mb(args);
     [
         (16, MAX_WORKERS),
         (12, MAX_WORKERS),
@@ -53,10 +48,26 @@ fn reserve_mb(total_mb: u64) -> u64 {
     (total_mb / 10).max(2048)
 }
 
-/// Ground at scale 1, km², below which `auto` builds one plain run instead of pieces. Bucharest,
-/// warm caches, 24 threads, one run vs 8 x 8 pieces x 4: 150 km² 35.6 vs 36.5 s, 200 km² 45.7
-/// vs 42.6 s, 256 km² 72.7 vs 64.9 s.
-pub const AUTO_SINGLE_BELOW_KM2: f64 = 220.0;
+/// `--ram-budget-mb`, else the machine's memory less the reserve.
+fn memory_budget_mb(args: &Args) -> u64 {
+    args.ram_budget_mb.unwrap_or_else(|| {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        let total = sys.total_memory() / (1024 * 1024);
+        total.saturating_sub(reserve_mb(total))
+    })
+}
+
+/// Ground at scale 1, km², below which `auto` builds one plain run instead of pieces, where
+/// the window first warns about the size. Berlin, warm caches, 10 cores, one run vs auto:
+/// 100 km² 43.8 s / 3.3 GB vs 37.8-43.6 s / 2.5 GB, 198 km² 85-90 s / 5.2 GB vs 76-84 s / 3.3 GB.
+pub const AUTO_SINGLE_BELOW_KM2: f64 = 100.0;
+
+/// Peak memory of one plain run. Berlin, warm caches: 27 km² 1.5 GB, 100 km² 3.3 GB, 198 km²
+/// 5.3 GB.
+fn estimate_single_mb(km2: f64) -> u64 {
+    1000 + (25.0 * km2) as u64
+}
 
 /// Whether `single_below_break_even` builds a selection of `km2` (ground at scale 1 times
 /// scale squared) in one plain run; the window's plan asks the same.
@@ -75,6 +86,7 @@ pub fn builds_single(args: &Args, km2: f64) -> bool {
         && !args.prewarm
         && !args.prewarm_first
         && km2 < AUTO_SINGLE_BELOW_KM2
+        && estimate_single_mb(km2) <= memory_budget_mb(args)
 }
 
 /// `--unit-regions auto --one-world-workers auto` on a selection smaller than
@@ -457,9 +469,14 @@ mod tests {
             ];
             <Args as clap::Parser>::parse_from(cmd)
         };
-        let auto = args("auto", "auto");
+        let mut auto = args("auto", "auto");
+        auto.ram_budget_mb = Some(8000);
         assert!(builds_single(&auto, AUTO_SINGLE_BELOW_KM2 - 1.0));
         assert!(!builds_single(&auto, AUTO_SINGLE_BELOW_KM2));
+        // One run of 60 km² needs about 2.5 GB: short of that, pieces.
+        auto.ram_budget_mb = Some(2000);
+        assert!(builds_single(&auto, 30.0));
+        assert!(!builds_single(&auto, 60.0));
         assert!(!builds_single(&args("4", "auto"), 10.0));
         assert!(!builds_single(&args("auto", "4"), 10.0));
         // The runner's drop agrees with the plan's answer.
