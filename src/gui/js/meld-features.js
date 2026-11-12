@@ -457,10 +457,13 @@ function retry(list) {
 let mapWindow = () => null;
 let world = () => '';
 let refreshWorld = () => {};
+// Whether Start would start a run now (main.js: not during a bake or a precompute).
+let startReady = () => true;
 
-export function initRunControls({ invoke, post, start, localize, key = () => '', map = () => null, world: worldOf = () => '', refreshWorld: refresh = () => {} }) {
+export function initRunControls({ invoke, post, start, localize, key = () => '', map = () => null, world: worldOf = () => '', refreshWorld: refresh = () => {}, ready = () => true }) {
   world = worldOf;
   refreshWorld = refresh;
+  startReady = ready;
   keyOf = key;
   mapWindow = map;
 
@@ -571,7 +574,7 @@ let pieceJob = '';
 const cellsJob = () => (pieces.size && pieceJob) || lastPlan?.job || '';
 
 // Whether a start now would build cells of the job on the map.
-const runsCells = () => isPiecesJob() && (!pieces.size || keyOf() === jobKey);
+const runsCells = () => startReady() && isPiecesJob() && (!pieces.size || keyOf() === jobKey);
 
 // A menu action on `cells` (plan indexes). A running job takes it through the engine; between
 // runs Skip, Include and Retry are the next run's, and Rebuild and Remove delete built land

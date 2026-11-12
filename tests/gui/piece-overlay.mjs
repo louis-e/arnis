@@ -8,7 +8,8 @@ const node = () => ({ value: '', checked: false, hidden: false, textContent: '',
 globalThis.document = { querySelector: () => null, addEventListener() {}, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
 const winListeners = [];
 globalThis.window = { addEventListener: (t, f) => winListeners.push([t, f]) };
-const { notePiece, clearPieces, dropStalePieces, showRunControls, initRunControls, initJobPlan, failedLine, meldFlags } =
+await import('../../src/gui/js/piece-style.js');
+const { notePiece, clearPieces, dropStalePieces, showRunControls, initRunControls, initJobPlan, failedLine, meldFlags, cellAction } =
   await import('../../src/gui/js/meld-features.js');
 
 const sent = [];
@@ -170,6 +171,27 @@ assert.equal(halo.attrs['aria-pressed'], 'false');
   assert.ok(shown.length > 0);
   shown.forEach((c) => assert.deepEqual(c, ['gui_show_in_folder', { path: 'C:/j/piece-2.log' }]));
   console.log('piece-overlay G8 ok');
+}
+
+// The cell menu's Rebuild removes land before it builds: while Start would refuse (a bake, a
+// precompute) or would not build in cells, nothing is removed.
+{
+  const removed = [];
+  let ready = false;
+  let rebuilds = 0;
+  initRunControls({ key: () => 'bbox-r|', map: () => mapWin, invoke: async (c, a) => { removed.push([c, a.cells]); return { removed: a.cells }; }, post: (m) => sent.push(m), start: async () => { rebuilds++; }, localize: () => {}, ready: () => ready });
+  clearPieces();
+  rec(0, 'done');
+  showRunControls(false);
+  const rebuild = () => cellAction('rebuild', [0], { ask: async () => true });
+  await rebuild();
+  cellsJob = false;
+  ready = true;
+  await rebuild();
+  assert.deepEqual([removed, rebuilds], [[], 0], 'refused before anything is removed');
+  cellsJob = true;
+  await rebuild();
+  assert.deepEqual([removed, rebuilds], [[['gui_cells_remove', [0]]], 1], 'removed, then built again');
 }
 
 // Many records in one frame reach the map once, with the newest state.

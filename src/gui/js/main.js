@@ -1456,6 +1456,8 @@ function initSettings() {
     // Remove and Rebuild in the cell menu work on the open One World, then read it again.
     world: () => oneWorldInfo?.world_path || '',
     refreshWorld: () => { oneWorldOverlayKey = null; refreshOneWorldState(); },
+    // Start refuses during a bake or a Mapillary precompute: a Rebuild must not remove cells then.
+    ready: () => !bakeRunning && !precomputeRunning,
   });
   initCellMenu();
   document.getElementById("bbox-features-cta").addEventListener("click", useMeldPieces);
