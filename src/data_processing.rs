@@ -1066,9 +1066,15 @@ pub fn generate_world_with_options(
     // (512 = 4x supersampling) instead of the full-resolution preview buffer.
     let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
     let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
-        Arc::new(if wants_png && one_world.is_some() {
-            // Every area of a One World is sent to the map overlay at once.
-            PreviewAccumulator::new_capped(&own_rect, 2048)
+        Arc::new(if let (true, Some(run)) = (wants_png, one_world) {
+            // Every area of a One World is sent to the map overlay at once. A piece gets its
+            // share of the job's picture, enough for the map item and the boards that crop it.
+            let floor = if wants_local_maps { 1024 } else { 512 };
+            let side = run
+                .unit
+                .as_ref()
+                .map_or(2048, |u| u.preview_side(2048, floor));
+            PreviewAccumulator::new_capped(&own_rect, side)
         } else if wants_png {
             PreviewAccumulator::new(&own_rect)
         } else if wants_local_maps {

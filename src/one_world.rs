@@ -447,6 +447,16 @@ pub struct UnitLease {
     pub tiled: bool,
 }
 
+impl UnitLease {
+    /// The longest side of this piece's preview: its share of the `job_side` pixels one run
+    /// of the whole job would draw, at least `floor`.
+    pub fn preview_side(&self, job_side: u32, floor: u32) -> u32 {
+        let side = |r: &[i32; 4]| (r[2] - r[0]).max(r[3] - r[1]) as u64 + 1;
+        let share = (u64::from(job_side) * side(&self.rect)).div_ceil(side(&self.job));
+        (share as u32).clamp(floor.min(job_side), job_side)
+    }
+}
+
 impl RunContext {
     pub fn preview_path(&self) -> PathBuf {
         self.world_dir
@@ -1921,6 +1931,27 @@ mod tests {
         m.save(&world).unwrap();
         let err = Manifest::load(&world).unwrap_err();
         assert!(err.contains("damaged"), "{err}");
+    }
+
+    #[test]
+    fn a_piece_preview_is_its_share_of_the_jobs() {
+        let lease = |rect, job| UnitLease {
+            piece: 0,
+            area_id: 1,
+            extending: true,
+            first_map_id: 0,
+            rect,
+            job,
+            tiled: true,
+        };
+        // A quarter of the job: half the side, so the step one run of the job would use.
+        let quarter = lease([0, 0, 4095, 4095], [0, 0, 8191, 8191]);
+        assert_eq!(quarter.preview_side(2048, 512), 1024);
+        // A small piece of a large job keeps the floor; a job of one piece the whole picture.
+        let small = lease([0, 0, 2047, 2047], [0, 0, 32767, 32767]);
+        assert_eq!(small.preview_side(2048, 512), 512);
+        let only = lease([0, 0, 4095, 2047], [0, 0, 4095, 2047]);
+        assert_eq!(only.preview_side(2048, 512), 2048);
     }
 
     #[test]
