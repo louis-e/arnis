@@ -134,6 +134,25 @@ fn run_world_path(
     }
 }
 
+/// A One World prewarm warms what the build will read: the frame, areas and elevation source
+/// of the world it extends, from a copy of that world's manifest in the scratch folder.
+fn seed_prewarm_world(world: &Path, scratch_world: &Path) -> Result<(), String> {
+    if !world.join(crate::one_world::MANIFEST_FILE).is_file() {
+        return Ok(());
+    }
+    fs::create_dir_all(scratch_world)
+        .map_err(|e| format!("Failed to create {}: {e}", scratch_world.display()))?;
+    // `prepare` opens a manifest only beside a level.dat.
+    for name in [crate::one_world::MANIFEST_FILE, "level.dat"] {
+        let from = world.join(name);
+        if from.is_file() {
+            fs::copy(&from, scratch_world.join(name))
+                .map_err(|e| format!("Failed to copy {}: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// A name in the shared temp folder that no other user can guess and create first.
 fn unguessable_temp(prefix: &str, suffix: &str) -> PathBuf {
     env::temp_dir().join(format!("{prefix}{:016x}{suffix}", rand::random::<u64>()))
@@ -2835,6 +2854,15 @@ fn gui_start_generation(
                 one_world.then_some(one_world_name.as_str()),
                 scratch.as_ref().map(|g| g.path.as_path()),
             );
+            // No saves folder, no world to read: the name alone would be a path in the
+            // working directory.
+            if one_world && scratch.is_some() && !selected_world.trim().is_empty() {
+                let world = one_world_dir(&selected_world, &one_world_name);
+                if let Err(e) = seed_prewarm_world(&world, &world_path) {
+                    emit_gui_error(&e);
+                    return Err(e);
+                }
+            }
 
             // Determine world format from UI selection first (needed for session lock decision)
 
@@ -3910,6 +3938,48 @@ mod tests {
             one_world_dir("saves", &name)
         );
         assert_eq!(run_world_path("w", None, None), PathBuf::from("w"));
+    }
+
+    /// "Download now" for a One World that exists warms in that world's frame, and leaves
+    /// the world itself as it is.
+    #[test]
+    fn a_one_world_prewarm_takes_the_existing_worlds_frame() {
+        use clap::Parser;
+        let saves = tempfile::tempdir().unwrap();
+        let world = one_world_dir(&saves.path().display().to_string(), "Frame");
+        let first = "48.130,11.560,48.145,11.590";
+        let mut args = Args::parse_from(["arnis", "--output-dir", ".", "--bbox", first]);
+        args.aws_only_elevation = true;
+        let frame = |args: &Args| {
+            let run = args.one_world_run.as_ref().unwrap();
+            (run.origin_lat, run.origin_lon)
+        };
+        let made = crate::one_world::prepare(&world, &LLBBox::from_str(first).unwrap(), &mut args);
+        drop(made.unwrap());
+        let origin = frame(&args);
+        let manifest = fs::read(world.join(crate::one_world::MANIFEST_FILE)).unwrap();
+
+        let scratch = tempfile::tempdir().unwrap();
+        let warm = run_world_path("", Some("Frame"), Some(scratch.path()));
+        seed_prewarm_world(&world, &warm).unwrap();
+        let second = "48.200,11.700,48.215,11.730";
+        let mut args = Args::parse_from(["arnis", "--output-dir", ".", "--bbox", second]);
+        let session =
+            crate::one_world::prepare(&warm, &LLBBox::from_str(second).unwrap(), &mut args)
+                .unwrap();
+        assert!(!session.created);
+        assert!(args.aws_only_elevation);
+        assert_eq!(frame(&args), origin);
+        drop(session);
+        assert_eq!(
+            fs::read(world.join(crate::one_world::MANIFEST_FILE)).unwrap(),
+            manifest
+        );
+
+        // A world that does not exist yet seeds nothing: the prewarm starts its own.
+        let fresh = scratch.path().join("fresh");
+        seed_prewarm_world(&saves.path().join("None"), &fresh).unwrap();
+        assert!(!fresh.exists());
     }
 
     /// A prewarm that left something out of the cache says what, not "Done!".
