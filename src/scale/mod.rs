@@ -753,13 +753,19 @@ pub fn run_with(
     }
     // `--mapillary-token` reads MAPILLARY_TOKEN, so a piece gets it without a command line.
     // The Overture release listing too: asked once here instead of once per piece, and only
-    // when a piece is left to build and reads Overture.
+    // when a piece is left to build and reads Overture. A piece's own environment does not
+    // count (`PIECE_ENV`), so this run's offline and Overpass settings go along too.
     let reads_overture =
         args.overture && !args.skip_objects() && (!queue.is_empty() || head.is_some());
     let token: Vec<(&str, String)> = args
         .mapillary_api_token()
         .map(|t| ("MAPILLARY_TOKEN", t.to_string()))
         .into_iter()
+        .chain(args.offline.then(|| ("ARNIS_OFFLINE", "1".to_string())))
+        .chain(
+            (!args.overpass_url.is_empty())
+                .then(|| ("ARNIS_OVERPASS_URL", args.overpass_url.join(","))),
+        )
         .chain(
             reads_overture
                 .then(crate::overture::shared_releases_env)
@@ -1405,6 +1411,21 @@ fn open_piece_log(path: &Path, warm: bool) -> Option<std::fs::File> {
     Some(f)
 }
 
+/// Variables a run reads that a piece takes from the coordinator only: the window ignores
+/// them in its own environment.
+const PIECE_ENV: &[&str] = &["ARNIS_OFFLINE", "ARNIS_OVERPASS_URL", "MAPILLARY_TOKEN"];
+
+/// A piece run of `exe` with `argv`, given of [`PIECE_ENV`] only what `env` sets.
+fn piece_command(exe: &Path, argv: &[OsString], env: &[(&str, String)]) -> Command {
+    let mut cmd = Command::new(exe);
+    cmd.args(argv);
+    for name in PIECE_ENV {
+        cmd.env_remove(name);
+    }
+    cmd.envs(env.iter().map(|(k, v)| (k, v)));
+    cmd
+}
+
 /// Runs one piece to the end, or kills it as soon as `cancel` says so. `progress` gets the
 /// piece's own fraction done. Its output lines are also written to `log`.
 fn run_piece_until(
@@ -1420,11 +1441,8 @@ fn run_piece_until(
     };
     let exe =
         std::env::current_exe().map_err(|e| fail(format!("Cannot find this executable: {e}")))?;
-    let mut cmd = Command::new(exe);
-    cmd.args(argv)
-        .envs(env.iter().map(|(k, v)| (k, v)))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut cmd = piece_command(&exe, argv, env);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     child::prepare(&mut cmd);
     let mut child = cmd
         .spawn()
@@ -1743,6 +1761,20 @@ second
         assert!(std::fs::read_to_string(&p)
             .unwrap()
             .contains("no-such-flag"));
+    }
+
+    #[test]
+    fn a_piece_takes_only_the_coordinators_settings_from_the_environment() {
+        let cmd = piece_command(
+            Path::new("arnis"),
+            &[],
+            &[("MAPILLARY_TOKEN", "MLY|x".into())],
+        );
+        let envs: Vec<_> = cmd.get_envs().collect();
+        let name = std::ffi::OsStr::new;
+        assert!(envs.contains(&(name("ARNIS_OFFLINE"), None)));
+        assert!(envs.contains(&(name("ARNIS_OVERPASS_URL"), None)));
+        assert!(envs.contains(&(name("MAPILLARY_TOKEN"), Some(name("MLY|x")))));
     }
 
     #[test]
