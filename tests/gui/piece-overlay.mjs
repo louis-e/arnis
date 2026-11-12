@@ -4,11 +4,11 @@
 import assert from 'node:assert';
 
 const nodes = new Map();
-const node = () => ({ value: '', checked: false, hidden: false, textContent: '', dataset: {}, listeners: {}, classList: { toggle() {}, remove() {}, contains: () => false }, replaceChildren() {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; }, addEventListener(t, f) { this.listeners[t] = f; } });
-globalThis.document = { querySelector: () => null, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
+const node = () => ({ value: '', checked: false, hidden: false, textContent: '', style: {}, dataset: {}, listeners: {}, classList: { toggle() {}, remove() {}, contains: () => false }, replaceChildren() {}, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; }, addEventListener(t, f) { this.listeners[t] = f; } });
+globalThis.document = { querySelector: () => null, addEventListener() {}, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
 const winListeners = [];
 globalThis.window = { addEventListener: (t, f) => winListeners.push([t, f]) };
-const { notePiece, clearPieces, dropStalePieces, showRunControls, initRunControls, failedLine, meldFlags } =
+const { notePiece, clearPieces, dropStalePieces, showRunControls, initRunControls, initJobPlan, failedLine, meldFlags } =
   await import('../../src/gui/js/meld-features.js');
 
 const sent = [];
@@ -22,6 +22,9 @@ const bounds = [44.4, 26.1, 44.5, 26.2];
 const rec = (piece, state, extra = {}) => notePiece({ piece, of: 4, state, bounds, ...extra });
 const message = (data, source = mapWin) => winListeners.filter(([t]) => t === 'message').forEach(([, f]) => f({ data, source }));
 document.getElementById('advanced-meld-features-toggle').checked = true;
+// Whether Start would run a job in cells (main.js: One World on, not Live, Parallel cells set).
+let cellsJob = true;
+initJobPlan({ request: () => (cellsJob ? { savePath: 's', worldName: 'w', bboxText: '1 2 3 4', worldScale: 1 } : null) });
 
 clearPieces();
 for (let i = 0; i < 4; i++) rec(i, 'queued');
@@ -75,6 +78,31 @@ assert.deepEqual(runs[1], ['--only-pieces=2,3,4']); // failed, stopped and still
 // Another selection makes the pieces stale; the same one does not.
 dropStalePieces();
 assert.equal(last().length, 4);
+
+// A retry is only for a job in cells: where Start would run something else (Live, say), it is
+// refused and says so, and nothing starts.
+cellsJob = false;
+message({ type: 'retryPiece', piece: 1 });
+document.getElementById('run-retry-button').listeners.click();
+assert.equal(starts, 2, 'no start that would build the whole area');
+assert.equal(document.getElementById('progress-info').textContent, '3 could not be changed.');
+assert.equal(last().length, 4, 'the cells stay');
+cellsJob = true;
+
+// A run that ends after its job went stale (Advanced or Parallel cells turned off meanwhile)
+// takes its cells with it: nothing is left to retry as a whole-area run.
+showRunControls(true);
+key = 'bbox-a|off';
+showRunControls(false);
+assert.deepEqual(last(), [], 'no cells are left on the map');
+assert.equal(document.getElementById('run-controls').hidden, true);
+key = 'bbox-a|';
+clearPieces();
+for (let i = 0; i < 4; i++) rec(i, 'queued');
+rec(1, 'failed');
+showRunControls(true);
+showRunControls(false);
+assert.equal(last().length, 4, 'an unchanged job keeps them');
 
 // Finding 1: the selection (or world) changed by a path that never called dropStalePieces:
 // a retry, one piece or all, is refused and the outlines go; no --only-pieces is sent.

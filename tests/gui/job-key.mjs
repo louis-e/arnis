@@ -49,5 +49,13 @@ assert.deepStrictEqual(run().filter((f) => f.startsWith('--skip-cells')), []);
 const before = cellsKey(bbox, 'W');
 document.getElementById('meld-margin-input').value = '2';
 assert.notStrictEqual(cellsKey(bbox, 'W'), before);
+// So is whether the run builds in cells at all: Parallel cells Off or Advanced off makes the cells stale.
+const cut = cellsKey(bbox, 'W');
+document.getElementById('meld-workers-select').value = '';
+assert.notStrictEqual(cellsKey(bbox, 'W'), cut, 'Parallel cells Off');
+document.getElementById('meld-workers-select').value = '4';
+assert.strictEqual(cellsKey(bbox, 'W'), cut, 'another worker count cuts the same cells');
+document.getElementById('advanced-meld-features-toggle').checked = false;
+assert.notStrictEqual(cellsKey(bbox, 'W'), cut, 'Advanced off');
 console.log('job-key: ok');
 process.exit(0);

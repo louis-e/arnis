@@ -222,10 +222,14 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
   return f;
 }
 
-// What a job's cells belong to: the selection, the One World and the flags that cut it
-// (--only-pieces and --skip-cells number its cells). Leaves out the skip list it guards.
-export const cellsKey = (bbox, world) =>
-  `${bbox}|${world}|${meldFlags({ oneWorld: true, java: true, plan: true, forKey: true }).filter((f) => /^--(unit-regions|margin-regions|snap-regions|plan-mask|origin)=/.test(f))}`;
+// What a job's cells belong to: the selection, the One World, whether a run builds in cells at all
+// (Advanced on, Parallel cells not Off) and the flags that cut it (--only-pieces and --skip-cells
+// number its cells). Leaves out the skip list it guards.
+export const cellsKey = (bbox, world) => {
+  const flags = meldFlags({ oneWorld: true, java: true, plan: true, forKey: true });
+  const cells = flags.some((f) => f.startsWith('--one-world-workers='));
+  return `${bbox}|${world}|${cells}|${flags.filter((f) => /^--(unit-regions|margin-regions|snap-regions|plan-mask|origin)=/.test(f))}`;
+};
 
 // meldFlags in reverse: each flag a job kept, and the control it came from, with the control's
 // value when the flag is absent. Flags that carry a path (an archive, a tree pack, the plan
@@ -438,6 +442,8 @@ function showRunLine() {
 function retry(list) {
   // --only-pieces names pieces of the job the outlines came from, not of another area.
   if (keyOf() !== jobKey) return dropStalePieces();
+  // No job in cells would start (Live, say): the run would build something else.
+  if (!isPiecesJob()) return say(t('cell_ignored', '{n} could not be changed.', { n: list.length }));
   retryNext = list;
   Promise.resolve(restart()).finally(() => { retryNext = []; });
 }
@@ -556,12 +562,15 @@ function skipLocal(list, include) {
 let pieceJob = '';
 const cellsJob = () => (pieces.size && pieceJob) || lastPlan?.job || '';
 
+// Whether a start now would build cells of the job on the map.
+const runsCells = () => isPiecesJob() && (!pieces.size || keyOf() === jobKey);
+
 // A menu action on `cells` (plan indexes). A running job takes it through the engine; between
 // runs Skip, Include and Retry are the next run's, and Rebuild and Remove delete built land
 // first, after the hold. `deps` are for tests.
 export async function cellAction(action, cells, deps = {}) {
   const list = [...new Set(cells)].sort((a, b) => a - b);
-  const { call: invoke = call, ask = askCells, live = running, world: worldPath = world, job = cellsJob, after = afterRemove } = deps;
+  const { call: invoke = call, ask = askCells, live = running, world: worldPath = world, job = cellsJob, after = afterRemove, runs = runsCells } = deps;
   if (!list.length) return;
   try {
     if (globalThis.arnisCells.confirm.has(action) && !(await ask(action, list))) return;
@@ -575,6 +584,8 @@ export async function cellAction(action, cells, deps = {}) {
     } else if (action === 'retry') {
       retry(list.map((i) => i + 1));
     } else {
+      // Rebuild removes the land first: only when the run after it builds these cells again.
+      if (action === 'rebuild' && !runs()) return say(t('cell_ignored', '{n} could not be changed.', { n: list.length }));
       const [command, args] = globalThis.arnisCells.calls('remove', list, worldPath(), job())[0];
       const report = await invoke(command, args);
       say(removedLine(report), false);
@@ -698,6 +709,8 @@ function forgetPieces() {
 export function showRunControls(isRunning) {
   const wasRunning = running;
   running = isRunning;
+  // Cells whose job the window would not run again (Advanced or Parallel cells went off) end with the run.
+  if (wasRunning && !running && pieces.size && keyOf() !== jobKey) forgetPieces();
   // The hint to click a failed piece comes and goes with the run.
   if (wasRunning !== running && pieces.size) postToMap({ type: 'pieceOutlines', pieces: outlines() });
   showRunLine();

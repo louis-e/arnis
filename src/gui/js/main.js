@@ -4635,6 +4635,16 @@ async function startGeneration(confirmed = false, prewarm = false) {
     // Get rotation angle
     var rotationAngle = oneWorld ? 0 : (parseFloat(document.getElementById("rotation-angle-input").value) || 0);
 
+    const flags = meldFlags({
+      oneWorld: oneWorld,
+      java: getEffectiveWorldFormat() === "java",
+      caves: settings.cavesEnabled,
+      extendHeight: settings.disableHeightLimit && !oneWorld && getEffectiveWorldFormat() === "java",
+      lods: settings.voxyLodEnabled || settings.dhLodEnabled
+    });
+    // Held or retried as a job in cells: it runs as one, or not at all.
+    if (cells && !prewarm && !flags.some((f) => f.startsWith('--one-world-workers='))) return;
+
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         ...settings,
@@ -4657,13 +4667,7 @@ async function startGeneration(confirmed = false, prewarm = false) {
         bodyGravity: gameplayToggle('body-gravity-toggle'),
         oneWorld: oneWorld,
         oneWorldName: oneWorld ? oneWorldFolderName() : "",
-        flags: [...meldFlags({
-          oneWorld: oneWorld,
-          java: getEffectiveWorldFormat() === "java",
-          caves: settings.cavesEnabled,
-          extendHeight: settings.disableHeightLimit && !oneWorld && getEffectiveWorldFormat() === "java",
-          lods: settings.voxyLodEnabled || settings.dhLodEnabled
-        }), ...(prewarm ? ["--prewarm"] : [])],
+        flags: [...flags, ...(prewarm ? ["--prewarm"] : [])],
         selectionShapes: generationShapes({ oneWorld, shapes: selectedShapes })
     });
 
