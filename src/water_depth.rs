@@ -1124,8 +1124,8 @@ pub fn carve_lc_water_region(
             carve_water_column(editor, x, z, water_y, depth, road_mask, bwf);
         }
     }
-    if bwf.has_river && !tunnel_footprint.is_empty() {
-        deepen_rivers_over_bores(
+    if bwf.has_river {
+        deepen_shallow_rivers(
             editor,
             ground,
             xzbbox,
@@ -1138,10 +1138,11 @@ pub fn carve_lc_water_region(
     }
 }
 
-/// River columns the polygon and channel fills left one block deep over a bore, dug to the
-/// river's depth now that the shell is built. Land-cover water was handled by the carve.
+/// River columns a fill left one block deep, dug to the river's depth: a closed way drawn
+/// as a sheet of water, and a column over a bore now that its shell is built. Land-cover
+/// water was handled by the carve.
 #[allow(clippy::too_many_arguments)]
-fn deepen_rivers_over_bores(
+fn deepen_shallow_rivers(
     editor: &mut WorldEditor,
     ground: &Ground,
     xzbbox: &XZBBox,
@@ -1155,7 +1156,7 @@ fn deepen_rivers_over_bores(
     const SURFACE_REACH: i32 = 20;
     for z in z0.max(xzbbox.min_z())..=z1.min(xzbbox.max_z()) {
         for x in x0.max(xzbbox.min_x())..=x1.min(xzbbox.max_x()) {
-            if !bwf.is_river(x, z) || !at_bore(bwf, tunnel_footprint, x, z) {
+            if !bwf.is_river(x, z) {
                 continue;
             }
             let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
@@ -1177,8 +1178,15 @@ fn deepen_rivers_over_bores(
                 continue;
             }
             let depth = carve_depth(bwf.depth_at(x, z), water_y);
-            if let Some(fits) = depth_over_bore(editor, x, z, water_y, depth) {
-                carve_water_column(editor, x, z, water_y, fits, road_mask, bwf);
+            let depth = if at_bore(bwf, tunnel_footprint, x, z) {
+                depth_over_bore(editor, x, z, water_y, depth)
+            } else {
+                // A column a fill already dug keeps what was put into its water since.
+                let dug = editor.check_for_block_absolute(x, water_y - 1, z, Some(&[WATER]), None);
+                (!dug).then_some(depth)
+            };
+            if let Some(depth) = depth {
+                carve_water_column(editor, x, z, water_y, depth, road_mask, bwf);
             }
         }
     }
@@ -1545,6 +1553,43 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A closed way is drawn as a sheet of water outside land-cover water; the carve digs it
+    /// to the river's depth, once, and leaves a dry river column alone.
+    #[test]
+    fn a_sheet_of_river_water_is_dug_to_the_river_bed() {
+        use crate::block_definitions::OAK_PLANKS;
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let (bbox, ground) = lake();
+        let mut bwf = compute_big_water_field(&ground, &bbox, WaterDetail::Default, 1.0);
+        // West of the lake, on land the land cover does not call water.
+        bwf.set_river_bed(crate::river_bed::RiverBedField::uniform(2, 40, 6, 20, 3));
+        let mut editor = lake_editor(&bbox, &ground);
+        for z in 40..60 {
+            for x in 2..7 {
+                editor.set_block_absolute(WATER, x, 0, z, None, None);
+            }
+        }
+        let none = RoadMaskBitmap::new_empty();
+        carve_lake(&mut editor, &ground, &bbox, &bwf, &none);
+        // River grass grows in the dug water.
+        let wet = [WATER, SEAGRASS, TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP];
+        let water =
+            |e: &WorldEditor, x, y, z| e.check_for_block_absolute(x, y, z, Some(&wet), None);
+        for z in 40..60 {
+            for x in 2..7 {
+                assert!((-3..=0).all(|y| water(&editor, x, y, z)), "({x}, {z})");
+                assert!(!water(&editor, x, -4, z) && editor.block_exists_absolute(x, -4, z));
+            }
+            assert!(!water(&editor, 7, 0, z), "no water was drawn at (7, {z})");
+        }
+        // A post set into the dug water stays through a second pass.
+        editor.set_block_absolute(OAK_PLANKS, 4, -2, 50, None, Some(&[]));
+        carve_lake(&mut editor, &ground, &bbox, &bwf, &none);
+        assert!(editor.check_for_block_absolute(4, -2, 50, Some(&[OAK_PLANKS]), None));
     }
 
     /// Beside a river dug four deep the bank is backed down to the river's lowest water;
