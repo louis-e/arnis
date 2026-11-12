@@ -488,6 +488,7 @@
   "meld_baking": "Priprava: napredek je na glavni vrstici.",
   "meld_bake_done": "Lokalni arhiv je pripravljen. Za uporabo izberite Lokalni arhiv kot vir podatkov OSM.",
   "meld_bake_stopped": "Ustavljeno. Dokončane države ostanejo shranjene.",
+  "meld_bake_error": "Priprava ni uspela: {error}",
   "meld_baked": "{name} (pripravljeno)",
   "meld_extract_sizes": "{download} prenosa, {archive} arhiva",
   "meld_archive_folder_line": "Mapa arhiva",

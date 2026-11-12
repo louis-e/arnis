@@ -488,6 +488,7 @@
   "meld_baking": "Préparation en cours : la progression est sur la barre principale.",
   "meld_bake_done": "L'archive locale est prête. Choisissez Archive locale comme source des données OSM pour l'utiliser.",
   "meld_bake_stopped": "Arrêté. Les pays terminés sont conservés.",
+  "meld_bake_error": "Impossible de préparer : {error}",
   "meld_baked": "{name} (préparé)",
   "meld_extract_sizes": "{download} à télécharger, {archive} d'archive",
   "meld_archive_folder_line": "Dossier d'archive",

@@ -488,6 +488,7 @@
   "meld_baking": "Обробка: прогрес на головній смузі.",
   "meld_bake_done": "Локальний архів готовий. Оберіть «Локальний архів» як джерело даних OSM, щоб його використати.",
   "meld_bake_stopped": "Зупинено. Готові країни збережено.",
+  "meld_bake_error": "Не вдалося обробити: {error}",
   "meld_baked": "{name} (оброблено)",
   "meld_extract_sizes": "{download} завантаження, {archive} архіву",
   "meld_archive_folder_line": "Папка архіву",

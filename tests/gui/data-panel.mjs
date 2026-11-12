@@ -43,4 +43,18 @@ let started = false;
 initDataPanel({ invoke, area: () => '1 2 3 4', plan: () => ({}), prefetch: async () => started });
 await document.getElementById('meld-plan-download').listeners.click();
 assert.ok(!document.getElementById('meld-plan-out').children[0].children[0].textContent.startsWith('Downloading'));
+
+// Download & Bake: the button waits for its bake (a second click would be refused and hide Stop),
+// main.js hears it start and end, and a failure has its own words.
+const told = [];
+let fail;
+initDataPanel({ invoke: (cmd) => (cmd === 'gui_bake_archive' ? new Promise((_, reject) => { fail = reject; }) : invoke(cmd)), area: () => '1 2 3 4', plan: () => ({}), prefetch: () => {}, baking: (on) => told.push(on) });
+const bake = document.getElementById('meld-prepare-bake');
+const stop = document.getElementById('meld-prepare-stop');
+const baked = bake.listeners.click();
+assert.deepEqual([bake.disabled, stop.hidden, told], [true, false, [true]]);
+fail('arnis-tiles was not found.');
+await baked;
+assert.deepEqual([bake.disabled, stop.hidden, told], [false, true, [true, false]]);
+assert.equal(document.getElementById('meld-prepare-list').children[0].children[0].textContent, 'Could not bake: arnis-tiles was not found.');
 console.log('data-panel ok');

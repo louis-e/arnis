@@ -488,6 +488,7 @@
   "meld_baking": "Se procesează: progresul e în bara principală.",
   "meld_bake_done": "Arhiva locală este gata. Alege Arhivă locală ca sursă a datelor OSM pentru a o folosi.",
   "meld_bake_stopped": "Oprit. Țările terminate sunt păstrate.",
+  "meld_bake_error": "Nu am putut procesa: {error}",
   "meld_baked": "{name} (procesat)",
   "meld_extract_sizes": "{download} de descărcat, {archive} arhivă",
   "meld_archive_folder_line": "Director arhivă",

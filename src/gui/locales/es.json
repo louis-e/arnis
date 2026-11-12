@@ -488,6 +488,7 @@
   "meld_baking": "Procesando: el progreso aparece en la barra principal.",
   "meld_bake_done": "El archivo local está listo. Elige Archivo local como fuente de datos OSM para usarlo.",
   "meld_bake_stopped": "Detenido. Los países terminados se conservan.",
+  "meld_bake_error": "No se pudo procesar: {error}",
   "meld_baked": "{name} (procesado)",
   "meld_extract_sizes": "{download} de descarga, {archive} de archivo",
   "meld_archive_folder_line": "Carpeta de archivo",

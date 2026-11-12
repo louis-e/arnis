@@ -488,6 +488,7 @@
   "meld_baking": "المعالجة جارية: يظهر التقدم في الشريط الرئيسي.",
   "meld_bake_done": "الأرشيف المحلي جاهز. اختر أرشيفاً محلياً كمصدر لبيانات OSM لاستخدامه.",
   "meld_bake_stopped": "تم الإيقاف. تُحفظ الدول المكتملة.",
+  "meld_bake_error": "تعذّرت المعالجة: {error}",
   "meld_baked": "{name} (تمت المعالجة)",
   "meld_extract_sizes": "{download} تنزيل، {archive} أرشيف",
   "meld_archive_folder_line": "مجلد الأرشيف",

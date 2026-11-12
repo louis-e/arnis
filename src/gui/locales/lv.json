@@ -488,6 +488,7 @@
   "meld_baking": "Apstrāde: progress ir galvenajā joslā.",
   "meld_bake_done": "Vietējais arhīvs ir gatavs. Lai to izmantotu, par OSM datu avotu izvēlieties Vietējais arhīvs.",
   "meld_bake_stopped": "Apturēts. Pabeigtās valstis tiek saglabātas.",
+  "meld_bake_error": "Neizdevās apstrādāt: {error}",
   "meld_baked": "{name} (apstrādāts)",
   "meld_extract_sizes": "{download} lejupielāde, {archive} arhīvs",
   "meld_archive_folder_line": "Arhīva mape",

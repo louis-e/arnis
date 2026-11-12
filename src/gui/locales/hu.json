@@ -488,6 +488,7 @@
   "meld_baking": "Feldolgozás: a haladás a fő sávon látszik.",
   "meld_bake_done": "A helyi archívum kész. Használatához válaszd a Helyi archívumot OSM adatforrásnak.",
   "meld_bake_stopped": "Leállítva. A kész országok megmaradnak.",
+  "meld_bake_error": "Nem sikerült a feldolgozás: {error}",
   "meld_baked": "{name} (feldolgozva)",
   "meld_extract_sizes": "{download} letöltés, {archive} archívum",
   "meld_archive_folder_line": "Archívum mappa",

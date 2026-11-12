@@ -488,6 +488,7 @@
   "meld_baking": "前処理中: 進捗はメインのバーに表示されます。",
   "meld_bake_done": "ローカルアーカイブの準備ができました。使うには OSM データソースで「ローカルアーカイブ」を選んでください。",
   "meld_bake_stopped": "停止しました。完了した国は保持されます。",
+  "meld_bake_error": "前処理できませんでした: {error}",
   "meld_baked": "{name}（前処理済み）",
   "meld_extract_sizes": "ダウンロード {download}、アーカイブ {archive}",
   "meld_archive_folder_line": "アーカイブフォルダ",

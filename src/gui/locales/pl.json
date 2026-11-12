@@ -488,6 +488,7 @@
   "meld_baking": "Przetwarzanie: postęp jest na głównym pasku.",
   "meld_bake_done": "Lokalne archiwum jest gotowe. Wybierz Lokalne archiwum jako źródło danych OSM, aby go użyć.",
   "meld_bake_stopped": "Zatrzymano. Ukończone kraje zostają zachowane.",
+  "meld_bake_error": "Nie udało się przetworzyć: {error}",
   "meld_baked": "{name} (przetworzone)",
   "meld_extract_sizes": "{download} pobierania, {archive} archiwum",
   "meld_archive_folder_line": "Folder archiwum",

@@ -488,6 +488,7 @@
   "meld_baking": "Ruošiama: eiga rodoma pagrindinėje juostoje.",
   "meld_bake_done": "Vietinis archyvas paruoštas. Norėdami jį naudoti, OSM duomenų šaltiniu pasirinkite Vietinis archyvas.",
   "meld_bake_stopped": "Sustabdyta. Baigtos šalys išsaugomos.",
+  "meld_bake_error": "Nepavyko paruošti: {error}",
   "meld_baked": "{name} (paruošta)",
   "meld_extract_sizes": "{download} atsisiuntimo, {archive} archyvo",
   "meld_archive_folder_line": "Archyvo aplankas",

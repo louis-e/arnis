@@ -1170,8 +1170,9 @@ function lines(box, rows) {
 
 const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints' };
 
-// `area()` is the selected bbox; `plan()` the settings a run's plan depends on.
-export function initDataPanel({ invoke, area, plan, prefetch }) {
+// `area()` is the selected bbox; `plan()` the settings a run's plan depends on; `baking(on)` hears
+// a Download & Bake start and end.
+export function initDataPanel({ invoke, area, plan, prefetch, baking = () => {} }) {
   const needArea = () => t('meld_select_area', 'Select an area on the map first.');
   const list = el('meld-prepare-list');
   const out = el('meld-plan-out');
@@ -1197,9 +1198,13 @@ export function initDataPanel({ invoke, area, plan, prefetch }) {
   });
 
   const stop = el('meld-prepare-stop');
-  el('meld-prepare-bake').addEventListener('click', async () => {
+  const bake = el('meld-prepare-bake');
+  bake.addEventListener('click', async () => {
     if (!area()) return say(list, needArea());
+    // One bake at a time: a second click would be refused and take Stop away from the first.
+    bake.disabled = true;
     stop.hidden = false;
+    baking(true);
     say(list, t('meld_baking', 'Baking: the progress is on the main bar.'));
     try {
       const done = await invoke('gui_bake_archive', {
@@ -1207,9 +1212,11 @@ export function initDataPanel({ invoke, area, plan, prefetch }) {
       });
       say(list, done ? t('meld_bake_done', 'The local archive is ready. Pick Local Archive as the OSM Data Source to use it.') : t('meld_bake_stopped', 'Stopped. Finished countries are kept.'));
     } catch (e) {
-      say(list, t('plan_error', 'Could not plan this selection: {error}', { error: e }));
+      say(list, t('meld_bake_error', 'Could not bake: {error}', { error: e }));
     }
     stop.hidden = true;
+    bake.disabled = false;
+    baking(false);
   });
   stop.addEventListener('click', () => invoke('gui_cancel_bake'));
 

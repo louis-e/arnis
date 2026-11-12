@@ -1195,7 +1195,11 @@ function setupProgressListener() {
       }
       if (shown.log) window.arnisLog?.(shown.notice ? "warn" : "error", shown.log);
 
-      if (message.startsWith("Error!")) {
+      if (bakeRunning && generationButtonEnabled && /^(Error!|Done!)/.test(message)) {
+        // A bake's end is not a run's: no world name, facades or Discord prompt follow it.
+        progressInfo.style.color = message.startsWith("Done!") ? "#7bd864" : "#fa7878";
+        resetEta();
+      } else if (message.startsWith("Error!")) {
         progressInfo.style.color = "#fa7878";
         setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
@@ -1530,7 +1534,7 @@ function initSettings() {
     savePath: () => savePath,
     scale: () => readGenerationSettings(true).worldScale,
     available: () => isOneWorldAvailable() && !liveActive(),
-    busy: () => !generationButtonEnabled,
+    busy: () => !generationButtonEnabled || bakeRunning,
     canRun: () => !isLiveMode(),
     renamed: (from, to) => worldRenamed(from, to),
     open: async (name, expand) => {
@@ -1555,6 +1559,7 @@ function initSettings() {
   });
   initDataPanel({
     invoke,
+    baking: (on) => { bakeRunning = on; redrawProjects(); },
     prefetch: () => startGeneration(true, true),
     area: () => (selectedBBox && selectedBBox !== "0.000000 0.000000 0.000000 0.000000" ? selectedBBox : ""),
     plan: () => {
@@ -4420,6 +4425,8 @@ function handleWorldSelectionError(errorCode) {
 }
 
 let generationButtonEnabled = true;
+// A Download & Bake is under way (Data Sources): Start waits for it.
+let bakeRunning = false;
 
 // Central setter so every place that toggles generation state also
 // refreshes the world-name pencil (hidden/blocked while a generation, or a
@@ -4528,6 +4535,15 @@ async function startGeneration(confirmed = false, prewarm = false) {
     return;
   }
   if (generationButtonEnabled === false) {
+    return;
+  }
+  // The backend refuses a run during a bake only after a new world was made for it.
+  if (bakeRunning) {
+    const info = document.getElementById('progress-info');
+    if (info) {
+      info.textContent = oneWorldText('meld_baking', 'Baking: the progress is on the main bar.');
+      info.style.color = "#fecc44";
+    }
     return;
   }
   // One World and Live keep their areas as rectangles of whole chunks; Advanced features build

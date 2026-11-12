@@ -488,6 +488,7 @@
   "meld_baking": "Käsittely: edistyminen näkyy päärivillä.",
   "meld_bake_done": "Paikallinen arkisto on valmis. Valitse Paikallinen arkisto OSM-datalähteeksi käyttääksesi sitä.",
   "meld_bake_stopped": "Pysäytetty. Valmiit maat säilytetään.",
+  "meld_bake_error": "Käsittely epäonnistui: {error}",
   "meld_baked": "{name} (käsitelty)",
   "meld_extract_sizes": "{download} lataus, {archive} arkisto",
   "meld_archive_folder_line": "Arkistokansio",

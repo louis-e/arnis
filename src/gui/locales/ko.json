@@ -488,6 +488,7 @@
   "meld_baking": "준비 중: 진행 상황은 상단 막대에 표시됩니다.",
   "meld_bake_done": "로컬 아카이브가 준비되었습니다. 사용하려면 OSM 데이터 소스에서 로컬 아카이브를 선택하세요.",
   "meld_bake_stopped": "중지되었습니다. 완료된 국가는 유지됩니다.",
+  "meld_bake_error": "준비할 수 없습니다: {error}",
   "meld_baked": "{name} (준비됨)",
   "meld_extract_sizes": "다운로드 {download}, 아카이브 {archive}",
   "meld_archive_folder_line": "아카이브 폴더",

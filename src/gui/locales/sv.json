@@ -488,6 +488,7 @@
   "meld_baking": "Bearbetning: framstegen visas i huvudfältet.",
   "meld_bake_done": "Det lokala arkivet är klart. Välj Lokalt arkiv som OSM-datakälla för att använda det.",
   "meld_bake_stopped": "Stoppat. Färdiga länder sparas.",
+  "meld_bake_error": "Det gick inte att bearbeta: {error}",
   "meld_baked": "{name} (bearbetad)",
   "meld_extract_sizes": "{download} nedladdning, {archive} arkiv",
   "meld_archive_folder_line": "Arkivmapp",

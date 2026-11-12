@@ -488,6 +488,7 @@
   "meld_baking": "Aufbereitung: Der Fortschritt steht in der Hauptleiste.",
   "meld_bake_done": "Das lokale Archiv ist fertig. Wähle Lokales Archiv als OSM-Datenquelle, um es zu nutzen.",
   "meld_bake_stopped": "Gestoppt. Fertige Länder bleiben erhalten.",
+  "meld_bake_error": "Aufbereitung fehlgeschlagen: {error}",
   "meld_baked": "{name} (aufbereitet)",
   "meld_extract_sizes": "{download} Download, {archive} Archiv",
   "meld_archive_folder_line": "Archivordner",
