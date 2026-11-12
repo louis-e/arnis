@@ -67,4 +67,8 @@ assert.deepStrictEqual(generationTarget({ prewarm: false, oneWorld: false, saveP
 assert.deepStrictEqual(generationTarget({ prewarm: false, oneWorld: true, savePath: 's', worldPath: 'w' }), { selectedWorld: 's', isNewWorld: true });
 // A prewarm with One World on still names the save folder (the backend resolves the world from it), never a new world.
 assert.deepStrictEqual(generationTarget({ prewarm: true, oneWorld: true, savePath: 's', worldPath: 'w' }), { selectedWorld: 's', isNewWorld: false });
+// Download now with Offline Mode on: the CLI refuses --offline beside --prewarm, and the download is the point.
+document.getElementById('meld-offline-toggle').checked = true;
+assert.ok(meldFlags(ctx).includes('--offline'), 'a run stays offline');
+assert.ok(!meldFlags({ ...ctx, prewarm: true }).includes('--offline'), 'a prewarm does not');
 console.log('meld-flags: ok');

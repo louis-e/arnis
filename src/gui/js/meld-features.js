@@ -143,7 +143,8 @@ let skipKey = '';
 // The flags for one run, as the CLI takes them (`--name=value`). What a field holds is passed
 // as typed: the backend parses it with the CLI's own parser and says what is wrong.
 // `plan` is for the plan drawn before a run: it leaves a pending retry for the run itself.
-export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = false, forKey = false }) {
+// `prewarm` is Download now, which is the download Offline Mode would refuse.
+export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = false, forKey = false, prewarm = false }) {
   // Rocks and Bushes are regular settings; everything else needs the Advanced switch.
   const f = [];
   if (!on('meld-rocks-toggle')) f.push('--rocks=false');
@@ -208,7 +209,7 @@ export function meldFlags({ oneWorld, java, caves, extendHeight, lods, plan = fa
     add('--osm-pbf-url', value('meld-pbf-url-input'));
   }
   add('--overpass-url', value('meld-overpass-input'));
-  if (on('meld-offline-toggle')) f.push('--offline');
+  if (on('meld-offline-toggle') && !prewarm) f.push('--offline');
 
   // Map and World
   if (oneWorld) add('--origin', value('meld-origin-input'));

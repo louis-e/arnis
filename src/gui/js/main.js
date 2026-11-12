@@ -4642,7 +4642,8 @@ async function startGeneration(confirmed = false, prewarm = false) {
       java: getEffectiveWorldFormat() === "java",
       caves: settings.cavesEnabled,
       extendHeight: settings.disableHeightLimit && !oneWorld && getEffectiveWorldFormat() === "java",
-      lods: settings.voxyLodEnabled || settings.dhLodEnabled
+      lods: settings.voxyLodEnabled || settings.dhLodEnabled,
+      prewarm
     });
     // Held or retried as a job in cells: it runs as one, or not at all.
     if (cells && !prewarm && !flags.some((f) => f.startsWith('--one-world-workers='))) return;
