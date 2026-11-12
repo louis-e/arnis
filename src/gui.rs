@@ -278,8 +278,17 @@ pub fn run_gui() -> Result<(), String> {
         .build(tauri::generate_context!())
         .map_err(|e| format!("Error while starting the application UI (Tauri): {e}"))?
         .run(|_, event| {
-            // The server holds the world; let it save before the process goes.
             if let tauri::RunEvent::Exit = event {
+                // A bake's arnis-tiles would run on without the window: stop it, and let the
+                // bake tidy up what it cut off.
+                BAKE_CANCEL.store(true, std::sync::atomic::Ordering::Release);
+                let asked = std::time::Instant::now();
+                while BUSY.load(std::sync::atomic::Ordering::Acquire) == BUSY_BAKE
+                    && asked.elapsed() < std::time::Duration::from_secs(10)
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                // The server holds the world; let it save before the process goes.
                 let session = LIVE_SESSION
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())

@@ -426,7 +426,8 @@ pub fn bake(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("{}: {e}", exe.display()))?;
-    // Killed with this process, however it ends.
+    // Windows kills it with this process, however that ends; elsewhere the window's exit
+    // stops the bake.
     if let Err(e) = crate::scale::child::adopt(&child) {
         let _ = child.kill();
         return Err(e);
