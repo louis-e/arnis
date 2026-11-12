@@ -323,6 +323,49 @@ struct Job {
     skip: BTreeSet<usize>,
 }
 
+type Slots = serde_json::Map<String, Value>;
+
+/// The ids a kept job state reserved, `None` when it holds none. Numbers no piece's ids fit
+/// in mean a damaged file: an error, where using them would overflow.
+fn reserved_ids(v: &Value, state: &Path) -> Result<Option<(u32, i32, Slots)>, String> {
+    let (Some(a), Some(m), Some(slots)) = (
+        v["area_base"].as_u64(),
+        v["map_base"].as_i64(),
+        v["slots"].as_object(),
+    ) else {
+        return Ok(None);
+    };
+    let damaged = || {
+        format!(
+            "{} is damaged; delete it and run the job again.",
+            state.display()
+        )
+    };
+    let area_base = u32::try_from(a).map_err(|_| damaged())?;
+    let map_base = i32::try_from(m)
+        .ok()
+        .filter(|&m| m >= 0)
+        .ok_or_else(damaged)?;
+    let per_piece = MAP_IDS_PER_PIECE as u64;
+    for slot in slots.values() {
+        let s = slot.as_u64().ok_or_else(damaged)?;
+        let area_fits = u32::try_from(s)
+            .ok()
+            .and_then(|s| area_base.checked_add(s))
+            .is_some();
+        // The piece's last map id: map_base + (s + 1) * per_piece - 1.
+        let maps_fit = s
+            .checked_add(1)
+            .and_then(|k| k.checked_mul(per_piece))
+            .and_then(|ids| ids.checked_add(map_base as u64))
+            .is_some_and(|end| end - 1 <= i32::MAX as u64);
+        if !(area_fits && maps_fit) {
+            return Err(damaged());
+        }
+    }
+    Ok(Some((area_base, map_base, slots.clone())))
+}
+
 /// A finished piece's file names its regions and size, so it stays its own whatever order
 /// the pieces build in: `done-r<rx>_<rz>_s<n>.json`.
 fn done_key(u: &WorkUnit) -> String {
@@ -349,15 +392,9 @@ impl Job {
         let kept = std::fs::read_to_string(&state)
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok());
-        let (area_base, map_base, slots) = match kept.as_ref().map(|v| {
-            (
-                v["area_base"].as_u64(),
-                v["map_base"].as_i64(),
-                v["slots"].as_object(),
-            )
-        }) {
-            Some((Some(a), Some(m), Some(slots))) => {
-                let slots = slots.clone();
+        let reserved = kept.as_ref().map(|v| reserved_ids(v, &state));
+        let (area_base, map_base, slots) = match reserved.transpose()?.flatten() {
+            Some((a, m, slots)) => {
                 if let Some(u) = units.iter().find(|u| !slots.contains_key(&done_key(u))) {
                     return Err(format!(
                         "{} was planned with other pieces (none at region {}); delete it or run \
@@ -382,7 +419,7 @@ impl Job {
                         changed.join(", ")
                     );
                 }
-                (a as u32, m as i32, slots)
+                (a, m, slots)
             }
             _ => {
                 // Reserved once, so a run in between cannot take a piece's ids.
@@ -1758,6 +1795,48 @@ second
             .err()
             .unwrap();
         assert!(err.contains("planned with other pieces"), "{err}");
+    }
+
+    #[test]
+    fn a_damaged_job_state_is_an_error() {
+        let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
+        let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
+        let (world, _) = crate::projection::snap_bbox_to_chunks(&proj, &req).unwrap();
+        let units = work_units::plan_units(&proj, &world, 1).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(one_world::JOBS_DIR).join("j");
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = job_state(&units);
+        let mut huge_slot = good.clone();
+        huge_slot["slots"][done_key(&units[1])] = json!(1u64 << 40);
+        let mut last_ids = good.clone();
+        last_ids["map_base"] = json!(i32::MAX - MAP_IDS_PER_PIECE);
+        for (k, v) in [
+            ("area_base", json!(u32::MAX)),
+            ("area_base", json!(1u64 << 33)),
+            ("map_base", json!(-1)),
+            ("map_base", json!(i64::from(i32::MAX) + 1)),
+        ]
+        .into_iter()
+        .map(|(k, v)| {
+            let mut s = good.clone();
+            s[k] = v;
+            (k, s)
+        })
+        .chain([("slots", huge_slot), ("map_base", last_ids)])
+        {
+            std::fs::write(dir.join("job.json"), v.to_string()).unwrap();
+            let err = Job::open(tmp.path(), "j".into(), &units, &[])
+                .err()
+                .unwrap();
+            assert!(err.contains("damaged"), "{k}: {err}");
+        }
+        // The last piece's ids reach i32::MAX exactly: fine.
+        let mut edge = good.clone();
+        let last = (units.len() as i32) * MAP_IDS_PER_PIECE;
+        edge["map_base"] = json!(i32::MAX - last + 1);
+        std::fs::write(dir.join("job.json"), edge.to_string()).unwrap();
+        assert!(Job::open(tmp.path(), "j".into(), &units, &[]).is_ok());
     }
 
     #[test]
