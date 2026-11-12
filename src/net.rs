@@ -53,6 +53,55 @@ pub fn offline() -> bool {
     OFFLINE.load(Ordering::Relaxed)
 }
 
+/// A window run's `--offline` and `--prewarm`, which end with it: both are process-wide, and
+/// the previews between two runs read them too.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub struct RunScope(());
+
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn begin_run(offline: bool, prewarm: bool) -> RunScope {
+    set_prewarm(prewarm);
+    OFFLINE.store(offline, Ordering::SeqCst);
+    // A preview caught mid-fetch is refused from here on; the misses are cleared after it.
+    while offline && PREVIEWS.load(Ordering::SeqCst) > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    set_offline(offline);
+    RunScope(())
+}
+
+impl Drop for RunScope {
+    fn drop(&mut self) {
+        set_offline(false);
+        set_prewarm(false);
+    }
+}
+
+/// Window previews that are fetching. An offline run waits for them, so what they are
+/// refused never counts as its misses.
+static PREVIEWS: AtomicUsize = AtomicUsize::new(0);
+
+/// Held by a window preview while it fetches.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub struct Preview(());
+
+/// `Err` during an offline run: turned away here, a preview is refused no download.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn preview() -> Result<Preview, String> {
+    PREVIEWS.fetch_add(1, Ordering::SeqCst);
+    let preview = Preview(());
+    if OFFLINE.load(Ordering::SeqCst) {
+        return Err("Offline Mode: no preview while the run is going.".to_string());
+    }
+    Ok(preview)
+}
+
+impl Drop for Preview {
+    fn drop(&mut self) {
+        PREVIEWS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Called in front of a download that only a cache miss reaches. Offline it refuses, and
 /// records `what` so the run can stop and name everything the cache lacks instead of building
 /// flat ground or leaving objects out.
@@ -198,6 +247,47 @@ mod tests {
         assert!(refused.0.unwrap_err().contains(what));
         assert!(refused.1.is_err());
         assert!(offline_misses().contains(&(what.to_string(), 2)));
+    }
+
+    #[test]
+    fn a_run_takes_its_offline_and_prewarm_with_it() {
+        let _guard = SERIALIZE.lock().unwrap_or_else(|e| e.into_inner());
+        let _floor = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let run = begin_run(true, false);
+        assert!(offline() && !prewarm());
+        // Turned away up front, so the run's misses stay its own.
+        assert!(preview().is_err());
+        assert!(offline_misses().is_empty());
+        drop(run);
+        assert!(!offline());
+        assert!(preview().is_ok());
+
+        let run = begin_run(false, true);
+        assert!(prewarm() && !offline());
+        drop(run);
+        assert!(!prewarm());
+    }
+
+    #[test]
+    fn an_offline_run_waits_for_a_preview_and_drops_its_misses() {
+        let _guard = SERIALIZE.lock().unwrap_or_else(|e| e.into_inner());
+        let _floor = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let what = "net test preview";
+        let fetching = preview().unwrap();
+        let preview = std::thread::spawn(move || {
+            while ensure_online(what).is_ok() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            drop(fetching);
+        });
+        let run = begin_run(true, false);
+        preview.join().unwrap();
+        assert!(!offline_misses().iter().any(|(w, _)| w == what));
+        drop(run);
     }
 
     #[test]

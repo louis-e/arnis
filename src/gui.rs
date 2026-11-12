@@ -1117,6 +1117,7 @@ async fn gui_get_terrain_preview(
     aws_only: bool,
 ) -> Result<tauri::ipc::Response, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let _preview = crate::net::preview()?;
         crate::preview_3d::build_preview_payload(&bbox_text, aws_only)
     })
     .await
@@ -1129,6 +1130,7 @@ async fn gui_get_terrain_preview(
 #[tauri::command]
 async fn gui_get_preview_landcover(bbox_text: String) -> Result<tauri::ipc::Response, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let _preview = crate::net::preview()?;
         crate::preview_3d::build_landcover_grid(&bbox_text)
     })
     .await
@@ -1157,6 +1159,7 @@ async fn gui_get_preview_facades(bbox_text: String) -> Result<String, String> {
 #[tauri::command]
 async fn gui_get_preview_buildings(bbox_text: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let _preview = crate::net::preview()?;
         crate::preview_3d::build_buildings_geojson(&bbox_text)
     })
     .await
@@ -2694,10 +2697,9 @@ fn gui_start_generation(
             return Err(msg);
         }
     };
-    // Process-wide, so set every run: a run without them gets the network and Arnis's own
-    // Overpass back.
-    crate::net::set_offline(extra.offline);
-    crate::net::set_prewarm(extra.prewarm);
+    // Process-wide: Offline Mode and prewarm end with the run, and a run without an Overpass
+    // of its own gets Arnis's back.
+    let run_net = crate::net::begin_run(extra.offline, extra.prewarm);
     crate::retrieve_data::set_overpass_urls(extra.overpass_url.clone());
     // The global pool was built at startup; a thread count asked for here gets its own.
     let pool = extra
@@ -2789,6 +2791,8 @@ fn gui_start_generation(
     tauri::async_runtime::spawn(async move {
         // Held until the worker finishes, on every path, so the globals stay this run's.
         let _generation_slot = generation_slot;
+        // Declared after the slot, so it is reset before the next run can set its own.
+        let _run_net = run_net;
         let _presence = presence;
         let run_pool = pool.clone();
         let work = move || -> Result<(), String> {
