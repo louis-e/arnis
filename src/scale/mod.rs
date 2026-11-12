@@ -377,12 +377,14 @@ fn done_key(u: &WorkUnit) -> String {
 
 impl Job {
     /// `options` are what decides the world (`generation_options`): kept with a new job, and
-    /// a resume with others is warned about.
+    /// a resume with others is warned about. Without `reserve` (a prewarm) a new job takes its
+    /// ids without reserving them and writes no state.
     fn open(
         world_dir: &Path,
         name: String,
         units: &[WorkUnit],
         options: &[String],
+        reserve: bool,
     ) -> Result<Self, String> {
         let pieces = units.len();
         let dir = world_dir.join(one_world::JOBS_DIR).join(&name);
@@ -435,23 +437,25 @@ impl Job {
                 }
                 let mut manifest = Manifest::load(world_dir)?.ok_or("The One World vanished.")?;
                 let area_base = manifest.next_area_id;
-                manifest.next_area_id += pieces as u32;
-                manifest.save(world_dir)?;
-                // Before any piece starts: a job interrupted and run again, or another
-                // run, must not hand out these ids to something else.
-                crate::map_item::set_map_counter(
-                    world_dir,
-                    map_base + pieces as i32 * MAP_IDS_PER_PIECE - 1,
-                )?;
                 let slots: serde_json::Map<String, Value> = units
                     .iter()
                     .map(|u| (done_key(u), json!(u.index)))
                     .collect();
-                write(
-                    &state,
-                    &json!({ "area_base": area_base, "map_base": map_base, "slots": slots,
-                             "argv": options }),
-                )?;
+                if reserve {
+                    manifest.next_area_id += pieces as u32;
+                    manifest.save(world_dir)?;
+                    // Before any piece starts: a job interrupted and run again, or another
+                    // run, must not hand out these ids to something else.
+                    crate::map_item::set_map_counter(
+                        world_dir,
+                        map_base + pieces as i32 * MAP_IDS_PER_PIECE - 1,
+                    )?;
+                    write(
+                        &state,
+                        &json!({ "area_base": area_base, "map_base": map_base, "slots": slots,
+                                 "argv": options }),
+                    )?;
+                }
                 (area_base, map_base, slots)
             }
         };
@@ -624,10 +628,26 @@ pub fn run_with(
              of this job and is ignored."
         );
     }
-    let mut job = Job::open(world_dir, plan.name, &units, &generation_options(&argv))?;
+    let job_existed = world_dir
+        .join(one_world::JOBS_DIR)
+        .join(&plan.name)
+        .exists();
+    // A prewarm writes no world: no ids reserved, no job state.
+    let mut job = Job::open(
+        world_dir,
+        plan.name,
+        &units,
+        &generation_options(&argv),
+        !args.prewarm,
+    )?;
     // `--skip-cells` replaces the cells the job kept out, an empty list none.
     if let Some(cells) = &args.units.skip_cells {
-        job.save_skip(cells.iter().map(|&c| c as usize).collect())?;
+        let cells: BTreeSet<usize> = cells.iter().map(|&c| c as usize).collect();
+        if args.prewarm {
+            job.skip = cells;
+        } else {
+            job.save_skip(cells)?;
+        }
     }
     let job = job;
     let wanted =
@@ -833,11 +853,15 @@ pub fn run_with(
             }
         }
         if args.prewarm {
-            // Only the leases it wrote: a job already under way keeps its resume records.
-            for &i in &fresh {
-                let _ = std::fs::remove_file(job.lease_path(i));
+            // Only what it wrote: a job already under way keeps its resume records.
+            if job_existed {
+                for &i in &fresh {
+                    let _ = std::fs::remove_file(job.lease_path(i));
+                }
+                let _ = std::fs::remove_dir(&job.dir);
+            } else {
+                let _ = std::fs::remove_dir_all(&job.dir);
             }
-            let _ = std::fs::remove_dir(&job.dir);
             let _ = std::fs::remove_dir(world_dir.join(one_world::JOBS_DIR));
             return Ok(());
         }
@@ -1626,11 +1650,11 @@ second
         let dir = tmp.path().join(one_world::JOBS_DIR).join("j");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("job.json"), job_state(&units).to_string()).unwrap();
-        let mut job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
+        let mut job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
         assert!(job.skip.is_empty());
         job.save_skip(BTreeSet::from([1, 3])).unwrap();
         // A restart reads it back; the reserved ids stay.
-        let job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
         assert_eq!(job.skip, BTreeSet::from([1, 3]));
         assert_eq!(job.area_id(&units[2]), 7);
         let parse = |argv: &[&str]| <Args as clap::Parser>::try_parse_from(argv).unwrap();
@@ -1749,7 +1773,7 @@ second
         let dir = tmp.path().join(one_world::JOBS_DIR).join("j");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("job.json"), job_state(&units).to_string()).unwrap();
-        let job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
         assert!(job.finished(&units[1]).is_none());
         assert_eq!(job.area_id(&units[2]), 7);
         assert_eq!(job.first_map_id(&units[2]), 100 + 2 * MAP_IDS_PER_PIECE);
@@ -1783,7 +1807,7 @@ second
         slots.insert(done_key(&units[2]), json!(11));
         let state = json!({"area_base": 5, "map_base": 100, "slots": slots});
         std::fs::write(dir.join("job.json"), state.to_string()).unwrap();
-        let job = Job::open(tmp.path(), "j".into(), &units, &[]).unwrap();
+        let job = Job::open(tmp.path(), "j".into(), &units, &[], true).unwrap();
         assert_eq!(job.area_id(&units[2]), 16);
         assert_eq!(job.first_map_id(&units[2]), 100 + 11 * MAP_IDS_PER_PIECE);
         assert_eq!(job.area_id(&units[3]), 8);
@@ -1791,7 +1815,7 @@ second
         slots.remove(&done_key(&units[3]));
         let state = json!({"area_base": 5, "map_base": 100, "slots": slots});
         std::fs::write(dir.join("job.json"), state.to_string()).unwrap();
-        let err = Job::open(tmp.path(), "j".into(), &units, &[])
+        let err = Job::open(tmp.path(), "j".into(), &units, &[], true)
             .err()
             .unwrap();
         assert!(err.contains("planned with other pieces"), "{err}");
@@ -1826,7 +1850,7 @@ second
         .chain([("slots", huge_slot), ("map_base", last_ids)])
         {
             std::fs::write(dir.join("job.json"), v.to_string()).unwrap();
-            let err = Job::open(tmp.path(), "j".into(), &units, &[])
+            let err = Job::open(tmp.path(), "j".into(), &units, &[], true)
                 .err()
                 .unwrap();
             assert!(err.contains("damaged"), "{k}: {err}");
@@ -1836,7 +1860,7 @@ second
         let last = (units.len() as i32) * MAP_IDS_PER_PIECE;
         edge["map_base"] = json!(i32::MAX - last + 1);
         std::fs::write(dir.join("job.json"), edge.to_string()).unwrap();
-        assert!(Job::open(tmp.path(), "j".into(), &units, &[]).is_ok());
+        assert!(Job::open(tmp.path(), "j".into(), &units, &[], true).is_ok());
     }
 
     #[test]
@@ -1895,7 +1919,17 @@ second
         let w = tmp.path().join("W");
         let mut args = <Args as clap::Parser>::parse_from(["arnis", "--bbox", &req.arg()]);
         drop(one_world::prepare(&w, &req, &mut args).unwrap());
-        Job::open(&w, "j".into(), &units, &first).unwrap();
+        // A prewarm takes the ids a build would, but reserves none and keeps no state.
+        let next_area = || Manifest::load(&w).unwrap().unwrap().next_area_id;
+        let maps = crate::world_utils::WorldLayout::of(&w).maps_dir(&w);
+        let (area_base, map_base) = (next_area(), crate::map_item::next_map_id(&maps));
+        let warm = Job::open(&w, "j".into(), &units, &first, false).unwrap();
+        assert_eq!((warm.area_base, warm.map_base), (area_base, map_base));
+        assert!(!w.join(one_world::JOBS_DIR).join("j/job.json").exists());
+        assert_eq!(next_area(), area_base);
+        assert_eq!(crate::map_item::next_map_id(&maps), map_base);
+        Job::open(&w, "j".into(), &units, &first, true).unwrap();
+        assert_eq!(next_area(), area_base + units.len() as u32);
         let state: Value = serde_json::from_str(
             &std::fs::read_to_string(w.join(one_world::JOBS_DIR).join("j/job.json")).unwrap(),
         )
