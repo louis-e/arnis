@@ -477,6 +477,8 @@ export function initRunControls({ invoke, post, start, localize, key = () => '',
   restart = start;
   // The bar's tooltip ticks once a second while a job runs.
   setInterval(() => running && showRunLine(), 1000);
+  // A job's outlines carry their words to the map: a new language sends them again.
+  window.addEventListener('arnis-localized', () => pieces.size && postToMap({ type: 'pieceOutlines', pieces: outlines() }));
   el('run-pause-button').addEventListener('click', async () => {
     setPaused(!paused);
     await call('gui_pause_generation', { paused });

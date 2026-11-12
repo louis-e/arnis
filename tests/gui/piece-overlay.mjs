@@ -49,6 +49,11 @@ assert.equal(last()[1].text.error, 'exit 1; last output:'.replace('; last output
 assert.equal(last()[1].text.state, 'Failed');
 assert.ok(last()[1].end, 'a finished piece has an end');
 assert.equal(last()[0].text.state, 'Done');
+// The map has no language of its own: a language change sends the outlines again in the new words.
+window.localization = { run_state_failed: 'Fehlgeschlagen' };
+winListeners.filter(([t]) => t === 'arnis-localized').forEach(([, f]) => f());
+assert.equal(last()[1].text.state, 'Fehlgeschlagen');
+delete window.localization;
 
 // A message from anything but the map is ignored.
 showRunControls(false);

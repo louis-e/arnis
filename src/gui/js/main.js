@@ -223,6 +223,8 @@ async function applyLocalization(localization) {
   window.localization = localization;
   renderOneWorldStatus();
   refreshStartButton();
+  // An open Projects list is built in the language it was drawn in.
+  redrawProjects();
   window.dispatchEvent(new Event('arnis-localized'));
   // The plan block is built in the language it was drawn in.
   schedulePlan(true);
