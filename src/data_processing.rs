@@ -1485,6 +1485,17 @@ pub fn generate_world_with_options(
     let models_3d_pipeline = args.use_3d.then(|| {
         crate::models_3d::Models3dPipeline::prescan(&elements, args, landmarks.suppressed())
     });
+    // Offline, a model the cache lacks stops the run here instead of after the build.
+    if crate::net::offline() {
+        if let Some(p) = &models_3d_pipeline {
+            p.prewarm();
+        }
+        let missing = crate::net::offline_misses();
+        if !missing.is_empty() {
+            let what: Vec<String> = missing.into_iter().map(|(what, _)| what).collect();
+            return Err(format!("Not in the cache yet: {}.", what.join(", ")));
+        }
+    }
     let empty_suppressed: HashSet<(&'static str, u64)> = HashSet::new();
     let models_3d_suppressed: &HashSet<(&'static str, u64)> = models_3d_pipeline
         .as_ref()

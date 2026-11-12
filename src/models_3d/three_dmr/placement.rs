@@ -6,6 +6,7 @@ use crate::block_palette::{closest_block, closest_of};
 use crate::colors::RGBTuple;
 use crate::models_3d::three_dmr::client::{fetch_glb, fetch_info, ModelInfo};
 use crate::models_3d::voxelize::{voxelize_glb_paint, WorldTransform};
+use crate::models_3d::FetchError;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
@@ -77,11 +78,12 @@ impl PrescanResult {
         self.placements.len()
     }
 
-    /// Downloads what placing these models would, so `--prewarm` caches it.
+    /// Fetches what placing these models would: `--prewarm` caches it, `--offline` finds
+    /// what the cache lacks.
     pub fn prewarm(&self) {
         let ids: HashSet<u64> = self.placements.iter().map(|p| p.model_id).collect();
         ids.par_iter().for_each(|&id| {
-            if fetch_info(id).and_then(|_| fetch_glb(id)).is_err() {
+            if let Err(FetchError::Failed(_)) = fetch_info(id).and_then(|_| fetch_glb(id)) {
                 crate::net::note_uncached("3D models (3DMR)");
             }
         });

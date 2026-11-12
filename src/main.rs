@@ -1312,11 +1312,13 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             }
         }
         Err(e) => {
+            // Generation stops after the 3D prescan when the cache lacks a model.
+            exit_if_offline_misses(fresh_world);
             eprintln!("{} {}", "Error:".red().bold(), e);
             exit_failed();
         }
     }
-    // 3D models are fetched while they are placed, after the check above.
+    // A model the server lacks leaves a marker, not a miss, so this cannot drop a world for it.
     exit_if_offline_misses(fresh_world);
     release_one_world(false);
     progress_json::done(started);

@@ -33,7 +33,7 @@ impl Models3dPipeline {
         }
     }
 
-    /// Wikidata and stadium models download in `prescan`; 3DMR only when placed.
+    /// Wikidata models download in `prescan`, 3DMR ones when placed or here.
     pub fn prewarm(&self) {
         self.three_dmr.prewarm();
     }
