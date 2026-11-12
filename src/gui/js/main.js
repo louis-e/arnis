@@ -88,6 +88,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
   syncDiscordStatus();
+  initOfflineModeSync();
   // The store's restore fired the toggle's change event before the save path
   // and the world name were known; read the world once more with both in hand.
   refreshOneWorldState();
@@ -2242,6 +2243,18 @@ function syncDiscordStatus() {
   const toggle = document.getElementById("discord-status-toggle");
   const enabled = !!(toggle && toggle.checked);
   Promise.resolve(invoke('gui_set_discord_status', { enabled })).catch(() => {});
+}
+
+// The backend is told Offline Mode once the store has restored it, and on every change: it
+// leaves old cached tiles alone while it is on. Off with the Advanced switch, as the flag is.
+function initOfflineModeSync() {
+  const toggles = ['advanced-meld-features-toggle', 'meld-offline-toggle'].map((id) => document.getElementById(id));
+  const sync = () => {
+    const offline = toggles.every((t) => t && t.checked);
+    Promise.resolve(invoke('gui_set_offline_mode', { offline })).catch(() => {});
+  };
+  toggles.forEach((t) => t && t.addEventListener('change', sync));
+  sync();
 }
 
 // The backend only reports crashes and errors while it holds a consent of true,

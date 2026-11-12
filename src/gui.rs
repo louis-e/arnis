@@ -150,8 +150,7 @@ pub fn run_gui() -> Result<(), String> {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
 
-    // Clean up old cached elevation tiles on startup
-    crate::elevation_data::cleanup_old_cached_tiles();
+    // Old cached elevation tiles are swept once the window has sent its Offline Mode.
     remove_old_plan_masks(&env::temp_dir(), std::time::Duration::from_secs(24 * 3600));
 
     // Launch the UI
@@ -241,6 +240,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_log,
             gui_set_telemetry_consent,
             gui_set_discord_status,
+            gui_set_offline_mode,
             gui_discord_available,
             gui_live_info,
             gui_live_start,
@@ -721,6 +721,18 @@ fn gui_set_telemetry_consent(consent: bool) {
 #[tauri::command]
 fn gui_set_discord_status(enabled: bool) {
     crate::discord::set_enabled(enabled);
+}
+
+/// The Offline Mode setting, sent at start-up and on every change. The start-up sweep of old
+/// elevation tiles waits for the first one: offline, the cache is all there is.
+#[tauri::command]
+fn gui_set_offline_mode(offline: bool) {
+    static STARTUP: std::sync::Once = std::sync::Once::new();
+    STARTUP.call_once(|| {
+        if !offline {
+            crate::elevation_data::cleanup_old_cached_tiles();
+        }
+    });
 }
 
 /// Whether the build has a Discord application, without which the toggle is hidden.
