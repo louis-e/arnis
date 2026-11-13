@@ -582,6 +582,10 @@ button:hover {
 
 .format-toggle-btn.format-toggle-btn--rightmost {
   border-radius: 0 0 8px 0;
+}
+
+/* Every button after the first keeps a divider, so two unpicked formats never merge. */
+.format-toggle-btn:not(:first-child) {
   border-left: 1px solid rgba(255, 255, 255, 0.15);
 }
 

@@ -1676,10 +1676,13 @@ fn filler_block_for(body: CelestialBody) -> crate::block_definitions::Block {
 /// Per-format build-height cap when the user opts into extended build height:
 /// 2031 for the Java datapack, 512 for the Bedrock behavior pack, and the vanilla
 /// ceiling for Luanti, which has no pack and whose spawn search only scans the
-/// vanilla range. Must stay gated like `world_top_y_for` / `extended_min_y_for`.
+/// vanilla range, and Hytale's 320-block column. Must stay gated like
+/// `world_top_y_for` / `extended_min_y_for`.
 pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
     if args.bedrock {
         512
+    } else if args.hytale {
+        crate::world_editor::HYTALE_MAX_Y
     } else if args.luanti {
         crate::world_editor::DEFAULT_MAX_Y
     } else {
@@ -1708,7 +1711,9 @@ pub(crate) fn world_top_y_for(args: &Args) -> i32 {
 
 /// `world_top_y_for` with the extended height on or off.
 pub(crate) fn world_top_y(args: &Args, extended: bool) -> i32 {
-    if !extended || args.luanti {
+    if args.hytale {
+        crate::world_editor::HYTALE_MAX_Y
+    } else if !extended || args.luanti {
         crate::world_editor::DEFAULT_MAX_Y
     } else if args.bedrock {
         511
@@ -1723,7 +1728,7 @@ pub(crate) fn extended_min_y_for(args: &Args) -> i32 {
 
 /// `extended_min_y_for` with the extended height on or off.
 pub(crate) fn world_min_y(args: &Args, extended: bool) -> i32 {
-    if extended && !args.bedrock && !args.luanti {
+    if extended && args.java() {
         java_tall_range(args).0
     } else {
         crate::world_editor::DEFAULT_MIN_Y
@@ -1754,7 +1759,7 @@ fn min_ground_level(args: &Args, extended: bool) -> i32 {
 pub(crate) fn auto_height(args: &Args) -> bool {
     !args.vanilla_height
         && !args.disable_height_limit
-        && !args.luanti
+        && !args.sandbox()
         && args.body.is_earth()
         && !args.one_world
         && args.one_world_run.is_none()
@@ -1777,7 +1782,8 @@ impl WorldHeight {
         Self {
             min_y: world_min_y(args, extended),
             min_ground_level: min_ground_level(args, extended),
-            extended,
+            // Hytale's ceiling sits under vanilla's, so its fit is always capped there.
+            extended: extended || args.hytale,
             extended_max_y: extended_max_y_for(args),
         }
     }
@@ -2358,6 +2364,14 @@ mod tests {
             crate::world_editor::DEFAULT_MAX_Y
         );
         assert_eq!(world_top_y_for(&luanti), crate::world_editor::DEFAULT_MAX_Y);
+
+        // Hytale's column, shifted up 64, whatever the flag says.
+        let hytale = args(&["--hytale"]);
+        assert_eq!(
+            extended_max_y_for(&hytale),
+            crate::world_editor::HYTALE_MAX_Y
+        );
+        assert_eq!(world_top_y_for(&hytale), crate::world_editor::HYTALE_MAX_Y);
 
         // A world whose pack was sized keeps that size when generated into again.
         let mut existing = args(&[]);

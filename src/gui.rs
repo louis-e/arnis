@@ -93,6 +93,11 @@ fn names_output(prewarm: bool) -> bool {
     !prewarm
 }
 
+/// Whether the window's format string is Java, whose new world the frontend made itself.
+fn java_format(world_format: &str) -> bool {
+    world_format != "bedrock" && world_format != "hytale" && !world_format.starts_with("luanti")
+}
+
 /// Runs `f` in the run's own pool (`--threads`), else where it is.
 fn in_pool<R: Send>(pool: Option<&rayon::ThreadPool>, f: impl FnOnce() -> R + Send) -> R {
     match pool {
@@ -220,6 +225,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_get_default_save_path,
             gui_get_default_bedrock_save_path,
             gui_get_default_luanti_save_path,
+            gui_get_default_hytale_save_path,
             gui_set_save_path,
             gui_pick_save_directory,
             gui_start_generation,
@@ -645,8 +651,16 @@ fn gui_get_default_luanti_save_path() -> String {
         .to_string()
 }
 
-/// Returns the configured Luanti worlds directory, or the default if it is unusable.
-fn resolve_luanti_output_dir(configured: &str) -> PathBuf {
+/// Returns the default Hytale saves directory.
+#[tauri::command]
+fn gui_get_default_hytale_save_path() -> String {
+    crate::world_utils::get_hytale_saves_directory()
+        .display()
+        .to_string()
+}
+
+/// Returns the configured worlds directory for `game`, or `default` if it is unusable.
+fn resolve_sandbox_output_dir(configured: &str, game: &str, default: fn() -> PathBuf) -> PathBuf {
     let trimmed = configured.trim();
     if !trimmed.is_empty() {
         let configured_dir = PathBuf::from(trimmed);
@@ -654,10 +668,10 @@ fn resolve_luanti_output_dir(configured: &str) -> PathBuf {
             return configured_dir;
         }
         eprintln!(
-            "Warning: Luanti save path '{trimmed}' is not a directory, using the default instead."
+            "Warning: {game} save path '{trimmed}' is not a directory, using the default instead."
         );
     }
-    crate::world_utils::get_luanti_worlds_directory()
+    default()
 }
 
 #[derive(serde::Serialize)]
@@ -2269,11 +2283,12 @@ fn window_flag_args(
     extra.one_world = one_world;
     extra.bedrock = world_format == "bedrock";
     extra.luanti = world_format.starts_with("luanti");
+    extra.hytale = world_format == "hytale";
     if extra.units.only_pieces.is_some() && !extra.units.coordinates() {
         return Err("Retrying pieces only applies to a job built in pieces.".to_string());
     }
     if extra.min_y.is_some() || extra.max_y.is_some() {
-        if !(is_new_world || extra.prewarm) || extra.bedrock || extra.luanti {
+        if !(is_new_world || extra.prewarm) || !extra.java() {
             return Err("Lowest and highest Y only apply to a new Java world.".to_string());
         }
         extra.disable_height_limit = true;
@@ -2663,6 +2678,7 @@ fn gui_start_generation(
     selected_world: String,
     bedrock_save_path: String,
     luanti_save_path: String,
+    hytale_save_path: String,
     world_scale: f64,
     height_multiplier: f64,
     ground_level: i32,
@@ -2732,8 +2748,7 @@ fn gui_start_generation(
                 eprintln!("{e}");
                 emit_gui_error(short);
                 // The frontend made a new world for this run.
-                if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti")
-                {
+                if is_new_world && java_format(&world_format) {
                     remove_new_java_world(&PathBuf::from(&selected_world));
                 }
                 return Err(e);
@@ -2782,7 +2797,7 @@ fn gui_start_generation(
         Err(msg) => {
             emit_gui_error(&msg);
             // The frontend made a new world for this run.
-            if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
+            if is_new_world && java_format(&world_format) {
                 remove_new_java_world(&PathBuf::from(&selected_world));
             }
             return Err(msg);
@@ -2798,7 +2813,7 @@ fn gui_start_generation(
         Err(msg) => {
             emit_gui_error(&msg);
             // The frontend made a new world for this run.
-            if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
+            if is_new_world && java_format(&world_format) {
                 remove_new_java_world(&PathBuf::from(&selected_world));
             }
             return Err(msg);
@@ -2854,7 +2869,7 @@ fn gui_start_generation(
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
-    if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
+    if is_new_world && java_format(&world_format) {
         let prep_result: Result<(), String> = (|| -> Result<(), String> {
             let llbbox = LLBBox::from_str(&bbox_text)
                 .map_err(|e| format!("Failed to parse bounding box: {e}"))?;
@@ -2938,6 +2953,8 @@ fn gui_start_generation(
                 WorldFormat::BedrockMcWorld
             } else if world_format.starts_with("luanti") {
                 WorldFormat::LuantiWorld
+            } else if world_format == "hytale" {
+                WorldFormat::HytaleWorld
             } else {
                 WorldFormat::JavaAnvil
             };
@@ -2957,8 +2974,18 @@ fn gui_start_generation(
                 WorldFormat::BedrockMcWorld => resolve_bedrock_output_dir(&bedrock_save_path),
                 _ => PathBuf::new(),
             };
-            let luanti_output_dir = match world_format {
-                WorldFormat::LuantiWorld => resolve_luanti_output_dir(&luanti_save_path),
+            // Luanti's or Hytale's worlds folder.
+            let sandbox_output_dir = match world_format {
+                WorldFormat::LuantiWorld => resolve_sandbox_output_dir(
+                    &luanti_save_path,
+                    "Luanti",
+                    crate::world_utils::get_luanti_worlds_directory,
+                ),
+                WorldFormat::HytaleWorld => resolve_sandbox_output_dir(
+                    &hytale_save_path,
+                    "Hytale",
+                    crate::world_utils::get_hytale_saves_directory,
+                ),
                 _ => PathBuf::new(),
             };
 
@@ -2966,7 +2993,7 @@ fn gui_start_generation(
             let disk_dir = match world_format {
                 WorldFormat::JavaAnvil => world_path.clone(),
                 WorldFormat::BedrockMcWorld => bedrock_output_dir.clone(),
-                WorldFormat::LuantiWorld => luanti_output_dir.clone(),
+                WorldFormat::LuantiWorld | WorldFormat::HytaleWorld => sandbox_output_dir.clone(),
             };
 
             // Acquire session lock for Java worlds only
@@ -3020,6 +3047,7 @@ fn gui_start_generation(
                 path: Some(world_path.clone()),
                 bedrock: world_format == WorldFormat::BedrockMcWorld,
                 luanti: world_format == WorldFormat::LuantiWorld,
+                hytale: world_format == WorldFormat::HytaleWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 height_multiplier,
@@ -3080,8 +3108,7 @@ fn gui_start_generation(
                 mob_spawning: crate::args::MobSpawning::from_str_lossy(&mob_spawning),
                 map_item,
                 // Frontend refuses previews for rotated worlds, skip the work there.
-                map_preview: world_format != WorldFormat::LuantiWorld
-                    && rotation_angle.abs() <= f64::EPSILON,
+                map_preview: !world_format.is_sandbox() && rotation_angle.abs() <= f64::EPSILON,
                 signage: crate::args::SignageLevel::from_str_lossy(&signage),
                 // The settings toggle and the token together: the toggle is what
                 // the user turns off to keep a saved token without paying for the
@@ -3297,23 +3324,15 @@ fn gui_start_generation(
                     progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }
-                WorldFormat::LuantiWorld => {
-                    let worlds_dir = luanti_output_dir.clone();
-                    let _ = std::fs::create_dir_all(&worlds_dir);
-                    let mut counter = 1;
-                    let world_name = loop {
-                        let candidate = format!("Arnis Luanti World {counter}");
-                        if !worlds_dir.join(&candidate).exists() {
-                            break candidate;
-                        }
-                        counter += 1;
-                    };
-                    let luanti_path = worlds_dir.join(&world_name);
+                WorldFormat::LuantiWorld | WorldFormat::HytaleWorld => {
+                    let game = world_format.game();
+                    let (path, world_name) =
+                        crate::world_utils::new_sandbox_world(&sandbox_output_dir, game);
                     println!(
-                        "Creating Luanti world at: {}",
-                        luanti_path.display().to_string().bright_white().bold()
+                        "Creating {game} world at: {}",
+                        path.display().to_string().bright_white().bold()
                     );
-                    (luanti_path, Some(world_name))
+                    (path, Some(world_name))
                 }
             };
 
@@ -4442,6 +4461,7 @@ mod tests {
         assert!(one_world_request(false, "bedrock", "moon").is_ok());
         assert!(one_world_request(true, "bedrock", "earth").is_err());
         assert!(one_world_request(true, "luanti_mineclonia", "earth").is_err());
+        assert!(one_world_request(true, "hytale", "earth").is_err());
         assert!(one_world_request(true, "java", "moon").is_err());
     }
 

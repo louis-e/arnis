@@ -125,6 +125,8 @@ const SETTINGS = [
   { id: 'rotation-angle-input', kind: 'number', store: NONE },
 
   { id: 'enable-luanti-toggle', kind: 'checkbox', store: EXTERNAL },
+  // Turning Hytale off gives Advanced back, so a reset does it before resetting Advanced.
+  { id: 'enable-hytale-toggle', kind: 'checkbox', store: EXTERNAL, resetFirst: true },
 
   // Map & Input. #bbox-coords is the area selection, not a preference, so it
   // is intentionally absent.
@@ -135,6 +137,7 @@ const SETTINGS = [
   { id: 'save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'savePath' },
   { id: 'bedrock-save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'bedrockSavePath' },
   { id: 'luanti-save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'luantiSavePath' },
+  { id: 'hytale-save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'hytaleSavePath' },
   { id: 'language-select', kind: 'select', store: EXTERNAL, dynamicDefault: 'language' },
   { id: 'discord-status-toggle', kind: 'checkbox', store: OWN },
 

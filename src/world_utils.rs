@@ -101,6 +101,34 @@ pub fn get_luanti_worlds_directory() -> PathBuf {
     })
 }
 
+/// Hytale's `UserData/Saves` (native, then Flatpak) once the game has run, else Desktop/Arnis Hytale Worlds.
+pub fn get_hytale_saves_directory() -> PathBuf {
+    let native = dirs::data_dir().map(|d| d.join("Hytale"));
+    let flatpak =
+        dirs::home_dir().map(|h| h.join(".var/app/com.hypixel.HytaleLauncher/data/Hytale"));
+    [native, flatpak]
+        .into_iter()
+        .flatten()
+        .map(|game| game.join("UserData"))
+        .find(|user_data| user_data.is_dir())
+        .map(|user_data| user_data.join("Saves"))
+        .unwrap_or_else(|| {
+            dirs::desktop_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("Arnis Hytale Worlds")
+        })
+}
+
+/// The first free "Arnis {game} World N" folder in `base_dir`, for Luanti and Hytale.
+pub fn new_sandbox_world(base_dir: &Path, game: &str) -> (PathBuf, String) {
+    let _ = fs::create_dir_all(base_dir);
+    let name = (1..)
+        .map(|n| format!("Arnis {game} World {n}"))
+        .find(|candidate| !base_dir.join(candidate).exists())
+        .expect("an unused world name");
+    (base_dir.join(&name), name)
+}
+
 /// Gets the area name for a given bounding box using the center point.
 pub fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
     let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;

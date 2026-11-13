@@ -45,11 +45,11 @@ pub fn validate(args: &Args) -> Result<(), String> {
     if args.origin.is_some() && !args.one_world {
         return Err("--origin only applies to --one-world.".to_string());
     }
-    if args.world_border && (args.bedrock || args.luanti) {
+    if args.world_border && !args.java() {
         return Err("--world-border applies to Java worlds only.".to_string());
     }
     if args.region_format == RegionFormat::Blinear {
-        if args.bedrock || args.luanti {
+        if !args.java() {
             return Err("--region-format blinear applies to Java worlds only.".to_string());
         }
         // One World merges into existing .mca files and nothing reads B_Linear back; the LOD

@@ -39,6 +39,7 @@ mod ground;
 mod ground_decoration;
 mod ground_generation;
 mod ground_scatter;
+mod hytale_block_map;
 mod land_cover;
 mod landmarks;
 mod live;
@@ -762,6 +763,8 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         world_editor::WorldFormat::BedrockMcWorld
     } else if args.luanti {
         world_editor::WorldFormat::LuantiWorld
+    } else if args.hytale {
+        world_editor::WorldFormat::HytaleWorld
     } else {
         world_editor::WorldFormat::JavaAnvil
     };
@@ -779,6 +782,10 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             .path
             .clone()
             .unwrap_or_else(world_utils::get_luanti_worlds_directory),
+        (None, world_editor::WorldFormat::HytaleWorld) => args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_hytale_saves_directory),
         (None, world_editor::WorldFormat::JavaAnvil) => args.path.clone().unwrap_or_default(),
     };
     if let Err(e) = world_utils::check_run_size(&args, &effective_bbox, world_format, &disk_dir) {
@@ -800,23 +807,11 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         let (output_path, lvl_name) =
             world_utils::build_bedrock_output(&effective_bbox, output_dir, args.body);
         (output_path, Some(lvl_name))
-    } else if args.luanti {
-        let base_dir = args
-            .path
-            .clone()
-            .unwrap_or_else(world_utils::get_luanti_worlds_directory);
-        let _ = std::fs::create_dir_all(&base_dir);
-        let mut counter = 1;
-        let world_name = loop {
-            let candidate = format!("Arnis Luanti World {counter}");
-            if !base_dir.join(&candidate).exists() {
-                break candidate;
-            }
-            counter += 1;
-        };
-        let world_path = base_dir.join(&world_name);
+    } else if args.sandbox() {
+        let game = world_format.game();
+        let (world_path, world_name) = world_utils::new_sandbox_world(&disk_dir, game);
         println!(
-            "Creating Luanti world at: {}",
+            "Creating {game} world at: {}",
             world_path.display().to_string().bright_white().bold()
         );
         (world_path, Some(world_name))

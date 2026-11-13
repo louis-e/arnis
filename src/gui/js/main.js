@@ -88,6 +88,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  // The restore may have switched Advanced features back on under a saved Hytale format.
+  refreshAdvancedFeaturesForFormat(selectedWorldFormat);
   initNewBadges();
   syncDiscordStatus();
   initOfflineModeSync();
@@ -666,7 +668,7 @@ function getFacadeSource() {
 }
 
 // Only the presets are Java only. Mapillary falls back to block facades on
-// Bedrock and Luanti, which is what the notice under the mode control says.
+// Bedrock, Luanti and Hytale, which is what the notice under the mode control says.
 // The Moon and Mars are terrain only, so there is no wall to hang anything on
 // and every source resolves to off there. As with the format gate, the stored
 // choice is left alone so coming back to Earth restores it.
@@ -1331,6 +1333,7 @@ function resolveDefaultSavePath() {
   resolve('gui_get_default_save_path', 'savePath');
   resolve('gui_get_default_bedrock_save_path', 'bedrockSavePath');
   resolve('gui_get_default_luanti_save_path', 'luantiSavePath');
+  resolve('gui_get_default_hytale_save_path', 'hytaleSavePath');
 }
 
 function initSettings() {
@@ -1968,10 +1971,12 @@ function initSettings() {
   window.closeLicense = closeLicense;
 }
 
-// World format selection (Java/Bedrock/Luanti)
+// World format selection (Java/Bedrock/Luanti/Hytale)
 let selectedWorldFormat = 'java'; // Default to Java
 
-const VALID_FORMATS = ['java', 'bedrock', 'luanti'];
+const VALID_FORMATS = ['java', 'bedrock', 'luanti', 'hytale'];
+// Experimental: each shows its button and save path once enabled under Advanced.
+const EXPERIMENTAL_FORMATS = ['luanti', 'hytale'];
 
 // Sets a toggle another one depends on. Dispatches, so the settings store persists the
 // knock-on change too.
@@ -2038,50 +2043,55 @@ function initDisastersCoupling() {
 }
 
 function initWorldFormatToggle() {
-  initLuantiExperimentalToggle();
+  EXPERIMENTAL_FORMATS.forEach(initExperimentalFormatToggle);
 
   const savedFormat = localStorage.getItem('arnis-world-format');
   if (savedFormat && VALID_FORMATS.includes(savedFormat)) {
     selectedWorldFormat = savedFormat;
   }
-  if (selectedWorldFormat === 'luanti' && !isLuantiEnabled()) {
+  if (EXPERIMENTAL_FORMATS.includes(selectedWorldFormat) && !isFormatEnabled(selectedWorldFormat)) {
     selectedWorldFormat = 'java';
   }
 
   updateFormatToggleUI(selectedWorldFormat);
 }
 
-function isLuantiEnabled() {
-  return localStorage.getItem('arnis-luanti-enabled') === 'true';
+function isFormatEnabled(format) {
+  return localStorage.getItem(`arnis-${format}-enabled`) === 'true';
 }
 
-function initLuantiExperimentalToggle() {
-  const toggle = document.getElementById('enable-luanti-toggle');
-  const luantiBtn = document.getElementById('format-luanti');
-  const bedrockBtn = document.getElementById('format-bedrock');
-  if (!toggle || !luantiBtn) return;
+// The last visible button closes the segmented control.
+function refreshFormatButtonEdges() {
+  const buttons = ['bedrock', ...EXPERIMENTAL_FORMATS]
+    .map((f) => document.getElementById(`format-${f}`))
+    .filter(Boolean);
+  const visible = buttons.filter((b) => b.style.display !== 'none');
+  const last = visible[visible.length - 1];
+  buttons.forEach((b) => b.classList.toggle('format-toggle-btn--rightmost', b === last));
+}
 
-  const luantiPathRow = document.getElementById('luanti-save-path-row');
+function initExperimentalFormatToggle(format) {
+  const toggle = document.getElementById(`enable-${format}-toggle`);
+  const btn = document.getElementById(`format-${format}`);
+  if (!toggle || !btn) return;
 
-  const applyRightmost = (enabled) => {
-    luantiBtn.style.display = enabled ? '' : 'none';
-    luantiBtn.classList.toggle('format-toggle-btn--rightmost', enabled);
-    if (bedrockBtn) {
-      bedrockBtn.classList.toggle('format-toggle-btn--rightmost', !enabled);
-    }
+  const pathRow = document.getElementById(`${format}-save-path-row`);
+  const apply = (enabled) => {
+    btn.style.display = enabled ? '' : 'none';
     // A save path for a format nobody can pick is only noise.
-    if (luantiPathRow) luantiPathRow.style.display = enabled ? '' : 'none';
+    if (pathRow) pathRow.style.display = enabled ? '' : 'none';
+    refreshFormatButtonEdges();
   };
 
-  const enabled = isLuantiEnabled();
+  const enabled = isFormatEnabled(format);
   toggle.checked = enabled;
-  applyRightmost(enabled);
+  apply(enabled);
 
   toggle.addEventListener('change', () => {
     const on = toggle.checked;
-    localStorage.setItem('arnis-luanti-enabled', on ? 'true' : 'false');
-    applyRightmost(on);
-    if (!on && selectedWorldFormat === 'luanti') {
+    localStorage.setItem(`arnis-${format}-enabled`, on ? 'true' : 'false');
+    apply(on);
+    if (!on && selectedWorldFormat === format) {
       setWorldFormat('java');
     }
   });
@@ -2089,7 +2099,7 @@ function initLuantiExperimentalToggle() {
 
 function setWorldFormat(format) {
   if (!VALID_FORMATS.includes(format) || liveActive()) return;
-  if (format === 'luanti' && (!isLuantiEnabled() || isOneWorldToggleOn())) return;
+  if (EXPERIMENTAL_FORMATS.includes(format) && (!isFormatEnabled(format) || isOneWorldToggleOn())) return;
 
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
@@ -2104,10 +2114,10 @@ function getEffectiveWorldFormat() {
 }
 
 // The extended dimension is declared by the Java datapack and the Bedrock
-// behavior pack; Luanti ships neither, and off Earth the relief already fits
+// behavior pack; Luanti and Hytale ship neither, and off Earth the relief already fits
 // vanilla height, so the backend forces the flag off there.
 function heightLimitAvailable(format) {
-  return selectedCelestialBody === 'earth' && format !== 'luanti';
+  return selectedCelestialBody === 'earth' && !EXPERIMENTAL_FORMATS.includes(format);
 }
 
 function refreshHeightLimitRow(format) {
@@ -2115,7 +2125,7 @@ function refreshHeightLimitRow(format) {
   if (!toggle) return;
 
   const current = format || selectedWorldFormat;
-  const reason = why([selectedCelestialBody === 'earth', 'reason_earth'], [current !== 'luanti', 'reason_java_bedrock'],
+  const reason = why([selectedCelestialBody === 'earth', 'reason_earth'], [!EXPERIMENTAL_FORMATS.includes(current), 'reason_java_bedrock'],
     [!oneWorldPinned, 'reason_not_one_world']);
   const available = !reason;
   toggle.disabled = !available;
@@ -2231,16 +2241,18 @@ function gameplayToggle(id) {
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
-  const luantiBtn = document.getElementById('format-luanti');
+  const experimentalBtns = EXPERIMENTAL_FORMATS.map((f) => document.getElementById(`format-${f}`));
 
   refreshHeightLimitRow(format);
   refreshGameplayRows(format);
   refreshWorldTypeRow(format);
   refreshJavaOnlyRows(format);
+  refreshWorldRulesRows();
+  refreshAdvancedFeaturesForFormat(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
-  if (luantiBtn) luantiBtn.classList.remove('format-active');
+  experimentalBtns.forEach((b) => b && b.classList.remove('format-active'));
 
   if (format === 'java') {
     javaBtn.classList.add('format-active');
@@ -2248,8 +2260,9 @@ function updateFormatToggleUI(format) {
     bedrockBtn.classList.add('format-active');
     // Clear world path for bedrock (auto-generated)
     worldPath = "";
-  } else if (format === 'luanti') {
-    if (luantiBtn) luantiBtn.classList.add('format-active');
+  } else if (EXPERIMENTAL_FORMATS.includes(format)) {
+    const btn = document.getElementById(`format-${format}`);
+    if (btn) btn.classList.add('format-active');
     worldPath = "";
   }
   // The label names the last Java world only while that is still the target.
@@ -2268,6 +2281,30 @@ function updateFormatToggleUI(format) {
   refreshBboxSelectionInfo();
 }
 
+// Advanced features are built for Java: Hytale turns them off, another format back on.
+const ADVANCED_HELD_KEY = 'arnis-advanced-before-hytale';
+const advancedHeldForHytale = () => localStorage.getItem(ADVANCED_HELD_KEY) === 'true';
+
+function holdAdvancedForHytale(held) {
+  if (held) localStorage.setItem(ADVANCED_HELD_KEY, 'true');
+  else localStorage.removeItem(ADVANCED_HELD_KEY);
+}
+
+function refreshAdvancedFeaturesForFormat(format) {
+  const toggle = document.getElementById('advanced-meld-features-toggle');
+  if (!toggle) return;
+  const hytale = format === 'hytale';
+  if (hytale && toggle.checked) {
+    holdAdvancedForHytale(true);
+    setChecked(toggle, false);
+  }
+  setSettingsRowAvailable('advanced-meld-features-toggle', !hytale, 'reason_not_hytale');
+  if (!hytale && advancedHeldForHytale()) {
+    holdAdvancedForHytale(false);
+    setChecked(toggle, true);
+  }
+}
+
 // Expose to window for onclick handlers
 window.setWorldFormat = setWorldFormat;
 
@@ -2279,16 +2316,21 @@ function syncDiscordStatus() {
 }
 
 // The backend is told Offline Mode once the store has restored it, and on every change: while
-// it is on it leaves old cached tiles alone and sends no telemetry or update check. Off with
-// the Advanced switch, as the flag is.
+// it is on it leaves old cached tiles alone and sends no telemetry or update check.
 function initOfflineModeSync() {
-  const toggles = ['advanced-meld-features-toggle', 'meld-offline-toggle'].map((id) => document.getElementById(id));
-  const sync = () => {
-    const offline = toggles.every((t) => t && t.checked);
-    Promise.resolve(invoke('gui_set_offline_mode', { offline })).catch(() => {});
-  };
-  toggles.forEach((t) => t && t.addEventListener('change', sync));
-  sync();
+  ['advanced-meld-features-toggle', 'meld-offline-toggle'].forEach((id) =>
+    document.getElementById(id)?.addEventListener('change', syncOfflineMode));
+  syncOfflineMode();
+}
+
+function syncOfflineMode() {
+  Promise.resolve(invoke('gui_set_offline_mode', { offline: offlineModeOn() })).catch(() => {});
+}
+
+// Off with the Advanced switch, as the flag is, but not while Hytale holds that switch off.
+function offlineModeOn() {
+  const on = (id) => !!document.getElementById(id)?.checked;
+  return on('meld-offline-toggle') && (on('advanced-meld-features-toggle') || advancedHeldForHytale());
 }
 
 // The backend only reports crashes and errors while it holds a consent of true,
@@ -2712,6 +2754,7 @@ function initTooltips() {
 let savePath = "";
 let bedrockSavePath = "";
 let luantiSavePath = "";
+let hytaleSavePath = "";
 
 const SAVE_PATHS = {
   java: {
@@ -2742,6 +2785,14 @@ const SAVE_PATHS = {
     browseId: 'luanti-save-path-browse',
     get: () => luantiSavePath,
     set: (value) => { luantiSavePath = value; },
+  },
+  hytale: {
+    storageKey: 'arnis-hytale-save-path',
+    defaultCommand: 'gui_get_default_hytale_save_path',
+    inputId: 'hytale-save-path-input',
+    browseId: 'hytale-save-path-browse',
+    get: () => hytaleSavePath,
+    set: (value) => { hytaleSavePath = value; },
   },
 };
 
@@ -3550,16 +3601,18 @@ function isOneWorldToggleOn() {
   return oneWorldMode() !== 'off';
 }
 
-// Luanti cannot hold a One World, so it is off while the toggle is.
-function refreshLuantiAvailability() {
+// Luanti and Hytale cannot hold a One World, so they are off while the toggle is.
+function refreshExperimentalFormatAvailability() {
   const on = isOneWorldToggleOn();
-  const luantiBtn = document.getElementById('format-luanti');
-  if (luantiBtn) {
-    luantiBtn.disabled = on;
-    luantiBtn.title = on ? 'Luanti is not available in One World mode' : '';
+  for (const format of EXPERIMENTAL_FORMATS) {
+    const btn = document.getElementById(`format-${format}`);
+    if (btn) {
+      btn.disabled = on;
+      btn.title = on ? 'Not available in One World mode' : '';
+    }
+    setSettingsRowAvailable(`enable-${format}-toggle`, !on, 'reason_not_one_world');
+    if (on && selectedWorldFormat === format) setWorldFormat('java');
   }
-  setSettingsRowAvailable('enable-luanti-toggle', !on, 'reason_not_one_world');
-  if (on && selectedWorldFormat === 'luanti') setWorldFormat('java');
 }
 
 function isOneWorldEnabled() {
@@ -3591,7 +3644,8 @@ function refreshWorldRulesRows() {
   const fixed = isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists);
   setSegmentedRowAvailable('gamemode-group', !fixed, 'reason_world_set');
   setSettingsRowAvailable('world-time-slider', !fixed, 'reason_world_set');
-  const mapWhy = why([!fixed, 'reason_world_set'], [!isLiveMode(), 'reason_live']);
+  const mapFormat = selectedWorldFormat === 'java' || selectedWorldFormat === 'bedrock';
+  const mapWhy = why([mapFormat, 'reason_java_bedrock'], [!fixed, 'reason_world_set'], [!isLiveMode(), 'reason_live']);
   setSettingsRowAvailable('map-item-toggle', !mapWhy, mapWhy);
   refreshMobSpawningRow();
 }
@@ -3676,6 +3730,7 @@ const ROW_REASONS = {
   reason_moon_mars: ['Switch the map to the Moon or Mars.'],
   reason_java: ['Switch the world format to Java.'],
   reason_java_bedrock: ['Switch the world format to Java or Bedrock.'],
+  reason_not_hytale: ['Switch the world format to Java, Bedrock or Luanti.'],
   reason_one_world: ['Switch One World to On.', 'one-world-group'],
   reason_not_one_world: ['Switch One World to Off.', 'one-world-group'],
   reason_live: ['Switch One World from Live to On.', 'one-world-group'],
@@ -3889,6 +3944,7 @@ function refreshJavaOnlyRows(format) {
     setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
     setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
   }
+  setSettingsRowAvailable('bake-lighting-toggle', java, 'reason_java');
   const signWhy = why([java, 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth']);
   setSegmentedRowAvailable('signage-group', !signWhy, signWhy);
   refreshWorldNameRow(format);
@@ -3997,7 +4053,7 @@ async function refreshOneWorldState() {
   // An outline picked while One World was off is written once it is on.
   if (outline && isOneWorldEnabled() !== outlineWritten) noteOutline(outline);
   if (!outline && selectedShapes && wantsShapesMask() !== shapesWritten) writeShapesMask();
-  refreshLuantiAvailability();
+  refreshExperimentalFormatAvailability();
   refreshOneWorldRow();
   redrawProjects();
   refreshLiveRows();
@@ -4656,8 +4712,9 @@ function readGenerationSettings(oneWorld) {
     return btn ? btn.dataset[key] : fallback;
   };
   const checked = (id) => document.getElementById(id).checked;
+  // Disabled means unsupported for this format or mode, so never send a stale tick.
+  const live = (id) => checked(id) && !document.getElementById(id).disabled;
   const heightLimitToggle = document.getElementById("disable-height-limit-toggle");
-  // Disabled means unsupported for this body or format, so never send a stale tick.
   let disableHeightLimit = !heightLimitToggle.disabled && heightLimitToggle.checked;
   let scale = parseFloat(document.getElementById("scale-value-slider").value);
   let heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
@@ -4694,9 +4751,9 @@ function readGenerationSettings(oneWorld) {
     use3dEnabled: checked("use-3d-toggle"),
     disableHeightLimit: disableHeightLimit,
     awsOnlyElevation: checked("aws-only-elevation-toggle"),
-    bakeLightingEnabled: checked("bake-lighting-toggle"),
-    voxyLodEnabled: checked("voxy-lod-toggle"),
-    dhLodEnabled: checked("dh-lod-toggle"),
+    bakeLightingEnabled: live("bake-lighting-toggle"),
+    voxyLodEnabled: live("voxy-lod-toggle"),
+    dhLodEnabled: live("dh-lod-toggle"),
     gamemode: segment("gamemode-group", "gamemode", "creative"),
     worldTime: worldTime,
     worldType: segment("world-type-group", "worldType", "void"),
@@ -4863,6 +4920,8 @@ async function startGeneration(confirmed = false, prewarm = false) {
       lods: settings.voxyLodEnabled || settings.dhLodEnabled,
       prewarm
     });
+    // meldFlags skips the Advanced settings Hytale holds off, but Offline Mode still applies.
+    if (!document.getElementById('advanced-meld-features-toggle').checked && offlineModeOn()) flags.push('--offline');
     // Held or retried as a job in cells: it runs as one, or not at all.
     if (cells && !prewarm && !flags.some((f) => f.startsWith('--one-world-workers='))) return;
 
@@ -4873,6 +4932,7 @@ async function startGeneration(confirmed = false, prewarm = false) {
         ...generationTarget({ prewarm, oneWorld, savePath, worldPath }),
         bedrockSavePath: bedrockSavePath,
         luantiSavePath: luantiSavePath,
+        hytaleSavePath: hytaleSavePath,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
