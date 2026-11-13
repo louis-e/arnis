@@ -84,6 +84,7 @@ pub fn builds_single(args: &Args, km2: f64) -> bool {
         && u.snap_regions.is_none()
         && u.margin_regions == 0
         && u.piece_order.is_none()
+        && u.skip_cells.is_none()
         && !u.skip_built
         && !u.stitch_map
         && !args.prewarm
@@ -94,12 +95,13 @@ pub fn builds_single(args: &Args, km2: f64) -> bool {
 
 /// `--unit-regions auto --one-world-workers auto` on a selection smaller than
 /// `AUTO_SINGLE_BELOW_KM2`, with no other job flag: drops both, so the One World is
-/// built in one plain run, which is faster there.
-pub fn single_below_break_even(args: &mut Args) {
+/// built in one plain run, which is faster there. Without `one_world` the flags stay, for
+/// the argument check to refuse. The window passes its own: its `Args` keep the field off.
+pub fn single_below_break_even(args: &mut Args, one_world: bool) {
     let km2 = args
         .bbox
         .map_or(f64::INFINITY, |b| b.area_km2() * args.scale * args.scale);
-    if builds_single(args, km2) {
+    if one_world && builds_single(args, km2) {
         println!(
             "One World: {km2:.0} km² is below {AUTO_SINGLE_BELOW_KM2:.0} km², built in one run"
         );
@@ -444,7 +446,7 @@ mod tests {
             cmd.extend(["--unit-regions", "auto", "--one-world-workers", workers]);
             cmd.extend_from_slice(extra);
             let mut args = <Args as clap::Parser>::parse_from(cmd);
-            single_below_break_even(&mut args);
+            single_below_break_even(&mut args, true);
             args.units.coordinates()
         };
         // 64 km2 in one run, 256 km2 in pieces.
@@ -483,10 +485,22 @@ mod tests {
         assert!(!builds_single(&auto, 60.0));
         assert!(!builds_single(&args("4", "auto"), 10.0));
         assert!(!builds_single(&args("auto", "4"), 10.0));
+        // Cells left out need the cells.
+        auto.units.skip_cells = Some([3].into());
+        assert!(!builds_single(&auto, 10.0));
         // The runner's drop agrees with the plan's answer.
         let mut a = args("auto", "auto");
         a.bbox = None;
-        single_below_break_even(&mut a);
+        single_below_break_even(&mut a, true);
         assert!(a.units.coordinates()); // no bbox: infinite km2, not single
+                                        // Without --one-world the flags stay, and the argument check refuses them.
+        let mut a = args("auto", "auto");
+        a.one_world = false;
+        a.ram_budget_mb = Some(8000);
+        single_below_break_even(&mut a, false);
+        assert!(crate::args::validate_args(&a).is_err());
+        a.one_world = true;
+        single_below_break_even(&mut a, true);
+        assert!(!a.units.coordinates());
     }
 }

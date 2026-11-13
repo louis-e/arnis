@@ -3108,7 +3108,7 @@ fn gui_start_generation(
             crate::args::apply_body_defaults(&mut args);
             crate::args::apply_feature_needs(&mut args);
             crate::y_bounds::apply(&mut args);
-            crate::scale::budget::single_below_break_even(&mut args);
+            crate::scale::budget::single_below_break_even(&mut args, one_world);
 
             let mut one_world_extending = false;
             if one_world {
