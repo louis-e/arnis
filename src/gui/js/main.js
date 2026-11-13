@@ -1552,9 +1552,22 @@ function initSettings() {
     busy: () => !generationButtonEnabled || bakeRunning,
     canRun: () => !isLiveMode(),
     renamed: (from, to) => worldRenamed(from, to),
+    trashed: (name) => worldTrashed(name),
+    // A new One World is picked by its name alone: the first Start makes it.
+    created: async (name) => {
+      oneWorldName = name;
+      oneWorldPicked = true;
+      oneWorldNew = true;
+      clearPrefetchDone();
+      if (oneWorldMode() === 'off') document.querySelector('#one-world-group .segment[data-one-world="on"]')?.click();
+      oneWorldOverlayKey = null;
+      await refreshOneWorldState();
+      closeSettings();
+    },
     open: async (name, expand) => {
       oneWorldName = name;
       oneWorldPicked = true;
+      oneWorldNew = false;
       clearPrefetchDone();
       if (oneWorldMode() === 'off') document.querySelector('#one-world-group .segment[data-one-world="on"]')?.click();
       oneWorldOverlayKey = null;
@@ -3252,10 +3265,20 @@ function worldRenamed(from, to) {
   if (oneWorldName === from || (oneWorldInfo && basenameFromPath(oneWorldInfo.world_path) === from)) {
     oneWorldName = to;
     oneWorldPicked = true;
+    oneWorldNew = false;
     localStorage.setItem(ONE_WORLD_NAME_KEY, to);
     localStorage.setItem('arnis-one-world-picked', '1');
   }
   if (worldLabelName === from) setWorldNameLabel(to);
+  oneWorldOverlayKey = null;
+  refreshOneWorldState();
+}
+
+// A One World moved to the trash from Projects: nothing in the window points at it any more.
+function worldTrashed(name) {
+  if (inSavesFolder(worldPath) && basenameFromPath(worldPath) === name) worldPath = "";
+  if (oneWorldName === name) setOneWorldName('');
+  if (worldLabelName === name) setWorldNameLabel("");
   oneWorldOverlayKey = null;
   refreshOneWorldState();
 }
@@ -3511,7 +3534,9 @@ let lastRunOneWorld = false;
 let lastRunPrewarm = false;
 let oneWorldName = localStorage.getItem(ONE_WORLD_NAME_KEY) || '';
 // Set by Settings > Projects > Open: the name above is then used with or without Custom World Name.
-let oneWorldPicked = localStorage.getItem('arnis-one-world-picked') === '1';
+let oneWorldPicked = ['1', 'new'].includes(localStorage.getItem('arnis-one-world-picked'));
+// Picked as a new One World in Projects: its folder is not there until the first Start.
+let oneWorldNew = localStorage.getItem('arnis-one-world-picked') === 'new';
 
 function refreshOneWorldRow() {
   const reason = why([selectedWorldFormat === 'java', 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth'],
@@ -3593,6 +3618,7 @@ function oneWorldDisplayName() {
 function setOneWorldName(name) {
   oneWorldName = name;
   oneWorldPicked = false;
+  oneWorldNew = false;
   localStorage.removeItem('arnis-one-world-picked');
   if (name) localStorage.setItem(ONE_WORLD_NAME_KEY, name);
   else localStorage.removeItem(ONE_WORLD_NAME_KEY);
@@ -4013,10 +4039,16 @@ async function refreshOneWorldState() {
     return;
   }
   if (seq !== oneWorldRefreshSeq) return;
-  if (oneWorldPicked && oneWorldFolderName() === oneWorldName && info && !info.exists) {
-    // The world picked in Projects is gone (deleted outside Arnis): back to the default name.
-    setOneWorldName('');
-    return refreshOneWorldState();
+  if (oneWorldPicked && oneWorldFolderName() === oneWorldName && info) {
+    if (oneWorldNew && info.exists) {
+      // Built: from now on it is a world like any other picked in Projects.
+      oneWorldNew = false;
+      localStorage.setItem('arnis-one-world-picked', '1');
+    } else if (!oneWorldNew && !info.exists) {
+      // The world picked in Projects is gone (deleted outside Arnis): back to the default name.
+      setOneWorldName('');
+      return refreshOneWorldState();
+    }
   }
   oneWorldInfo = info;
   applyOneWorldPins(info);

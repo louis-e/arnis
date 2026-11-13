@@ -1386,16 +1386,57 @@ body.meld-off .meld-only {
   overflow-wrap: anywhere;
 }
 
-.settings-page .projects-view {
+/* List / Grid on the left, New One World on the right */
+.settings-page .projects-bar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-bottom: 10px;
 }
 
-.settings-page .projects-view .settings-action-button {
+.settings-page .projects-view {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-page .projects-bar .settings-action-button,
+.settings-page .projects-new-row .settings-action-button {
   height: 30px;
   padding: 0 12px;
   border-radius: 6px;
+}
+
+.settings-page .projects-bar .projects-new {
+  gap: 6px;
+  margin-left: auto;
+}
+
+.settings-page .projects-new .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.settings-page .projects-bar .projects-new:disabled {
+  border-color: var(--ui-field-border);
+  background: var(--ui-field);
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The name card for a new One World: first in the list, across the grid */
+.settings-page .projects-new-row {
+  grid-column: 1 / -1;
+}
+
+.settings-page .projects-new-row .projects-rename {
+  flex: 1 1 200px;
+  height: 30px;
+}
+
+.settings-page .projects-list .projects-new-row .projects-actions {
+  flex-basis: auto;
+  margin-left: auto;
 }
 
 .settings-page .projects-view .settings-action-button[aria-pressed="true"] {
@@ -1497,6 +1538,15 @@ body.meld-off .meld-only {
 
 .settings-page .projects-row .settings-action-button.projects-hold.is-armed {
   background-size: 50% 100%;
+}
+
+.settings-page .projects-row .settings-action-button.projects-delete {
+  background-image: linear-gradient(rgba(250, 120, 120, 0.35), rgba(250, 120, 120, 0.35));
+}
+
+.settings-page .projects-row .settings-action-button.projects-delete:not(:disabled):hover {
+  border-color: #fa7878;
+  color: #fa7878;
 }
 
 .settings-page .projects-empty {

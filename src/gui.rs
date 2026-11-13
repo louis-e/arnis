@@ -252,6 +252,8 @@ pub fn run_gui() -> Result<(), String> {
             gui_world_thumbnail,
             gui_set_place_name,
             gui_rename_world,
+            gui_new_one_world_name,
+            gui_trash_one_world,
             gui_one_world_overlap,
             gui_get_one_world_overlays,
             gui_plan_job,
@@ -1546,6 +1548,43 @@ fn gui_set_place_name(world_path: String, place_name: String) -> Result<(), Stri
     let name = place_name.trim();
     manifest.place_name = (!name.is_empty()).then(|| name.to_string());
     manifest.save(&world)
+}
+
+/// Checks the name of a One World about to be started from Projects; returns its folder name.
+#[tauri::command(async)]
+fn gui_new_one_world_name(save_path: String, name: String) -> Result<String, String> {
+    crate::world_utils::new_world_name(Path::new(save_path.trim()), &name)
+}
+
+/// Moves a One World to the system trash, where it can be restored; refused while it is in use.
+#[tauri::command(async)]
+fn gui_trash_one_world(save_path: String, world_name: String) -> Result<(), String> {
+    let save = PathBuf::from(save_path.trim());
+    if live_plays(&save.join(&world_name)) {
+        return Err("Live mode is playing this world. Stop it first.".to_string());
+    }
+    crate::world_utils::remove_one_world(&save, &world_name, |world| {
+        let world = world.to_path_buf();
+        // Own thread: on Windows the trash crate panics if a pooled thread set up COM otherwise.
+        std::thread::spawn(move || trash_world(&world))
+            .join()
+            .unwrap_or_else(|_| Err("Could not move the world to the trash.".to_string()))
+    })
+}
+
+fn trash_world(world: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let bin = {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut bin = trash::TrashContext::new();
+        // Finder's way asks for permission to control Finder first.
+        bin.set_delete_method(DeleteMethod::NsFileManager);
+        bin
+    };
+    #[cfg(not(target_os = "macos"))]
+    let bin = trash::TrashContext::new();
+    bin.delete(world)
+        .map_err(|e| format!("Could not move the world to the trash: {e}"))
 }
 
 /// Renames a world's folder and its LevelName together; returns the new folder name.

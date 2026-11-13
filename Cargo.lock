@@ -240,6 +240,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tempfile",
  "tokio",
+ "trash",
  "twox-hash 2.1.2",
  "windows 0.62.2",
  "zip",
@@ -6280,6 +6281,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "trash"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e13ed7a76ae8b9053f33493745ebb4cd2e5ee1cccd9823bb96ec97b78ec4844"
+dependencies = [
+ "chrono",
+ "libc",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "once_cell",
+ "percent-encoding",
+ "scopeguard",
+ "urlencoding",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

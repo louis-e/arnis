@@ -9,6 +9,8 @@ const choice = (id) => {
 };
 let defaultArchive = '';
 const on = (id) => Boolean(el(id) && el(id).checked);
+// Longest world name typed here: Minecraft's own Create World limit.
+const NAME_MAX = 32;
 
 // A string from the loaded language, `{name}` placeholders filled in; the English text is the
 // fallback while no language is loaded.
@@ -1366,7 +1368,7 @@ export async function resumeJob(job, rebuild, { select = selectBounds, current, 
 // job data from the engine) only Open and Expand are offered.
 // `busy()`: a run is under way, so no world is picked, renamed or run. `canRun()`: Resume and
 // Rebuild can start a run here (not in Live).
-export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null }) {
+export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null }) {
   const list = el('projects-list');
   let view = readView();
   const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
@@ -1406,7 +1408,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     box.className = 'projects-thumb is-empty';
     const path = w.world_path || `${savePath()}/${w.name}`;
     const key = `${path}|${w.modified_ms || 0}`;
-    const show = (url) => {
+    const fill = (url) => {
       if (!url) return;
       const img = document.createElement('img');
       img.alt = '';
@@ -1420,9 +1422,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
         try { url = w.preview === false ? null : await invoke('gui_world_thumbnail', { worldPath: path }); } catch (_) { /* a world without an image */ }
         thumbs.set(key, url || null);
       }
-      show(thumbs.get(key));
+      fill(thumbs.get(key));
     };
-    if (thumbs.has(key)) show(thumbs.get(key));
+    if (thumbs.has(key)) fill(thumbs.get(key));
     else if (seen) { loaders.set(box, load); seen.observe(box); } else load();
     return box;
   };
@@ -1487,7 +1489,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'projects-rename';
-    input.maxLength = 48;
+    input.maxLength = NAME_MAX;
     input.value = w.name;
     input.setAttribute('aria-label', t('projects_rename', 'Rename'));
     const err = text('projects-error', '');
@@ -1517,9 +1519,94 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     return input;
   }
 
+  // New One World: a name card heads the list, refreshes included, until used or cancelled.
+  const newButton = el('projects-new');
+  let draft = null;
+  let draftInput = null;
+  let shown = [];
+  const show = () => {
+    // The card stays put while the rows under it change: moving it would take its focus.
+    if (!draft || list.firstElementChild !== draft) return list.replaceChildren(...(draft ? [draft] : []), ...shown);
+    while (draft.nextElementSibling) draft.nextElementSibling.remove();
+    draft.after(...shown);
+  };
+  const errorLine = (s) => {
+    const e = text('projects-error', s);
+    e.setAttribute('role', 'alert');
+    return e;
+  };
+  const newOff = () => !savePath() || !available() || busy();
+  const closeDraft = () => {
+    if (!draft) return;
+    draft = null;
+    draftInput = null;
+    show();
+  };
+  function newWorldCard() {
+    const card = document.createElement('div');
+    card.className = 'projects-row projects-new-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'projects-rename';
+    input.maxLength = NAME_MAX;
+    input.value = '';
+    input.placeholder = t('projects_new_placeholder', 'Name of the new One World');
+    input.setAttribute('aria-label', t('projects_new', 'New One World'));
+    const err = errorLine('');
+    err.id = 'projects-new-error';
+    input.setAttribute('aria-describedby', err.id);
+    const make = button('projects_new_create', 'Create', false, () => submit());
+    const dismiss = () => { closeDraft(); newButton?.focus?.(); };
+    const cancel = button('one_world_confirm_cancel', 'Cancel', false, dismiss);
+    const submit = async () => {
+      const name = input.value.trim();
+      if (!name) return input.focus?.();
+      if (make.disabled) return;
+      if (newOff()) return closeDraft();
+      make.disabled = true;
+      err.textContent = '';
+      let folder;
+      try {
+        folder = (await invoke('gui_new_one_world_name', { savePath: savePath(), name })) || name;
+      } catch (e) {
+        make.disabled = false;
+        err.textContent = String((e && e.message) || e);
+        return;
+      }
+      try {
+        localStorage.setItem('arnis-one-world-name', folder);
+        localStorage.setItem('arnis-one-world-picked', 'new');
+      } catch (_) { /* not kept */ }
+      closeDraft();
+      if (created) await created(folder);
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation?.();
+      if (e.key === 'Enter') { e.preventDefault?.(); submit(); } else if (e.key === 'Escape') { e.preventDefault?.(); dismiss(); }
+    });
+    const actions = document.createElement('div');
+    actions.className = 'projects-actions';
+    actions.append(make, cancel);
+    card.append(input, actions, err);
+    draftInput = input;
+    return card;
+  }
+  newButton?.addEventListener('click', () => {
+    if (newOff()) return;
+    if (!draft) {
+      draft = newWorldCard();
+      show();
+    }
+    draftInput?.focus?.();
+  });
+
+  // Only the latest listing is drawn: a Delete or rename refreshes from two places.
+  let listing = 0;
   async function refresh() {
+    const seq = ++listing;
     let worlds = [];
     try { worlds = savePath() ? (await invoke('gui_list_one_worlds', { savePath: savePath() })) || [] : []; } catch (e) { console.error(e); }
+    if (seq !== listing) return;
     // The cards drawn before go: their pending thumbnails with them.
     seen?.disconnect();
     loaders.clear();
@@ -1584,6 +1671,25 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       acts.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
       acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
       if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position.'); });
+      // Held like Rebuild; the world goes to the system trash, where it can still be restored.
+      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy()), () => {});
+      del.classList.add('projects-hold', 'projects-delete');
+      del.title = t('projects_delete_tip', 'Hold to move this world to the trash. It can be restored from there.');
+      globalThis.arnisHold(del, async () => {
+        del.disabled = true;
+        row.querySelector('.projects-error')?.remove();
+        try {
+          await invoke('gui_trash_one_world', { savePath: savePath(), worldName: w.name });
+        } catch (e) {
+          del.disabled = false;
+          row.append(errorLine(String((e && e.message) || e)));
+          return;
+        }
+        if (trashed) trashed(w.name);
+        await refresh();
+        newButton?.focus?.();
+      }, 1500);
+      acts.push(del);
       const actions = document.createElement('div');
       actions.className = 'projects-actions';
       actions.append(...acts);
@@ -1591,7 +1697,13 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       return row;
     });
     if (!rows.length) rows.push(text('projects-empty', t('projects_empty', 'No worlds yet. Build one with One World on.')));
-    list.replaceChildren(...rows);
+    if (newButton) {
+      newButton.disabled = newOff();
+      newButton.title = available() ? '' : t('one_world_desc_on', 'Each area joins one growing world at its real position.');
+      if (newButton.disabled) { draft = null; draftInput = null; }
+    }
+    shown = rows;
+    show();
     fillPlaces(worlds);
   }
   return refresh;

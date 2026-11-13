@@ -127,10 +127,9 @@ fn sanitize_chars_and_trim(name: &str) -> String {
 /// these names get wrapped in longer strings (`Arnis {name}.mcworld`).
 const MAX_FILENAME_BYTES: usize = 64;
 
-/// Longest custom world name a user may set, counted in characters (not
-/// bytes) so the limit means the same thing in every script. Mirrored by the
-/// world-name editor's `maxlength` and character counter in the GUI, so what
-/// the user is allowed to type is exactly what lands on disk.
+/// Longest custom world name kept, counted in characters (not bytes) so the
+/// limit means the same thing in every script. The window's name fields take
+/// 32, Minecraft's own limit; 48 here keeps longer names from before working.
 pub const MAX_CUSTOM_WORLD_NAME_CHARS: usize = 48;
 
 /// Byte budget for a custom world name. Sized so the character cap above is
@@ -1333,6 +1332,54 @@ pub fn rename_world(save: &Path, old: &str, new: &str) -> Result<String, String>
     Ok(new.to_string())
 }
 
+/// Hands the One World `name` in `save` to `remove`; refused for other folders and while held.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn remove_one_world(
+    save: &Path,
+    name: &str,
+    remove: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let world = save.join(name);
+    if bad_world_name(name).is_some()
+        || !world.join("level.dat").is_file()
+        || !crate::one_world::Manifest::path_in(&world).is_file()
+    {
+        return Err(format!("{name} is not a One World in this folder."));
+    }
+    let lock = SessionLock::acquire(&world).map_err(|_| {
+        "The world is in use; close it in Minecraft or wait for the run.".to_string()
+    })?;
+    // Held through the move so no run starts in it; on Windows an open file would pin the folder.
+    if cfg!(windows) {
+        drop(lock);
+        return remove(&world);
+    }
+    let moved = remove(&world);
+    drop(lock);
+    moved
+}
+
+/// The folder for a new One World typed as `raw`: it must land on disk as typed and be free.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn new_world_name(save: &Path, raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if let Some(why) = bad_world_name(name) {
+        return Err(why.to_string());
+    }
+    // Minecraft's own Create World screen takes 32 characters.
+    const LONGEST: usize = 32;
+    if name.chars().count() > LONGEST {
+        return Err(format!("The name is longer than {LONGEST} characters."));
+    }
+    if !save.is_dir() {
+        return Err("The saves folder does not exist.".to_string());
+    }
+    if save.join(name).exists() {
+        return Err(format!("A world named {name} already exists."));
+    }
+    Ok(name.to_string())
+}
+
 /// `Data.LevelName` of a world's `level.dat`.
 pub(crate) fn level_name(world: &Path) -> Option<String> {
     let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
@@ -1599,6 +1646,56 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_world_name_must_be_free_and_land_as_typed() {
+        let save = tempfile::tempdir().unwrap();
+        fs::create_dir(save.path().join("Paris")).unwrap();
+        assert_eq!(new_world_name(save.path(), "  Tokyo ").unwrap(), "Tokyo");
+        assert!(new_world_name(save.path(), "Paris")
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(new_world_name(save.path(), &"x".repeat(32)).is_ok());
+        let long = "x".repeat(33);
+        for refused in ["", "   ", "a/b", "..", "CON", "Tokyo.", &long] {
+            assert!(
+                new_world_name(save.path(), refused).is_err(),
+                "{refused:?} must be refused"
+            );
+        }
+        assert!(new_world_name(&save.path().join("missing"), "Tokyo").is_err());
+    }
+
+    #[test]
+    fn only_a_one_world_that_is_not_in_use_is_removed() {
+        let save = tempfile::tempdir().unwrap();
+        let make = |name: &str, one_world: bool| {
+            let world = save.path().join(name);
+            fs::create_dir_all(&world).unwrap();
+            fs::write(world.join("level.dat"), b"x").unwrap();
+            if one_world {
+                fs::write(crate::one_world::Manifest::path_in(&world), b"{}").unwrap();
+            }
+            world
+        };
+        let paris = make("Paris", true);
+        make("Plain", false);
+        let mut removed = Vec::new();
+        let mut remove = |name: &str| {
+            remove_one_world(save.path(), name, |w| {
+                removed.push(w.to_path_buf());
+                Ok(())
+            })
+        };
+        for refused in ["Plain", "Missing", "..", "../Paris", "Paris/", ""] {
+            assert!(remove(refused).is_err(), "{refused:?} must be refused");
+        }
+        let held = SessionLock::acquire(&paris).unwrap();
+        assert!(remove("Paris").unwrap_err().contains("in use"));
+        drop(held);
+        remove("Paris").unwrap();
+        assert_eq!(removed, [paris]);
+    }
 
     /// A rename moves the folder and the LevelName together, and refuses a clash, path
     /// characters, reserved names and a world in use.
@@ -1956,8 +2053,7 @@ mod tests {
 
     #[test]
     fn a_full_length_custom_name_survives_in_any_script() {
-        // The editor caps input at MAX_CUSTOM_WORLD_NAME_CHARS characters, so
-        // a name of exactly that many characters must come back untouched -
+        // A name of exactly MAX_CUSTOM_WORLD_NAME_CHARS characters must come back untouched -
         // in every script, not just Latin-1. A byte-based cap would quietly
         // cut a Japanese or Cyrillic name to a third of what was typed.
         let tmp = tempfile::tempdir().unwrap();

@@ -28,6 +28,7 @@
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
     <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
     <symbol id="i-earth" viewBox="0 0 24 24"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></symbol>
@@ -129,7 +130,7 @@
                          characters too - so nothing typed here is ever silently truncated
                          on the way to disk. main.js reads the limit off this attribute to
                          colour the field red once it's reached. -->
-                    <input type="text" id="world-name-input" class="world-name-input" style="display: none;" maxlength="48" autocomplete="off" spellcheck="false">
+                    <input type="text" id="world-name-input" class="world-name-input" style="display: none;" maxlength="32" autocomplete="off" spellcheck="false">
                     <button type="button" id="world-name-edit-button" class="world-name-edit-button" title="Set a custom world name" aria-label="Set a custom world name" style="display: none;">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75z"/></svg>
                     </button>
@@ -1247,9 +1248,12 @@
                   <p data-localize="settings_section_projects_desc">The worlds built with One World in your save folder.</p>
                 </div>
               </header>
-              <div class="projects-view" role="group" data-localize-aria-label="projects_view">
-                <button type="button" id="projects-view-list" class="settings-action-button" aria-pressed="true" data-localize="projects_view_list">List</button>
-                <button type="button" id="projects-view-grid" class="settings-action-button" aria-pressed="false" data-localize="projects_view_grid">Grid</button>
+              <div class="projects-bar">
+                <div class="projects-view" role="group" data-localize-aria-label="projects_view">
+                  <button type="button" id="projects-view-list" class="settings-action-button" aria-pressed="true" data-localize="projects_view_list">List</button>
+                  <button type="button" id="projects-view-grid" class="settings-action-button" aria-pressed="false" data-localize="projects_view_grid">Grid</button>
+                </div>
+                <button type="button" id="projects-new" class="settings-action-button projects-new"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg><span data-localize="projects_new">New One World</span></button>
               </div>
               <div id="projects-list" class="projects-list"></div>
             </section>
