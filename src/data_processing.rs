@@ -4,7 +4,7 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::building_facade::BuildingContext;
 use crate::element_processing::subprocessor::interior::InteriorUseIndex;
 use crate::element_processing::*;
-use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, InnerRings};
 use crate::ground::Ground;
 use crate::ground_generation;
 use crate::map_preview;
@@ -70,7 +70,11 @@ fn way_ground_fill_area(way: &ProcessedWay) -> Option<f64> {
     {
         return None;
     }
-    let fills_ground = if swimming_pools::is_swimming_pool(tags) || golf::claims(tags) {
+    let fills_ground = if swimming_pools::is_swimming_pool(tags)
+        || golf::claims(tags)
+        || cemetery::claims(tags)
+        || camp_sites::claims(tags)
+    {
         true
     } else if tags.contains_key("landuse") {
         landuse_paints_ground(tags)
@@ -94,7 +98,11 @@ fn relation_ground_fill_area(rel: &ProcessedRelation) -> Option<f64> {
     let tags = &rel.tags;
     match RelationArea::of(tags) {
         Some(
-            RelationArea::Natural | RelationArea::Leisure | RelationArea::Golf | RelationArea::Pool,
+            RelationArea::Natural
+            | RelationArea::Leisure
+            | RelationArea::Golf
+            | RelationArea::Grounds
+            | RelationArea::Pool,
         ) => {}
         Some(RelationArea::Landuse) if landuse_paints_ground(tags) => {}
         _ => return None,
@@ -415,6 +423,25 @@ fn process_element(
                 swimming_pools::generate_swimming_pool(editor, way, &ctx);
             } else if golf::claims(&way.tags) {
                 golf::generate_golf(editor, way, args, flood_fill_cache);
+            } else if camp_sites::claims(&way.tags) {
+                camp_sites::generate_camp_site(
+                    editor,
+                    way,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    args.timeout.as_ref(),
+                );
+            } else if cemetery::claims(&way.tags) {
+                cemetery::generate_cemetery(
+                    editor,
+                    way,
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                    road_mask,
+                    bridge_surface,
+                );
             } else if way.tags.contains_key("landuse") {
                 landuse::generate_landuse(
                     editor,
@@ -597,6 +624,10 @@ fn process_element(
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
+            } else if cemetery::is_mapped_grave(&node.tags) {
+                cemetery::generate_mapped_grave(editor, node, building_footprints);
+            } else if camp_sites::is_pitch(&node.tags) {
+                camp_sites::generate_pitch_node(editor, node);
             } else if node.tags.contains_key("tourism") {
                 tourisms::generate_tourisms(editor, node, road_mask);
             } else if node.tags.contains_key("man_made") {
@@ -672,6 +703,45 @@ fn process_element(
             }
             Some(RelationArea::Golf) => {
                 golf::generate_golf_from_relation(editor, rel, args, flood_fill_cache);
+            }
+            Some(RelationArea::Grounds) => {
+                // Each outer ring with the relation's tags, less the holes its inner rings cut.
+                let inners = InnerRings::of(rel);
+                for member in rel
+                    .members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer)
+                {
+                    let holes =
+                        flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
+                    let way = ProcessedWay {
+                        id: member.way.id,
+                        nodes: member.way.nodes.clone(),
+                        tags: rel.tags.clone(),
+                    };
+                    if camp_sites::claims(&rel.tags) {
+                        camp_sites::camp_area(
+                            editor,
+                            &way,
+                            flood_fill_cache,
+                            building_footprints,
+                            road_mask,
+                            args.timeout.as_ref(),
+                            holes.as_ref(),
+                        );
+                    } else {
+                        cemetery::cemetery_area(
+                            editor,
+                            &way,
+                            args,
+                            flood_fill_cache,
+                            building_footprints,
+                            road_mask,
+                            bridge_surface,
+                            holes.as_ref(),
+                        );
+                    }
+                }
             }
             Some(RelationArea::Pool) => {
                 let ctx = swimming_pools::PoolContext {
@@ -1223,6 +1293,9 @@ pub fn generate_world_with_options(
         editor.set_tree_pack(Arc::clone(tp));
     }
 
+    cemetery::prepare(&mut elements, sign_region);
+    camp_sites::prepare(&mut elements);
+    allotments::prepare(&mut elements, args.scale);
     // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 

@@ -1,7 +1,7 @@
 //! Farmland plots: one crop per field, laid out inside its OSM outline; sizes in metres.
 
+use super::area_layout::{cell_hash, mix};
 use crate::block_definitions::*;
-use crate::clipping::is_invented_node_id;
 use crate::ground_generation::value_noise_01;
 use crate::land_cover::coord_hash;
 use crate::osm_parser::ProcessedNode;
@@ -109,18 +109,6 @@ impl Params {
             rows_along_x,
         }
     }
-}
-
-fn mix(mut h: u64) -> u64 {
-    h ^= h >> 30;
-    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h ^= h >> 27;
-    h = h.wrapping_mul(0x94D0_49BB_1331_11EB);
-    h ^ (h >> 31)
-}
-
-fn plot_key(a: u64, i: i64, j: i64) -> u64 {
-    mix(a ^ mix((i as u64) ^ mix(j as u64 ^ 0x51ED)))
 }
 
 fn sane_scale(scale: f64) -> f64 {
@@ -310,37 +298,9 @@ impl FieldLayout {
     pub fn new(preset: FieldPreset, scale: f64, id: u64, nodes: &[ProcessedNode]) -> Option<Self> {
         let params = preset.params()?;
         let scale = sane_scale(scale);
-        // Clipper-made edges skipped; 4x folding lets parallel and perpendicular edges agree.
-        let (mut c, mut s) = (0.0f64, 0.0f64);
-        for w in nodes.windows(2) {
-            if is_invented_node_id(w[0].id) && is_invented_node_id(w[1].id) {
-                continue;
-            }
-            let (dx, dz) = ((w[1].x - w[0].x) as f64, (w[1].z - w[0].z) as f64);
-            let len = dx.hypot(dz);
-            if len >= 1.0 {
-                let a = 4.0 * dz.atan2(dx);
-                c += len * a.cos();
-                s += len * a.sin();
-            }
-        }
-        let (sin, cos) = (s.atan2(c) / 4.0).sin_cos();
-        let (u, v) = ((cos, sin), (-sin, cos));
-        let extent = |d: (f64, f64)| {
-            nodes.iter().fold((f64::MAX, f64::MIN), |(lo, hi), n| {
-                let p = d.0 * n.x as f64 + d.1 * n.z as f64;
-                (lo.min(p), hi.max(p))
-            })
-        };
-        let (eu, ev) = (extent(u), extent(v));
-        if eu.0 > eu.1 {
-            return None;
-        }
-        let (along, across, ea, ec) = if eu.1 - eu.0 >= ev.1 - ev.0 {
-            (u, v, eu, ev)
-        } else {
-            (v, u, ev, eu)
-        };
+        let frame = super::area_layout::Frame::of(nodes)?;
+        let (along, across) = (frame.along, frame.across);
+        let (ea, ec) = (frame.along_range, frame.across_range);
         let width = params.strip_blocks(scale, mix(id ^ 0x5717_1D7A));
         let length = (params.length_m * scale).max(MIN_LENGTH_BLOCKS);
         let n_across = (((ec.1 - ec.0) / width).round() as i64).max(1);
@@ -387,7 +347,9 @@ impl FieldLayout {
                 return plot;
             }
         }
-        let plot = self.params.plot(plot_key(self.id, i, j), self.rows_along_x);
+        let plot = self
+            .params
+            .plot(cell_hash(self.id, i, j), self.rows_along_x);
         self.last_plot.set(Some(((i, j), plot)));
         plot
     }
@@ -431,7 +393,7 @@ impl CroplandGrid {
         let b = match self.last_block.get() {
             Some(b) if b.key == key => b,
             _ => {
-                let hash = plot_key(0xC0FF_EE11, i64::from(key.0), i64::from(key.1));
+                let hash = cell_hash(0xC0FF_EE11, i64::from(key.0), i64::from(key.1));
                 let width = self.params.strip_blocks(self.scale, hash >> 8).round() as i32;
                 let b = StripBlock {
                     key,
@@ -453,7 +415,7 @@ impl CroplandGrid {
         }
         let plot = self
             .params
-            .plot(plot_key(b.hash, i64::from(strip), 0), b.rows_along_x);
+            .plot(cell_hash(b.hash, i64::from(strip), 0), b.rows_along_x);
         self.last_plot.set(Some(((b.hash, strip), plot)));
         plot
     }
