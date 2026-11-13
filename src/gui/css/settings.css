@@ -652,9 +652,9 @@ button.setting-reason:focus-visible {
 }
 
 
-/* "New!" on a feature of this release (main.js, initNewBadges) */
+/* "New!" on a feature of this release (main.js, initNewBadges); as tall as the icons beside it */
 .new-badge {
-  height: 18px;
+  height: 16px;
   width: auto;
   margin-left: 6px;
   vertical-align: middle;
@@ -665,10 +665,11 @@ button.setting-reason:focus-visible {
   margin-left: -16px;
 }
 
+/* Clear of the modified dot in the item's corner */
 .settings-nav-item .new-badge {
   flex-shrink: 0;
-  height: 15px;
-  margin-left: 4px;
+  height: 14px;
+  margin: 0 6px 0 4px;
 }
 
 .settings-page .segmented-control .segment .new-badge {
