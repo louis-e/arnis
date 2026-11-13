@@ -464,7 +464,8 @@ pub struct Args {
     #[arg(long, value_parser = clap::value_parser!(u64).range(1..=100_000_000))]
     pub ram_budget_mb: Option<u64>,
 
-    /// Downloads this process keeps in flight at once (default 16).
+    /// Downloads this process keeps in flight at once (default 16). The pieces of a --one-world
+    /// job share twice this, at least 2 each.
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
     pub max_downloads: Option<u32>,
 

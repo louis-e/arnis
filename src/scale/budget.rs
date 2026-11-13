@@ -2,8 +2,9 @@
 //!
 //! A fixed count (`--one-world-workers N`) splits the memory one run would take:
 //! `--ram-budget-mb` else what is free. Every piece gets all the threads (`--threads` else
-//! 90% of the cores), which the system shares between them, and all the downloads
-//! (`--max-downloads` else the default), as pieces start, and so fetch, one at a time.
+//! 90% of the cores), which the system shares between them. Pieces start, and so mostly fetch,
+//! one at a time, but may overlap: they share twice a run's downloads (`--max-downloads` else
+//! the default), at least 2 each.
 //! `auto` picks W = clamp(min(pieces, threads / MIN_THREADS, free RAM / piece RAM), 2, 6), or 1
 //! below `TWO_WORKERS_FROM` threads or one piece's RAM: a few fat workers beat many thin ones.
 
@@ -130,7 +131,7 @@ pub struct Sizing {
     /// Per piece: the job's whole budget, as pieces are rarely all in their parallel part.
     pub threads: usize,
     pub ram_mb: Option<u64>,
-    /// Per piece: the job's whole allowance, as pieces fetch one at a time.
+    /// Per piece: a share of twice the job's allowance (`piece_downloads`).
     pub downloads: u32,
     /// Memory the running pieces may share, when `auto` watches it.
     pub usable_mb: Option<u64>,
@@ -164,6 +165,14 @@ impl Sizing {
     }
 }
 
+/// Downloads each of `workers` pieces keeps in flight, of a run's `allowance`: twice the
+/// allowance in all, as pieces mostly fetch one after another, at least 2 each and never
+/// more than one run's.
+fn piece_downloads(allowance: u32, workers: usize) -> u32 {
+    let share = (2 * allowance as usize / workers.max(1)).max(2);
+    share.min(allowance as usize) as u32
+}
+
 /// Sizing for a job of `pieces` pieces, the largest `piece_regions` regions.
 pub fn sizing(args: &Args, pieces: usize, piece_regions: u64) -> Sizing {
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
@@ -190,7 +199,7 @@ pub fn sizing(args: &Args, pieces: usize, piece_regions: u64) -> Sizing {
                 workers,
                 threads: budget,
                 ram_mb: piece_share(free, workers, piece_mb, given),
-                downloads,
+                downloads: piece_downloads(downloads, workers),
                 usable_mb: Some(free),
             }
         }
@@ -207,7 +216,7 @@ pub fn sizing(args: &Args, pieces: usize, piece_regions: u64) -> Sizing {
                 workers,
                 threads: budget,
                 ram_mb: ram_mb.and_then(|mb| piece_share(mb, workers, piece_mb, given)),
-                downloads,
+                downloads: piece_downloads(downloads, workers),
                 usable_mb: None,
             }
         }
@@ -316,7 +325,25 @@ mod tests {
     }
 
     #[test]
-    fn a_fixed_count_splits_memory_not_threads_or_downloads() {
+    fn pieces_share_twice_a_runs_downloads() {
+        // One or two at a time: each the run's 16; six: 5 each, 30 in all.
+        assert_eq!(piece_downloads(16, 1), 16);
+        assert_eq!(piece_downloads(16, 2), 16);
+        assert_eq!(piece_downloads(16, 4), 8);
+        assert_eq!(piece_downloads(16, 6), 5);
+        // Never under 2 a piece, unless the run itself is allowed less.
+        assert_eq!(piece_downloads(16, 64), 2);
+        assert_eq!(piece_downloads(1, 4), 1);
+        let s = sizing(
+            &parse(&["--one-world-workers", "6", "--max-downloads", "8"]),
+            16,
+            16,
+        );
+        assert_eq!((s.workers, s.downloads), (6, 2));
+    }
+
+    #[test]
+    fn a_fixed_count_splits_memory_and_downloads_not_threads() {
         let s = sizing(
             &parse(&[
                 "--one-world-workers",
@@ -335,7 +362,7 @@ mod tests {
                 workers: 4,
                 threads: 20,
                 ram_mb: Some(2000),
-                downloads: 16,
+                downloads: 8,
                 usable_mb: None,
             }
         );
