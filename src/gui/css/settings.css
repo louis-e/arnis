@@ -652,7 +652,7 @@ button.setting-reason:focus-visible {
 }
 
 
-/* "New!" on a feature of this release (main.js, initNewBadges); as tall as the icons beside it */
+/* "New!" on a feature of this release (new-badges.js); as tall as the icons beside it */
 .new-badge {
   height: 16px;
   width: auto;
@@ -660,9 +660,9 @@ button.setting-reason:focus-visible {
   vertical-align: middle;
 }
 
-/* Takes the place of the hidden revert button before it */
-.settings-row:not(.is-modified) .setting-heading > .setting-revert + .new-badge {
-  margin-left: -16px;
+/* The badge takes the place of the revert button while there is nothing to revert (new-badges.js) */
+.settings-row.has-new-badge:not(.is-modified) .setting-heading > .setting-revert {
+  display: none;
 }
 
 /* Clear of the modified dot in the item's corner */

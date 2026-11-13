@@ -523,8 +523,7 @@ function injectRevertButtons(localization) {
       revert(entry);
     });
 
-    // Before a "New!" badge: the heading CSS reads the title's next siblings, and WebKit leaves the
-    // title's padding stale when a badge between them goes away.
+    // Before a "New!" badge: WebKit kept the heading's sibling-based padding stale when one went.
     slot.insertBefore(button, slot.querySelector(':scope > .new-badge'));
   }
 }
