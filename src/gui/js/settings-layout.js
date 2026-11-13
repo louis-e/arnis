@@ -210,7 +210,9 @@ const SEARCH_WORDS = {
 function rowText(row) {
   const tips = Array.from(row.querySelectorAll('[data-tooltip]'), (t) => t.dataset.tooltip).join(' ');
   const extra = Array.from(row.querySelectorAll('[id]'), (el) => SEARCH_WORDS[el.id] || '').join(' ');
-  return `${row.textContent} ${tips} ${extra}`.toLowerCase();
+  // A greyed row's reason is about another setting, so it is no reason to list this one.
+  const reason = row.querySelector('.setting-reason')?.textContent || '';
+  return `${row.textContent.replace(reason, '')} ${tips} ${extra}`.toLowerCase();
 }
 
 // The search field in the sidebar leaves only the settings that hold every word typed, in the

@@ -107,15 +107,17 @@ export function initDockGrip(dock, grip) {
   });
 }
 
-export function initMeldFeatures() {
+let refreshPageLayout = () => {};
+export const refreshLayout = () => refreshPageLayout();
+
+export function initMeldFeatures({ buildsInCells = () => false } = {}) {
   const toggle = el('advanced-meld-features-toggle');
   if (!toggle) return;
-  // The map-first page (styles.css, body.map-first): Map first, or Auto with Advanced features on.
+  // The map-first page (styles.css, body.map-first): Map first, or Auto while a build in cells is set up.
   const layout = el('layout-select');
-  const apply = () => {
-    const mode = layout ? layout.value : 'classic';
-    document.body.classList.toggle('meld-off', !toggle.checked);
-    const mapFirst = mode === 'map' || (mode === 'auto' && toggle.checked);
+  refreshPageLayout = () => {
+    const mode = layout ? layout.value : 'auto';
+    const mapFirst = mode === 'map' || (mode === 'auto' && toggle.checked && buildsInCells());
     document.body.classList.toggle('map-first', mapFirst);
     const dock = el('preview3d-mini');
     if (dock) {
@@ -123,6 +125,10 @@ export function initMeldFeatures() {
       try { w = Number(localStorage.getItem('arnis-preview-dock-width')); } catch (_) { /* default size */ }
       dock.style.width = mapFirst && w >= 200 ? `${w}px` : '';
     }
+  };
+  const apply = () => {
+    document.body.classList.toggle('meld-off', !toggle.checked);
+    refreshPageLayout();
     // Off, a finished job's pieces leave the map with the rest of Advanced features.
     if (!toggle.checked && !running && pieces.size) resetPieces();
     // So does the outline a Resume or Rebuild put back: the map never drew it, so cannot clear it.

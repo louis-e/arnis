@@ -13,7 +13,7 @@ import { initPreviews } from './preview-popover.js';
 import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
 import {
   t as oneWorldText,
-  initMeldFeatures, meldFlags, cellsKey, generationTarget, generationShapes, progressText, holdsNotice,
+  initMeldFeatures, refreshLayout, meldFlags, cellsKey, generationTarget, generationShapes, progressText, holdsNotice,
   initRunControls, initCellMenu, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls,
   initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing,
   setPlanMask, hasPlanMask, refreshStretch,
@@ -111,9 +111,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 function applyStoredLayout() {
   try {
     const values = JSON.parse(localStorage.getItem('arnis-settings') || '{}').values || {};
-    // Auto is the default, so it is not stored.
+    // Auto is the default, so it is not stored; it shows the map first for a build in cells.
     const mode = values['layout-select'] || 'auto';
-    document.body.classList.toggle('map-first', mode === 'map' || (mode === 'auto' && values['advanced-meld-features-toggle'] === true));
+    const cells = values['advanced-meld-features-toggle'] === true && values['one-world-group'] === 'on' && !!values['meld-workers-select'];
+    document.body.classList.toggle('map-first', mode === 'map' || (mode === 'auto' && cells));
   } catch (_) { /* the store's own restore sets it */ }
 }
 
@@ -705,7 +706,10 @@ function refreshFacadeSourceRows() {
   // greyed like the row it sits in rather than left looking live.
   group.classList.toggle('segmented-disabled', !earth);
   const sourceRow = group.closest('.settings-row');
-  if (sourceRow) sourceRow.classList.toggle('settings-row-unavailable', !earth);
+  if (sourceRow) {
+    sourceRow.classList.toggle('settings-row-unavailable', !earth);
+    setRowReason(sourceRow, earth ? null : 'reason_earth');
+  }
   group.querySelectorAll('.segment').forEach((btn) => {
     btn.disabled = !earth || ((!java || isOneWorldEnabled()) && btn.dataset.facadeSource === 'preset');
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
@@ -716,12 +720,13 @@ function refreshFacadeSourceRows() {
   // under Off only buried the rest of the page. A row that belongs to this
   // source but cannot act yet (no token, wrong format) is greyed instead, so
   // it is still there to explain itself.
-  const grey = (id, shown, live) => {
+  const grey = (id, shown, live, reason = null) => {
     const el = document.getElementById(id);
     const row = el && el.closest('.settings-row');
     if (row) {
       row.style.display = shown ? '' : 'none';
       row.classList.toggle('settings-row-unavailable', !live);
+      setRowReason(row, live ? null : reason);
     }
     if (el) {
       el.querySelectorAll('.segment, input, button').forEach((c) => {
@@ -733,13 +738,10 @@ function refreshFacadeSourceRows() {
   const mapillary = source === 'mapillary';
   const token = !!getMapillaryToken();
   grey('mapillary-token', mapillary, mapillary);
-  grey('facade-mode-group', mapillary, mapillary && token);
+  grey('facade-mode-group', mapillary, mapillary && token, 'reason_token');
   // Panel resolution, so it means nothing where no panels are hung.
-  grey('facade-detail-group', source !== 'off', source !== 'off' && java);
-  grey('precompute-facades-button', mapillary, mapillary && token);
-
-  const notice = document.getElementById('facade-java-only-notice');
-  if (notice) notice.style.display = java ? 'none' : '';
+  grey('facade-detail-group', source !== 'off', source !== 'off' && java, 'reason_java');
+  grey('precompute-facades-button', mapillary, mapillary && token, 'reason_token');
 }
 
 // The facade rows react to the world format (panels are Java only), the on/off
@@ -747,21 +749,17 @@ function refreshFacadeSourceRows() {
 // left looking live, and the Precompute button reads the same facts.
 function refreshFacadeRows() {
   const group = document.getElementById('facade-mode-group');
-  const notice = document.getElementById('facade-java-only-notice');
   if (!group) return;
 
   const java = selectedWorldFormat === 'java';
-  const earth = selectedCelestialBody === 'earth';
   const effective = getEffectiveFacadeMode();
+  // The source rows enable the whole group first; photo panels stay off where they cannot hang.
+  refreshFacadeSourceRows();
   group.querySelectorAll('.segment').forEach((btn) => {
     const panels = btn.dataset.facadeMode !== 'blocks';
-    btn.disabled = panels && (!java || isOneWorldEnabled());
+    if (panels && (!java || isOneWorldEnabled())) btn.disabled = true;
     btn.classList.toggle('active', btn.dataset.facadeMode === effective);
   });
-  // Off Earth nothing builds facades at all, so the format gate has nothing
-  // left to explain.
-  if (notice) notice.style.display = java || !earth ? 'none' : '';
-  refreshFacadeSourceRows();
   refreshPrecomputeButton();
 }
 
@@ -800,7 +798,10 @@ function setCelestialBody(body) {
 
   const markRow = (el) => {
     const row = el && el.closest('.settings-row');
-    if (row) row.classList.toggle('settings-row-unavailable', off);
+    if (row) {
+      row.classList.toggle('settings-row-unavailable', off);
+      setRowReason(row, off ? 'reason_earth' : null);
+    }
   };
 
   EARTH_ONLY_SETTINGS.forEach((id) => {
@@ -1445,7 +1446,9 @@ function initSettings() {
     });
   });
 
-  initMeldFeatures();
+  initMeldFeatures({
+    buildsInCells: () => isOneWorldEnabled() && !isLiveMode() && !!document.getElementById('meld-workers-select')?.value,
+  });
   initRunControls({
     invoke,
     post: (message) => getMapFrame()?.contentWindow?.postMessage(message, '*'),
@@ -2100,7 +2103,10 @@ function refreshHeightLimitRow(format) {
   const toggle = document.getElementById('disable-height-limit-toggle');
   if (!toggle) return;
 
-  const available = heightLimitAvailable(format || selectedWorldFormat);
+  const current = format || selectedWorldFormat;
+  const reason = why([selectedCelestialBody === 'earth', 'reason_earth'], [current !== 'luanti', 'reason_java_bedrock'],
+    [!oneWorldPinned, 'reason_not_one_world']);
+  const available = !reason;
   toggle.disabled = !available;
 
   const row = toggle.closest('.settings-row');
@@ -2108,6 +2114,7 @@ function refreshHeightLimitRow(format) {
     // Cleared, not set to 1: an inline value would beat the class rule.
     row.style.opacity = '';
     row.classList.toggle('settings-row-unavailable', !available);
+    setRowReason(row, reason);
   }
 }
 
@@ -2116,15 +2123,15 @@ function refreshHeightLimitRow(format) {
 // A One World's areas sit at their real heights and a superflat off Earth is
 // grass, so the backend makes both void.
 function refreshWorldTypeRow(format) {
-  const available = (format || selectedWorldFormat) === 'java'
-    && selectedCelestialBody === 'earth' && !isOneWorldEnabled();
-  setSegmentedRowAvailable('world-type-group', available);
+  const reason = why([(format || selectedWorldFormat) === 'java', 'reason_java'],
+    [selectedCelestialBody === 'earth', 'reason_earth'], [!isOneWorldEnabled(), 'reason_not_one_world']);
+  setSegmentedRowAvailable('world-type-group', !reason, reason);
 }
 
 // Greyed the way the settings store reads it: every segment disabled, so the row is out of
-// the tab order and never shows as modified, and inert like a greyed toggle's row. The
-// active segment stays, so the choice comes back with the row.
-function setSegmentedRowAvailable(groupId, available) {
+// the tab order and never shows as modified, and inert like a greyed toggle's row (all but
+// its reason, when it has one). The active segment stays, so the choice comes back with the row.
+function setSegmentedRowAvailable(groupId, available, reason = null) {
   const group = document.getElementById(groupId);
   if (!group) return;
   group.classList.toggle('segmented-disabled', !available);
@@ -2132,7 +2139,8 @@ function setSegmentedRowAvailable(groupId, available) {
   const row = group.closest('.settings-row');
   if (row) {
     row.classList.toggle('settings-row-unavailable', !available);
-    row.toggleAttribute('inert', !available);
+    row.toggleAttribute('inert', !available && !reason);
+    setRowReason(row, available ? null : reason);
   }
 }
 
@@ -2149,14 +2157,22 @@ function refreshGameplayRows(format) {
   const earth = selectedCelestialBody === 'earth';
   const mode = document.getElementById('generation-mode-select');
   const blueprint = !!mode && mode.value === 'blueprint';
-  setSettingsRowAvailable('pause-menu-toggle', pack);
-  setSettingsRowAvailable('zombie-outbreak-toggle', pack);
-  setSettingsRowAvailable('disasters-toggle', pack);
-  setSettingsRowAvailable('discoveries-toggle', pack && earth);
-  setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
-  setSettingsRowAvailable('moving-cars-toggle', vehicles && earth);
-  setSettingsRowAvailable('pedestrians-toggle', pack && earth);
-  setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
+  const packWhy = [[current === 'java', 'reason_java'], [!isOneWorldEnabled(), 'reason_not_one_world']];
+  const gate = (id, ...more) => {
+    const reason = why(...packWhy, ...more);
+    setSettingsRowAvailable(id, !reason, reason);
+  };
+  gate('pause-menu-toggle');
+  gate('zombie-outbreak-toggle');
+  gate('disasters-toggle');
+  gate('discoveries-toggle', [earth, 'reason_earth']);
+  gate('traffic-lights-toggle', [earth, 'reason_earth'], [!blueprint, 'reason_blueprint']);
+  const carsWhy = why([current === 'java' || current === 'bedrock', 'reason_java_bedrock'],
+    [vehicles, 'reason_not_one_world'], [earth, 'reason_earth']);
+  setSettingsRowAvailable('moving-cars-toggle', !carsWhy, carsWhy);
+  gate('pedestrians-toggle', [earth, 'reason_earth']);
+  const gravityWhy = why([!earth, 'reason_moon_mars'], ...packWhy);
+  setSettingsRowAvailable('body-gravity-toggle', !gravityWhy, gravityWhy);
   // Last, as it reads whether the outbreak and the disasters are still available.
   refreshMobSpawningRow(current);
 }
@@ -2164,17 +2180,21 @@ function refreshGameplayRows(format) {
 // Mineclonia spawns by settings outside the world, nothing lives off Earth, and the Zombie
 // Outbreak and Disasters bring their own mobs on their own difficulty. The backend turns it
 // off in all of these too.
-function mobSpawningAvailable(format) {
+function mobSpawningReason(format) {
   const current = format || selectedWorldFormat;
-  return (current === 'java' || current === 'bedrock')
-    && selectedCelestialBody === 'earth'
-    && !gameplayToggle('zombie-outbreak-toggle')
-    && !gameplayToggle('disasters-toggle')
-    && !(isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists));
+  return why([current === 'java' || current === 'bedrock', 'reason_java_bedrock'],
+    [selectedCelestialBody === 'earth', 'reason_earth'],
+    [!gameplayToggle('zombie-outbreak-toggle'), 'reason_outbreak'], [!gameplayToggle('disasters-toggle'), 'reason_disasters'],
+    [!(isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists)), 'reason_world_set']);
+}
+
+function mobSpawningAvailable(format) {
+  return !mobSpawningReason(format);
 }
 
 function refreshMobSpawningRow(format) {
-  setSegmentedRowAvailable('mob-spawning-group', mobSpawningAvailable(format));
+  const reason = mobSpawningReason(format);
+  setSegmentedRowAvailable('mob-spawning-group', !reason, reason);
 }
 
 // Off wherever the row is greyed, so a stale choice is never sent.
@@ -3486,6 +3506,12 @@ let oneWorldName = localStorage.getItem(ONE_WORLD_NAME_KEY) || '';
 // Set by Settings > Projects > Open: the name above is then used with or without Custom World Name.
 let oneWorldPicked = localStorage.getItem('arnis-one-world-picked') === '1';
 
+function refreshOneWorldRow() {
+  const reason = why([selectedWorldFormat === 'java', 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth'],
+    [!liveActive(), 'reason_live_running']);
+  setSegmentedRowAvailable('one-world-group', !reason, reason);
+}
+
 function isOneWorldAvailable() {
   return selectedWorldFormat === 'java' && selectedCelestialBody === 'earth';
 }
@@ -3508,7 +3534,7 @@ function refreshLuantiAvailability() {
     luantiBtn.disabled = on;
     luantiBtn.title = on ? 'Luanti is not available in One World mode' : '';
   }
-  setSettingsRowAvailable('enable-luanti-toggle', !on);
+  setSettingsRowAvailable('enable-luanti-toggle', !on, 'reason_not_one_world');
   if (on && selectedWorldFormat === 'luanti') setWorldFormat('java');
 }
 
@@ -3539,9 +3565,10 @@ function refreshOneWorldDesc() {
 // live world gets no map item at all.
 function refreshWorldRulesRows() {
   const fixed = isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists);
-  setSegmentedRowAvailable('gamemode-group', !fixed);
-  setSettingsRowAvailable('world-time-slider', !fixed);
-  setSettingsRowAvailable('map-item-toggle', !fixed && !isLiveMode());
+  setSegmentedRowAvailable('gamemode-group', !fixed, 'reason_world_set');
+  setSettingsRowAvailable('world-time-slider', !fixed, 'reason_world_set');
+  const mapWhy = why([!fixed, 'reason_world_set'], [!isLiveMode(), 'reason_live']);
+  setSettingsRowAvailable('map-item-toggle', !mapWhy, mapWhy);
   refreshMobSpawningRow();
 }
 
@@ -3617,14 +3644,105 @@ function renderOneWorldStatus() {
   setOneWorldStatus(text, tone);
 }
 
-function setSettingsRowAvailable(inputId, available) {
+// Why a greyed row is greyed, said as what to do, in place of its description. Where that
+// is another setting on this page, the text is a link that shows it.
+const ROW_REASONS = {
+  reason_earth: ['Switch the map to Earth.'],
+  reason_moon_mars: ['Switch the map to the Moon or Mars.'],
+  reason_java: ['Switch the world format to Java.'],
+  reason_java_bedrock: ['Switch the world format to Java or Bedrock.'],
+  reason_one_world: ['Switch One World to On.', 'one-world-group'],
+  reason_not_one_world: ['Switch One World to Off.', 'one-world-group'],
+  reason_live: ['Switch One World from Live to On.', 'one-world-group'],
+  reason_live_running: ['Stop Live Mode first.'],
+  reason_world_set: ['Locked by this One World. Start a new one to change it.'],
+  reason_cells: ['Set Parallel cells to Auto.', 'meld-workers-select'],
+  reason_height: ['Turn on Extend build height.', 'disable-height-limit-toggle'],
+  reason_voxy: ['Turn off Pre-generate Voxy LOD.', 'voxy-lod-toggle'],
+  reason_dh: ['Turn off Pre-generate Distant Horizons LOD.', 'dh-lod-toggle'],
+  reason_blinear: ['Pick B_Linear as the Region Format.', 'meld-region-format-group'],
+  reason_rocks: ['Turn on Rocks.', 'meld-rocks-toggle'],
+  reason_bushes: ['Turn on Bushes.', 'meld-bushes-toggle'],
+  reason_caves: ['Turn on Caves.', 'caves-toggle'],
+  reason_tree_folder: ['Enter a Custom Tree Folder.', 'meld-tree-pack-dir-input'],
+  reason_archive: ['Pick Local Archive as the OSM Data Source.', 'meld-osm-source-group'],
+  reason_region_download: ['Pick Region Download as the OSM Data Source.', 'meld-osm-source-group'],
+  reason_blueprint: ['Pick a Generation Mode other than Blueprint.', 'generation-mode-select'],
+  reason_token: ['Enter a Mapillary Token.', 'mapillary-token'],
+  reason_outbreak: ['Turn off Zombie Outbreak.', 'zombie-outbreak-toggle'],
+  reason_disasters: ['Turn off Disasters.', 'disasters-toggle'],
+};
+
+// The key of the first check that fails, as [ok, key] pairs; null when all pass.
+const why = (...checks) => checks.find(([ok]) => !ok)?.[1] || null;
+
+// Scrolls to the setting a reason names, lights it up for a moment and moves focus there.
+function showSetting(id) {
+  const row = document.getElementById(id)?.closest('.settings-row');
+  if (!row) return;
+  const search = document.getElementById('settings-search');
+  if (search?.value && row.classList.contains('search-miss')) {
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+  }
+  if (row.offsetParent === null) return;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  row.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
+  clearTimeout(row.pointedTimer);
+  row.classList.remove('is-pointed');
+  void row.offsetWidth;
+  row.classList.add('is-pointed');
+  row.pointedTimer = setTimeout(() => row.classList.remove('is-pointed'), 1600);
+  const control = row.querySelector('input:not([type=hidden]):not(:disabled), select:not(.visually-hidden):not(:disabled), .segment.active:not(:disabled), button:not(.tooltip-icon):not(.setting-revert):not(.setting-reason):not(:disabled)');
+  control?.focus({ preventScroll: true });
+}
+
+// A greyed row with a reason keeps its name readable and only its controls locked, so the
+// reason can be a link. The callers leave such a row out of `inert`.
+function setRowReason(row, key) {
+  if (!row) return;
+  // While a Live session runs, One World is locked: the step before any change to it.
+  if (key && liveActive() && ROW_REASONS[key]?.[1] === 'one-world-group') key = 'reason_live_running';
+  if (key && !ROW_REASONS[key]) key = null;
+  let note = row.querySelector('.setting-reason');
+  row.classList.toggle('has-reason', !!key);
+  const locked = row.querySelectorAll(':scope > :not(.setting-label), .setting-label > :not(.setting-text):not(.setting-heading):not(.setting-reason), .setting-heading > .tooltip-icon, .setting-heading > .setting-revert');
+  locked.forEach((el) => { el.inert = !!key; });
+  if (!key) {
+    if (note) note.remove();
+    return;
+  }
+  row.removeAttribute('inert');
+  const [fallback, target] = ROW_REASONS[key];
+  if (!note || note.dataset.reason !== key) {
+    note?.remove();
+    note = document.createElement(target ? 'button' : 'span');
+    note.className = 'setting-reason';
+    note.dataset.reason = key;
+    if (target) {
+      note.type = 'button';
+      note.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showSetting(target);
+      });
+    }
+    (row.querySelector('.setting-text') || row.querySelector('.setting-label') || row).appendChild(note);
+  }
+  note.dataset.localize = key;
+  const text = oneWorldText(key, fallback);
+  if (note.textContent !== text) note.textContent = text;
+}
+
+function setSettingsRowAvailable(inputId, available, reason = null) {
   const input = document.getElementById(inputId);
   if (!input) return;
   input.disabled = !available;
   const row = input.closest('.settings-row');
   if (row) {
     row.classList.toggle('settings-row-unavailable', !available);
-    row.toggleAttribute('inert', !available);
+    row.toggleAttribute('inert', !available && !reason);
+    setRowReason(row, available ? null : reason);
   }
 }
 
@@ -3636,38 +3754,53 @@ function refreshAdvancedRows() {
   const seg = (id) => document.querySelector(`#${id} .segment.active`)?.dataset.v || '';
   // Live builds with standard settings, so nothing here applies while it is the mode.
   const live = isLiveMode();
-  const row = (id, ok) => setSettingsRowAvailable(id, ok && !live);
-  const group = (id, ok) => { row(id, ok); setSegmentedRowAvailable(id, ok && !live); };
+  // In Live, a row that needs One World off says that, not the step to On.
+  const liveWhy = (ok, reason) => (live && (ok || reason !== 'reason_not_one_world') ? 'reason_live' : reason);
+  const row = (id, ok, reason = null) => setSettingsRowAvailable(id, ok && !live, liveWhy(ok, reason));
+  const group = (id, ok, reason = null) => {
+    row(id, ok, reason);
+    setSegmentedRowAvailable(id, ok && !live, liveWhy(ok, reason));
+  };
   const java = selectedWorldFormat === 'java';
   const earth = selectedCelestialBody === 'earth';
   const oneWorld = isOneWorldEnabled();
   const cells = oneWorld && !!val('meld-workers-select');
-  row('meld-rocks-toggle', earth);
-  row('meld-bushes-toggle', earth);
-  row('meld-workers-select', oneWorld);
-  group('meld-piece-size-group', cells);
-  group('meld-snap-group', cells);
-  for (const id of ['meld-margin-input', 'meld-piece-order-select', 'meld-skip-built-toggle', 'meld-stitch-map-toggle']) row(id, cells);
-  row('meld-origin-input', oneWorld);
-  row('meld-stretch-toggle', oneWorld);
-  const ownHeight = java && !oneWorld && on('disable-height-limit-toggle');
-  row('meld-min-y-input', ownHeight);
-  row('meld-max-y-input', ownHeight);
-  row('meld-world-border-toggle', java);
-  const ownFormat = java && !oneWorld && !on('voxy-lod-toggle') && !on('dh-lod-toggle');
-  group('meld-region-format-group', ownFormat);
-  row('meld-blinear-level-input', ownFormat && seg('meld-region-format-group') === 'blinear');
-  row('meld-rock-density-input', earth && on('meld-rocks-toggle'));
-  row('meld-bush-density-input', earth && on('meld-bushes-toggle'));
-  group('meld-tree-pack-mode-group', !!val('meld-tree-pack-dir-input').trim());
-  row('meld-cave-style-select', on('caves-toggle'));
-  group('meld-cave-ores-group', on('caves-toggle'));
-  row('meld-archive-folder-input', seg('meld-osm-source-group') === 'archive');
-  row('meld-pbf-url-input', seg('meld-osm-source-group') === 'region');
+  row('meld-rocks-toggle', earth, 'reason_earth');
+  row('meld-bushes-toggle', earth, 'reason_earth');
+  const owChecks = [[java, 'reason_java'], [earth, 'reason_earth'], [oneWorld, 'reason_one_world']];
+  row('meld-workers-select', oneWorld, why(...owChecks));
+  const cellsWhy = why(...owChecks, [cells, 'reason_cells']);
+  group('meld-piece-size-group', cells, cellsWhy);
+  group('meld-snap-group', cells, cellsWhy);
+  for (const id of ['meld-margin-input', 'meld-piece-order-select', 'meld-skip-built-toggle', 'meld-stitch-map-toggle']) row(id, cells, cellsWhy);
+  row('meld-origin-input', oneWorld, why(...owChecks));
+  row('meld-stretch-toggle', oneWorld, why(...owChecks));
+  const heightWhy = why([java, 'reason_java'], [!oneWorld, 'reason_not_one_world'], [earth, 'reason_earth'],
+    [on('disable-height-limit-toggle'), 'reason_height']);
+  row('meld-min-y-input', !heightWhy, heightWhy);
+  row('meld-max-y-input', !heightWhy, heightWhy);
+  row('meld-world-border-toggle', java, 'reason_java');
+  const formatChecks = [[java, 'reason_java'], [!oneWorld, 'reason_not_one_world'], [!on('voxy-lod-toggle'), 'reason_voxy'],
+    [!on('dh-lod-toggle'), 'reason_dh']];
+  const formatWhy = why(...formatChecks);
+  group('meld-region-format-group', !formatWhy, formatWhy);
+  const levelWhy = why(...formatChecks, [seg('meld-region-format-group') === 'blinear', 'reason_blinear']);
+  row('meld-blinear-level-input', !levelWhy, levelWhy);
+  const rockWhy = why([earth, 'reason_earth'], [on('meld-rocks-toggle'), 'reason_rocks']);
+  row('meld-rock-density-input', !rockWhy, rockWhy);
+  const bushWhy = why([earth, 'reason_earth'], [on('meld-bushes-toggle'), 'reason_bushes']);
+  row('meld-bush-density-input', !bushWhy, bushWhy);
+  group('meld-tree-pack-mode-group', !!val('meld-tree-pack-dir-input').trim(), 'reason_tree_folder');
+  row('meld-cave-style-select', on('caves-toggle'), 'reason_caves');
+  group('meld-cave-ores-group', on('caves-toggle'), 'reason_caves');
+  row('meld-archive-folder-input', seg('meld-osm-source-group') === 'archive', 'reason_archive');
+  row('meld-pbf-url-input', seg('meld-osm-source-group') === 'region', 'reason_region_download');
   for (const id of ['meld-seed-input', 'meld-surface-patches-toggle', 'meld-buildings-toggle', 'meld-tree-realm-select',
     'meld-tree-pack-dir-input', 'meld-overpass-input', 'meld-offline-toggle', 'meld-ram-budget-input', 'meld-threads-input']) row(id, true);
   for (const id of ['meld-road-detail-group', 'meld-props-group', 'meld-river-bed-group', 'meld-water-detail-group',
     'meld-climate-mode-group', 'meld-osm-source-group']) group(id, true);
+  // Auto's page follows One World and Parallel cells, which these same changes move.
+  refreshLayout();
 }
 
 function initAdvancedRows() {
@@ -3725,9 +3858,9 @@ function pinControl(id, value) {
 }
 
 function restoreNaturalRows() {
-  setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth', 'reason_earth');
   setSettingsRowAvailable('height-multiplier-slider', true);
-  setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
+  setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth', 'reason_earth');
   setSettingsRowAvailable('voxy-lod-toggle', true);
   setSettingsRowAvailable('dh-lod-toggle', true);
   setSettingsRowAvailable('disable-height-limit-toggle', true);
@@ -3741,9 +3874,9 @@ function applyOneWorldPins(info) {
   oneWorldPinned = true;
   const rotationInput = document.getElementById('rotation-angle-input');
   if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
-  setSettingsRowAvailable('rotation-angle-input', false);
-  setSettingsRowAvailable('voxy-lod-toggle', false);
-  setSettingsRowAvailable('dh-lod-toggle', false);
+  setSettingsRowAvailable('rotation-angle-input', false, 'reason_not_one_world');
+  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
+  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
   postToMap({ type: 'setRotationLocked', locked: true });
   syncShapesRect();
 
@@ -3754,13 +3887,13 @@ function applyOneWorldPins(info) {
   pinControl('disable-height-limit-toggle',
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
   restoreNaturalRows();
-  setSettingsRowAvailable('voxy-lod-toggle', false);
-  setSettingsRowAvailable('dh-lod-toggle', false);
-  setSettingsRowAvailable('disable-height-limit-toggle', false);
+  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
+  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
+  setSettingsRowAvailable('disable-height-limit-toggle', false, 'reason_not_one_world');
   if (exists) {
-    setSettingsRowAvailable('scale-value-slider', false);
-    setSettingsRowAvailable('height-multiplier-slider', false);
-    setSettingsRowAvailable('aws-only-elevation-toggle', false);
+    setSettingsRowAvailable('scale-value-slider', false, 'reason_world_set');
+    setSettingsRowAvailable('height-multiplier-slider', false, 'reason_world_set');
+    setSettingsRowAvailable('aws-only-elevation-toggle', false, 'reason_world_set');
   }
 }
 
@@ -3817,11 +3950,12 @@ let oneWorldRefit = false;
 let redrawProjects = () => {};
 async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
+  refreshLayout();
   // An outline picked while One World was off is written once it is on.
   if (outline && isOneWorldEnabled() !== outlineWritten) noteOutline(outline);
   if (!outline && selectedShapes && wantsShapesMask() !== shapesWritten) writeShapesMask();
   refreshLuantiAvailability();
-  setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  refreshOneWorldRow();
   redrawProjects();
   refreshLiveRows();
   refreshStartButton();
@@ -4047,11 +4181,11 @@ function refreshLiveRows() {
     if (row) row.style.display = live ? '' : 'none';
   }
   document.getElementById('one-world-stack')?.classList.toggle('is-open', live);
-  setSettingsRowAvailable('live-version-select', !liveActive());
-  setSettingsRowAvailable('live-view-distance-select', !liveActive());
+  setSettingsRowAvailable('live-version-select', !liveActive(), 'reason_live_running');
+  setSettingsRowAvailable('live-view-distance-select', !liveActive(), 'reason_live_running');
   // The world the session plays is fixed until it ends.
-  setSettingsRowAvailable('save-path-input', !liveActive());
-  setSettingsRowAvailable('custom-world-name-toggle', !liveActive());
+  setSettingsRowAvailable('save-path-input', !liveActive(), 'reason_live_running');
+  setSettingsRowAvailable('custom-world-name-toggle', !liveActive(), 'reason_live_running');
   if (liveInfo && liveInfoKey !== (savePath || '') + '|' + oneWorldFolderName()) liveInfo = null;
   if (live && !liveInfo) loadLiveInfo();
 }
@@ -4318,7 +4452,7 @@ function onLiveStatus() {
   refreshStartButton();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   refreshLiveRows();
-  setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  refreshOneWorldRow();
   redrawProjects();
   const bedrockBtn = document.getElementById('format-bedrock');
   if (bedrockBtn) bedrockBtn.disabled = liveActive();

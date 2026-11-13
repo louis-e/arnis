@@ -580,6 +580,71 @@ label[for].setting-label {
   pointer-events: none;
 }
 
+/* A greyed row that says why: the reason stands in for the description and stays readable,
+   while the rest of the row stays dim */
+.settings-row-unavailable.has-reason {
+  opacity: 1;
+}
+
+.settings-row-unavailable.has-reason > :not(.setting-label),
+.settings-row-unavailable.has-reason .setting-label > :not(.setting-text):not(.setting-reason),
+.settings-row-unavailable.has-reason .setting-text > :not(.setting-reason) {
+  opacity: 0.4;
+}
+
+.settings-row.has-reason .setting-desc {
+  display: none;
+}
+
+.setting-reason {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ui-muted);
+}
+
+/* A reason that names another setting: a quiet link (yellow stays for what is selected or on) */
+button.setting-reason {
+  display: inline;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--ui-text);
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.35);
+  text-underline-offset: 2px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+button.setting-reason:hover,
+button.setting-reason:focus-visible {
+  text-decoration-color: currentColor;
+}
+
+/* The setting a reason pointed at, for a moment */
+.settings-row.is-pointed {
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  border-radius: 10px;
+  animation: setting-pointed 1.6s ease-out;
+}
+
+@keyframes setting-pointed {
+  0%, 35% { outline-color: var(--ui-accent); }
+  100% { outline-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-row.is-pointed { animation: none; outline-color: var(--ui-accent); }
+}
+
+
 /* Notices: status lines and explanations under a setting */
 .settings-page .settings-notice {
   margin: 0;
@@ -626,8 +691,8 @@ label[for].setting-label {
   color: var(--primary-accent);
 }
 
-/* Picture of what a setting does (preview-popover.js): small, placed beside the hovered control by
-   the script (left/top), no shadow. The image box has a fixed 4:3 size, so nothing moves when the picture
+/* Picture of what a setting does (preview-popover.js): docked at the foot of the sidebar, above Reset
+   (the script sets its bottom). The image box has a fixed 4:3 size, so nothing moves when the picture
    loads, and the popover ignores the pointer so it never steals the hover from the control. */
 .preview-popover {
   position: absolute;
