@@ -47,8 +47,8 @@ pub struct Args {
     pub save_json_file: Option<String>,
 
     /// Folder the new world is created in, e.g. your Minecraft saves folder. Required for
-    /// Java (and the saves folder with --one-world). Bedrock defaults to the Desktop and
-    /// Luanti to its worlds folder. --path is a deprecated alias.
+    /// Java (and the saves folder with --one-world). Bedrock defaults to the Desktop,
+    /// Luanti to its worlds folder and Hytale to its saves folder. --path is a deprecated alias.
     #[arg(long = "output-dir", alias = "path")]
     pub path: Option<PathBuf>,
 
@@ -59,6 +59,10 @@ pub struct Args {
     /// Generate a Luanti/Minetest world (map.sqlite) instead of Java Edition
     #[arg(long)]
     pub luanti: bool,
+
+    /// Generate a Hytale world (experimental) instead of Java Edition
+    #[arg(long)]
+    pub hytale: bool,
 
     /// How Overpass is queried when the data comes from there: requests (built in), curl or
     /// wget
@@ -923,6 +927,11 @@ impl Args {
     pub fn thread_count(&self) -> Option<usize> {
         self.threads.map(|n| n as usize)
     }
+
+    /// Luanti or Hytale: no Minecraft packs, entities or block entities.
+    pub fn sandbox(&self) -> bool {
+        self.luanti || self.hytale
+    }
 }
 
 /// Live tiles build with the stock settings only, so `--live` refuses every flag that would
@@ -1716,8 +1725,13 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         validate_scale(args.scale)?;
     }
 
-    if args.bedrock && args.luanti {
-        return Err("Cannot use --bedrock and --luanti together.".to_string());
+    if [args.bedrock, args.luanti, args.hytale]
+        .iter()
+        .filter(|&&on| on)
+        .count()
+        > 1
+    {
+        return Err("Pick one of --bedrock, --luanti and --hytale.".to_string());
     }
 
     // The legacy --terrain flag is redundant now that terrain is the default, but it must
@@ -1739,12 +1753,12 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (args.moving_vehicles, "--moving-vehicles"),
         (args.pedestrians, "--pedestrians"),
     ];
-    if args.bedrock || args.luanti {
+    if args.bedrock || args.sandbox() {
         // Bedrock runs the vehicles from an add-on of its own.
-        let java_only = |flag: &str| args.luanti || flag != "--moving-vehicles";
+        let java_only = |flag: &str| args.sandbox() || flag != "--moving-vehicles";
         if let Some((_, flag)) = extras.iter().find(|(on, flag)| *on && java_only(flag)) {
             return Err(format!(
-                "{flag} runs from a Java Edition data pack and is not available for Bedrock or Luanti worlds."
+                "{flag} runs from a Java Edition data pack and is not available for Bedrock, Luanti or Hytale worlds."
             ));
         }
     }
@@ -1758,17 +1772,22 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("--body-gravity only applies to --body moon or --body mars.".to_string());
     }
 
-    if args.map_preview && args.luanti {
-        return Err("--map-preview is not supported for Luanti worlds.".to_string());
+    if args.map_preview && args.sandbox() {
+        return Err("--map-preview is not supported for Luanti or Hytale worlds.".to_string());
     }
 
     // Mineclonia spawns by its own settings, which live outside the world.
-    if args.mob_spawning.spawns() && args.luanti {
-        return Err("--mob-spawning is not available for Luanti worlds.".to_string());
+    if args.mob_spawning.spawns() && args.sandbox() {
+        return Err("--mob-spawning is not available for Luanti or Hytale worlds.".to_string());
+    }
+
+    // Hytale's column is 320 blocks tall and Arnis fits the area under it.
+    if args.hytale && args.disable_height_limit {
+        return Err("--disable-height-limit is not available for Hytale worlds.".to_string());
     }
 
     if args.one_world {
-        if args.bedrock || args.luanti {
+        if args.bedrock || args.sandbox() {
             return Err("--one-world is available for Java Edition worlds only.".to_string());
         }
         if !args.body.is_earth() {
@@ -1837,7 +1856,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     // other world format can show them. Said here rather than dropped silently
     // at the wall, and checked for the fetch too, not only for a facade folder.
     if args.mapillary_facades_wanted()
-        && (args.bedrock || args.luanti)
+        && (args.bedrock || args.sandbox())
         && args.mapillary_facade_mode.places_displays()
     {
         return Err(
@@ -1861,7 +1880,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     // The preset facades hang on the same item display entities, so they are
     // refused here for the same reason and in the same words. Said out loud
     // rather than dropped at the wall.
-    if args.building_facades && (args.bedrock || args.luanti) {
+    if args.building_facades && (args.bedrock || args.sandbox()) {
         return Err(
             "--building-facades needs a Java world (item display entities, 1.21.4+). \
              Leave it off and the buildings are generated with their usual block walls."
@@ -1946,8 +1965,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 return Err(format!("Path is not a directory: {}", path.display()));
             }
         }
-    } else if args.luanti {
-        // Luanti: path optional, defaults to OS Luanti worlds dir
+    } else if args.sandbox() {
+        // Luanti and Hytale: path optional, defaults to the game's own worlds folder
         if let Some(ref path) = args.path {
             if !path.exists() {
                 return Err(format!("Path does not exist: {}", path.display()));
@@ -2345,6 +2364,11 @@ mod tests {
         let luanti = validate_args(&parse(&["--luanti", "--mob-spawning", "animals"])).unwrap_err();
         assert!(luanti.contains("--mob-spawning"), "{luanti}");
         assert!(validate_args(&parse(&["--luanti"])).is_ok());
+        let hytale = validate_args(&parse(&["--hytale", "--mob-spawning", "animals"])).unwrap_err();
+        assert!(hytale.contains("--mob-spawning"), "{hytale}");
+        assert!(validate_args(&parse(&["--hytale"])).is_ok());
+        assert!(validate_args(&parse(&["--hytale", "--disable-height-limit"])).is_err());
+        assert!(validate_args(&parse(&["--hytale", "--luanti"])).is_err());
 
         assert_eq!(MobSpawning::from_str_lossy("animals"), MobSpawning::Animals);
         assert_eq!(MobSpawning::from_str_lossy("all"), MobSpawning::All);
@@ -2531,6 +2555,10 @@ mod tests {
             assert!(gl(flags, 305).is_err(), "{flags:?} accepted 305");
             assert!(gl(flags, -63).is_err(), "{flags:?} accepted -63");
         }
+
+        // Hytale fits the area under its 320-block column.
+        assert!(gl(&["--hytale"], 240).is_ok());
+        assert!(gl(&["--hytale"], 241).is_err());
 
         // Bedrock's behavior pack raises the ceiling to 511 but leaves the floor vanilla.
         for bedrock in [

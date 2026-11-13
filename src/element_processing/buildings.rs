@@ -12086,11 +12086,10 @@ fn generate_floors_and_ceilings(
     };
     // An empty shell is lit by invisible light hung under each slab, so no
     // lamp grid shows through the windows; furnished interiors keep their
-    // glowstone, which the furnishing plans around. Luanti games have no
-    // invisible light node, so there the lamps stay flush in the ceiling.
-    let hidden_lights = !furnished
-        && !config.is_abandoned_building
-        && editor.format() != crate::world_editor::WorldFormat::LuantiWorld;
+    // glowstone, which the furnishing plans around. Luanti and Hytale have no
+    // invisible light block, so there the lamps stay flush in the ceiling.
+    let hidden_lights =
+        !furnished && !config.is_abandoned_building && !editor.format().is_sandbox();
 
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 

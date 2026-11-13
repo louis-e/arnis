@@ -540,7 +540,7 @@ impl Extras {
     }
 
     /// Those a world of `format` runs: Bedrock has an add-on for the vehicles alone, and
-    /// Luanti none at all.
+    /// Luanti and Hytale none at all.
     pub fn for_format(self, format: WorldFormat) -> Self {
         match format {
             WorldFormat::JavaAnvil => self,
@@ -548,7 +548,7 @@ impl Extras {
                 cars: self.cars,
                 ..Self::default()
             },
-            WorldFormat::LuantiWorld => Self::default(),
+            WorldFormat::LuantiWorld | WorldFormat::HytaleWorld => Self::default(),
         }
     }
 

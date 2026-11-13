@@ -566,7 +566,7 @@ fn keep_seed(manifest: &Manifest, args: &mut Args) {
 /// Opens or creates the One World at `world_dir`, locks it, and points `args`
 /// at the world's frame.
 pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<Session, String> {
-    if args.bedrock || args.luanti {
+    if args.bedrock || args.sandbox() {
         return Err("One World is available for Java Edition worlds only.".to_string());
     }
     if !args.body.is_earth() {

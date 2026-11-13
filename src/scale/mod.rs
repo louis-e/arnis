@@ -1080,7 +1080,7 @@ pub fn run_with(
     // `--stitch-map`: the head piece draws the map item from itself alone; once all are built
     // it is redrawn from every piece's preview (a One World area always writes one).
     let stitch_map =
-        args.units.stitch_map && args.map_item && !args.bedrock && !args.luanti && of > 1;
+        args.units.stitch_map && args.map_item && !args.bedrock && !args.sandbox() && of > 1;
     let failure: Mutex<Option<String>> = Mutex::new(None);
     let aborting = AtomicBool::new(false);
     // The cells left to build, which the window may hold, reorder, cancel and retry.

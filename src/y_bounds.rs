@@ -10,7 +10,7 @@ pub fn check(args: &Args) -> Result<(), String> {
     if args.min_y.is_none() && args.max_y.is_none() {
         return Ok(());
     }
-    if !args.disable_height_limit || args.bedrock || args.luanti {
+    if !args.disable_height_limit || args.bedrock || args.sandbox() {
         return Err(
             "--min-y/--max-y set the range of the extended build height: Java worlds only."
                 .to_string(),

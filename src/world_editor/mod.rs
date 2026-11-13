@@ -11,9 +11,12 @@
 
 pub(crate) mod blinear;
 pub(crate) mod common;
+mod hytale;
 pub(crate) mod java;
 mod luanti;
 mod style;
+
+pub use hytale::HYTALE_MAX_Y;
 
 pub mod bedrock;
 mod bedrock_entities;
@@ -169,6 +172,15 @@ pub enum WorldFormat {
     BedrockMcWorld,
     /// Luanti/Minetest world (map.sqlite)
     LuantiWorld,
+    /// Hytale save folder (experimental)
+    HytaleWorld,
+}
+
+impl WorldFormat {
+    /// Luanti and Hytale: no packs, no block entities, saved whole at the end.
+    pub fn is_sandbox(self) -> bool {
+        matches!(self, Self::LuantiWorld | Self::HytaleWorld)
+    }
 }
 
 /// Metadata saved with the world
@@ -259,12 +271,10 @@ pub struct WorldEditor<'a> {
     bedrock_level_name: Option<String>,
     bedrock_spawn_point: Option<(i32, i32)>,
     bedrock_extend_height: bool,
-    /// Optional level name for Luanti worlds
-    luanti_level_name: Option<String>,
-    /// Optional spawn point for Luanti worlds (x, z coordinates)
-    luanti_spawn_point: Option<(i32, i32)>,
-    /// Ground level for Luanti worlds
-    luanti_ground_level: i32,
+    /// Luanti and Hytale: level name, spawn (x, z) and the ground level its search starts at.
+    sandbox_level_name: Option<String>,
+    sandbox_spawn_point: Option<(i32, i32)>,
+    sandbox_ground_level: i32,
     /// Luanti game pack
     luanti_game: LuantiGame,
     /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
@@ -352,9 +362,9 @@ impl<'a> WorldEditor<'a> {
             bedrock_level_name: None,
             bedrock_spawn_point: None,
             bedrock_extend_height: false,
-            luanti_level_name: None,
-            luanti_spawn_point: None,
-            luanti_ground_level: -62,
+            sandbox_level_name: None,
+            sandbox_spawn_point: None,
+            sandbox_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
@@ -424,9 +434,9 @@ impl<'a> WorldEditor<'a> {
             bedrock_level_name,
             bedrock_spawn_point,
             bedrock_extend_height,
-            luanti_level_name: None,
-            luanti_spawn_point: None,
-            luanti_ground_level: -62,
+            sandbox_level_name: None,
+            sandbox_spawn_point: None,
+            sandbox_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
@@ -496,9 +506,9 @@ impl<'a> WorldEditor<'a> {
             bedrock_level_name: None,
             bedrock_spawn_point: None,
             bedrock_extend_height: false,
-            luanti_level_name: level_name,
-            luanti_spawn_point: spawn_point,
-            luanti_ground_level: ground_level,
+            sandbox_level_name: level_name,
+            sandbox_spawn_point: spawn_point,
+            sandbox_ground_level: ground_level,
             luanti_game: game,
             bake_lighting: false,
             void_world: false,
@@ -523,6 +533,29 @@ impl<'a> WorldEditor<'a> {
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
+        }
+    }
+
+    /// Creates a new WorldEditor configured for Hytale output; `world_dir` is the save folder.
+    pub fn new_hytale(
+        world_dir: PathBuf,
+        xzbbox: &'a XZBBox,
+        llbbox: LLBBox,
+        level_name: Option<String>,
+        spawn_point: Option<(i32, i32)>,
+        ground_level: i32,
+    ) -> Self {
+        Self {
+            format: WorldFormat::HytaleWorld,
+            ..Self::new_luanti(
+                world_dir,
+                xzbbox,
+                llbbox,
+                LuantiGame::Mineclonia,
+                level_name,
+                spawn_point,
+                ground_level,
+            )
         }
     }
 
@@ -1814,7 +1847,8 @@ impl<'a> WorldEditor<'a> {
             crate::world_editor::WorldFormat::BedrockMcWorld => {
                 self.set_bedrock_banner_block_entity_absolute(x, y, z, base_color, patterns);
             }
-            crate::world_editor::WorldFormat::LuantiWorld => {}
+            crate::world_editor::WorldFormat::LuantiWorld
+            | crate::world_editor::WorldFormat::HytaleWorld => {}
         }
     }
 
@@ -2831,6 +2865,7 @@ impl<'a> WorldEditor<'a> {
                 WorldFormat::JavaAnvil => "Java Edition (Anvil)",
                 WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
                 WorldFormat::LuantiWorld => "Luanti/Minetest",
+                WorldFormat::HytaleWorld => "Hytale (experimental)",
             }
         );
 
@@ -2874,13 +2909,38 @@ impl<'a> WorldEditor<'a> {
                     self.xzbbox,
                     &self.llbbox,
                     self.luanti_game,
-                    self.luanti_level_name.as_deref(),
-                    self.luanti_spawn_point,
-                    self.luanti_ground_level,
+                    self.sandbox_level_name.as_deref(),
+                    self.sandbox_spawn_point,
+                    self.sandbox_ground_level,
                     self.game_mode,
                     self.world_time,
                 ) {
                     let user_msg = format!("Failed to save Luanti world: {}", e);
+                    eprintln!("{}", user_msg);
+                    #[cfg(feature = "gui")]
+                    emit_gui_error(&user_msg);
+                    return Err(user_msg.into());
+                }
+            }
+            WorldFormat::HytaleWorld => {
+                if let Err(e) = hytale::save_hytale_world(
+                    &self.world,
+                    &self.world_dir,
+                    self.xzbbox,
+                    &self.llbbox,
+                    self.ground.as_deref(),
+                    (self.ground_origin_x, self.ground_origin_z),
+                    self.sandbox_level_name.as_deref(),
+                    self.sandbox_spawn_point,
+                    self.sandbox_ground_level,
+                    self.game_mode,
+                    self.world_time,
+                ) {
+                    let user_msg = if is_disk_full_error(e.as_ref()) {
+                        "Not enough disk space available.".to_string()
+                    } else {
+                        format!("Failed to save Hytale world: {}", e)
+                    };
                     eprintln!("{}", user_msg);
                     #[cfg(feature = "gui")]
                     emit_gui_error(&user_msg);

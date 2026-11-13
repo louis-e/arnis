@@ -892,6 +892,15 @@ pub fn generate_world_with_options(
             options.spawn_point,
             options.ground_level,
         )
+    } else if options.format == WorldFormat::HytaleWorld {
+        WorldEditor::new_hytale(
+            options.path,
+            &xzbbox,
+            llbbox,
+            options.level_name.clone(),
+            options.spawn_point,
+            options.ground_level,
+        )
     } else {
         WorldEditor::new_with_format_and_name(
             options.path,
@@ -975,10 +984,10 @@ pub fn generate_world_with_options(
         && args.mapillary_facade_mode.places_displays()
         && args.mapillary_facades_wanted()
     {
-        let other = if world_format == WorldFormat::LuantiWorld {
-            "Luanti"
-        } else {
-            "Bedrock"
+        let other = match world_format {
+            WorldFormat::LuantiWorld => "Luanti",
+            WorldFormat::HytaleWorld => "Hytale",
+            _ => "Bedrock",
         };
         eprintln!(
             "{} Facade photo panels need a Java world; building the {other} facade blocks only.",
@@ -1083,7 +1092,7 @@ pub fn generate_world_with_options(
     // The map item consumes the same accumulator, so either feature enables it.
     // Without the PNG the map item only needs 128px, so a small frame suffices
     // (512 = 4x supersampling) instead of the full-resolution preview buffer.
-    let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
+    let wants_png = args.map_preview && !world_format.is_sandbox();
     let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
         Arc::new(if let (true, Some(run)) = (wants_png, one_world) {
             // Every area of a One World is sent to the map overlay at once. A piece gets its
@@ -1605,7 +1614,8 @@ pub fn generate_world_with_options(
 
     // Tile editors take the world's format, so what they write that depends on it (a
     // banner's block entity) matches the output. Luanti keeps the sequential path: its
-    // editor carries a game and a ground level that the tile editors are not given.
+    // editor carries a game and a ground level that the tile editors are not given. Hytale
+    // needs neither until it saves, from the main editor.
     // A piece of a job takes the path the whole job would, or its blocks differ from a single run's.
     let wants_tiles = one_world
         .and_then(|run| run.unit.as_ref())
@@ -1613,7 +1623,7 @@ pub fn generate_world_with_options(
     let use_parallel_tiles = wants_tiles
         && matches!(
             world_format,
-            WorldFormat::JavaAnvil | WorldFormat::BedrockMcWorld
+            WorldFormat::JavaAnvil | WorldFormat::BedrockMcWorld | WorldFormat::HytaleWorld
         );
 
     if use_parallel_tiles {
