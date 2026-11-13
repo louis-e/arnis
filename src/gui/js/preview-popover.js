@@ -1,11 +1,10 @@
 // The picture a setting shows while its tile is hovered or one of its controls has focus: a block diorama
 // of what the setting does (images/previews3d, made by scripts/previews3d). It has one fixed place, the
-// foot of the settings sidebar above Reset, so it never covers the setting. A switch flips between its
-// off and on pictures, so the difference shows without toggling anything.
+// foot of the settings sidebar above Reset, so it never covers the setting. Every setting shows its current
+// state, a switch included; changing it shows the new one.
 
 const BASE = 'images/previews3d/';
 const W = 720, H = 540; // the pictures' pixel size; the page shows them small (settings.css)
-const FLIP_MS = 1600;
 
 // File name (no extension) for a setting in its current state, or for `button`, a choice button the
 // pointer is on. `el` carries data-preview-on/-off (a switch), data-preview-num + data-preview-steps
@@ -37,8 +36,9 @@ export function previewName(el, button) {
 
 export const captionKey = (name) => `preview_${name.replace(/[^a-z0-9]+/gi, '_')}`;
 
-// The pictures to show: one, or for a switch its two states, the current one first. A picture shared with
-// another setting names its own caption in data-preview-on-caption / -off-caption.
+// The picture to show, as a list of one: the setting's current state, or a switch's other state where it
+// has a picture for one only. A picture shared with another setting names its own caption in
+// data-preview-on-caption / -off-caption.
 export function previewFrames(el, button) {
   const d = el.dataset;
   if (button || d.previewSeg || d.previewSel || d.previewNum) {
@@ -51,7 +51,7 @@ export function previewFrames(el, button) {
   if (!off || !on || off.name === on.name) return [on || off].filter(Boolean);
   const row = el.closest('.settings-row');
   const sw = row && row.querySelector('input.switch');
-  return sw && sw.checked ? [on, off] : [off, on];
+  return [sw && sw.checked ? on : off];
 }
 
 export function initPreviews() {
@@ -71,17 +71,10 @@ export function initPreviews() {
   const sidebar = document.querySelector('.settings-sidebar');
   (sidebar || document.body).appendChild(pop);
 
-  const still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   let open = false;
   let current = null; // the element the picture is for
   let want = null; // the file being loaded
-  let timer = null;
-  const stop = () => {
-    if (timer) clearInterval(timer);
-    timer = null;
-  };
   const hide = () => {
-    stop();
     open = false;
     want = null;
     if (current) current.removeAttribute('aria-describedby');
@@ -110,7 +103,6 @@ export function initPreviews() {
     img.src = `${BASE}${frame.name}.webp`;
   };
   const show = (el, button) => {
-    stop();
     const frames = previewFrames(el, button);
     if (!frames.length) return hide();
     if (current && current !== el) current.removeAttribute('aria-describedby');
@@ -118,14 +110,7 @@ export function initPreviews() {
     el.setAttribute('aria-describedby', pop.id);
     open = true;
     if (!pop.classList.contains('is-visible')) img.removeAttribute('src');
-    let i = 0;
     load(frames[0]);
-    if (frames.length > 1 && !still) {
-      timer = setInterval(() => {
-        i = (i + 1) % frames.length;
-        load(frames[i]);
-      }, FLIP_MS);
-    }
   };
 
   document.querySelectorAll('[data-preview-on], [data-preview-seg], [data-preview-sel], [data-preview-num]').forEach((el) => {

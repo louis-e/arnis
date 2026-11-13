@@ -37,17 +37,17 @@ const { previewName, previewFrames, captionKey, initPreviews } = await import('.
 
 // names
 assert.equal(previewName(swIcon, null), 'rocks-off');
-assert.deepEqual(previewFrames(swIcon, null).map((f) => f.name), ['rocks-off', 'rocks-on'], 'a switch shows both states, its own first');
+assert.deepEqual(previewFrames(swIcon, null).map((f) => f.name), ['rocks-off'], 'a switch shows its own state only');
 sw.checked = true;
 assert.equal(previewName(swIcon, null), 'rocks-on');
-assert.deepEqual(previewFrames(swIcon, null).map((f) => f.name), ['rocks-on', 'rocks-off']);
+assert.deepEqual(previewFrames(swIcon, null).map((f) => f.name), ['rocks-on']);
 assert.equal(previewName(segIcon, null), 'road-detail-max', 'the active button');
 assert.equal(previewName(segIcon, segs[1]), 'road-detail-clean', 'the hovered button');
 assert.equal(previewFrames(segIcon, segs[1]).length, 1);
 assert.equal(captionKey('post-apocalyptic-on'), 'preview_post_apocalyptic_on');
 // a picture borrowed from another setting brings its own caption; a switch with one picture shows it in both states
 const shared = node({ dataset: { previewOn: 'winter-on', previewOff: 'buildings-on', previewOffCaption: 'preview_winter_off' }, closest: () => node({ querySelector: () => node({ checked: false }) }) });
-assert.deepEqual(previewFrames(shared, null), [{ name: 'buildings-on', caption: 'preview_winter_off' }, { name: 'winter-on', caption: 'preview_winter_on' }]);
+assert.deepEqual(previewFrames(shared, null), [{ name: 'buildings-on', caption: 'preview_winter_off' }]);
 assert.deepEqual(previewFrames(node({ dataset: { previewOn: 'x-on' }, closest: () => swRow }), null).map((f) => f.name), ['x-on']);
 
 // select, slider and number box rows, and a keyed button group
