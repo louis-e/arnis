@@ -478,6 +478,7 @@
   "data_source_overture": "Rakennusten pohjat",
   "meld_cache_path": "Tiedostot säilytetään kansiossa {path}",
   "region_download_fallback": "Alueen lataus ei ole käytettävissä tälle valinnalle, joten Arnis käytti oletuslähdettä.",
+  "job_settings_changed": "Asetukset ovat muuttuneet tämän työn alun jälkeen: {names}. Jäljellä olevat ruudut rakennetaan uusilla asetuksilla.",
   "meld_open_folder": "Avaa kansio",
   "meld_plan_download": "Lataa nyt",
   "meld_downloading": "Ladataan. Edistyminen näkyy pääpalkissa.",

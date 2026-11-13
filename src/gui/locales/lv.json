@@ -478,6 +478,7 @@
   "data_source_overture": "Ēku kontūras",
   "meld_cache_path": "Faili tiek glabāti šeit: {path}",
   "region_download_fallback": "Reģiona lejupielāde šai izvēlei nav pieejama, tāpēc Arnis izmantoja noklusējuma avotu.",
+  "job_settings_changed": "Iestatījumi mainīti kopš šī darba sākuma: {names}. Atlikušās šūnas tiek būvētas ar jaunajiem iestatījumiem.",
   "meld_open_folder": "Atvērt mapi",
   "meld_plan_download": "Lejupielādēt tagad",
   "meld_downloading": "Notiek lejupielāde. Progress redzams galvenajā joslā.",

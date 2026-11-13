@@ -478,6 +478,7 @@
   "data_source_overture": "Byggnadsavtryck",
   "meld_cache_path": "Filerna sparas i {path}",
   "region_download_fallback": "Regionnedladdning är inte tillgänglig för det här urvalet, så Arnis använde standardkällan.",
+  "job_settings_changed": "Inställningarna har ändrats sedan jobbet startade: {names}. De återstående cellerna byggs med de nya.",
   "meld_open_folder": "Öppna mappen",
   "meld_plan_download": "Ladda ner nu",
   "meld_downloading": "Laddar ner. Förloppet visas i huvudfältet.",

@@ -478,6 +478,7 @@
   "data_source_overture": "Épületek alaprajza",
   "meld_cache_path": "A fájlok itt vannak: {path}",
   "region_download_fallback": "A régiólétöltés nem érhető el ehhez a kijelöléshez, ezért az Arnis az alapértelmezett forrást használta.",
+  "job_settings_changed": "A beállítások megváltoztak a feladat indítása óta: {names}. A hátralévő cellák már az újakkal épülnek.",
   "meld_open_folder": "Mappa megnyitása",
   "meld_plan_download": "Letöltés most",
   "meld_downloading": "Letöltés. Az előrehaladás a fő sávon látható.",

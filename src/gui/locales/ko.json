@@ -478,6 +478,7 @@
   "data_source_overture": "건물 외곽선",
   "meld_cache_path": "파일은 {path}에 저장됩니다",
   "region_download_fallback": "이 선택 영역에는 지역 다운로드를 사용할 수 없어 기본 소스를 사용했습니다.",
+  "job_settings_changed": "이 작업을 시작한 뒤 설정이 바뀌었습니다: {names}. 남은 셀은 새 설정으로 빌드됩니다.",
   "meld_open_folder": "폴더 열기",
   "meld_plan_download": "지금 다운로드",
   "meld_downloading": "다운로드 중. 진행 상황은 메인 바에 표시됩니다.",

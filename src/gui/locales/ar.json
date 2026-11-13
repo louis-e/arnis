@@ -478,6 +478,7 @@
   "data_source_overture": "مخططات المباني",
   "meld_cache_path": "الملفات محفوظة في {path}",
   "region_download_fallback": "تنزيل المنطقة غير متاح لهذا التحديد، لذا استخدم Arnis المصدر الافتراضي.",
+  "job_settings_changed": "تغيّرت الإعدادات منذ بدء هذه المهمة: {names}. الخلايا المتبقية تُبنى بالإعدادات الجديدة.",
   "meld_open_folder": "فتح المجلد",
   "meld_plan_download": "نزّل الآن",
   "meld_downloading": "جارٍ التنزيل. التقدم على الشريط الرئيسي.",

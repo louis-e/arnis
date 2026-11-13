@@ -39,7 +39,7 @@ export const tp = (key, fallback, n, lang) => {
 
 // What the status line shows for a progress payload. An error that carries `detail` keeps the
 // short `message` on the line and the full text as its tooltip and in the log; a Region Download
-// fallback is a notice in the user's language rather than the raw log line.
+// fallback or a resume with changed settings is a notice in the user's language rather than the raw log line.
 // A fallback notice stays on the status line for 8 s: a following ordinary line then moves only
 // the bar. The end of a run (Error!, Done!, Stopped, a retry's "The retried cells are built") always shows.
 export const holdsNotice = (shown, message, since, now) =>
@@ -55,9 +55,16 @@ export const generationTarget = ({ prewarm, oneWorld, savePath, worldPath }) =>
 // bbox the map reports), in pieces they travel as the plan mask; only another run clips to them.
 export const generationShapes = ({ oneWorld, shapes }) => (oneWorld ? null : shapes);
 
+// Sent by the engine when a job is resumed with other settings (scale::SETTINGS_CHANGED).
+const SETTINGS_CHANGED = 'Settings changed since this job started:';
+
 export function progressText({ message = '', detail = '' }) {
   if (message.startsWith('region_download_fallback')) {
     return { text: t('region_download_fallback', 'Region Download is not available for this selection, so Arnis used the default source.'), title: '', log: message, notice: true };
+  }
+  if (message.startsWith(SETTINGS_CHANGED)) {
+    const names = message.slice(SETTINGS_CHANGED.length).trim();
+    return { text: t('job_settings_changed', 'Settings changed since this job started: {names}. The cells still to build use the new ones.', { names }), title: '', log: message, notice: true };
   }
   // The backend counts "pieces"; the window says cells.
   const built = /^Building pieces\.\.\. (\d+)\/(\d+) done(\. Paused\.)?$/.exec(message);

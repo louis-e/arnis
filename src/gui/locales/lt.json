@@ -478,6 +478,7 @@
   "data_source_overture": "Pastatų kontūrai",
   "meld_cache_path": "Failai laikomi čia: {path}",
   "region_download_fallback": "Regiono atsisiuntimas šiam pasirinkimui nepasiekiamas, todėl Arnis naudojo numatytąjį šaltinį.",
+  "job_settings_changed": "Nustatymai pakeisti nuo šios užduoties pradžios: {names}. Likę langeliai kuriami su naujais nustatymais.",
   "meld_open_folder": "Atidaryti aplanką",
   "meld_plan_download": "Atsisiųsti dabar",
   "meld_downloading": "Siunčiama. Eiga rodoma pagrindinėje juostoje.",

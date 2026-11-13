@@ -478,6 +478,7 @@
   "data_source_overture": "Contururile clădirilor",
   "meld_cache_path": "Fișierele se păstrează în {path}",
   "region_download_fallback": "Descărcarea regiunii nu e disponibilă pentru această selecție, așa că Arnis a folosit sursa implicită.",
+  "job_settings_changed": "Setările s-au schimbat de la începutul acestei lucrări: {names}. Celulele rămase folosesc setările noi.",
   "meld_open_folder": "Deschide folderul",
   "meld_plan_download": "Descarcă acum",
   "meld_downloading": "Se descarcă. Progresul apare pe bara principală.",

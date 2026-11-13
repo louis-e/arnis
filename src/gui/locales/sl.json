@@ -478,6 +478,7 @@
   "data_source_overture": "Tlorisi stavb",
   "meld_cache_path": "Datoteke so shranjene v {path}",
   "region_download_fallback": "Prenos regije za ta izbor ni na voljo, zato je Arnis uporabil privzeti vir.",
+  "job_settings_changed": "Nastavitve so se od začetka tega opravila spremenile: {names}. Preostale celice se gradijo z novimi.",
   "meld_open_folder": "Odpri mapo",
   "meld_plan_download": "Prenesi zdaj",
   "meld_downloading": "Prenašanje. Napredek je na glavni vrstici.",

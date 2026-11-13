@@ -478,6 +478,7 @@
   "data_source_overture": "Obrysy budynków",
   "meld_cache_path": "Pliki są przechowywane w {path}",
   "region_download_fallback": "Pobieranie regionu jest niedostępne dla tego zaznaczenia, więc Arnis użył domyślnego źródła.",
+  "job_settings_changed": "Ustawienia zmieniły się od rozpoczęcia tego zadania: {names}. Pozostałe komórki są budowane z nowymi.",
   "meld_open_folder": "Otwórz folder",
   "meld_plan_download": "Pobierz teraz",
   "meld_downloading": "Pobieranie. Postęp widać na głównym pasku.",

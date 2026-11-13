@@ -478,6 +478,7 @@
   "data_source_overture": "建筑轮廓",
   "meld_cache_path": "文件保存在 {path}",
   "region_download_fallback": "此选区无法使用区域下载，已使用默认来源。",
+  "job_settings_changed": "此任务开始后设置已更改：{names}。剩余单元格将使用新设置构建。",
   "meld_open_folder": "打开文件夹",
   "meld_plan_download": "立即下载",
   "meld_downloading": "正在下载。进度显示在主进度条上。",

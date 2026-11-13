@@ -478,6 +478,7 @@
   "data_source_overture": "Huellas de edificios",
   "meld_cache_path": "Los archivos se guardan en {path}",
   "region_download_fallback": "La descarga de región no está disponible para esta selección, así que Arnis usó la fuente predeterminada.",
+  "job_settings_changed": "Los ajustes cambiaron desde que empezó este trabajo: {names}. Las celdas que faltan se construyen con los nuevos.",
   "meld_open_folder": "Abrir carpeta",
   "meld_plan_download": "Descargar ahora",
   "meld_downloading": "Descargando. El progreso está en la barra principal.",

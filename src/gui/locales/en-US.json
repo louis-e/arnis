@@ -478,6 +478,7 @@
   "data_source_overture": "Building footprints",
   "meld_cache_path": "Files are kept in {path}",
   "region_download_fallback": "Region Download is not available for this selection, so Arnis used the default source.",
+  "job_settings_changed": "Settings changed since this job started: {names}. The cells still to build use the new ones.",
   "meld_open_folder": "Open folder",
   "meld_plan_download": "Download now",
   "meld_downloading": "Downloading. Progress shows on the main bar.",

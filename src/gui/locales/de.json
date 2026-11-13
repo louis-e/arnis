@@ -478,6 +478,7 @@
   "data_source_overture": "Gebäudegrundrisse",
   "meld_cache_path": "Die Dateien liegen in {path}",
   "region_download_fallback": "Der Regions-Download ist für diese Auswahl nicht verfügbar, daher hat Arnis die Standardquelle verwendet.",
+  "job_settings_changed": "Einstellungen seit dem Start dieses Auftrags geändert: {names}. Die restlichen Zellen werden mit den neuen gebaut.",
   "meld_open_folder": "Ordner öffnen",
   "meld_plan_download": "Jetzt herunterladen",
   "meld_downloading": "Download läuft. Der Fortschritt steht in der Hauptleiste.",

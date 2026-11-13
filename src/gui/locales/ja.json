@@ -478,6 +478,7 @@
   "data_source_overture": "建物の形状",
   "meld_cache_path": "ファイルの保存先: {path}",
   "region_download_fallback": "この選択範囲ではリージョンダウンロードを利用できなかったため、既定のソースを使用しました。",
+  "job_settings_changed": "このジョブの開始後に設定が変更されました: {names}。残りのセルは新しい設定で構築されます。",
   "meld_open_folder": "フォルダーを開く",
   "meld_plan_download": "今すぐダウンロード",
   "meld_downloading": "ダウンロード中。進行状況はメインバーに表示されます。",
