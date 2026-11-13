@@ -1101,7 +1101,7 @@ fn area_rect(a: &GeneratedArea) -> [i32; 4] {
     [a.min_x, a.min_z, a.max_x, a.max_z]
 }
 
-fn overlaps(a: &[i32; 4], b: &[i32; 4]) -> bool {
+pub(crate) fn overlaps(a: &[i32; 4], b: &[i32; 4]) -> bool {
     a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
 }
 

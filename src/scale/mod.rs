@@ -532,9 +532,13 @@ impl Job {
     }
 
     /// `--skip-built`: every chunk of the piece is in the world already, from an earlier
-    /// job. Never a piece this job started, whose chunks may be half written.
-    fn built_before(&self, world_dir: &Path, u: &WorkUnit) -> bool {
+    /// job. Never a piece this job started, nor one over an `unfinished` piece of another
+    /// job: their chunks may be half written.
+    fn built_before(&self, world_dir: &Path, u: &WorkUnit, unfinished: &[[i32; 4]]) -> bool {
         !self.lease_path(u.index as usize).exists()
+            && !unfinished
+                .iter()
+                .any(|r| one_world::overlaps(r, &corners(&u.rect)))
             && one_world::existing_chunks(world_dir, &u.rect) == u.chunks()
     }
 
@@ -564,6 +568,33 @@ fn starts_over(manifest: &Manifest, name: &str, kept: Option<&Value>) -> bool {
             .iter()
             .any(|j| j.name == name && j.status.finished),
     }
+}
+
+/// The rectangles of pieces a job in `world_dir` started and did not finish: a lease and no
+/// done file. Every chunk of one may be there, half of them from before.
+fn unfinished_pieces(world_dir: &Path) -> Vec<[i32; 4]> {
+    let mut out = Vec::new();
+    let jobs = std::fs::read_dir(world_dir.join(one_world::JOBS_DIR));
+    for dir in jobs.into_iter().flatten().flatten().map(|e| e.path()) {
+        let files: Vec<String> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        for name in files.iter().filter(|n| n.ends_with(".lease.json")) {
+            let lease = std::fs::read_to_string(dir.join(name)).ok();
+            let Some(rect) = lease.and_then(|t| serde_json::from_str::<UnitLease>(&t).ok()) else {
+                continue;
+            };
+            let r = rect.rect;
+            let done = format!("done-r{}_{}_s", r[0].div_euclid(512), r[1].div_euclid(512));
+            if !files.iter().any(|f| f.starts_with(&done)) {
+                out.push(r);
+            }
+        }
+    }
+    out
 }
 
 /// Cells of job `name` the manifest holds an area for, by plan index: built, though the job
@@ -738,6 +769,11 @@ pub fn run_with(
         }
     }
     let job = job;
+    let unfinished = if args.units.skip_built {
+        unfinished_pieces(world_dir)
+    } else {
+        Vec::new()
+    };
     let wanted =
         |i: usize| !job.skip.contains(&i) && only.is_none_or(|p| p.contains(&(i as u32 + 1)));
 
@@ -797,7 +833,10 @@ pub fn run_with(
                 piece_record(i, "skipped", json!({"reason": "skip_cells"}));
             }
             // `--skip-built`: every chunk is in the world already, from an earlier job.
-            None if wanted(i) && args.units.skip_built && job.built_before(world_dir, unit) => {
+            None if wanted(i)
+                && args.units.skip_built
+                && job.built_before(world_dir, unit, &unfinished) =>
+            {
                 println!(
                     "  piece {}/{of}: every chunk already exists, skipped",
                     i + 1
@@ -2144,11 +2183,27 @@ second
             .iter()
             .find(|u| u.rect.min_x() >= -512 && u.rect.max_x() < 0 && u.rect.max_z() < 0)
             .unwrap();
-        assert!(!job.built_before(world, u));
+        assert!(!job.built_before(world, u, &[]));
         std::fs::write(world.join("region/r.-1.-1.mca"), vec![1u8; 4096]).unwrap();
-        assert!(job.built_before(world, u));
+        assert!(job.built_before(world, u, &[]));
+        // Another job started a piece over it and did not finish: maybe half written.
+        let other = world.join(one_world::JOBS_DIR).join("k");
+        std::fs::create_dir_all(&other).unwrap();
+        let lease = UnitLease {
+            piece: 0,
+            area_id: 0,
+            extending: true,
+            first_map_id: 0,
+            rect: [-600, -600, -100, -100],
+            job: [-600, -600, -100, -100],
+            tiled: false,
+        };
+        std::fs::write(other.join("piece-0.lease.json"), json!(lease).to_string()).unwrap();
+        assert!(!job.built_before(world, u, &unfinished_pieces(world)));
+        std::fs::write(other.join("done-r-2_-2_s1.json"), "{}").unwrap();
+        assert!(job.built_before(world, u, &unfinished_pieces(world)));
         std::fs::write(job.lease_path(u.index as usize), "{}").unwrap();
-        assert!(!job.built_before(world, u));
+        assert!(!job.built_before(world, u, &[]));
         // A piece's share follows its slot, not its plan index.
         let mut slots: serde_json::Map<String, Value> = units
             .iter()
