@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::climate::Climate;
-use crate::deterministic_rng::element_rng;
+use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{self, place_bush, BushKind};
 use crate::element_processing::tree::{Tree, TreeType};
@@ -222,6 +222,7 @@ fn natural_area(
                 let bare_rock = matches!(natural_type.as_str(), "bare_rock" | "rock" | "stone");
 
                 let plants_here = piece_plants_at(args);
+                let woods_by_cell = woods_by_cell(args);
                 let mut shrubbery_species: Option<Block> = None;
                 for &(x, z) in filled_area.iter() {
                     if in_hole(holes, x, z) {
@@ -379,13 +380,18 @@ fn natural_area(
                             }
                             let density = crate::ground_generation::value_noise_01(x, z, 32);
                             let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
-                            let spawn_tree = rng.random_range(0..tree_threshold) == 0;
+                            let mut cell = woods_by_cell.then(|| coord_rng(x, z, way.id));
+                            let spawn_tree = cell
+                                .as_mut()
+                                .unwrap_or(&mut rng)
+                                .random_range(0..tree_threshold)
+                                == 0;
                             let random_choice: i32 = rng.random_range(0..30);
                             if spawn_tree {
                                 let tree_type = *trees_ok_to_generate
-                                    .choose(&mut rng)
+                                    .choose(cell.as_mut().unwrap_or(&mut rng))
                                     .unwrap_or(&TreeType::Oak);
-                                if roots {
+                                if roots || woods_by_cell {
                                     Tree::create_of_type(
                                         editor,
                                         (x, 1, z),
@@ -787,6 +793,15 @@ pub(crate) fn piece_plants_at(args: &Args) -> impl Fn(i32, i32) -> bool {
     move |x, z| own.is_none_or(|[x0, z0, x1, z1]| (x0..=x1).contains(&x) && (z0..=z1).contains(&z))
 }
 
+/// In a piece of a job, the trees of woods and forests are drawn per cell, so the pieces on
+/// both sides of a seam plant the same ones, and its halo roots them too: their crowns reach
+/// the piece's own chunks.
+pub(crate) fn woods_by_cell(args: &Args) -> bool {
+    args.one_world_run
+        .as_ref()
+        .is_some_and(|run| run.unit.is_some())
+}
+
 /// Ground of a `natural=beach` or `shoal`, from its `surface=*`: sand unless mapped otherwise.
 fn beach_block(surface: Option<&String>) -> Block {
     match surface.map(String::as_str) {
@@ -1102,21 +1117,26 @@ mod tests {
     }
 
     #[test]
-    fn a_piece_roots_no_wood_trees_in_its_halo() {
+    fn neighbouring_pieces_plant_the_same_wood_trees() {
         let place = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
         let wood = [("natural", "wood")];
-        let trunks = |e: &WorldEditor, xs: std::ops::Range<i32>| {
+        let trunks = |e: &WorldEditor| -> Vec<(i32, i32)> {
             let logs = [OAK_LOG, SPRUCE_LOG, BIRCH_LOG, DARK_OAK_LOG];
-            xs.flat_map(|x| (5..55).map(move |z| (x, z)))
+            (0..60)
+                .flat_map(|x| (5..55).map(move |z| (x, z)))
                 .filter(|&(x, z)| e.check_for_block(x, 1, z, Some(&logs)))
-                .count()
+                .collect()
         };
-        let whole = render_natural(place, &wood);
-        assert!(trunks(&whole, 30..55) > 0);
-        // The piece owns x 0..=29: the rest is a neighbour's, whose trees it does not plant.
-        let piece = render_natural_on(place, None, Some([0, 0, 29, 59]), &wood);
-        assert_eq!(trunks(&piece, 30..55), 0);
-        assert_eq!(trunks(&piece, 5..30), trunks(&whole, 5..30));
+        // Each piece owns one half and also roots the trees of the other, which is its halo.
+        let west = trunks(&render_natural_on(place, None, Some([0, 0, 29, 59]), &wood));
+        let east = trunks(&render_natural_on(
+            place,
+            None,
+            Some([30, 0, 59, 59]),
+            &wood,
+        ));
+        assert!(west.iter().any(|&(x, _)| x >= 30) && west.iter().any(|&(x, _)| x < 30));
+        assert_eq!(west, east);
     }
 
     #[test]

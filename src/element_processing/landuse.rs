@@ -1,7 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::deterministic_rng::element_rng;
+use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
 use crate::element_processing::construction_site;
@@ -149,6 +149,7 @@ fn landuse_area(
 
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     let plants_here = crate::element_processing::natural::piece_plants_at(args);
+    let woods_by_cell = crate::element_processing::natural::woods_by_cell(args);
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
             continue;
@@ -284,11 +285,17 @@ fn landuse_area(
                 // Density-modulated spawn: thickets in some patches, clearings in others.
                 let density = crate::ground_generation::value_noise_01(x, z, 32);
                 let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
-                if rng.random_range(0..tree_threshold) == 0 {
+                let mut cell = woods_by_cell.then(|| coord_rng(x, z, element.id));
+                if cell
+                    .as_mut()
+                    .unwrap_or(&mut rng)
+                    .random_range(0..tree_threshold)
+                    == 0
+                {
                     let tree_type = *trees_ok_to_generate
-                        .choose(&mut rng)
+                        .choose(cell.as_mut().unwrap_or(&mut rng))
                         .unwrap_or(&TreeType::Oak);
-                    if roots {
+                    if roots || woods_by_cell {
                         Tree::create_of_type(
                             editor,
                             (x, 1, z),
