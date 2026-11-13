@@ -150,6 +150,9 @@
                 <button type="button" id="format-luanti" class="format-toggle-btn" onclick="setWorldFormat('luanti')" style="display: none;">
                   Luanti
                 </button>
+                <button type="button" id="format-hytale" class="format-toggle-btn" onclick="setWorldFormat('hytale')" style="display: none;">
+                  Hytale
+                </button>
               </div>
               <!-- One World: which persistent world the next area joins (hidden unless the mode is on) -->
               <div id="one-world-status" class="one-world-status" style="display: none;" aria-live="polite"></div>
@@ -372,7 +375,7 @@
                 <label class="setting-label">
                   <span class="setting-heading">
                     <span data-localize="gamemode">Game Mode</span>
-                    <span class="tooltip-icon" data-tooltip-key="gamemode_tip" data-tooltip="The game mode the world starts in. On Luanti, Spectator becomes Creative.">?</span>
+                    <span class="tooltip-icon" data-tooltip-key="gamemode_tip" data-tooltip="The game mode the world starts in. On Luanti and Hytale, Spectator becomes Creative.">?</span>
                   </span>
                 </label>
                 <div class="segmented-control choice-cards" id="gamemode-group">
@@ -1236,6 +1239,22 @@
                     <input type="checkbox" class="switch" id="enable-luanti-toggle" name="enable-luanti-toggle">
                   </div>
                 </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="enable-hytale-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-flask"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="enable_hytale">Hytale</span>
+                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="hytale" data-new-when="#enable-hytale-toggle:checked">
+                      </span>
+                      <span class="setting-desc" data-localize="enable_hytale_desc">Adds Hytale as an output format. Experimental.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="enable-hytale-toggle" name="enable-hytale-toggle">
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -2096,6 +2115,23 @@
                   <div class="settings-control save-path-control">
                     <input type="text" id="luanti-save-path-input" name="luanti-save-path-input" class="save-path-input" placeholder="Luanti worlds directory" data-localize="placeholder_luanti_save_path" spellcheck="false">
                     <button type="button" id="luanti-save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse" data-localize-title="browse_title" data-localize-aria-label="browse_label">
+                      <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Only shown while Hytale is enabled under Advanced -->
+                <div class="settings-row setting-tile is-wide" id="hytale-save-path-row">
+                  <label for="hytale-save-path-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-folder"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading"><span data-localize="hytale_save_path">Hytale Save Path</span></span>
+                      <span class="setting-desc" data-localize="hytale_save_path_desc">Folder new Hytale worlds are created in.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control save-path-control">
+                    <input type="text" id="hytale-save-path-input" name="hytale-save-path-input" class="save-path-input" placeholder="Hytale saves directory" data-localize="placeholder_hytale_save_path" spellcheck="false">
+                    <button type="button" id="hytale-save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse" data-localize-title="browse_title" data-localize-aria-label="browse_label">
                       <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
                     </button>
                   </div>

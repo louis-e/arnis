@@ -136,6 +136,10 @@ Aeroplanes and jet bridge by French_Prod</p>
 <h4>Luanti (formerly Minetest)</h4>
 <p>Luanti world export targets the <a href="https://www.luanti.org" target="_blank" rel="noopener noreferrer">Luanti</a> engine, licensed under <a href="https://github.com/luanti-org/luanti/blob/master/LICENSE.txt" target="_blank" rel="noopener noreferrer">LGPL-2.1+</a>.</p>
 </div>
+<div class="credit">
+<h4>Hytale</h4>
+<p>The experimental Hytale export writes the save format of <a href="https://hytale.com" target="_blank" rel="noopener noreferrer">Hytale</a>. Hytale is a trademark of Hypixel Studios; Arnis is not affiliated with or endorsed by Hypixel Studios.</p>
+</div>
 </div>
 </section>
 
