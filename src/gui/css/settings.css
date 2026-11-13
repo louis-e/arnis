@@ -653,6 +653,11 @@ button.setting-reason:focus-visible {
   vertical-align: middle;
 }
 
+/* Takes the place of the hidden revert button before it */
+.settings-row:not(.is-modified) .setting-heading > .setting-revert + .new-badge {
+  margin-left: -16px;
+}
+
 .settings-nav-item .new-badge {
   flex-shrink: 0;
   height: 15px;
