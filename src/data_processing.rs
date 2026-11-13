@@ -984,11 +984,7 @@ pub fn generate_world_with_options(
         && args.mapillary_facade_mode.places_displays()
         && args.mapillary_facades_wanted()
     {
-        let other = match world_format {
-            WorldFormat::LuantiWorld => "Luanti",
-            WorldFormat::HytaleWorld => "Hytale",
-            _ => "Bedrock",
-        };
+        let other = world_format.game();
         eprintln!(
             "{} Facade photo panels need a Java world; building the {other} facade blocks only.",
             "Warning:".yellow().bold()

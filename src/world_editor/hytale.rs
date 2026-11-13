@@ -13,6 +13,7 @@ use rayon::prelude::*;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -487,7 +488,7 @@ fn fill(section: &mut Section, from: &SectionToModify, ox: usize, oy: usize, oz:
     }
 }
 
-/// The column nearest (x, z), within 40 blocks, whose top is solid ground as Hytale sees it.
+/// The column nearest (x, z), within 40 blocks, with ground to stand on as Hytale sees it.
 fn find_spawn(world: &WorldToModify, x: i32, z: i32, ground_level: i32) -> (i32, i32, i32) {
     for radius in 0i32..=40 {
         for dx in -radius..=radius {
@@ -501,25 +502,33 @@ fn find_spawn(world: &WorldToModify, x: i32, z: i32, ground_level: i32) -> (i32,
             }
         }
     }
-    (x, ground_level + 3, z)
+    // Water as far as the search goes: on its surface rather than in the ground below.
+    let top = (-Y_OFFSET..=HYTALE_MAX_Y - 2)
+        .rev()
+        .find(|&y| world.get_block(x, y, z).is_some());
+    (x, top.map_or(ground_level + 3, |y| y + 1), z)
 }
 
-/// Feet Y on the column's top cell, unless that is fluid, a tree or a cactus.
+/// Feet Y on the column's ground with two open cells above (under a tree is fine), unless
+/// the ground is fluid or a cactus.
 fn spawn_y(world: &WorldToModify, x: i32, z: i32) -> Option<i32> {
+    let mut headroom = 2;
     for y in (-Y_OFFSET..=HYTALE_MAX_Y - 2).rev() {
-        let Some(block) = world.get_block(x, y, z) else {
+        let cell = world
+            .get_block(x, y, z)
+            .map(|b| to_hytale(b, world.get_properties(x, y, z).as_deref()))
+            .filter(|c| !c.is_empty() || c.fluid.is_some());
+        let Some(cell) = cell else {
+            headroom += 1;
             continue;
         };
-        let cell = to_hytale(block, world.get_properties(x, y, z).as_deref());
-        if cell.is_empty() && cell.fluid.is_none() {
+        let name = cell.block;
+        if name.starts_with("Plant_Leaves") || name.ends_with("_Trunk") {
+            headroom = 0;
             continue;
         }
-        let name = cell.block;
-        let unsafe_top = cell.fluid.is_some()
-            || name.starts_with("Plant_Leaves")
-            || name.starts_with("Plant_Cactus")
-            || name.ends_with("_Trunk");
-        return (!unsafe_top).then_some(y + 1);
+        let solid = cell.fluid.is_none() && !name.starts_with("Plant_Cactus");
+        return (solid && headroom >= 2).then_some(y + 1);
     }
     None
 }
@@ -587,7 +596,6 @@ type Blob = (usize, usize, Vec<u8>);
 
 /// Writes a region file: header, the 1024-slot index, then each blob in 4 KiB segments.
 fn write_region(path: &Path, blobs: Vec<Blob>) -> SaveResult<()> {
-    let header = 32 + BLOBS_PER_REGION * 4;
     let segments = |data: &[u8]| (8 + data.len()).div_ceil(SEGMENT_SIZE);
     let mut index = vec![0u32; BLOBS_PER_REGION];
     let mut next_segment = 1;
@@ -595,24 +603,22 @@ fn write_region(path: &Path, blobs: Vec<Blob>) -> SaveResult<()> {
         index[*slot] = next_segment as u32;
         next_segment += segments(data);
     }
-    let mut out = Vec::with_capacity(header + (next_segment - 1) * SEGMENT_SIZE);
-    out.extend_from_slice(b"HytaleIndexedStorage");
+    let mut out = BufWriter::new(fs::File::create(path)?);
+    out.write_all(b"HytaleIndexedStorage")?;
     for word in [1, BLOBS_PER_REGION as u32, SEGMENT_SIZE as u32]
         .into_iter()
         .chain(index)
     {
-        out.extend_from_slice(&word.to_be_bytes());
+        out.write_all(&word.to_be_bytes())?;
     }
+    let zeros = [0u8; SEGMENT_SIZE];
     for (_, raw_len, data) in &blobs {
-        out.extend_from_slice(&(*raw_len as u32).to_be_bytes());
-        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        out.extend_from_slice(data);
-        out.resize(
-            header + (out.len() - header).div_ceil(SEGMENT_SIZE) * SEGMENT_SIZE,
-            0,
-        );
+        out.write_all(&(*raw_len as u32).to_be_bytes())?;
+        out.write_all(&(data.len() as u32).to_be_bytes())?;
+        out.write_all(data)?;
+        out.write_all(&zeros[..segments(data) * SEGMENT_SIZE - 8 - data.len()])?;
     }
-    fs::write(path, out)?;
+    out.flush()?;
     Ok(())
 }
 

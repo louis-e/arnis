@@ -125,7 +125,8 @@ const SETTINGS = [
   { id: 'rotation-angle-input', kind: 'number', store: NONE },
 
   { id: 'enable-luanti-toggle', kind: 'checkbox', store: EXTERNAL },
-  { id: 'enable-hytale-toggle', kind: 'checkbox', store: EXTERNAL },
+  // Turning Hytale off gives Advanced back, so a reset does it before resetting Advanced.
+  { id: 'enable-hytale-toggle', kind: 'checkbox', store: EXTERNAL, resetFirst: true },
 
   // Map & Input. #bbox-coords is the area selection, not a preference, so it
   // is intentionally absent.

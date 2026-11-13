@@ -2293,10 +2293,6 @@ fn window_flag_args(
         }
         extra.disable_height_limit = true;
     }
-    // Hytale's column is fixed; the extended height toggle has nothing to raise there.
-    if extra.hytale {
-        extra.disable_height_limit = false;
-    }
     crate::y_bounds::check(&extra)?;
     crate::output_args::validate(&extra)?;
     Ok(extra)
@@ -3329,11 +3325,7 @@ fn gui_start_generation(
                     (output_path, Some(lvl_name))
                 }
                 WorldFormat::LuantiWorld | WorldFormat::HytaleWorld => {
-                    let game = if world_format == WorldFormat::HytaleWorld {
-                        "Hytale"
-                    } else {
-                        "Luanti"
-                    };
+                    let game = world_format.game();
                     let (path, world_name) =
                         crate::world_utils::new_sandbox_world(&sandbox_output_dir, game);
                     println!(

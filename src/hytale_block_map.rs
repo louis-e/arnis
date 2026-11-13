@@ -511,10 +511,15 @@ fn full_stem(name: &str) -> &str {
 
 /// Maps an Arnis block to a Hytale cell. `props` are the block's Minecraft states.
 pub fn to_hytale(block: Block, props: Option<&Value>) -> HytaleCell {
-    let mut cell = match (props, TABLE.get(block.id() as usize)) {
+    match (props, TABLE.get(block.id() as usize)) {
         (None, Some(&cell)) => cell,
-        _ => map_block(block.try_name().unwrap_or("stone"), props),
-    };
+        _ => with_water(block.try_name().unwrap_or("stone"), props),
+    }
+}
+
+/// `map_block`, with water in a waterlogged cell.
+fn with_water(name: &str, props: Option<&Value>) -> HytaleCell {
+    let mut cell = map_block(name, props);
     if cell.fluid.is_none() && prop(props, "waterlogged") == Some("true") {
         cell.fluid = Some(WATER);
     }
@@ -530,12 +535,7 @@ static TABLE: Lazy<Vec<HytaleCell>> = Lazy::new(|| {
             let Some(name) = block.try_name() else {
                 return STONE;
             };
-            let defaults = block.properties();
-            let mut cell = map_block(name, defaults.as_ref());
-            if cell.fluid.is_none() && prop(defaults.as_ref(), "waterlogged") == Some("true") {
-                cell.fluid = Some(WATER);
-            }
-            cell
+            with_water(name, block.properties().as_ref())
         })
         .collect()
 });
@@ -755,6 +755,7 @@ fn special(name: &str, props: Option<&Value>) -> Option<HytaleCell> {
         "brown_mushroom_block" => HytaleCell::of("Plant_Crop_Mushroom_Block_Brown"),
         "cave_vines" | "cave_vines_plant" => HytaleCell::of("Plant_Vine_Hanging"),
         "big_dripleaf" | "big_dripleaf_stem" | "small_dripleaf" => HytaleCell::of("Plant_Fern_Wet"),
+        "tall_seagrass" if prop(props, "half") == Some("upper") => water(EMPTY),
         "kelp" | "kelp_plant" | "tall_seagrass" => water("Plant_Seaweed_Grass_Tall"),
         "seagrass" => water("Plant_Seaweed_Grass"),
         "sea_pickle" => HytaleCell::fluid(WATER),
@@ -889,6 +890,10 @@ mod tests {
         assert!(water.is_empty());
         let wet = to_hytale(OAK_SLAB, Some(&props(&[("waterlogged", "true")])));
         assert_eq!(wet.fluid, Some(WATER));
+        let seagrass = to_hytale(crate::block_definitions::TALL_SEAGRASS_BOTTOM, None);
+        assert_eq!(seagrass.block, "Plant_Seaweed_Grass_Tall");
+        let upper = to_hytale(crate::block_definitions::TALL_SEAGRASS_TOP, None);
+        assert!(upper.is_empty() && upper.fluid == Some(WATER));
     }
 
     #[test]

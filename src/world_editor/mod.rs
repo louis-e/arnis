@@ -194,6 +194,16 @@ impl WorldFormat {
     pub fn is_sandbox(self) -> bool {
         matches!(self, Self::LuantiWorld | Self::HytaleWorld)
     }
+
+    /// The game's name in messages and new world folders.
+    pub fn game(self) -> &'static str {
+        match self {
+            Self::JavaAnvil => "Java",
+            Self::BedrockMcWorld => "Bedrock",
+            Self::LuantiWorld => "Luanti",
+            Self::HytaleWorld => "Hytale",
+        }
+    }
 }
 
 /// Metadata saved with the world

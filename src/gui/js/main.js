@@ -2091,11 +2091,6 @@ function initExperimentalFormatToggle(format) {
     const on = toggle.checked;
     localStorage.setItem(`arnis-${format}-enabled`, on ? 'true' : 'false');
     apply(on);
-    // Turning Hytale off (a settings reset does) is no pick of another format: Advanced stays off.
-    if (!on && format === 'hytale' && advancedHeldForHytale()) {
-      holdAdvancedForHytale(false);
-      syncOfflineMode();
-    }
     if (!on && selectedWorldFormat === format) {
       setWorldFormat('java');
     }

@@ -808,7 +808,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             world_utils::build_bedrock_output(&effective_bbox, output_dir, args.body);
         (output_path, Some(lvl_name))
     } else if args.sandbox() {
-        let game = if args.hytale { "Hytale" } else { "Luanti" };
+        let game = world_format.game();
         let (world_path, world_name) = world_utils::new_sandbox_world(&disk_dir, game);
         println!(
             "Creating {game} world at: {}",

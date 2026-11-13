@@ -359,10 +359,7 @@ pub fn generate_ground_region(
     // A flat world fills columns the outline leaves out, so a cut chunk's edge is no trench;
     // Bedrock, Luanti and Hytale are void around the area anyway.
     let shaped = xzbbox.outline().is_some();
-    let filler_outside = shaped
-        && args.world_type == crate::args::WorldType::Flat
-        && !args.bedrock
-        && !args.sandbox();
+    let filler_outside = shaped && args.world_type == crate::args::WorldType::Flat && args.java();
 
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
