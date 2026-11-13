@@ -111,7 +111,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 function applyStoredLayout() {
   try {
     const values = JSON.parse(localStorage.getItem('arnis-settings') || '{}').values || {};
-    const mode = values['layout-select'];
+    // Auto is the default, so it is not stored.
+    const mode = values['layout-select'] || 'auto';
     document.body.classList.toggle('map-first', mode === 'map' || (mode === 'auto' && values['advanced-meld-features-toggle'] === true));
   } catch (_) { /* the store's own restore sets it */ }
 }
