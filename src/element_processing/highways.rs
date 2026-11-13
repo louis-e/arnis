@@ -7,7 +7,7 @@ use crate::element_processing::bridge_styles::{
     BridgePathSample, BridgeStyle,
 };
 use crate::element_processing::bridges::{
-    is_bridge_way, way_cells, BridgeStructureMap, BridgeSurfaceMap,
+    is_bridge_way, lays_deck, way_cells, BridgeStructureMap, BridgeSurfaceMap,
 };
 use crate::element_processing::connected_blocks::{
     connected_iron_bars, four_connected_line, place_connected, stair_steps,
@@ -271,7 +271,7 @@ impl<'a> RoadSurfaces<'a> {
     fn surface_of(&self, way: &ProcessedWay) -> WaySurface {
         let cells = way_cells(way);
         let ys = if let Some(member) = self.bridges.lookup_member(way.id) {
-            (0..cells.len()).map(|t| member.drive_y_at(t)).collect()
+            (0..cells.len()).map(|t| member.y_at(t)).collect()
         } else if let Some(ramp) = self.bridges.lookup_ramp(way.id) {
             (0..cells.len()).map(|t| ramp.y_at(t)).collect()
         } else {
@@ -1847,8 +1847,8 @@ fn generate_highways_internal(
 
             let bridge_member = bridge_structures.lookup_member(way.id);
             let bridge_ramp = bridge_structures.lookup_ramp(way.id);
-            // Redundant side deck under a wider module bridge: render nothing.
-            if bridge_member.is_some_and(|m| m.covered_by_wider) {
+            // A platform or stop drawn on a bridge is no deck of its own.
+            if bridge_member.is_none() && is_bridge_way(way) && !lays_deck(way) {
                 return;
             }
             let is_bridge_member = bridge_member.is_some();
@@ -1860,8 +1860,11 @@ fn generate_highways_internal(
             let bridge_end_is_boundary = bridge_member
                 .map(|m| m.end_is_group_boundary)
                 .unwrap_or(true);
-            let bridge_foundation_block = bridge_style.foundation_block();
-            let bridge_rail_block_choice = bridge_style.rail_block();
+            let bridge_design = bridge_member.map(|m| bridge_structures.structure_of(m).design);
+            let bridge_foundation_block = bridge_design.map_or(STONE_BRICKS, |d| d.slab());
+            // An approach ramp is built like the bridge it climbs to.
+            let ramp_design = bridge_ramp.map(|r| r.design);
+            let ramp_wall = ramp_design.map_or(STONE_BRICKS, |d| d.slab());
 
             // Surface palette; width is resolved by highway_block_range below so
             // renderer and prescan stay in sync.
@@ -1970,11 +1973,6 @@ fn generate_highways_internal(
                 tunnel_portals.approach(way.id)
             };
 
-            // Plain beam bridges get a swept segment-schematic deck instead.
-            let bridge_module = bridge_member
-                .and_then(|m| m.module_idx)
-                .and_then(crate::element_processing::bridge_modules::module_at);
-            let bridge_structure_moduled = bridge_module.is_some();
             // Cable carriers hang from pylons; other members stand on piers.
             let bridge_pylons = bridge_member.and_then(|m| m.cable_pylons.as_deref());
             let bridge_cables_carry_deck = bridge_pylons.is_some();
@@ -2253,7 +2251,7 @@ fn generate_highways_internal(
                                         && cell_y - ground >= RAMP_SPAN_CLEARANCE
                                     {
                                         editor.set_block_absolute(
-                                            STONE_BRICKS,
+                                            ramp_wall,
                                             set_x,
                                             cell_y - 1,
                                             set_z,
@@ -2262,7 +2260,7 @@ fn generate_highways_internal(
                                         );
                                     } else {
                                         editor.fill_column_absolute(
-                                            STONE_BRICKS,
+                                            ramp_wall,
                                             set_x,
                                             set_z,
                                             ground + 1,
@@ -2362,17 +2360,15 @@ fn generate_highways_internal(
                                     }
                                 }
 
-                                // Add stone brick foundation and support pillars only for
+                                // Add a foundation and support pillars only for
                                 // genuinely elevated decks — bridges and explicit overpasses.
                                 // (Regular wide roads now flow through `use_absolute_y == true`
                                 // too, but they aren't floating decks; they get embankments
                                 // from the registered ground-surface override instead.)
-                                let is_elevated_deck = (is_bridge_member
-                                    && !bridge_structure_moduled)
-                                    || effective_elevation > 0;
+                                let is_elevated_deck = is_bridge_member || effective_elevation > 0;
                                 // Absolute decks can sit below Y=0.
                                 if is_elevated_deck && (use_absolute_y || cell_y > 0) {
-                                    // Foundation: stone bricks for everything except wooden boardwalks.
+                                    // The deck's own slab under a bridge, stone bricks elsewhere.
                                     let foundation = if is_bridge_member {
                                         bridge_paint.unwrap_or(bridge_foundation_block)
                                     } else {
@@ -2423,8 +2419,10 @@ fn generate_highways_internal(
                                                 is_center,
                                             );
                                         }
+                                        // Other decks stand on the piers their structure lays out.
                                         if is_center
                                             && use_absolute_y
+                                            && bridge_style == BridgeStyle::Boardwalk
                                             && !hangs_at(set_x, set_z)
                                             && on_pier_step(bridge_style.pier_interval(block_range))
                                         {
@@ -2485,10 +2483,8 @@ fn generate_highways_internal(
                                     Some(prev) => stair_steps(prev, rail_cell),
                                     None => vec![rail_cell],
                                 };
-                                // Boardwalks and module decks bring their own railings.
-                                let skip_side_railing = is_bridge_member
-                                    && (!bridge_style.has_side_railing()
-                                        || bridge_structure_moduled);
+                                // A deck's railing is laid out over its whole structure.
+                                let skip_side_railing = is_bridge_member;
                                 if !skip_side_railing {
                                     for (rx, rz) in cells_to_fill {
                                         // Another deck continues the surface at this level.
@@ -2503,11 +2499,8 @@ fn generate_highways_internal(
                                             *prev_parapet = None;
                                             continue;
                                         }
-                                        let rail_block = if is_bridge_member {
-                                            bridge_paint.unwrap_or(bridge_rail_block_choice)
-                                        } else {
-                                            LIGHT_GRAY_CONCRETE
-                                        };
+                                        let rail_block =
+                                            ramp_design.map_or(LIGHT_GRAY_CONCRETE, |d| d.curb());
                                         editor.set_block_absolute(
                                             rail_block,
                                             rx,
@@ -2516,13 +2509,7 @@ fn generate_highways_internal(
                                             None,
                                             Some(ROAD_PROTECTED_SURFACES),
                                         );
-                                        let rail_foundation = if is_bridge_member {
-                                            bridge_paint.unwrap_or_else(|| {
-                                                bridge_style.rail_foundation_block()
-                                            })
-                                        } else {
-                                            STONE_BRICKS
-                                        };
+                                        let rail_foundation = ramp_wall;
                                         editor.set_block_absolute(
                                             rail_foundation,
                                             rx,
@@ -2539,7 +2526,7 @@ fn generate_highways_internal(
                                                 && by - ground >= RAMP_SPAN_CLEARANCE;
                                             if ground < by - 2 && !spans {
                                                 editor.fill_column_absolute(
-                                                    STONE_BRICKS,
+                                                    ramp_wall,
                                                     rx,
                                                     rz,
                                                     ground + 1,
@@ -2548,10 +2535,9 @@ fn generate_highways_internal(
                                                 );
                                             }
                                         }
-                                        let parapet = if is_bridge_member {
-                                            bridge_style.parapet_block()
-                                        } else {
-                                            Some(BRICK_WALL)
+                                        let parapet = match ramp_design {
+                                            Some(d) => d.parapet(),
+                                            None => Some(BRICK_WALL),
                                         };
                                         if let Some(p) = parapet {
                                             let top = by + 1;
@@ -2698,19 +2684,16 @@ fn generate_highways_internal(
             }
 
             if is_bridge_member {
-                if let Some(module) = bridge_module {
-                    crate::element_processing::bridge_modules::sweep_module(
-                        editor,
-                        bridge_surface,
-                        &bridge_path,
-                        module,
-                    );
-                } else if !bridge_structure_moduled
-                    && (bridge_pylons.is_some()
-                        || !matches!(
-                            bridge_style,
-                            BridgeStyle::Suspension | BridgeStyle::CableStayed
-                        ))
+                if let (Some(design), Some(parts)) =
+                    (bridge_design, bridge_surface.parts_of(way.id))
+                {
+                    crate::element_processing::bridge_decks::render(editor, design, parts);
+                }
+                if bridge_pylons.is_some()
+                    || !matches!(
+                        bridge_style,
+                        BridgeStyle::Suspension | BridgeStyle::CableStayed
+                    )
                 {
                     decorate_bridge_above_deck(
                         editor,
@@ -6248,12 +6231,12 @@ mod tests {
         assert!(y >= 3, "{ramp:?}");
         assert_eq!(
             editor.get_block_absolute(30, y - 2, edge),
-            Some(STONE_BRICKS),
+            Some(SMOOTH_STONE),
             "a wall stands along the ramp"
         );
         assert_eq!(
             editor.get_block_absolute(30, 1, 50),
-            Some(STONE_BRICKS),
+            Some(SMOOTH_STONE),
             "the ramp is solid down to the ground"
         );
     }
@@ -6273,7 +6256,7 @@ mod tests {
         }
         assert_eq!(
             editor.get_block_absolute(36, 2, 50),
-            Some(STONE_BRICKS),
+            Some(SMOOTH_STONE),
             "the ramp is solid clear of the road"
         );
     }
@@ -6329,7 +6312,7 @@ mod tests {
         }
         assert_eq!(
             editor.get_block_absolute(30, y - 2, 47),
-            Some(STONE_BRICKS),
+            Some(SMOOTH_STONE),
             "the far side keeps its wall"
         );
     }

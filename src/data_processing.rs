@@ -1396,8 +1396,12 @@ pub fn generate_world_with_options(
         &bridge_outlines,
         args.scale,
     );
-    let bridge_surface =
-        bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
+    let bridge_surface = bridges::BridgeSurfaceMap::build(
+        &elements,
+        &bridge_structures,
+        args.scale,
+    )
+    .with_parts(&elements, &bridge_structures, &editor, args.scale);
 
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);

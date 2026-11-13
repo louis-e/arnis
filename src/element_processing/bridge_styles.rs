@@ -27,13 +27,6 @@ impl BridgeStyle {
         }
     }
 
-    pub fn rail_block(self) -> Block {
-        match self {
-            BridgeStyle::Boardwalk => OAK_FENCE,
-            _ => LIGHT_GRAY_CONCRETE,
-        }
-    }
-
     /// Centerline cells between pier bents; 0 when the style carries its deck otherwise.
     pub fn pier_interval(self, half_width: i32) -> usize {
         match self {
@@ -61,30 +54,6 @@ impl BridgeStyle {
         end_is_boundary: bool,
     ) -> bool {
         !default_pylons(self, path_len, start_is_boundary, end_is_boundary).is_empty()
-    }
-}
-
-impl BridgeStyle {
-    pub fn has_side_railing(self) -> bool {
-        self != BridgeStyle::Boardwalk
-    }
-
-    pub fn parapet_block(self) -> Option<Block> {
-        match self {
-            BridgeStyle::Boardwalk => None,
-            BridgeStyle::Covered => None,
-            BridgeStyle::Truss | BridgeStyle::Suspension | BridgeStyle::CableStayed => {
-                Some(IRON_BARS)
-            }
-            _ => Some(BRICK_WALL),
-        }
-    }
-
-    pub fn rail_foundation_block(self) -> Block {
-        match self {
-            BridgeStyle::Boardwalk => OAK_PLANKS,
-            _ => STONE_BRICKS,
-        }
     }
 }
 
