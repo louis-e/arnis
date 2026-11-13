@@ -1625,6 +1625,21 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         if y.rem_euclid(16) != 0 || !(-2032..=2016).contains(&y) {
             return Err("--cave-datum-y must be a multiple of 16 from -2032 to 2016.".to_string());
         }
+        // A One World always has the extended height; a run that picks its own may extend.
+        let extended =
+            args.disable_height_limit || args.one_world || crate::ground::auto_height(args);
+        let (bottom, top) = (
+            crate::ground::world_min_y(args, extended),
+            crate::ground::world_top_y(args, extended),
+        );
+        if !(bottom..=top).contains(&y) {
+            return Err(format!(
+                "--cave-datum-y must lie inside this world's height, {bottom} to {top} (got {y})."
+            ));
+        }
+    }
+    for warning in ignored_flags(args) {
+        eprintln!("Warning: {warning}");
     }
     if !args.one_world
         && (args.units.plan_units.is_some()
@@ -2013,6 +2028,40 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
+/// Flags that were given but do nothing with the rest of the command line.
+fn ignored_flags(args: &Args) -> Vec<&'static str> {
+    let scatter = ScatterArgs::default();
+    let pack_flags = args.tree_realm.is_some()
+        || args.tree_size_weights.is_some()
+        || args.tree_pack_dir.is_some();
+    [
+        (
+            args.loot_table.is_some() && !args.interior,
+            "--loot-table only applies to --interior; it is ignored.",
+        ),
+        (
+            !args.scatter.rocks && args.scatter.rock_density != scatter.rock_density,
+            "--rock-density does nothing with --rocks false.",
+        ),
+        (
+            !args.scatter.bushes && args.scatter.bush_density != scatter.bush_density,
+            "--bush-density does nothing with --bushes false.",
+        ),
+        (
+            args.blinear_level != 6
+                && args.region_format != crate::output_args::RegionFormat::Blinear,
+            "--blinear-level only applies to --region-format blinear; it is ignored.",
+        ),
+        (
+            pack_flags && args.legacy_trees,
+            "--tree-realm, --tree-size-weights and --tree-pack-dir do nothing with --legacy-trees.",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(ignored, warning)| ignored.then_some(warning))
+    .collect()
+}
+
 /// Legal `--ground-level` range for the chosen output format. The scaler clamps every column
 /// into `[ground_level, ceiling]`, so a base above the ceiling makes that clamp's min exceed
 /// its max and aborts the run after the whole elevation download. A run that picks its build
@@ -2031,6 +2080,57 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flags_that_do_nothing_are_named_and_kept() {
+        let p = |x: &[&str]| {
+            Args::try_parse_from(
+                ["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"]
+                    .iter()
+                    .chain(x),
+            )
+            .unwrap()
+        };
+        assert!(ignored_flags(&p(&[])).is_empty());
+        for (flags, named) in [
+            (&["--loot-table", "x.json"][..], "--loot-table"),
+            (
+                &["--rocks", "false", "--rock-density", "0.5"],
+                "--rock-density",
+            ),
+            (
+                &["--bushes", "false", "--bush-density", "0.5"],
+                "--bush-density",
+            ),
+            (&["--blinear-level", "9"], "--blinear-level"),
+            (&["--legacy-trees", "--tree-realm", "eur"], "--legacy-trees"),
+        ] {
+            let args = p(flags);
+            let warned = ignored_flags(&args);
+            assert!(warned.len() == 1 && warned[0].contains(named), "{flags:?}");
+            assert!(validate_args(&args).is_ok(), "{flags:?}");
+        }
+        // On by default: no land cover is no reason to speak up.
+        assert!(ignored_flags(&p(&["--rock-density", "0.5", "--mode", "geo-only"])).is_empty());
+        assert!(ignored_flags(&p(&["--interior", "--loot-table", "x.json"])).is_empty());
+    }
+
+    #[test]
+    fn cave_datum_stays_inside_the_world() {
+        let p = |x: &[&str]| {
+            Args::try_parse_from(
+                ["arnis", "--output-dir", ".", "--bbox", "1,2,3,4", "--caves"]
+                    .iter()
+                    .chain(x),
+            )
+            .unwrap()
+        };
+        let vanilla = |y: &str| validate_args(&p(&["--vanilla-height", "--cave-datum-y", y]));
+        assert!(vanilla("-64").is_ok() && vanilla("304").is_ok());
+        assert!(vanilla("-128").unwrap_err().contains("-64 to 319"));
+        assert!(vanilla("2016").is_err());
+        assert!(validate_args(&p(&["--disable-height-limit", "--cave-datum-y", "-1024"])).is_ok());
+    }
 
     #[test]
     fn capabilities_lists_every_long_flag() {
