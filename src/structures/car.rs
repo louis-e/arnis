@@ -95,6 +95,10 @@ fn park(
     if !editor.place_prop(super::Prop::Car) || h % 100 >= OCCUPANCY_PERCENT {
         return;
     }
+    if editor.parked_car_models() {
+        park_model(editor, cx, cz, base_y, rot_base, h, max_height);
+        return;
+    }
     let pool: Vec<&(StructureSchematic, u8)> = cars()
         .iter()
         .filter(|(car, _)| car_height(car) <= max_height)
@@ -107,6 +111,58 @@ fn park(
     let rot = (rot_base + align + flip) & 3;
     place_structure(editor, schem, cx, cz, base_y, rot, None);
 }
+
+/// Parks one of the moving cars' models: one display, at 1:1 as the spaces are, its lamps
+/// dark. Not quite square in its space, as parked cars are.
+fn park_model(
+    editor: &mut WorldEditor,
+    cx: i32,
+    cz: i32,
+    base_y: i32,
+    rot_base: u8,
+    h: u64,
+    max_height: i32,
+) {
+    use crate::vehicle_models::{display_nbt, parked_item_model};
+    use fastnbt::Value;
+    let headroom = if max_height == i32::MAX {
+        f64::MAX
+    } else {
+        f64::from(max_height) - 0.1
+    };
+    let Some(look) = crate::element_processing::cars::parked_look(h >> 8, headroom) else {
+        return;
+    };
+    let unit = |shift: u32| ((h >> shift) & 0xff) as f64 / 255.0 - 0.5;
+    let flip = if (h >> 16) & 1 == 0 { 0.0 } else { 180.0 };
+    let yaw = f64::from(rot_base & 3) * 90.0 + flip + unit(40) * 5.0;
+    let (x, z) = (
+        f64::from(cx) + 0.5 + unit(48) * 0.3,
+        f64::from(cz) + 0.5 + unit(56) * 0.3,
+    );
+    let mut nbt = display_nbt(look.model, &parked_item_model(&look), 1.0, false);
+    nbt.insert(
+        "Rotation".to_string(),
+        Value::List(vec![Value::Float(yaw as f32), Value::Float(0.0)]),
+    );
+    nbt.insert(
+        "Tags".to_string(),
+        Value::List(vec![Value::String("arnis.parked".to_string())]),
+    );
+    nbt.insert("view_range".to_string(), Value::Float(PARKED_VIEW_RANGE));
+    editor.add_entity_exact(
+        "minecraft:item_display",
+        x,
+        f64::from(base_y),
+        z,
+        (h >> 1) as i64,
+        nbt,
+    );
+}
+
+/// Parked cars are drawn out to 64 blocks times this: far enough across a lot, and a big
+/// lot does not draw cars nobody can make out.
+const PARKED_VIEW_RANGE: f32 = 2.0;
 
 #[cfg(test)]
 mod tests {

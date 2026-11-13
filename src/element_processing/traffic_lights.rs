@@ -3,9 +3,7 @@
 //! `assets/minecraft/datapack_extras/data/arnis/function/traffic`.
 
 use crate::block_definitions::{COBBLESTONE_WALL, IRON_BARS};
-use crate::bresenham::bresenham_line;
 use crate::element_processing::cars::drivable;
-use crate::element_processing::connected_blocks::{connected_iron_bars, four_connected_line};
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::road_markings::oneway_sign;
 use crate::floodfill_cache::RoadMaskBitmap;
@@ -36,33 +34,6 @@ const BIKE_SCALE: f64 = 0.62;
 const MAST_Y: i32 = 7;
 /// Roads this wide get a mast arm with a second head over the lanes.
 const MAST_HALF: i32 = 3;
-
-const HOUSING: &str = "minecraft:black_concrete";
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Lamp {
-    Red,
-    Amber,
-    Green,
-}
-
-impl Lamp {
-    fn block(self) -> &'static str {
-        match self {
-            Lamp::Red => "minecraft:redstone_block",
-            Lamp::Amber => "minecraft:yellow_concrete",
-            Lamp::Green => "minecraft:emerald_block",
-        }
-    }
-
-    fn tag(self) -> char {
-        match self {
-            Lamp::Red => 'r',
-            Lamp::Amber => 'y',
-            Lamp::Green => 'g',
-        }
-    }
-}
 
 /// East-west roads are group a, north-south ones group b; the two take turns.
 pub(crate) fn group_of(dir: (f64, f64)) -> char {
@@ -653,6 +624,23 @@ impl SignalIndex {
         }
     }
 
+    /// Whether a car head near `at`, within reach of a junction's widest heads, faces
+    /// `facing`: towards traffic that has to stop there.
+    pub(crate) fn shows(&self, at: (f64, f64), facing: (f64, f64), scale: f64) -> bool {
+        let reach = (HEAD_REACH_M * scale).max(12.0);
+        self.poles.iter().any(|pole| {
+            let d = (f64::from(pole.x) + 0.5 - at.0).hypot(f64::from(pole.z) + 0.5 - at.1);
+            d <= reach
+                && pole
+                    .heads
+                    .iter()
+                    .chain(pole.mast.as_ref().map(|(_, h)| h))
+                    .any(|h| {
+                        h.kind == Kind::Car && h.facing.0 * facing.0 + h.facing.1 * facing.1 > 0.7
+                    })
+        })
+    }
+
     /// Builds the poles and heads this node owns.
     pub fn place(
         &self,
@@ -669,23 +657,32 @@ impl SignalIndex {
                 parts: 0,
             };
             builder.post(pole.x, pole.z, base, pole.top);
+            let pole_centre = (f64::from(pole.x) + 0.5, f64::from(pole.z) + 0.5);
             for head in &pole.heads {
-                let (y, scale) = match head.kind {
-                    Kind::Car => (CAR_HEAD_Y, 1.0),
-                    Kind::Bike => (BIKE_HEAD_Y, BIKE_SCALE),
-                    Kind::Pedestrian => (PED_HEAD_Y, 1.0),
+                let y = match head.kind {
+                    Kind::Car => CAR_HEAD_Y,
+                    Kind::Bike => BIKE_HEAD_Y,
+                    Kind::Pedestrian => PED_HEAD_Y,
                 };
-                let centre = pole_front(pole.x, pole.z, head.facing, base as f64 + y, scale);
-                builder.head(centre, *head);
+                // On the post's face, the brackets against it.
+                let back = (
+                    pole_centre.0 + head.facing.0 * POST_HALF,
+                    pole_centre.1 + head.facing.1 * POST_HALF,
+                );
+                builder.head(back, f64::from(base) + y, *head, true);
             }
             if let Some((end, head)) = pole.mast {
-                builder.mast_arm((pole.x, pole.z), end, base + MAST_Y);
-                let hang = (
-                    end.0 as f64 + 0.5,
-                    (base + MAST_Y) as f64 - 0.62,
-                    end.1 as f64 + 0.5,
+                let arm_y = f64::from(base + MAST_Y) + 0.5;
+                let end_centre = (f64::from(end.0) + 0.5, f64::from(end.1) + 0.5);
+                builder.mast_arm(pole_centre, end_centre, arm_y);
+                // Hung under the arm's end, its housing centred on the arm.
+                let depth = HEAD_DEPTH_M * head.kind.size();
+                let back = (
+                    end_centre.0 - head.facing.0 * depth / 2.0,
+                    end_centre.1 - head.facing.1 * depth / 2.0,
                 );
-                builder.head(hang, head);
+                let centre_y = arm_y - ARM_SIDE / 2.0 - head.kind.half_height();
+                builder.head(back, centre_y, head, false);
             }
         }
     }
@@ -713,15 +710,70 @@ fn kerb_cell(
     })
 }
 
-/// Where a head of this scale hanging on the pole's `facing` side has its centre.
-fn pole_front(px: i32, pz: i32, facing: (f64, f64), y: f64, scale: f64) -> (f64, f64, f64) {
-    // Half the iron bar post plus half the housing depth.
-    let out = 0.0625 + 0.15 * scale;
-    (
-        px as f64 + 0.5 + facing.0 * out,
-        y,
-        pz as f64 + 0.5 + facing.1 * out,
-    )
+/// How far from its signal node a car head can stand: back behind the widest crossing
+/// road, and out to the kerb.
+const HEAD_REACH_M: f64 = 20.0;
+
+/// Half the width of the iron bar post, where a head's brackets meet it.
+const POST_HALF: f64 = 0.0625;
+/// The heads' models are drawn at 32 units to the metre (see `assets/vehicles/models/
+/// signals.py`), so at half the size of a vehicle's: a car head is 0.34 m across.
+const HEAD_SIZE: f64 = 0.5;
+/// From the back of a head's housing, where its origin is, to the back of its brackets,
+/// and to the front of its housing, at 1:1.
+const BRACKET_M: f64 = 1.5 / 32.0;
+const HEAD_DEPTH_M: f64 = 8.0 / 32.0;
+/// The mast arm: a square bar, the colour of the iron bar post.
+const ARM_SIDE: f64 = 0.12;
+const ARM_BLOCK: &str = "minecraft:polished_andesite";
+
+impl Kind {
+    /// How big this kind of head is drawn, against its model.
+    fn size(self) -> f64 {
+        match self {
+            Kind::Bike => BIKE_SCALE,
+            Kind::Car | Kind::Pedestrian => 1.0,
+        }
+    }
+
+    /// From a head's middle down to the foot of its housing, the model's origin.
+    fn half_height(self) -> f64 {
+        let units = match self {
+            Kind::Car | Kind::Bike => 17.5,
+            Kind::Pedestrian => 12.5,
+        };
+        units / 32.0 * self.size()
+    }
+
+    /// The model it shows at the start, and the tag the data pack switches it by: walkers
+    /// cross road a while group b has its green.
+    fn start(self, group: char) -> (&'static str, String) {
+        match (self, group) {
+            (Kind::Pedestrian, 'a') => ("signal_walk_red", format!("arnis.tl_p{group}")),
+            (Kind::Pedestrian, _) => ("signal_walk_green", format!("arnis.tl_p{group}")),
+            (_, 'a') => ("signal_car_green", format!("arnis.tl_{group}")),
+            _ => ("signal_car_red", format!("arnis.tl_{group}")),
+        }
+    }
+}
+
+/// The look a signal head shows in each state: the data pack names the same ids.
+pub fn signal_looks() -> Vec<crate::vehicle_models::Look> {
+    [
+        "signal_car_red",
+        "signal_car_amber",
+        "signal_car_green",
+        "signal_car_red_amber",
+        "signal_walk_red",
+        "signal_walk_green",
+    ]
+    .into_iter()
+    .map(signal_look)
+    .collect()
+}
+
+fn signal_look(model: &'static str) -> crate::vehicle_models::Look {
+    crate::vehicle_models::Look::plain(model, "std", "minecraft:black_concrete")
 }
 
 struct Builder<'e, 'a> {
@@ -740,138 +792,63 @@ impl Builder<'_, '_> {
         }
     }
 
-    fn head(&mut self, centre: (f64, f64, f64), head: Head) {
-        match head.kind {
-            Kind::Car => self.car_head(centre, head.facing, head.group, 1.0),
-            Kind::Bike => self.car_head(centre, head.facing, head.group, BIKE_SCALE),
-            Kind::Pedestrian => self.ped_head(centre, head.facing, head.group),
-        }
-    }
-
-    fn mast_arm(&mut self, from: (i32, i32), to: (i32, i32), y: i32) {
-        // Bars join on their faces only, so a diagonal arm needs a corner at every step.
-        let cells = four_connected_line(
-            &bresenham_line(from.0, 0, from.1, to.0, 0, to.1)
-                .into_iter()
-                .map(|(x, _, z)| (x, z))
-                .collect::<Vec<_>>(),
+    /// One head: a display of its model, its back at `back` (the face of the post its
+    /// brackets meet, if `bracketed`), its middle `centre_y` up, facing its traffic.
+    fn head(&mut self, back: (f64, f64), centre_y: f64, head: Head, bracketed: bool) {
+        use crate::vehicle_models::{display_nbt, item_model};
+        let size = head.kind.size();
+        let (model, tag) = head.kind.start(head.group);
+        let out = if bracketed { BRACKET_M * size } else { 0.0 };
+        let origin = (back.0 + head.facing.0 * out, back.1 + head.facing.1 * out);
+        let mut nbt = display_nbt(
+            model,
+            &item_model(&signal_look(model)),
+            HEAD_SIZE * size,
+            false,
         );
-        for &(x, z) in &cells {
-            let joins = |dx: i32, dz: i32| cells.contains(&(x + dx, z + dz));
-            self.editor.set_block_with_properties_absolute(
-                connected_iron_bars(joins(0, -1), joins(0, 1), joins(1, 0), joins(-1, 0)),
-                x,
-                y,
-                z,
-                None,
-                None,
-            );
-        }
+        nbt.insert(
+            "Rotation".to_string(),
+            Value::List(vec![Value::Float(yaw_of(head.facing)), Value::Float(0.0)]),
+        );
+        nbt.insert(
+            "Tags".to_string(),
+            Value::List(vec![
+                Value::String("arnis.tl".to_string()),
+                Value::String(tag),
+            ]),
+        );
+        let seed = self.seed_base + self.parts;
+        self.parts += 1;
+        self.editor.add_entity_exact(
+            "minecraft:item_display",
+            origin.0,
+            centre_y - head.kind.half_height(),
+            origin.1,
+            seed,
+            nbt,
+        );
     }
 
-    /// A three-lamp head; bike heads are the same at a smaller `scale`.
-    fn car_head(&mut self, centre: (f64, f64, f64), facing: (f64, f64), group: char, scale: f64) {
-        let k = scale as f32;
+    /// A straight bar from the post out to the head over the lanes, at any angle.
+    fn mast_arm(&mut self, from: (f64, f64), to: (f64, f64), y: f64) {
+        let (dx, dz) = (to.0 - from.0, to.1 - from.1);
+        let len = dx.hypot(dz);
+        if len < 0.5 {
+            return;
+        }
+        let dir = (dx / len, dz / len);
+        // On past the head's middle by half the bar, so the head hangs under its end.
+        let reach = len + ARM_SIDE / 2.0;
+        let side = ARM_SIDE as f32;
         self.part(
-            centre,
-            facing,
+            (from.0, y, from.1),
+            dir,
             0.0,
-            0.0,
-            (0.42 * k, 1.10 * k, 0.30 * k),
-            HOUSING,
+            reach / 2.0,
+            (side, side, reach as f32),
+            ARM_BLOCK,
             Vec::new(),
             None,
-        );
-        for (lamp, y) in [(Lamp::Red, 0.34), (Lamp::Amber, 0.0), (Lamp::Green, -0.34)] {
-            let lit = match group {
-                'a' => lamp == Lamp::Green,
-                _ => lamp == Lamp::Red,
-            };
-            self.lamp(
-                centre,
-                facing,
-                y * scale,
-                0.17 * scale,
-                0.26 * k,
-                lamp,
-                format!("arnis.tl_{group}_{}", lamp.tag()),
-                lit,
-            );
-            self.part(
-                centre,
-                facing,
-                (y + 0.15) * scale,
-                0.225 * scale,
-                (0.32 * k, 0.035 * k, 0.15 * k),
-                HOUSING,
-                Vec::new(),
-                None,
-            );
-        }
-    }
-
-    fn ped_head(&mut self, centre: (f64, f64, f64), facing: (f64, f64), group: char) {
-        self.part(
-            centre,
-            facing,
-            0.0,
-            0.0,
-            (0.34, 0.72, 0.26),
-            HOUSING,
-            Vec::new(),
-            None,
-        );
-        for (lamp, y) in [(Lamp::Red, 0.17), (Lamp::Green, -0.17)] {
-            // Walkers cross road a while group b has its green.
-            let lit = match group {
-                'a' => lamp == Lamp::Red,
-                _ => lamp == Lamp::Green,
-            };
-            self.lamp(
-                centre,
-                facing,
-                y,
-                0.15,
-                0.24,
-                lamp,
-                format!("arnis.tl_p{group}_{}", lamp.tag()),
-                lit,
-            );
-            self.part(
-                centre,
-                facing,
-                y + 0.135,
-                0.19,
-                (0.28, 0.03, 0.12),
-                HOUSING,
-                Vec::new(),
-                None,
-            );
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn lamp(
-        &mut self,
-        centre: (f64, f64, f64),
-        facing: (f64, f64),
-        y: f64,
-        forward: f64,
-        size: f32,
-        lamp: Lamp,
-        tag: String,
-        lit: bool,
-    ) {
-        let brightness = if lit { (15, 15) } else { (3, 0) };
-        self.part(
-            centre,
-            facing,
-            y,
-            forward,
-            (size, size, 0.04),
-            lamp.block(),
-            vec!["arnis.tl".to_string(), tag],
-            Some(brightness),
         );
     }
 
@@ -911,11 +888,9 @@ impl Builder<'_, '_> {
             "transformation".to_string(),
             Value::Compound(transformation),
         );
-        // Yaw turns the model's +z towards `facing`.
-        let yaw = (-facing.0).atan2(facing.1).to_degrees() as f32;
         extra.insert(
             "Rotation".to_string(),
-            Value::List(vec![Value::Float(yaw), Value::Float(0.0)]),
+            Value::List(vec![Value::Float(yaw_of(facing)), Value::Float(0.0)]),
         );
         if !tags.is_empty() {
             extra.insert(
@@ -943,6 +918,11 @@ impl Builder<'_, '_> {
             extra,
         );
     }
+}
+
+/// The yaw that turns an entity's +z, and a vehicle model's front, towards `facing`.
+fn yaw_of(facing: (f64, f64)) -> f32 {
+    (-facing.0).atan2(facing.1).to_degrees() as f32
 }
 
 #[cfg(test)]
@@ -1245,5 +1225,36 @@ mod tests {
         // Driving north, the right-hand kerb is to the east.
         assert_eq!(kerb_side((0.0, -1.0), false), (1.0, 0.0));
         assert_eq!(kerb_side((0.0, -1.0), true), (-1.0, 0.0));
+    }
+
+    /// The data pack switches a head between models by id: each must be one the resource
+    /// pack draws, and so must the one every head starts with.
+    #[test]
+    fn heads_switch_between_models_the_pack_draws() {
+        use crate::vehicle_models::item_model;
+        let drawn: Vec<String> = signal_looks().iter().map(item_model).collect();
+        let switches = [
+            include_str!("../../assets/minecraft/datapack_extras/data/arnis/function/traffic/car/red.mcfunction"),
+            include_str!("../../assets/minecraft/datapack_extras/data/arnis/function/traffic/car/amber.mcfunction"),
+            include_str!("../../assets/minecraft/datapack_extras/data/arnis/function/traffic/car/green.mcfunction"),
+            include_str!("../../assets/minecraft/datapack_extras/data/arnis/function/traffic/car/red_amber.mcfunction"),
+            include_str!("../../assets/minecraft/datapack_extras/data/arnis/function/traffic/walk/red.mcfunction"),
+            include_str!("../../assets/minecraft/datapack_extras/data/arnis/function/traffic/walk/green.mcfunction"),
+        ];
+        for text in switches {
+            let id = text.trim().rsplit(' ').next().unwrap().trim_matches('"');
+            assert!(drawn.iter().any(|d| d == id), "{id}");
+        }
+        for kind in [Kind::Car, Kind::Bike, Kind::Pedestrian] {
+            for group in ['a', 'b'] {
+                let (model, tag) = kind.start(group);
+                assert!(drawn.contains(&item_model(&signal_look(model))), "{model}");
+                assert!(tag.starts_with("arnis.tl_"), "{tag}");
+                // Every model exists, and stands on its foot with its lenses forward.
+                let meta = crate::vehicle_models::model(model).meta();
+                let (foot, front) = (meta.bounds[0][1], meta.bounds[0][2]);
+                assert!((-2.0..=0.0).contains(&foot) && front < -8.0, "{model}");
+            }
+        }
     }
 }

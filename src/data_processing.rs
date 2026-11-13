@@ -1379,11 +1379,12 @@ pub fn generate_world_with_options(
             &tunnel_portals,
             args.scale,
         );
-        let net = crate::element_processing::cars::CarNetwork::build(
+        let net = crate::element_processing::cars::CarNetwork::build_with_heads(
             &elements,
             args.scale,
             sign_region.drives_on_left(),
             extras.traffic_lights,
+            traffic_signals.as_deref(),
             &xzbbox,
             |way, x, z| surfaces.y_at(way, x, z),
             |x, z| building_footprints.contains(x, z),
@@ -1427,6 +1428,9 @@ pub fn generate_world_with_options(
     if let Some(cars) = &placed_cars {
         editor.set_car_network(Arc::clone(cars));
     }
+    // With moving vehicles on Java, parked cars are the same models as the moving ones.
+    let parked_car_models = extras.cars && world_format == WorldFormat::JavaAnvil;
+    editor.set_parked_car_models(parked_car_models);
     // Boats float on the water as it was built, so it is read back along their routes.
     let ship_plan = extras
         .cars
@@ -1470,6 +1474,19 @@ pub fn generate_world_with_options(
     extras.trains = train_network.is_some();
     if let Some(heights) = &rail_heights {
         editor.set_rail_heights(Arc::clone(heights));
+    }
+    // The vehicles' textures go into the block atlas the facade photos fill, so they are
+    // set aside before the first photo is sized against it. Boats set sail only once the
+    // world is written, so every look the planned lines could get is counted.
+    if java {
+        let mut looks = pack_looks(
+            car_network.as_deref(),
+            train_network.as_ref(),
+            extras.traffic_lights,
+        );
+        looks.extend(parked_looks(parked_car_models));
+        looks.extend(ship_plan.iter().flat_map(|plan| plan.possible_looks()));
+        crate::mapillary::atlas::reserve(crate::vehicle_models::atlas_px(&looks));
     }
 
     // The elements are gone by the time the pack is written.
@@ -1790,6 +1807,7 @@ pub fn generate_world_with_options(
             if let Some(cars) = &placed_cars {
                 tile_editor.set_car_network(Arc::clone(cars));
             }
+            tile_editor.set_parked_car_models(parked_car_models);
             if let Some(heights) = &rail_heights {
                 tile_editor.set_rail_heights(Arc::clone(heights));
             }
@@ -2792,6 +2810,15 @@ pub fn generate_world_with_options(
                 })
                 .unwrap_or_default(),
             disasters,
+            // The boats are on the train network by now.
+            vehicle_pack: crate::vehicle_models::java_pack(
+                &pack_looks(
+                    car_network.as_deref(),
+                    train_network.as_ref(),
+                    extras.traffic_lights,
+                ),
+                &parked_looks(parked_car_models),
+            ),
         };
         match crate::datapack::install(&output_path, &ctx) {
             Ok(()) => println!("Installed the {} data pack.", crate::datapack::PACK_NAME),
@@ -2855,6 +2882,35 @@ pub fn generate_world_with_options(
     }
 
     Ok(output_path)
+}
+
+/// Every look the cars, the train network (with the boats on it, once launched) and the
+/// signal heads can show on Java: what the resource pack draws and the atlas makes room
+/// for.
+fn pack_looks(
+    cars: Option<&crate::element_processing::cars::CarNetwork>,
+    trains: Option<&crate::element_processing::trains::TrainNetwork>,
+    signals: bool,
+) -> Vec<crate::vehicle_models::Look> {
+    cars.iter()
+        .flat_map(|net| net.java_looks())
+        .chain(trains.iter().flat_map(|net| net.java_looks()))
+        .chain(
+            signals
+                .then(crate::element_processing::traffic_lights::signal_looks)
+                .into_iter()
+                .flatten(),
+        )
+        .collect()
+}
+
+/// Every look a parked car can have, when parked cars are models.
+fn parked_looks(models: bool) -> Vec<crate::vehicle_models::Look> {
+    if models {
+        crate::element_processing::cars::parked_looks()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Puts the boats on the routes whose water turned out to carry them.

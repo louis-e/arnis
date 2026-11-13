@@ -35,17 +35,27 @@ const fn atlas_budget_for(side: u32) -> u64 {
     (side as u64) * (side as u64) * 6 / 10
 }
 
-/// The budget this run is working to, set once from the settings.
+/// The budget of the atlas this run is working to, set once from the settings.
 static ATLAS_BUDGET: AtomicU64 = AtomicU64::new(atlas_budget_for(ATLAS_SIDE_STANDARD));
+/// Pixels of it other textures in the same atlas take, the vehicles'.
+static RESERVED: AtomicU64 = AtomicU64::new(0);
 
 /// Chooses the atlas the panels are budgeted against for this generation.
 pub fn set_atlas_side(side: u32) {
     ATLAS_BUDGET.store(atlas_budget_for(side), Ordering::Relaxed);
 }
 
+/// Sets `px` of the budget aside for the vehicles' textures, for this generation: the
+/// last call counts, before or after `set_atlas_side`.
+pub fn reserve(px: u64) {
+    RESERVED.store(px, Ordering::Relaxed);
+}
+
 /// Atlas pixels the panels of this run may fill between them.
 pub(super) fn atlas_budget() -> u64 {
-    ATLAS_BUDGET.load(Ordering::Relaxed)
+    ATLAS_BUDGET
+        .load(Ordering::Relaxed)
+        .saturating_sub(RESERVED.load(Ordering::Relaxed))
 }
 
 /// Lowest resolution the budget rule falls back to, in pixels per block.

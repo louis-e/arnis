@@ -60,8 +60,12 @@ const GRAVITY: &[(&str, &[u8])] = static_files![
 const TRAFFIC: &[(&str, &[u8])] = static_files![
     "data/arnis/function/traffic/load.mcfunction",
     "data/arnis/function/traffic/tick.mcfunction",
-    "data/arnis/function/traffic/on.mcfunction",
-    "data/arnis/function/traffic/off.mcfunction",
+    "data/arnis/function/traffic/car/red.mcfunction",
+    "data/arnis/function/traffic/car/amber.mcfunction",
+    "data/arnis/function/traffic/car/green.mcfunction",
+    "data/arnis/function/traffic/car/red_amber.mcfunction",
+    "data/arnis/function/traffic/walk/red.mcfunction",
+    "data/arnis/function/traffic/walk/green.mcfunction",
     "data/arnis/function/traffic/catch_up.mcfunction",
     "data/arnis/function/traffic/switched.mcfunction",
     "data/arnis/function/traffic/phase/a_go.mcfunction",
@@ -629,6 +633,8 @@ pub struct PackContext {
     pub walk_functions: Vec<(String, String)>,
     /// Which disasters the area gets and the water maps they rise by.
     pub disasters: Option<disasters::Plan>,
+    /// The resource pack files the moving vehicles are drawn with, as (path, bytes).
+    pub vehicle_pack: Vec<(String, Vec<u8>)>,
 }
 
 impl PackContext {
@@ -685,10 +691,15 @@ pub fn install(world: &Path, ctx: &PackContext) -> Result<(), String> {
         fs::write(&dest, bytes).map_err(|e| format!("Failed to write {dest:?}: {e}"))?;
     }
     crate::world_utils::enable_datapack_in_level_dat(world, PACK_NAME)?;
-    if ctx.extras.pause_menu {
-        // Only the logo needs it, so a failure costs the logo and nothing else.
-        if let Err(e) = resources::install_banner(world) {
-            eprintln!("Warning: the pause menu logo was left out of resources.zip: {e}");
+    if ctx.extras.pause_menu || !ctx.vehicle_pack.is_empty() {
+        // Only the logo and the vehicles need it, so a failure costs those and nothing else.
+        if let Err(e) = resources::install(world, ctx.extras.pause_menu, &ctx.vehicle_pack) {
+            let what = match (ctx.extras.pause_menu, ctx.vehicle_pack.is_empty()) {
+                (true, false) => "the pause menu logo and the vehicle models",
+                (true, true) => "the pause menu logo",
+                _ => "the vehicle models",
+            };
+            eprintln!("Warning: resources.zip was not written, so it lacks {what}: {e}");
         }
     }
     if ctx.extras.outbreak || ctx.extras.disasters {
@@ -1067,6 +1078,7 @@ mod tests {
             disasters: extras
                 .disasters
                 .then(|| disasters::Plan::for_tests(CelestialBody::Moon)),
+            vehicle_pack: Vec::new(),
         }
     }
 
@@ -1184,6 +1196,7 @@ mod tests {
                     // network, which the test has none of.
                     let networked = [
                         "clear",
+                        "conflict",
                         "ease",
                         "look",
                         "network",

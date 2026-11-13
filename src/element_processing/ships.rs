@@ -267,6 +267,49 @@ impl ShipPlan {
         self.lines.is_empty()
     }
 
+    /// Every look a boat on these lines could be drawn with, before the water is read and
+    /// it is known which of them set sail: each kind its lines might get, in each of its
+    /// liveries, and lowered where it can be.
+    pub fn possible_looks(&self) -> Vec<crate::vehicle_models::Look> {
+        let mut vessels: Vec<Vessel> = Vec::new();
+        for line in &self.lines {
+            // Every vessel the choosers below can give a line of this role, whatever its
+            // length, its waters and its rolls.
+            let kinds: Vec<Vessel> = match line.role {
+                Use::Ferry { cars, .. } => [(true, 0.0), (false, 0.0), (false, 1000.0)]
+                    .iter()
+                    .flat_map(|&(sea, len)| ferry_choices(cars, sea, len).iter().copied())
+                    .collect(),
+                Use::Waterway { class } => {
+                    (0..100).flat_map(|r| waterway_vessels(class, r)).collect()
+                }
+                Use::Leisure => (0..100)
+                    .flat_map(|r| leisure_choices(r).iter().copied())
+                    .collect(),
+            };
+            for v in kinds {
+                if !vessels.contains(&v) {
+                    vessels.push(v);
+                }
+            }
+        }
+        let mut looks = Vec::new();
+        for vessel in vessels {
+            for low in [false, true] {
+                if low && !vessel.lowers() {
+                    continue;
+                }
+                for &livery in vessel.liveries() {
+                    looks.push(crate::element_processing::train_bodies::look(
+                        Coach::Ship { vessel, low },
+                        livery,
+                    ));
+                }
+            }
+        }
+        looks
+    }
+
     /// How far across a route of `role` the water is read, in blocks either way of its
     /// middle, and every how many points.
     fn across(&self, role: Use) -> (Vec<f64>, usize) {
@@ -479,12 +522,7 @@ impl ShipPlan {
             Some(m) => m >= 45,
             None => len_m > 8000.0 || (edge && len_m > 3000.0),
         };
-        let choices: &[Vessel] = match (cars, len_m) {
-            (true, _) if sea => &[Vessel::SeaFerry, Vessel::CarFerry, Vessel::RiverFerry],
-            (true, l) if l > 450.0 => &[Vessel::CarFerry, Vessel::RiverFerry],
-            (true, _) => &[Vessel::RiverFerry, Vessel::WaterBus],
-            (false, _) => &[Vessel::WaterBus],
-        };
+        let choices = ferry_choices(cars, sea, len_m);
         let margin = (6.0 * self.scale).ceil() as usize;
         let (vessel, low) = choices.iter().find_map(|&v| {
             let length = v.size_m().0 * self.size;
@@ -691,11 +729,7 @@ impl ShipPlan {
         line: &Line,
         water: &impl Fn(f64, f64) -> Option<Sample>,
     ) -> Option<(Route, Service)> {
-        let choices: &[Vessel] = if trains::hash(line.seed, 1) % 100 < 60 {
-            &[Vessel::Sailboat, Vessel::Motorboat]
-        } else {
-            &[Vessel::Motorboat]
-        };
+        let choices = leisure_choices(trains::hash(line.seed, 1));
         let (vessel, low) = choices
             .iter()
             .find_map(|&v| self.fits(line, 0..line.points.len(), v, water))?;
@@ -934,6 +968,26 @@ fn waterway_class(tags: &HashMap<String, String>) -> Option<u8> {
         return Some(3);
     }
     (yes("boat") || yes("motorboat")).then_some(0)
+}
+
+/// What crosses on a ferry line, largest first: out to sea, a long crossing or a short one,
+/// carrying cars or only people.
+fn ferry_choices(cars: bool, sea: bool, len_m: f64) -> &'static [Vessel] {
+    match (cars, len_m) {
+        (true, _) if sea => &[Vessel::SeaFerry, Vessel::CarFerry, Vessel::RiverFerry],
+        (true, l) if l > 450.0 => &[Vessel::CarFerry, Vessel::RiverFerry],
+        (true, _) => &[Vessel::RiverFerry, Vessel::WaterBus],
+        (false, _) => &[Vessel::WaterBus],
+    }
+}
+
+/// What a leisure line's `roll` sends out: mostly sails, else a motorboat.
+fn leisure_choices(roll: u64) -> &'static [Vessel] {
+    if roll % 100 < 60 {
+        &[Vessel::Sailboat, Vessel::Motorboat]
+    } else {
+        &[Vessel::Motorboat]
+    }
 }
 
 /// What sails a waterway of `class`, largest first, then smaller where it is too narrow.

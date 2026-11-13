@@ -8,16 +8,17 @@
 //! Speeds are in thousandths of a block per step, a step being the two ticks between
 //! moves, so 1000 is 36 km/h on a 1:1 world.
 
-use crate::bedrock_addon::{self, Body, Fleet, Lamp, Shape};
+use crate::bedrock_addon::{self, Body, Fleet};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::datapack::macro_coord;
 use crate::element_processing::highways::{highway_block_range, highway_default_lanes};
 use crate::element_processing::road_markings::{is_roundabout, oneway_sign};
 use crate::element_processing::traffic_lights::{
-    group_of, is_signal, is_vehicular, signal_upstream, Junctions, UPSTREAM_M,
+    group_of, is_signal, is_vehicular, signal_upstream, Junctions, SignalIndex, UPSTREAM_M,
 };
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::vehicle_models::{self, Look};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
@@ -109,12 +110,15 @@ const GIVE_WAY_STEPS: i32 = 30;
 /// A driver's pace, in thousandths of the lane speed, both ends included.
 const PACE: (i32, i32) = (880, 1120);
 /// How often each kind of car turns up.
-const KINDS: [(Kind, u32); 6] = [
-    (Kind::Sedan, 52),
-    (Kind::Hatchback, 24),
-    (Kind::Van, 10),
-    (Kind::Pickup, 6),
-    (Kind::Truck, 5),
+const KINDS: [(Kind, u32); 9] = [
+    (Kind::Sedan, 30),
+    (Kind::Hatchback, 20),
+    (Kind::Suv, 16),
+    (Kind::Estate, 10),
+    (Kind::City, 6),
+    (Kind::Van, 8),
+    (Kind::Pickup, 4),
+    (Kind::Truck, 3),
     (Kind::Bus, 3),
 ];
 
@@ -415,6 +419,10 @@ impl Segment {
 enum Kind {
     Sedan,
     Hatchback,
+    Estate,
+    Suv,
+    /// A small city car.
+    City,
     Van,
     Pickup,
     Truck,
@@ -585,11 +593,37 @@ const BUS_COLOURS: [(&str, u32); 4] = [
 
 impl CarNetwork {
     /// `surface_y` is the height of a way's road surface block at a column.
+    #[cfg(test)]
     pub fn build(
         elements: &[ProcessedElement],
         scale: f64,
         drives_on_left: bool,
         stop_at_signals: bool,
+        world: &XZBBox,
+        surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
+        built: impl Fn(i32, i32) -> bool,
+    ) -> Self {
+        Self::build_with_heads(
+            elements,
+            scale,
+            drives_on_left,
+            stop_at_signals,
+            None,
+            world,
+            surface_y,
+            built,
+        )
+    }
+
+    /// As `build`, holding cars only at signals whose `heads` show them a light: where the
+    /// heads were planned off the road or merged with another, there is nothing to stop for.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_with_heads(
+        elements: &[ProcessedElement],
+        scale: f64,
+        drives_on_left: bool,
+        stop_at_signals: bool,
+        heads: Option<&SignalIndex>,
         world: &XZBBox,
         surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
         built: impl Fn(i32, i32) -> bool,
@@ -777,6 +811,11 @@ impl CarNetwork {
                             node.z as f64 - lane.nodes[k - 1].z as f64,
                         )
                         .unwrap_or((1.0, 0.0));
+                        // A driver stops only for a light they can see.
+                        let at = (node.x as f64 + 0.5, node.z as f64 + 0.5);
+                        if heads.is_some_and(|h| !h.shows(at, (-dir.0, -dir.1), scale)) {
+                            continue;
+                        }
                         let group = if group_of(dir) == 'a' { 1 } else { 2 };
                         let s = if k == lane.nodes.len() - 1 {
                             to
@@ -900,7 +939,7 @@ impl CarNetwork {
             .map(|&(kind, _)| {
                 let list: Vec<String> = respawn_colours(kind.colours())
                     .iter()
-                    .map(|c| format!("\"{c}\""))
+                    .map(|c| format!("\"{}\"", colour_name(c)))
                     .collect();
                 format!("{}:[{}]", kind.name(), list.join(","))
             })
@@ -1065,6 +1104,46 @@ impl CarNetwork {
             dispatch,
         ));
 
+        // In a junction, a car close ahead (look's #ahead 3) standing at a red line is a
+        // queue reaching back from the road out, not a conflict to wait out and pass.
+        let mut conflict = String::from(
+            "# A car close ahead inside a junction. One standing at a red line has filled the road out\n\
+             # of it: wait behind it as in any queue. Anyone else is a conflict, waited out for a while\n\
+             # only, since cars can block each other in a circle there. The spots are look's.\n",
+        );
+        let held = |own: &str, at: f64, r: f64, tag: &str| {
+            format!(
+                "execute if entity @s[{own}] rotated as @s positioned ^ ^ ^{} if entity @e[type=marker,{tag},distance=..{}] run return run scoreboard players set #t arnis.car 0\n",
+                d(at),
+                d(r)
+            )
+        };
+        for (own, extra) in [
+            ("tag=!arnis.car.long", 0.0),
+            ("tag=arnis.car.long", LONG_EXTRA),
+        ] {
+            let close = if extra > 0.0 {
+                LONG_CLOSE_AHEAD
+            } else {
+                CLOSE_AHEAD
+            };
+            conflict.push_str(&held(own, close.0, close.1, "tag=arnis.car.held"));
+            for &(at, r, _) in LOOK.iter().filter(|&&(_, _, c)| c == 3) {
+                conflict.push_str(&held(own, at + extra, r, "tag=arnis.car.held"));
+                conflict.push_str(&held(
+                    own,
+                    at + extra + LONG_EXTRA,
+                    r,
+                    "tag=arnis.car.held,tag=arnis.car.long",
+                ));
+            }
+        }
+        conflict.push_str("scoreboard players set #jam arnis.car 1\n");
+        out.push((
+            "data/arnis/function/cars/conflict.mcfunction".to_string(),
+            conflict,
+        ));
+
         let mut clear = format!(
             "# Crossing traffic right in front, or anyone ahead inside a junction: give way, but\n\
              # not for ever, since cars can block each other in a circle there. Which goes first\n\
@@ -1126,52 +1205,44 @@ impl CarNetwork {
         out
     }
 
-    /// The functions that build a respawned car's body: the block displays of each kind,
-    /// as (path in the pack, text). 26.3 reads a display's block as a bare id, so it gets
-    /// its own copies in the `ov121` overlay.
+    /// The functions that build a respawned car's body, as (path in the pack, text): the
+    /// box a player clicks to get in, the model and, on a display of its own so the pack
+    /// can turn them up, the brake lights. The colour comes in as its name, `red`.
     pub fn body_functions(&self) -> Vec<(String, String)> {
         let k = self.size as f32;
-        let mut out = Vec::new();
-        for (kind, _) in KINDS {
-            let name = kind.name();
-            for (prefix, bare) in [("", false), ("ov121/", true)] {
+        KINDS
+            .iter()
+            .map(|&(kind, _)| {
+                let name = kind.name();
+                let model = kind.model();
                 let (width, height) = kind.hitbox();
-                let mut text = format!(
-                    "$summon interaction $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.k_{name}\"],width:{:.2}f,height:{:.2}f}}\n",
+                let item = vehicle_models::item_model_named(model, "$(colour)");
+                let text = format!(
+                    "$summon interaction $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.k_{name}\"],width:{:.2}f,height:{:.2}f}}\n\
+                     $summon item_display $(x) $(y) $(z) {{Tags:[\"arnis.car.part\"],teleport_duration:2,view_range:{VIEW_RANGE}f,{}}}\n\
+                     $summon item_display $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.car.tail\"],teleport_duration:2,view_range:{VIEW_RANGE}f,{}}}\n",
                     width * k,
                     height * k,
+                    vehicle_models::display_snbt(model, &item, self.size, false, ""),
+                    vehicle_models::display_snbt(
+                        model,
+                        &vehicle_models::brake_item_model(model),
+                        self.size,
+                        false,
+                        ",brightness:{sky:7,block:7}",
+                    ),
                 );
-                for p in parts(kind, "$(colour)") {
-                    let block = if bare {
-                        format!("\"{}\"", p.block)
-                    } else {
-                        format!("{{Name:\"{}\"}}", p.block)
-                    };
-                    let v3 = |v: [f32; 3]| {
-                        format!("[{:.3}f,{:.3}f,{:.3}f]", v[0] * k, v[1] * k, v[2] * k)
-                    };
-                    let (tags, glow) = match p.light {
-                        Light::Head => ("\"arnis.car.part\"", ",brightness:{sky:15,block:15}"),
-                        Light::Tail => (
-                            "\"arnis.car.part\",\"arnis.car.tail\"",
-                            ",brightness:{sky:7,block:7}",
-                        ),
-                        Light::None => ("\"arnis.car.part\"", ""),
-                    };
-                    let _ = writeln!(
-                        text,
-                        "$summon block_display $(x) $(y) $(z) {{Tags:[{tags}],teleport_duration:2,view_range:{VIEW_RANGE}f,block_state:{block},transformation:{{left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f],translation:{},scale:{}}}{glow}}}",
-                        v3(p.corner),
-                        v3(p.size),
-                    );
-                }
-                out.push((
-                    format!("{prefix}data/arnis/function/cars/body/{name}.mcfunction"),
-                    text,
-                ));
-            }
-        }
-        out
+                (format!("data/arnis/function/cars/body/{name}.mcfunction"), text)
+            })
+            .collect()
+    }
+
+    /// Every look a car can have, for the resource pack.
+    pub fn java_looks(&self) -> Vec<Look> {
+        all_bodies()
+            .into_iter()
+            .map(|(kind, colour)| kind.look(colour))
+            .collect()
     }
 
     /// The function that picks a new car's kind, each as often as its weight.
@@ -1324,28 +1395,15 @@ impl CarNetwork {
         })
     }
 
-    /// Every body a car can have on Bedrock, at the size the cars are built at.
+    /// Every body a car can have on Bedrock.
     pub fn bedrock_bodies(&self) -> Vec<Body> {
-        let k = self.size as f32;
         all_bodies()
             .into_iter()
             .map(|(kind, colour)| Body {
                 name: body_name(kind, colour),
                 fleet: Fleet::Car,
-                shapes: parts(kind, colour)
-                    .into_iter()
-                    .map(|p| Shape {
-                        block: p.block,
-                        size: p.size.map(|v| v * k),
-                        corner: p.corner.map(|v| v * k),
-                        tilt: 0.0,
-                        lamp: match p.light {
-                            Light::None => Lamp::Off,
-                            Light::Head => Lamp::On,
-                            Light::Tail => Lamp::Brake,
-                        },
-                    })
-                    .collect(),
+                look: kind.look(colour),
+                size: self.size,
             })
             .collect()
     }
@@ -1411,13 +1469,34 @@ impl CarNetwork {
                 ("Rotation".to_string(), rotation.clone()),
             ]);
             editor.add_entity_exact("minecraft:interaction", x, y, z, seed + 31, hitbox);
-            for (k, mut nbt) in body(car.kind, car.colour, self.size)
-                .into_iter()
-                .enumerate()
-            {
+            let look = car.kind.look(car.colour);
+            let shown = [
+                (vehicle_models::item_model(&look), None),
+                (
+                    vehicle_models::brake_item_model(look.model),
+                    Some(Value::String("arnis.car.tail".to_string())),
+                ),
+            ];
+            for (k, (item, tag)) in shown.into_iter().enumerate() {
+                let mut nbt = vehicle_models::display_nbt(look.model, &item, self.size, false);
+                let mut tags = vec![Value::String("arnis.car.part".to_string())];
+                tags.extend(tag.clone());
+                nbt.insert("Tags".to_string(), Value::List(tags));
+                // Steps come every second tick; the client glides between them.
+                nbt.insert("teleport_duration".to_string(), Value::Int(2));
+                nbt.insert("view_range".to_string(), Value::Float(VIEW_RANGE));
+                if tag.is_some() {
+                    nbt.insert(
+                        "brightness".to_string(),
+                        Value::Compound(HashMap::from([
+                            ("sky".to_string(), Value::Int(7)),
+                            ("block".to_string(), Value::Int(7)),
+                        ])),
+                    );
+                }
                 nbt.insert("Rotation".to_string(), rotation.clone());
                 editor.add_entity_exact(
-                    "minecraft:block_display",
+                    "minecraft:item_display",
                     x,
                     y,
                     z,
@@ -1442,6 +1521,9 @@ impl Kind {
         match self {
             Kind::Sedan => "sedan",
             Kind::Hatchback => "hatchback",
+            Kind::Estate => "estate",
+            Kind::Suv => "suv",
+            Kind::City => "city",
             Kind::Van => "van",
             Kind::Pickup => "pickup",
             Kind::Truck => "truck",
@@ -1452,7 +1534,7 @@ impl Kind {
     /// The colours this kind comes in, weighted.
     fn colours(self) -> &'static [(&'static str, u32)] {
         match self {
-            Kind::Sedan | Kind::Hatchback => &CAR_COLOURS,
+            Kind::Sedan | Kind::Hatchback | Kind::Estate | Kind::Suv | Kind::City => &CAR_COLOURS,
             Kind::Van => &VAN_COLOURS,
             Kind::Pickup => &PICKUP_COLOURS,
             Kind::Truck => &TRUCK_COLOURS,
@@ -1471,6 +1553,9 @@ impl Kind {
         match self {
             Kind::Sedan => (0.4, 1.15),
             Kind::Hatchback => (0.1, 1.2),
+            Kind::Estate => (0.3, 1.15),
+            Kind::Suv => (0.25, 1.35),
+            Kind::City => (0.05, 1.2),
             Kind::Van => (1.25, 1.42),
             Kind::Pickup => (0.95, 1.28),
             Kind::Truck => (2.7, 1.95),
@@ -1484,11 +1569,51 @@ impl Kind {
         match self {
             Kind::Sedan => (2.4, 1.45),
             Kind::Hatchback => (2.4, 1.5),
+            Kind::Estate => (2.4, 1.5),
+            Kind::Suv => (2.5, 1.7),
+            Kind::City => (2.4, 1.5),
             Kind::Van => (2.6, 1.8),
             Kind::Pickup => (2.6, 1.6),
             Kind::Truck => (3.0, 2.7),
             Kind::Bus => (3.0, 2.6),
         }
+    }
+
+    /// Length and width at 1:1, mirrors left out: what the kind's model is built to, and
+    /// what the tests of queues and look-aheads go by.
+    #[cfg(test)]
+    fn size_m(self) -> (f64, f64) {
+        match self {
+            Kind::Sedan => (4.6, 1.82),
+            Kind::Hatchback => (4.0, 1.76),
+            Kind::Estate => (4.7, 1.8),
+            Kind::Suv => (4.5, 1.86),
+            Kind::City => (3.6, 1.65),
+            Kind::Van => (4.9, 1.95),
+            Kind::Pickup => (5.3, 1.95),
+            Kind::Truck => (7.6, 2.4),
+            Kind::Bus => (10.0, 2.5),
+        }
+    }
+
+    /// The vehicle model this kind is drawn with (`assets/vehicles`).
+    fn model(self) -> &'static str {
+        match self {
+            Kind::Sedan => "car_sedan",
+            Kind::Hatchback => "car_hatchback",
+            Kind::Estate => "car_estate",
+            Kind::Suv => "car_suv",
+            Kind::City => "car_city",
+            Kind::Van => "car_van",
+            Kind::Pickup => "car_pickup",
+            Kind::Truck => "car_truck",
+            Kind::Bus => "car_bus",
+        }
+    }
+
+    /// How a car of this kind in `colour` looks.
+    fn look(self, colour: &'static str) -> Look {
+        Look::plain(self.model(), colour_name(colour), colour)
     }
 }
 
@@ -1498,6 +1623,36 @@ fn all_bodies() -> Vec<(Kind, &'static str)> {
         .iter()
         .flat_map(|&(kind, _)| kind.colours().iter().map(move |(c, _)| (kind, *c)))
         .collect()
+}
+
+/// Whether a kind parks on lots, decks and at pumps: lorries and buses have depots.
+fn parks(kind: Kind) -> bool {
+    !kind.is_long()
+}
+
+/// Every look a parked car can have, for the resource pack.
+pub fn parked_looks() -> Vec<Look> {
+    all_bodies()
+        .into_iter()
+        .filter(|&(kind, _)| parks(kind))
+        .map(|(kind, colour)| kind.look(colour))
+        .collect()
+}
+
+/// The car parked where the hash `h` falls, each kind and colour as often as on the road,
+/// at 1:1 and no taller than `headroom` blocks; `None` if none fits.
+pub fn parked_look(h: u64, headroom: f64) -> Option<Look> {
+    let fits: Vec<(Kind, u32)> = KINDS
+        .iter()
+        .copied()
+        .filter(|&(kind, _)| parks(kind))
+        .filter(|&(kind, _)| vehicle_models::model(kind.model()).top_m() <= headroom)
+        .collect();
+    if fits.is_empty() {
+        return None;
+    }
+    let kind = pick(&fits, h);
+    Some(kind.look(pick(kind.colours(), h >> 24)))
 }
 
 /// `red` for red concrete.
@@ -2264,295 +2419,9 @@ fn spots(segments: &[Segment], scale: f64) -> BTreeMap<(i32, i32), Vec<(usize, u
 /// Display entities are drawn out to 64 blocks times this, and sent out to 160 blocks.
 const VIEW_RANGE: f32 = 3.0;
 
-/// One block of a vehicle: its block, size and lowest corner in the vehicle's frame, and
-/// how it is lit.
-struct Part {
-    block: &'static str,
-    size: [f32; 3],
-    corner: [f32; 3],
-    light: Light,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Light {
-    None,
-    Head,
-    /// Dim while driving; the pack turns it up while the car brakes or stands.
-    Tail,
-}
-
-const fn part(block: &'static str, size: [f32; 3], corner: [f32; 3], light: Light) -> Part {
-    Part {
-        block,
-        size,
-        corner,
-        light,
-    }
-}
-
-/// A vehicle's parts at 1:1, +z ahead and the ground at 0.
-fn parts(kind: Kind, colour: &'static str) -> Vec<Part> {
-    // (length, width, axle from each end, wheel size, light height)
-    let (l, w, axle, wheel, lights) = match kind {
-        Kind::Sedan => (4.6, 1.82, 0.95, 0.64, 0.66),
-        Kind::Hatchback => (4.0, 1.76, 0.75, 0.62, 0.68),
-        Kind::Van => (4.9, 1.95, 0.85, 0.68, 0.75),
-        Kind::Pickup => (5.3, 1.95, 1.0, 0.74, 0.78),
-        Kind::Truck => (7.6, 2.4, 1.25, 0.95, 0.8),
-        Kind::Bus => (10.0, 2.5, 2.2, 0.98, 0.8),
-    };
-    let wheels = |z: f32| {
-        part(
-            "minecraft:black_concrete",
-            [w + 0.08, wheel, wheel],
-            [-(w + 0.08) / 2.0, 0.0, z - wheel / 2.0],
-            Light::None,
-        )
-    };
-    let lamp = |block, z: f32, light| {
-        part(
-            block,
-            [w - 0.3, 0.13, 0.04],
-            [-(w - 0.3) / 2.0, lights, z],
-            light,
-        )
-    };
-    let plate = |z: f32| {
-        part(
-            "minecraft:white_concrete",
-            [0.52, 0.11, 0.02],
-            [-0.26, lights - 0.2, z],
-            Light::None,
-        )
-    };
-    let mut out = vec![
-        wheels(l / 2.0 - axle),
-        wheels(-l / 2.0 + axle),
-        lamp("minecraft:white_concrete", l / 2.0, Light::Head),
-        lamp("minecraft:red_concrete", -l / 2.0 - 0.04, Light::Tail),
-        plate(l / 2.0),
-        plate(-l / 2.0 - 0.02),
-    ];
-    match kind {
-        Kind::Sedan => out.extend([
-            part(
-                colour,
-                [w, 0.72, l],
-                [-w / 2.0, 0.22, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w - 0.2, 0.52, 2.3],
-                [-(w - 0.2) / 2.0, 0.94, -1.3],
-                Light::None,
-            ),
-            part(
-                colour,
-                [w - 0.18, 0.07, 2.0],
-                [-(w - 0.18) / 2.0, 1.43, -1.15],
-                Light::None,
-            ),
-        ]),
-        Kind::Hatchback => out.extend([
-            part(
-                colour,
-                [w, 0.72, l],
-                [-w / 2.0, 0.22, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w - 0.18, 0.56, 2.3],
-                [-(w - 0.18) / 2.0, 0.94, -1.78],
-                Light::None,
-            ),
-            part(
-                colour,
-                [w - 0.16, 0.07, 2.1],
-                [-(w - 0.16) / 2.0, 1.47, -1.72],
-                Light::None,
-            ),
-        ]),
-        // A tall box, glazed at the front where the cab is.
-        Kind::Van => out.extend([
-            part(colour, [w, 1.5, l], [-w / 2.0, 0.3, -l / 2.0], Light::None),
-            part(
-                "minecraft:tinted_glass",
-                [w + 0.04, 0.55, 1.0],
-                [-(w + 0.04) / 2.0, 1.15, l / 2.0 - 0.98],
-                Light::None,
-            ),
-        ]),
-        // A cab up front and an open bed behind it.
-        Kind::Pickup => out.extend([
-            part(
-                colour,
-                [w, 0.62, l],
-                [-w / 2.0, 0.36, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w - 0.2, 0.56, 2.1],
-                [-(w - 0.2) / 2.0, 0.98, -0.4],
-                Light::None,
-            ),
-            part(
-                colour,
-                [w - 0.18, 0.07, 1.9],
-                [-(w - 0.18) / 2.0, 1.54, -0.3],
-                Light::None,
-            ),
-        ]),
-        // A coloured cab and a plain box behind it.
-        Kind::Truck => out.extend([
-            part(
-                colour,
-                [w, 1.95, 1.95],
-                [-w / 2.0, 0.55, l / 2.0 - 1.95],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w + 0.04, 0.62, 0.95],
-                [-(w + 0.04) / 2.0, 1.65, l / 2.0 - 0.93],
-                Light::None,
-            ),
-            part(
-                "minecraft:light_gray_concrete",
-                [w + 0.06, 2.4, 5.5],
-                [-(w + 0.06) / 2.0, 0.85, -l / 2.0],
-                Light::None,
-            ),
-        ]),
-        // One long box with a band of windows round it.
-        Kind::Bus => out.extend([
-            part(
-                colour,
-                [w, 2.55, l],
-                [-w / 2.0, 0.35, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w + 0.04, 0.95, l - 0.28],
-                [-(w + 0.04) / 2.0, 1.5, -l / 2.0 + 0.3],
-                Light::None,
-            ),
-        ]),
-    }
-    // Windows and bumpers stand a hair proud of the body, so the two never flicker.
-    let mut boxes: Vec<crate::element_processing::train_bodies::Part> = out
-        .iter()
-        .map(|p| crate::element_processing::train_bodies::Part {
-            block: p.block,
-            size: p.size,
-            corner: p.corner,
-            tilt: 0.0,
-            glow: false,
-        })
-        .collect();
-    crate::element_processing::ship_bodies::apart(&mut boxes);
-    for (p, b) in out.iter_mut().zip(boxes) {
-        (p.size, p.corner) = (b.size, b.corner);
-    }
-    out
-}
-
-/// The block displays of one vehicle at `size` blocks per metre.
-fn body(kind: Kind, colour: &'static str, size: f64) -> Vec<HashMap<String, Value>> {
-    let k = size as f32;
-    let floats = |v: [f32; 4]| Value::List(v.iter().map(|f| Value::Float(*f)).collect());
-    let vec3 = |v: [f32; 3]| Value::List(v.iter().map(|f| Value::Float(*f * k)).collect());
-    let glow = |level: i32| {
-        Value::Compound(HashMap::from([
-            ("sky".to_string(), Value::Int(level)),
-            ("block".to_string(), Value::Int(level)),
-        ]))
-    };
-    parts(kind, colour)
-        .into_iter()
-        .map(|p| {
-            let mut tags = vec![Value::String("arnis.car.part".to_string())];
-            if p.light == Light::Tail {
-                tags.push(Value::String("arnis.car.tail".to_string()));
-            }
-            let mut nbt = HashMap::from([
-                (
-                    "block_state".to_string(),
-                    Value::Compound(HashMap::from([(
-                        "Name".to_string(),
-                        Value::String(p.block.to_string()),
-                    )])),
-                ),
-                (
-                    "transformation".to_string(),
-                    Value::Compound(HashMap::from([
-                        ("left_rotation".to_string(), floats([0.0, 0.0, 0.0, 1.0])),
-                        ("right_rotation".to_string(), floats([0.0, 0.0, 0.0, 1.0])),
-                        ("translation".to_string(), vec3(p.corner)),
-                        ("scale".to_string(), vec3(p.size)),
-                    ])),
-                ),
-                ("Tags".to_string(), Value::List(tags)),
-                // Steps come every second tick; the client glides between them.
-                ("teleport_duration".to_string(), Value::Int(2)),
-                ("view_range".to_string(), Value::Float(VIEW_RANGE)),
-            ]);
-            match p.light {
-                Light::Head => {
-                    nbt.insert("brightness".to_string(), glow(15));
-                }
-                Light::Tail => {
-                    nbt.insert("brightness".to_string(), glow(7));
-                }
-                Light::None => {}
-            }
-            nbt
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn no_two_parts_of_a_car_flicker_against_each_other_or_hide_one_another() {
-        use crate::element_processing::train_bodies::Part as Box;
-        let mut found = Vec::new();
-        for kind in [
-            Kind::Sedan,
-            Kind::Hatchback,
-            Kind::Van,
-            Kind::Pickup,
-            Kind::Truck,
-            Kind::Bus,
-        ] {
-            let parts: Vec<Box> = parts(kind, "minecraft:red_concrete")
-                .iter()
-                .map(|p| Box {
-                    block: p.block,
-                    size: p.size,
-                    corner: p.corner,
-                    tilt: 0.0,
-                    glow: false,
-                })
-                .collect();
-            for (i, a) in parts.iter().enumerate() {
-                for b in &parts[i + 1..] {
-                    for f in crate::element_processing::ship_bodies::shared_faces(a, b) {
-                        found.push(format!("{kind:?} {} / {} {f:?}", a.block, b.block));
-                    }
-                }
-            }
-            for b in crate::element_processing::ship_bodies::buried(&parts) {
-                found.push(format!("{kind:?} {b}"));
-            }
-        }
-        assert!(found.is_empty(), "{}", found.join("\n"));
-    }
 
     fn node(id: u64, x: i32, z: i32, tags: &[(&str, &str)]) -> ProcessedNode {
         ProcessedNode {
@@ -2830,19 +2699,7 @@ mod tests {
 
     /// A kind's body: its length and width, in blocks at 1:1.
     fn footprint(kind: Kind) -> (f64, f64) {
-        let parts = parts(kind, "minecraft:white_concrete");
-        let extent = |axis: usize| {
-            let lo = parts
-                .iter()
-                .map(|p| p.corner[axis])
-                .fold(f32::MAX, f32::min);
-            let hi = parts
-                .iter()
-                .map(|p| p.corner[axis] + p.size[axis])
-                .fold(f32::MIN, f32::max);
-            f64::from(hi - lo)
-        };
-        (extent(2), extent(0))
+        kind.size_m()
     }
 
     /// What a driver makes of the car ahead `gap` blocks off, middle to middle, as the
@@ -3358,6 +3215,47 @@ mod tests {
             .all(|p| p.stop.is_none()));
     }
 
+    /// A car stops only for a light it can see. Where the planner found no kerb to stand
+    /// a head on (here: paving all round), the signal holds nobody; with kerbs, every
+    /// approach gets its head and its stop line.
+    #[test]
+    fn cars_stop_only_where_a_head_faces_them() {
+        let elements = crossroads(true);
+        let mask = |paved: &dyn Fn(i32, i32) -> bool| {
+            let bbox = XZBBox::rect_from_min_max(-120, -120, 120, 120).unwrap();
+            let mut mask = crate::floodfill_cache::RoadMaskBitmap::new(&bbox);
+            for x in -120..=120 {
+                for z in -120..=120 {
+                    if paved(x, z) {
+                        mask.set(x, z);
+                    }
+                }
+            }
+            mask
+        };
+        let stops = |paved: &dyn Fn(i32, i32) -> bool| {
+            let heads = SignalIndex::build(&elements, 1.0, false, &mask(paved));
+            let net = CarNetwork::build_with_heads(
+                &elements,
+                1.0,
+                false,
+                true,
+                Some(&heads),
+                &world(),
+                flat,
+                open,
+            );
+            net.segments
+                .iter()
+                .flat_map(|s| &s.points)
+                .filter(|p| p.stop.is_some())
+                .count()
+        };
+        assert_eq!(stops(&|_, _| true), 0);
+        let half = highway_block_range("residential", &HashMap::new(), 1.0);
+        assert_eq!(stops(&|x, z| x.abs() <= half || z.abs() <= half), 4);
+    }
+
     #[test]
     fn speeds_follow_maxspeed_and_the_road_class() {
         assert_eq!(parse_maxspeed("50"), Some(50.0));
@@ -3551,50 +3449,70 @@ mod tests {
             assert!((880..=1120).contains(&car.pace));
         }
         for (kind, _) in KINDS {
-            let tails = parts(kind, "minecraft:red_concrete")
-                .iter()
-                .filter(|p| p.light == Light::Tail)
-                .count();
-            assert_eq!(tails, 1);
+            assert!(vehicle_models::model(kind.model()).has_brake(), "{kind:?}");
         }
     }
 
     #[test]
-    fn respawned_bodies_match_the_placed_ones_in_both_block_formats() {
+    fn a_respawned_body_is_its_click_box_its_model_and_its_brake_lights() {
         let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         let bodies = net.body_functions();
-        assert_eq!(bodies.len(), KINDS.len() * 2);
-        let sedan = |prefix: &str| {
-            &bodies
-                .iter()
-                .find(|(p, _)| {
-                    p == &format!("{prefix}data/arnis/function/cars/body/sedan.mcfunction")
-                })
-                .unwrap()
-                .1
-        };
-        // Every part, and the box that can be clicked.
-        assert_eq!(sedan("").lines().count(), parts(Kind::Sedan, "x").len() + 1);
-        assert!(sedan("").starts_with("$summon interaction $(x) $(y) $(z) {Tags:[\"arnis.car.part\",\"arnis.k_sedan\"],width:2.40f,height:1.45f}"));
-        assert!(sedan("").contains("block_state:{Name:\"$(colour)\"}"));
-        assert!(sedan("ov121/").contains("block_state:\"$(colour)\""));
-        assert!(sedan("").contains("\"arnis.car.tail\"],teleport_duration:2,view_range:3f"));
+        assert_eq!(bodies.len(), KINDS.len());
+        let sedan = &bodies
+            .iter()
+            .find(|(p, _)| p == "data/arnis/function/cars/body/sedan.mcfunction")
+            .unwrap()
+            .1;
+        let lines: Vec<&str> = sedan.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("$summon interaction $(x) $(y) $(z) {Tags:[\"arnis.car.part\",\"arnis.k_sedan\"],width:2.40f,height:1.45f}"));
+        assert!(lines[1].starts_with("$summon item_display $(x) $(y) $(z) {Tags:[\"arnis.car.part\"],teleport_duration:2,view_range:3f,"));
+        assert!(lines[1].contains("\"minecraft:item_model\":\"arnis:vehicle/car_sedan_$(colour)\""));
+        assert!(lines[2].contains("\"arnis.car.tail\"],teleport_duration:2,view_range:3f"));
+        assert!(lines[2].contains("\"minecraft:item_model\":\"arnis:vehicle/car_sedan_brake\""));
+        assert!(lines[2].ends_with(",brightness:{sky:7,block:7}}"));
+        for line in &lines {
+            assert_eq!(
+                line.matches('{').count(),
+                line.matches('}').count(),
+                "{line}"
+            );
+        }
         assert!(net
             .storage_function()
-            .contains("colours set value {sedan:[\"minecraft:white_concrete\""));
+            .contains("colours set value {sedan:[\"white\""));
+        // The pack has a model for every colour a car is respawned in.
+        let looks: Vec<String> = net.java_looks().iter().map(|l| l.name()).collect();
+        for (kind, _) in KINDS {
+            for colour in respawn_colours(kind.colours()) {
+                let name = format!("{}_{}", kind.model(), colour_name(colour));
+                assert!(looks.contains(&name), "{name}");
+            }
+        }
     }
 
     #[test]
     fn the_look_functions_scale_with_the_cars() {
         let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat, open);
         let looks = net.look_functions(false);
-        assert_eq!(looks.len(), 19);
+        assert_eq!(looks.len(), 20);
         let h0 = &looks
             .iter()
             .find(|(p, _)| p.ends_with("h0.mcfunction"))
             .unwrap()
             .1;
         assert!(h0.contains("^ ^ ^6.00"), "{h0}");
+        // The queue check in a junction looks where look does, at the same scale.
+        let conflict = &looks
+            .iter()
+            .find(|(p, _)| p.ends_with("cars/conflict.mcfunction"))
+            .unwrap()
+            .1;
+        assert!(
+            conflict.contains("^ ^ ^6.00") && conflict.contains("^ ^ ^12.00"),
+            "{conflict}"
+        );
+        assert!(conflict.ends_with("scoreboard players set #jam arnis.car 1\n"));
         // Bucket 0 points north, so its range wraps round the half turn.
         assert!(h0.contains("y_rotation=112.5..-112.5"), "{h0}");
     }
@@ -3608,11 +3526,38 @@ mod tests {
             text.starts_with("execute store result score #r arnis.car run random value 0..99\n")
         );
         assert!(text.contains(
-            "matches 0..51 run data modify storage arnis:cars spawn merge value {kind:\"sedan\",long:0b}"
+            "matches 0..29 run data modify storage arnis:cars spawn merge value {kind:\"sedan\",long:0b}"
         ));
         assert!(text.contains(
             "matches 97..99 run data modify storage arnis:cars spawn merge value {kind:\"bus\",long:1b}"
         ));
+    }
+
+    /// Parked cars are the cars of the road, lorries and buses left out, as often as they
+    /// drive, and under a deck only those that fit.
+    #[test]
+    fn parked_cars_are_road_cars_that_fit_their_space() {
+        let mut seen = HashMap::new();
+        for h in 0..20_000u64 {
+            let h = h.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let look = parked_look(h, f64::MAX).unwrap();
+            assert!(
+                !matches!(look.model, "car_truck" | "car_bus"),
+                "{}",
+                look.model
+            );
+            *seen.entry(look.model).or_insert(0u32) += 1;
+            let low = parked_look(h, 1.6).unwrap();
+            assert!(
+                vehicle_models::model(low.model).top_m() <= 1.6,
+                "{}",
+                low.model
+            );
+            assert!(parked_looks().contains(&look));
+        }
+        assert_eq!(seen.len(), 7);
+        assert!(seen["car_sedan"] > seen["car_city"]);
+        assert!(parked_look(1, 1.0).is_none());
     }
 
     #[test]
@@ -3622,10 +3567,14 @@ mod tests {
         for (kind, _) in KINDS {
             let (width, height) = kind.hitbox();
             assert!(width >= 2.4 && height >= 1.4, "{kind:?}");
-            let body = body(kind, "minecraft:white_concrete", net.size);
-            assert!(body
-                .iter()
-                .all(|nbt| nbt["view_range"] == Value::Float(VIEW_RANGE)));
+        }
+        for (path, text) in net.body_functions() {
+            for line in text.lines().filter(|l| l.contains("item_display")) {
+                assert!(
+                    line.contains(&format!("view_range:{VIEW_RANGE}f")),
+                    "{path}"
+                );
+            }
         }
         const { assert!(VIEW_RANGE * 64.0 >= 160.0) };
     }
@@ -4345,32 +4294,30 @@ mod tests {
     }
 
     #[test]
-    fn every_bedrock_car_body_has_one_brake_light_and_known_colours() {
+    fn every_car_body_has_a_model_of_its_kind_s_size_with_brake_lights() {
         let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat, open);
         let bodies = net.bedrock_bodies();
         assert_eq!(bodies.len(), all_bodies().len());
         let names: FnvHashSet<&str> = bodies.iter().map(|b| b.name.as_str()).collect();
         assert_eq!(names.len(), bodies.len(), "names are unique");
-        for body in &bodies {
-            assert_eq!(
-                body.shapes.iter().filter(|s| s.lamp == Lamp::Brake).count(),
-                1,
-                "{}",
-                body.name
+        for (kind, _) in KINDS {
+            let model = vehicle_models::model(kind.model());
+            assert!(model.has_brake(), "{kind:?}");
+            let [lo, hi] = model.meta().bounds;
+            let (len, width) = kind.size_m();
+            let built_len = (hi[2] - lo[2]) / 16.0;
+            assert!(
+                (built_len - len).abs() <= 0.3,
+                "{kind:?}: {built_len} m long, not {len}"
             );
-            for s in &body.shapes {
-                assert!(crate::bedrock_addon::palette_has(s.block), "{}", s.block);
-                assert!(s.size.iter().all(|&v| v > 0.0));
-            }
+            // Mirrors may stand out a little either side.
+            let built_width = (hi[0] - lo[0]) / 16.0;
+            assert!(
+                built_width >= width - 0.1 && built_width <= width + 0.5,
+                "{kind:?}: {built_width} m wide"
+            );
+            assert!(model.wheels().len() >= 4, "{kind:?} turns its wheels");
         }
-        // Built at the size the world's cars are.
-        let sedan = bodies.iter().find(|b| b.name == "car_sedan_white").unwrap();
-        let long = sedan
-            .shapes
-            .iter()
-            .map(|s| s.size[2])
-            .fold(0.0f32, f32::max);
-        assert!((long - 4.6 * 2.0).abs() < 1e-4, "{long}");
     }
 
     #[test]

@@ -77,6 +77,7 @@ mod test_utilities;
 mod tile;
 mod transfer;
 mod trees;
+mod vehicle_models;
 mod version_check;
 mod voxy;
 mod water_depth;

@@ -17,9 +17,9 @@ function arnis:cars/look
 execute if score #ahead arnis.car matches 2 run scoreboard players operation #t arnis.car < #q25 arnis.car
 execute if score #ahead arnis.car matches 1 run scoreboard players operation #t arnis.car < #q50 arnis.car
 # Crossing a junction, a car close ahead is a conflict to give way to for a while; on a
-# lane it is a queue to wait in.
+# lane it is a queue to wait in, and so is one waiting at a red line past the junction.
 execute if score #ahead arnis.car matches 3 unless data entity @s data.j run scoreboard players set #t arnis.car 0
-execute if score #ahead arnis.car matches 3 if data entity @s data.j run scoreboard players set #jam arnis.car 1
+execute if score #ahead arnis.car matches 3 if data entity @s data.j run function arnis:cars/conflict
 function arnis:cars/clear
 # Gentle on the throttle, firm on the brake.
 execute store result score #c arnis.car run data get entity @s data.c

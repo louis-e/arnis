@@ -5,6 +5,11 @@ import { Bits, ahead, distance, numbers, randInt, turnBetween, warn, yawOf } fro
 
 const FAMILY = "arnis_car";
 const BRAKE = "arnis:brake";
+// Speed in half blocks a second, as far as the client turns the wheels by it: it changes
+// only when that does, so a car cruising sends nothing.
+const SPEED = "arnis:speed";
+// As bedrock_addon/mod.rs declares it: room for 130 km/h at the largest scale.
+const SPEED_MAX = 255;
 /** Cars this close to a player move. */
 const DRIVE_REACH = 96;
 /** A car placed at the start appears once a player comes this close. */
@@ -144,6 +149,9 @@ export class Cars {
       }
       if (!car) continue;
       car.drives = players.some((p) => distance(p.location, car) <= DRIVE_REACH);
+      // The wheels turn by the speed last sent, saved with the car: one that no longer
+      // drives, or comes back from a save, stands still.
+      if (!car.drives) this.wheels(car, 0);
       cars.set(id, car);
       this.index(car);
     }
@@ -187,6 +195,7 @@ export class Cars {
       w: 0,
       q: 0,
       b: e.getProperty(BRAKE) === true ? 1 : 0,
+      ws: e.getProperty(SPEED) ?? 0,
       n: tieBreak(e.id),
     };
     this.enter(car);
@@ -305,6 +314,8 @@ export class Cars {
       car.b = b;
       car.e.setProperty(BRAKE, b === 1);
     }
+    // c is in thousandths of a block per step, ten steps a second.
+    this.wheels(car, Math.min(SPEED_MAX, Math.max(0, Math.round(car.c / 50))));
     if (car.c <= 0) return;
     this.move(car, car.c * 0.001);
   }
@@ -396,6 +407,13 @@ export class Cars {
     }
   }
 
+  /** Tells the client how fast the wheels turn, when that changes. */
+  wheels(car, ws) {
+    if (ws === car.ws) return;
+    car.ws = ws;
+    car.e.setProperty(SPEED, ws);
+  }
+
   /** A car that has driven out of everyone's reach is gone, and a new one joins nearer. */
   leave() {
     for (const car of [...this.cars.values()]) {
@@ -424,6 +442,7 @@ export class Cars {
       w: 0,
       q: 0,
       b: 0,
+      ws: 0,
       n: tieBreak(e.id),
       drives: false,
     };
