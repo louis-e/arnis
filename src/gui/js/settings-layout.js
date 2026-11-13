@@ -40,14 +40,20 @@ function setActive(index) {
   }
 }
 
-// The list can be longer than the sidebar: it scrolls along with the page.
+// The list can be longer than the sidebar: it glides along with the page, keeping the
+// next section in view too.
 function revealInNav(item) {
   const nav = item?.closest('.settings-nav');
   if (!nav || item.offsetParent === null) return;
   const box = nav.getBoundingClientRect();
   const row = item.getBoundingClientRect();
-  if (row.top < box.top) nav.scrollTop -= box.top - row.top + 6;
-  else if (row.bottom > box.bottom) nav.scrollTop += row.bottom - box.bottom + 6;
+  const margin = row.height + 6;
+  let by = 0;
+  if (row.top < box.top + margin) by = row.top - box.top - margin;
+  else if (row.bottom > box.bottom - margin) by = row.bottom - box.bottom + margin;
+  if (!by) return;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  nav.scrollBy({ top: by, behavior: reduced ? 'auto' : 'smooth' });
 }
 
 function currentSectionIndex() {
