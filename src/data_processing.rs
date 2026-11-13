@@ -833,6 +833,25 @@ pub fn generate_world_with_options(
             .map_err(|e| format!("piece lease rect {:?} is invalid: {e}", u.rect))?,
         None => xzbbox.clone(),
     };
+    // Every piece of a job carves against the job's rect and one datum, so caves run on across
+    // its seams as in a single run.
+    let piece_caves = one_world
+        .and_then(|run| run.unit.as_ref())
+        .filter(|_| args.caves);
+    let cave_world = match piece_caves {
+        Some(u) => XZBBox::rect_from_min_max(u.job[0], u.job[1], u.job[2], u.job[3])
+            .map_err(|e| format!("piece lease job {:?} is invalid: {e}", u.job))?,
+        None => xzbbox.clone(),
+    };
+    crate::caves::set_piece_datum(
+        piece_caves
+            .filter(|_| args.cave_datum_y.is_none())
+            .and(args.units.one_world_unit.as_deref())
+            .and_then(std::path::Path::parent)
+            .map(|dir| {
+                crate::caves::share_piece_datum(dir, crate::world_editor::terrain_floor_y())
+            }),
+    );
     let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
     if let Some(shape) = xzbbox.outline() {
         let all = shape.rect().total_blocks();
@@ -1865,7 +1884,7 @@ pub fn generate_world_with_options(
                 crate::caves::carve_region(
                     &mut tile_editor,
                     args,
-                    &xzbbox,
+                    &cave_world,
                     g_min_x,
                     g_max_x,
                     g_min_z,
@@ -2315,7 +2334,7 @@ pub fn generate_world_with_options(
                 (!tunnel_footprint.is_empty() && tunnel_footprint.contains(x, z))
                     || stations.digs(x, z)
             };
-            crate::caves::carve(&mut editor, args, &xzbbox, &dug);
+            crate::caves::carve(&mut editor, args, &cave_world, &xzbbox, &dug);
         } else if args.fillground {
             crate::ore_generation::generate_ores(&mut editor, &xzbbox);
         }

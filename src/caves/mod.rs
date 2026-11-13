@@ -119,6 +119,46 @@ fn set_datum_y(y: Option<i32>) {
     DATUM_Y.store(y.unwrap_or(i32::MIN), Ordering::Relaxed);
 }
 
+/// The datum every piece of a job shares when the user gave none, or `i32::MIN`.
+static PIECE_DATUM_Y: AtomicI32 = AtomicI32::new(i32::MIN);
+
+/// Pins this run's carve to `y` as `--cave-datum-y` would; `None` outside a piece of a job.
+pub fn set_piece_datum(y: Option<i32>) {
+    PIECE_DATUM_Y.store(y.unwrap_or(i32::MIN), Ordering::Relaxed);
+}
+
+fn piece_datum() -> Option<i32> {
+    Some(PIECE_DATUM_Y.load(Ordering::Relaxed)).filter(|&y| y != i32::MIN)
+}
+
+/// The datum of the job whose pieces' leases are in `job_dir`: the first piece to ask records
+/// its own floor there, and every later one, run after it or beside it, reads that.
+pub fn share_piece_datum(job_dir: &std::path::Path, own: i32) -> i32 {
+    let path = job_dir.join("cave_datum_y");
+    let read = || {
+        std::fs::read_to_string(&path)
+            .ok()?
+            .trim()
+            .parse::<i32>()
+            .ok()
+    };
+    if let Some(y) = read() {
+        return y;
+    }
+    // Linked into place whole, so a piece never reads a half-written value.
+    let tmp = job_dir.join(format!("cave_datum_y.{}", std::process::id()));
+    let linked =
+        std::fs::write(&tmp, own.to_string()).and_then(|()| std::fs::hard_link(&tmp, &path));
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => own,
+        Err(e) => read().unwrap_or_else(|| {
+            eprintln!("Warning: the job's cave datum could not be shared ({e}); caves may not meet at this piece's edges");
+            own
+        }),
+    }
+}
+
 /// Where vanilla's floor sits for the cave passes: `--cave-datum-y` when given, so separate
 /// runs share one depth frame, else this world's bedrock plane.
 #[inline]
@@ -211,13 +251,14 @@ pub(crate) fn biome_amounts(args: &Args) -> BiomeAmounts {
 pub fn carve(
     editor: &mut WorldEditor,
     args: &Args,
+    world: &XZBBox,
     xzbbox: &XZBBox,
     keep_out: &dyn Fn(i32, i32) -> bool,
 ) {
     carve_region(
         editor,
         args,
-        xzbbox,
+        world,
         xzbbox.min_x(),
         xzbbox.max_x(),
         xzbbox.min_z(),
@@ -242,7 +283,7 @@ pub fn carve_region(
     max_z: i32,
     keep_out: &dyn Fn(i32, i32) -> bool,
 ) {
-    set_datum_y(args.cave_datum_y);
+    set_datum_y(args.cave_datum_y.or(piece_datum()));
     // The ore variants and the lava rims match the host rock, so the deepslate line goes first.
     deepslate::apply_region(editor, min_x, max_x, min_z, max_z);
 
@@ -789,6 +830,15 @@ mod tests {
                 ..BiomeAmounts::uniform(0.0)
             }
         );
+    }
+
+    #[test]
+    fn a_jobs_pieces_share_the_first_floor_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(share_piece_datum(dir.path(), -960), -960);
+        assert_eq!(share_piece_datum(dir.path(), -848), -960);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(names.len(), 1, "no temporary file is left behind");
     }
 
     /// Two runs whose bedrock planes differ carve the same field once `--cave-datum-y` pins it.
