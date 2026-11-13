@@ -261,8 +261,10 @@ impl<K: Copy + Eq + std::hash::Hash> Palette<K> {
         match kind {
             1 => out.extend(
                 cells
-                    .chunks_exact(2)
-                    .map(|p| ((remap[p[0] as usize] as u8) << 4) | remap[p[1] as usize] as u8),
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|&[a, b]| ((remap[a as usize] as u8) << 4) | remap[b as usize] as u8),
             ),
             2 => out.extend(cells.iter().map(|&c| remap[c as usize] as u8)),
             _ => {
@@ -355,10 +357,14 @@ impl Section {
         c.fluid_palette
             .write(&c.fluids, |o, k| write_utf(o, k), &mut out);
         out.push(1);
-        out.extend(c.fluids.chunks_exact(2).map(|p| {
-            let level = |f: u16| u8::from(f != 0);
-            level(p[0]) | (level(p[1]) << 4)
-        }));
+        let level = |f: u16| u8::from(f != 0);
+        out.extend(
+            c.fluids
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&[a, b]| level(a) | (level(b) << 4)),
+        );
         out
     }
 }
