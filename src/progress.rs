@@ -64,9 +64,16 @@ pub fn set_progress_suppressed(suppressed: bool) {
 
 // Terminal messages always pass: a generation finishing or failing while a
 // preview fetch holds the mute must still reach the GUI, or the Generate
-// button stays locked forever (main.js re-enables it on "Error!"/"Done!").
+// button stays locked forever (main.js re-enables it on these four).
 fn emits_suppressed(progress: f64, message: &str) -> bool {
-    SUPPRESS_COUNT.load(Ordering::Relaxed) > 0 && progress < 100.0 && !message.starts_with("Error!")
+    SUPPRESS_COUNT.load(Ordering::Relaxed) > 0 && !ends_run(progress, message)
+}
+
+fn ends_run(progress: f64, message: &str) -> bool {
+    progress >= 100.0
+        || ["Error!", "Stopped.", "The retried cells are built"]
+            .iter()
+            .any(|end| message.starts_with(end))
 }
 
 /// Resets the monotonic progress floor at the start of a generation.
@@ -126,6 +133,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         return;
     }
     remember_status(message);
+    crate::progress_json::progress(progress, message);
     crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
@@ -148,6 +156,7 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
         return;
     }
     remember_status(message);
+    crate::progress_json::progress(progress, message);
     crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
@@ -161,14 +170,65 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
     }
 }
 
-pub fn emit_gui_error(message: &str) {
+/// A job's `piece` record (see `progress_json`), for the map in the window.
+pub fn emit_gui_piece(piece: &serde_json::Value) {
+    if let Some(window) = get_main_window() {
+        let payload = json!({ "progress": MESSAGE_ONLY, "message": "", "piece": piece });
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
+}
+
+/// A progress emit that also says where a download or bake is, for the bar in
+/// the OSM Data Source panel (`transfer` in the payload). Also sent on
+/// `--progress json` as a `transfer` record, so a child's reaches the window.
+pub fn emit_gui_transfer(progress: f64, message: &str, transfer: &crate::transfer::Transfer) {
+    if emits_suppressed(progress, message) {
+        return;
+    }
+    remember_status(message);
+    crate::progress_json::progress(progress, message);
+    crate::progress_json::record("transfer", json!(transfer));
+    if let Some(window) = get_main_window() {
+        let payload = json!({
+            "progress": clamp_progress(progress),
+            "message": message,
+            "transfer": transfer
+        });
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
+}
+
+/// The `progress-update` payload for an error: `message` is cut to fit the
+/// status bar, `detail` keeps the full text for the window to show.
+fn error_payload(message: &str) -> serde_json::Value {
     // Truncate by characters (not bytes) to avoid panicking when the GUI
     // status bar receives an error containing multi-byte UTF-8. e.g.
     // localized OS error messages like "Недостаточно системных ресурсов…"
     // where byte 35 lands inside a Cyrillic character.
     const MAX_CHARS: usize = 35;
     let truncated: String = message.chars().take(MAX_CHARS).collect();
-    emit_gui_progress_update(0.0, &format!("Error! {truncated}"));
+    json!({ "progress": 0.0, "message": format!("Error! {truncated}"), "detail": message })
+}
+
+pub fn emit_gui_error(message: &str) {
+    crate::progress_json::error(message);
+    let payload = error_payload(message);
+    let shown = payload["message"].as_str().unwrap_or_default();
+    if emits_suppressed(0.0, shown) {
+        return;
+    }
+    remember_status(shown);
+    crate::progress_json::progress(0.0, shown);
+    crate::discord::progress(shown);
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
 }
 
 /// Emits the final in-game level name (including localized area suffix for Java,
@@ -230,5 +290,33 @@ mod tests {
         })
         .join()
         .unwrap();
+    }
+
+    /// What ends a run (and frees Start in the window) passes a preview fetch's mute.
+    #[test]
+    fn the_end_of_a_run_is_never_muted() {
+        assert!(ends_run(100.0, "Done! World generation completed."));
+        assert!(ends_run(0.0, "Error! Failed"));
+        assert!(ends_run(
+            MESSAGE_ONLY,
+            "Stopped. Finished cells are kept; starting again resumes them."
+        ));
+        assert!(ends_run(
+            MESSAGE_ONLY,
+            "The retried cells are built; starting again builds the rest."
+        ));
+        assert!(!ends_run(40.0, "Generating area..."));
+    }
+
+    #[test]
+    fn error_payload_keeps_full_text() {
+        let full = "Недостаточно системных ресурсов для завершения операции. ".repeat(4)[..]
+            .chars()
+            .take(200)
+            .collect::<String>();
+        assert_eq!(full.chars().count(), 200);
+        let p = error_payload(&full);
+        assert!(p["message"].as_str().unwrap().chars().count() <= 42);
+        assert_eq!(p["detail"].as_str().unwrap(), full);
     }
 }

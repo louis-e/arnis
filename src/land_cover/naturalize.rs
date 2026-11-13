@@ -506,9 +506,9 @@ mod tests {
             _ => 'w',
         });
         naturalize(&mut lc, None, Climate::Temperate, (0, 0), true);
-        for z in 10..20 {
-            for x in 15..23 {
-                assert_eq!(lc.grid[z][x], LC_WATER, "gap cell ({x}, {z})");
+        for (z, row) in lc.grid.iter().enumerate().take(20).skip(10) {
+            for (x, &cell) in row.iter().enumerate().take(23).skip(15) {
+                assert_eq!(cell, LC_WATER, "gap cell ({x}, {z})");
             }
         }
         assert_eq!(lc.grid[5][19], LC_GRASSLAND);

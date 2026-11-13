@@ -458,12 +458,12 @@ struct HoleGroup {
 
 /// Outer rings grouped by the holes that cut them, so a pond on an island in a hole
 /// keeps its water.
-struct PolygonEdges {
+pub(crate) struct PolygonEdges {
     groups: Vec<HoleGroup>,
 }
 
 impl PolygonEdges {
-    fn new(outers: &[Vec<XZPoint>], inners: &[Vec<XZPoint>]) -> Self {
+    pub(crate) fn new(outers: &[Vec<XZPoint>], inners: &[Vec<XZPoint>]) -> Self {
         let groups = hole_groups(outers, inners, |p: &XZPoint| (p.x, p.z))
             .into_iter()
             .map(|(outer, cutting)| HoleGroup {
@@ -481,7 +481,7 @@ impl PolygonEdges {
     }
 
     /// Filled x-spans of row `z`, clamped to `[min_x, max_x]`.
-    fn row_spans(&self, z: i32, min_x: i32, max_x: i32) -> Vec<(i32, i32)> {
+    pub(crate) fn row_spans(&self, z: i32, min_x: i32, max_x: i32) -> Vec<(i32, i32)> {
         let mut spans: Vec<(i32, i32)> = Vec::new();
         for group in &self.groups {
             let group_spans = group.row_spans(z as f64, min_x, max_x);
@@ -833,7 +833,7 @@ fn scanline_fill_water(
                 }
                 // Over a bore, fill down to the terrain but never carve into it: its shell
                 // may not be built yet. The land-cover carve deepens it once it is.
-                if tunnel_footprint.contains(x, z) {
+                if crate::water_depth::at_bore(bwf, tunnel_footprint, x, z) {
                     for y in (ground_y + 1).min(water_y)..=water_y {
                         editor.set_block_absolute(WATER, x, y, z, None, Some(&[]));
                     }
@@ -913,7 +913,8 @@ mod tests {
                 footprint.set(x, z);
             }
         }
-        let bwf = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+        let bwf =
+            crate::water_depth::compute_big_water_field(&ground, &xzbbox, Default::default(), 1.0);
         let road_mask = CoordinateBitmap::new_empty();
         let surface = 5;
         let mut surfaces = FnvHashMap::default();
@@ -1007,7 +1008,8 @@ mod tests {
         );
         let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
         editor.set_ground(Arc::new(ground.clone()));
-        let bwf = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+        let bwf =
+            crate::water_depth::compute_big_water_field(&ground, &xzbbox, Default::default(), 1.0);
         let none = CoordinateBitmap::new_empty();
 
         generate_water_area_from_way(
@@ -1044,7 +1046,8 @@ mod tests {
         );
         let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
         editor.set_ground(Arc::new(ground.clone()));
-        let bwf = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+        let bwf =
+            crate::water_depth::compute_big_water_field(&ground, &xzbbox, Default::default(), 1.0);
         let none = CoordinateBitmap::new_empty();
 
         generate_water_area_from_way(

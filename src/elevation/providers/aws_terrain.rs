@@ -95,6 +95,7 @@ impl ElevationProvider for AwsTerrain {
                     tile_map.insert(key, img);
                 }
                 Err(e) => {
+                    crate::net::note_uncached("elevation tiles (AWS Terrain)");
                     eprintln!("Warning: Failed to download tile: {e}");
                 }
             }
@@ -237,6 +238,15 @@ fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
     (x, y)
 }
 
+/// The files a fetch of `bbox` reads from `dir`.
+pub(crate) fn cache_files(dir: &Path, bbox: &LLBBox) -> Vec<std::path::PathBuf> {
+    let zoom = calculate_zoom_level(bbox);
+    get_tile_coordinates(bbox, zoom)
+        .into_iter()
+        .map(|(x, y)| dir.join(format!("z{zoom}_x{x}_y{y}.png")))
+        .collect()
+}
+
 fn get_tile_coordinates(bbox: &LLBBox, zoom: u8) -> Vec<(u32, u32)> {
     let (x1, y1) = lat_lng_to_tile(bbox.min().lat(), bbox.min().lng(), zoom);
     let (x2, y2) = lat_lng_to_tile(bbox.max().lat(), bbox.max().lng(), zoom);
@@ -257,6 +267,8 @@ fn download_tile(
     zoom: u8,
     tile_path: &Path,
 ) -> Result<TileImage, String> {
+    // Ahead of the retries, whose sleeps would only delay the refusal.
+    crate::net::ensure_online("elevation tiles (AWS Terrain)")?;
     println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from AWS Terrain Tiles");
     let url: String = AWS_TERRARIUM_URL
         .replace("{z}", &zoom.to_string())

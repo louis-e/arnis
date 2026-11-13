@@ -10,6 +10,7 @@ use crate::models_3d::voxelize::{
 use crate::models_3d::wikidata::client::fetch_model;
 use crate::models_3d::wikidata::index::lookup;
 use crate::models_3d::wikidata::stl::{bbox, parse_triangles};
+use crate::models_3d::FetchError;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
@@ -179,6 +180,9 @@ pub fn prescan(
         .filter_map(|url| match fetch_model(url) {
             Ok(bytes) => Some((url.clone(), bytes)),
             Err(e) => {
+                if matches!(e, FetchError::Failed(_)) {
+                    crate::net::note_uncached("3D models (Wikimedia)");
+                }
                 eprintln!(
                     "{} Wikidata model fetch failed ({url}): {e}",
                     "Warning:".yellow().bold()

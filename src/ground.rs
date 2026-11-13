@@ -57,6 +57,8 @@ pub struct Ground {
     snow_threshold_y: i32,
     /// Climate at the bbox center, driving arid/polar surface palettes and biomes.
     climate: crate::climate::Climate,
+    /// Set by `--climate-mode per-position`; `None` reads `climate` everywhere.
+    climate_field: Option<Arc<crate::climate_field::ClimateField>>,
     /// Earth unless this is a Moon/Mars world, which take their own surface palette.
     body: CelestialBody,
     ecoregions: Option<Arc<EcoMap>>,
@@ -65,7 +67,11 @@ pub struct Ground {
     /// Absolute block of the grids' first cell, so passes that draw patterns line up
     /// across One World seams. (0, 0) in a local run.
     origin: (i32, i32),
+    /// In a piece of a job, the whole job's bbox: per-run choices are taken there.
+    anchor: Option<LLBBox>,
 }
+
+pub(crate) type Geo = Box<dyn Fn(f64, f64) -> (f64, f64) + Send + Sync>;
 
 /// Layout of a run's ground grids. A projected run takes its size from the
 /// projected rectangle and re-spaces rows to Mercator, so every cell sits on
@@ -76,6 +82,10 @@ pub struct GroundFrame {
     pub mercator: Option<WebMercatorProjection>,
     pub pad_blocks: usize,
     pub affine: AffinePolicy,
+    /// What the water options add to the land-cover estimate of the deepest carve.
+    pub carve_depth: crate::water_detail::CarveDepth,
+    /// In a piece of a job, the whole job's bbox.
+    pub anchor: Option<LLBBox>,
 }
 
 impl GroundFrame {
@@ -85,6 +95,8 @@ impl GroundFrame {
             mercator: None,
             pad_blocks: 0,
             affine: AffinePolicy::Fit,
+            carve_depth: Default::default(),
+            anchor: None,
         }
     }
 
@@ -110,12 +122,19 @@ impl GroundFrame {
                     Some(affine) => AffinePolicy::Fixed(affine),
                     None => AffinePolicy::FitWithHeadroom,
                 },
+                carve_depth: Default::default(),
+                anchor: run.unit.as_ref().and_then(|u| {
+                    let job = XZBBox::rect_from_min_max(u.job[0], u.job[1], u.job[2], u.job[3]);
+                    crate::projection::llbbox_for_rect(&projection, &job.ok()?).ok()
+                }),
             },
             None => Self {
                 world_dims: Some((world_w, world_h)),
                 mercator: Some(projection),
                 pad_blocks: 0,
                 affine: AffinePolicy::Fit,
+                carve_depth: Default::default(),
+                anchor: None,
             },
         }
     }
@@ -130,28 +149,38 @@ impl GroundFrame {
         })
     }
 
-    /// Ecoregions over the area, at the geography the land cover is laid out on.
-    fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
-        let map = match &self.mercator {
+    /// (lat, lon) under a ground coordinate, laid out as the land cover is, and the world
+    /// block at ground (0, 0).
+    pub(crate) fn geo(
+        &self,
+        bbox: &LLBBox,
+        (world_w, world_h): (usize, usize),
+    ) -> (Geo, (i32, i32)) {
+        match self.mercator {
             Some(proj) => {
                 let (x0, z0) = self.origin(bbox);
-                EcoMap::build(world_w, world_h, (x0, z0), |gx, gz| {
+                let geo: Geo = Box::new(move |gx, gz| {
                     (
                         proj.lat_for_z(f64::from(z0) + gz),
                         proj.lon_for_x(f64::from(x0) + gx),
                     )
-                })
+                });
+                (geo, (x0, z0))
             }
             None => {
                 let (top, left) = (bbox.max().lat(), bbox.min().lng());
                 let (dlat, dlon) = (top - bbox.min().lat(), bbox.max().lng() - left);
-                let (w, h) = (world_w as f64, world_h as f64);
-                EcoMap::build(world_w, world_h, (0, 0), move |gx, gz| {
-                    (top - gz / h * dlat, left + gx / w * dlon)
-                })
+                let (w, h) = (world_w.max(1) as f64, world_h.max(1) as f64);
+                let geo: Geo = Box::new(move |gx, gz| (top - gz / h * dlat, left + gx / w * dlon));
+                (geo, (0, 0))
             }
-        };
-        map.map(Arc::new)
+        }
+    }
+
+    /// Ecoregions over the area, at the geography the land cover is laid out on.
+    fn ecoregions(&self, bbox: &LLBBox, (world_w, world_h): (usize, usize)) -> Option<Arc<EcoMap>> {
+        let (geo, align) = self.geo(bbox, (world_w, world_h));
+        EcoMap::build(world_w, world_h, align, geo).map(Arc::new)
     }
 
     /// The padding is dropped when the padded grid would be capped, since the
@@ -296,10 +325,12 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -353,11 +384,13 @@ impl Ground {
             world_height: world_h,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
-            climate: crate::climate::Climate::classify(bbox),
+            climate: crate::climate::Climate::classify(frame.anchor.as_ref().unwrap_or(bbox)),
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: frame.ecoregions(bbox, (world_w, world_h)),
             winter: false,
             origin: frame.origin(bbox),
+            anchor: frame.anchor,
         }
     }
 
@@ -379,10 +412,12 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -404,10 +439,12 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -457,10 +494,12 @@ impl Ground {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -509,9 +548,13 @@ impl Ground {
             bench.mark("elev_landcover_fetch");
 
             // Raise the floor for the deepest water carve (elevation path only).
-            let max_depth = land_cover
-                .as_ref()
-                .map(|lc| crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h));
+            let max_depth = match &land_cover {
+                Some(lc) => Some(frame.carve_depth.bound(
+                    crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h),
+                )),
+                // A river bed is dug without land cover too.
+                None => Some(frame.carve_depth.floor).filter(|&depth| depth > 0),
+            };
             let band = |h: WorldHeight| {
                 let carve_floor = match max_depth {
                     Some(depth) => h.min_y + depth + 2,
@@ -554,7 +597,8 @@ impl Ground {
                 }),
             ) {
                 Ok(mut elevation_data) => {
-                    let lat = (requested_bbox.min().lat() + requested_bbox.max().lat()) / 2.0;
+                    let at = frame.anchor.as_ref().unwrap_or(&requested_bbox);
+                    let lat = (at.min().lat() + at.max().lat()) / 2.0;
                     // Must use the base the scaler actually settled on: snow_threshold_for
                     // inverts that exact affine, so a mismatched base misplaces every snow cap.
                     let base = elevation_data.ground_level;
@@ -596,7 +640,10 @@ impl Ground {
                         world_height: final_h,
                         rotation_mask: None,
                         snow_threshold_y,
-                        climate: crate::climate::Climate::classify(&requested_bbox),
+                        climate: crate::climate::Climate::classify(
+                            frame.anchor.as_ref().unwrap_or(&requested_bbox),
+                        ),
+                        climate_field: None,
                         body,
                         ecoregions: body
                             .is_earth()
@@ -604,6 +651,7 @@ impl Ground {
                             .flatten(),
                         winter: false,
                         origin: frame.origin(&requested_bbox),
+                        anchor: frame.anchor,
                     }
                 }
                 Err(e) => {
@@ -632,7 +680,10 @@ impl Ground {
                         world_height: 0,
                         rotation_mask: None,
                         snow_threshold_y: i32::MAX,
-                        climate: crate::climate::Climate::classify(&requested_bbox),
+                        climate: crate::climate::Climate::classify(
+                            frame.anchor.as_ref().unwrap_or(&requested_bbox),
+                        ),
+                        climate_field: None,
                         body,
                         ecoregions: body
                             .is_earth()
@@ -640,6 +691,7 @@ impl Ground {
                             .flatten(),
                         winter: false,
                         origin: frame.origin(&requested_bbox),
+                        anchor: frame.anchor,
                     }
                 }
             }
@@ -659,6 +711,38 @@ impl Ground {
         self.climate
     }
 
+    /// Reads climate per position (`--climate-mode per-position`) instead of at
+    /// the origin. Earth only.
+    pub fn apply_climate_mode(
+        &mut self,
+        mode: crate::climate_field::ClimateMode,
+        frame: &GroundFrame,
+        bbox: &LLBBox,
+    ) {
+        if mode == crate::climate_field::ClimateMode::PerPosition && self.body.is_earth() {
+            let field = crate::climate_field::ClimateField::new(frame, bbox, self.world_dims());
+            self.climate_field = Some(Arc::new(field));
+        }
+    }
+
+    /// Climate under a ground coordinate when it is read per position.
+    #[inline]
+    pub fn local_climate(&self, coord: XZPoint) -> Option<crate::climate::Climate> {
+        Some(self.climate_field.as_ref()?.climate(coord))
+    }
+
+    /// Climate under a ground coordinate: the local one, or the origin's.
+    #[inline]
+    pub fn climate_at(&self, coord: XZPoint) -> crate::climate::Climate {
+        self.local_climate(coord).unwrap_or(self.climate)
+    }
+
+    /// Latitude under a ground coordinate when climate is read per position.
+    #[inline]
+    pub fn local_lat(&self, coord: XZPoint) -> Option<f64> {
+        Some(self.climate_field.as_ref()?.lat(coord))
+    }
+
     /// Body this world is on; Earth keeps every existing behaviour.
     #[inline(always)]
     pub fn body(&self) -> CelestialBody {
@@ -673,6 +757,19 @@ impl Ground {
 
     pub fn ecoregion_map(&self) -> Option<&EcoMap> {
         self.ecoregions.as_deref()
+    }
+
+    /// In a piece of a job, the whole job's bbox, where per-run choices are taken so every
+    /// piece makes the ones a single run would.
+    pub fn anchor(&self) -> Option<&LLBBox> {
+        self.anchor.as_ref()
+    }
+
+    /// In a piece of a job, the ecoregions over the whole job.
+    pub fn job_ecoregions(&self, args: &Args) -> Option<Arc<EcoMap>> {
+        let job = self.anchor.as_ref().filter(|_| self.body.is_earth())?;
+        let frame = GroundFrame::from_args(args, job);
+        frame.ecoregions(job, frame.world_dims?)
     }
 
     /// Replaces the ecoregion map after the ground was rotated.
@@ -1483,7 +1580,9 @@ pub fn generate_ground_data(
     // Cleared before the scaler publishes its own: in the GUI a previous run's terrain top
     // would misgrade this world's map preview.
     crate::world_editor::common::set_terrain_top_y(args.ground_level);
-    let frame = GroundFrame::from_args(args, &bbox);
+    let mut frame = GroundFrame::from_args(args, &bbox);
+    frame.carve_depth = args.water.carve_depth(args.scale);
+    crate::water_depth::set_crossing_carve(frame.carve_depth);
     let auto = auto_height(args);
     let (height, taller) = height_choice(args);
     if args.terrain() {
@@ -1514,6 +1613,7 @@ pub fn generate_ground_data(
             extend_world_bounds(args, ground.base_level(), raised_for);
         }
         ground.set_winter(args.winter);
+        ground.apply_climate_mode(args.climate_mode, &frame, &bbox);
         // The scaler may have sunk the base to reach the extended floor. The bedrock plane and
         // the out-of-bbox filler chunks both key off that base, so pin them to it now.
         let floor = area_floor_for(&ground, args);
@@ -1545,6 +1645,7 @@ pub fn generate_ground_data(
         extend_world_bounds(args, ground.base_level(), raised_for);
     }
     ground.set_winter(args.winter);
+    ground.apply_climate_mode(args.climate_mode, &frame, &bbox);
     crate::world_editor::set_base_chunk_y(ground.base_level());
     crate::world_editor::set_terrain_floor_y(ground.base_level());
     crate::world_editor::set_base_chunk_block(filler_block_for(args.body));
@@ -1906,10 +2007,12 @@ mod tests {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 
@@ -2438,10 +2541,12 @@ pub(crate) mod test_support {
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+            climate_field: None,
             body: CelestialBody::Earth,
             ecoregions: None,
             winter: false,
             origin: (0, 0),
+            anchor: None,
         }
     }
 }
@@ -2457,6 +2562,8 @@ mod frame_tests {
             mercator: Some(WebMercatorProjection::new(48.1372, 11.5755, 1.0)),
             pad_blocks: pad,
             affine: AffinePolicy::Fit,
+            carve_depth: Default::default(),
+            anchor: None,
         }
     }
 
@@ -2544,5 +2651,42 @@ mod frame_tests {
                 (rect.max_z() - rect.min_z() + 1) as usize
             ))
         );
+    }
+
+    #[test]
+    fn a_piece_takes_per_run_choices_at_its_whole_job() {
+        use clap::Parser;
+        let mut args =
+            crate::args::Args::parse_from(["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"]);
+        let proj = WebMercatorProjection::new(48.0, 11.0, 1.0);
+        let lease = crate::one_world::UnitLease {
+            piece: 3,
+            area_id: 4,
+            extending: true,
+            first_map_id: 0,
+            rect: [0, 0, 511, 511],
+            job: [-1024, -1024, 1023, 1023],
+            tiled: false,
+        };
+        let run = |unit| crate::one_world::RunContext {
+            world_dir: std::path::PathBuf::new(),
+            origin_lat: 48.0,
+            origin_lon: 11.0,
+            extending: true,
+            elevation: None,
+            replaced_chunks: 0,
+            area_id: 4,
+            piece: None,
+            unit,
+        };
+        let own = XZBBox::rect_from_min_max(-32, -32, 543, 543).unwrap();
+        let bbox = llbbox_for_rect(&proj, &own).unwrap();
+        let job = XZBBox::rect_from_min_max(-1024, -1024, 1023, 1023).unwrap();
+        args.one_world_run = Some(run(Some(lease)));
+        let anchor = GroundFrame::from_args(&args, &bbox).anchor.unwrap();
+        assert_eq!(anchor, llbbox_for_rect(&proj, &job).unwrap());
+        // A run that is not a piece keeps its own bbox.
+        args.one_world_run = Some(run(None));
+        assert!(GroundFrame::from_args(&args, &bbox).anchor.is_none());
     }
 }

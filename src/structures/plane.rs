@@ -163,7 +163,7 @@ impl PrescanResult {
 /// Decides where planes go, before the tile loop. Returns nothing when props are off so the
 /// caller does not pin regions for placements that will never be stamped.
 pub fn prescan(elements: &[ProcessedElement], args: &Args) -> PrescanResult {
-    if !args.use_3d {
+    if !args.props().has(super::Prop::Plane) {
         return PrescanResult {
             placements: Vec::new(),
         };
@@ -180,7 +180,7 @@ pub fn prescan(elements: &[ProcessedElement], args: &Args) -> PrescanResult {
 /// Stamp the planes, after ground generation so the runway Y is final.
 /// Places `indices` (into the prescan's placements, ascending).
 pub fn place_plane_models(editor: &mut WorldEditor, prescan: &PrescanResult, indices: &[usize]) {
-    if indices.is_empty() || !editor.place_schematics() {
+    if indices.is_empty() || !editor.place_prop(super::Prop::Plane) {
         return;
     }
 

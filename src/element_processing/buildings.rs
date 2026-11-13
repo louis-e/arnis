@@ -4064,11 +4064,7 @@ pub(crate) fn is_underground_building(tags: &HashMap<String, String>) -> bool {
     }
 
     // Check building:levels:underground, if this is the only levels tag, it's underground
-    if tags.contains_key("building:levels:underground") && !tags.contains_key("building:levels") {
-        return true;
-    }
-
-    false
+    tags.contains_key("building:levels:underground") && !tags.contains_key("building:levels")
 }
 
 /// Calculates the starting Y offset based on terrain and min_level
@@ -8453,6 +8449,36 @@ const COPPER_ROOF: Block = WAXED_OXIDIZED_COPPER;
 const METAL_GREEN: Block = DARK_PRISMARINE;
 const METAL_RED: Block = RED_NETHER_BRICKS;
 
+/// For `--surface-patches`: the full block in the colour of a family's stairs and
+/// slabs, so a ridge or hip block left showing does not read as a dot.
+fn full_block_like_its_stairs(roof: Block) -> Block {
+    match roof {
+        TILE_RED | ORANGE_TERRACOTTA => BRICK,
+        TILE_ORANGE => GRANITE,
+        _ => roof,
+    }
+}
+
+/// The roof block under `--surface-patches`: stair-built roofs that are not mapped
+/// take [`full_block_like_its_stairs`]; domes, cones and mapped roofs keep theirs.
+fn patched_roof_block(roof: Block, roof_type: RoofType, mapped: bool) -> Block {
+    let stair_built = matches!(
+        roof_type,
+        RoofType::Gabled
+            | RoofType::Hipped
+            | RoofType::HalfHipped
+            | RoofType::Gambrel
+            | RoofType::Mansard
+            | RoofType::Skillion
+            | RoofType::Pyramidal
+    );
+    if stair_built && !mapped {
+        full_block_like_its_stairs(roof)
+    } else {
+        roof
+    }
+}
+
 /// The clay tile families, which `roof:material=tile` and warm `roof:colour`
 /// values choose among.
 const TILE_FAMILIES: [Block; 5] = [TILE_RED, TILE_BRICK, TILE_DARK, TILE_BROWN, TILE_ORANGE];
@@ -12664,7 +12690,21 @@ pub fn generate_buildings(
     // Resolve style with deterministic RNG
     let mut rng = element_rng(group_seed);
     let has_multiple_floors = building_height > floor_cycle + 2;
-    let climate = editor.climate();
+    // Parts of one building take the district and climate at the centre of the whole
+    // group, so a cell seam never splits one building's materials.
+    let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    let group_cells = group_other_cells.iter().copied();
+    for (x, z) in element.nodes.iter().map(|n| (n.x, n.z)).chain(group_cells) {
+        (min_x, max_x) = (min_x.min(x), max_x.max(x));
+        (min_z, max_z) = (min_z.min(z), max_z.max(z));
+    }
+    let (centre_x, centre_z) = (
+        min_x.saturating_add(max_x) / 2,
+        min_z.saturating_add(max_z) / 2,
+    );
+    let climate = editor
+        .local_climate(centre_x, centre_z)
+        .unwrap_or_else(|| editor.climate());
     let roof_ctx = {
         let (lat, lon) = editor.geo_anchor();
         let (mut party, mut total) = (0, 0);
@@ -12673,14 +12713,6 @@ pub fn generate_buildings(
             if seg.class == FacadeClass::Party {
                 party += seg.len;
             }
-        }
-        // Parts of one building take the district at the centre of the whole
-        // group, so a cell seam never splits one building's materials.
-        let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
-        let group_cells = group_other_cells.iter().copied();
-        for (x, z) in element.nodes.iter().map(|n| (n.x, n.z)).chain(group_cells) {
-            (min_x, max_x) = (min_x.min(x), max_x.max(x));
-            (min_z, max_z) = (min_z.min(z), max_z.max(z));
         }
         let (mut ring, mut walled) = (0usize, 0usize);
         for &(x, z) in cached_floor_area.iter() {
@@ -12699,11 +12731,7 @@ pub fn generate_buildings(
             attached: party >= 4 && party * 100 >= total * 15,
             scale: scale_factor,
             materials: MaterialRegion::at(lat, lon),
-            district: district_seed(
-                min_x.saturating_add(max_x) / 2,
-                min_z.saturating_add(max_z) / 2,
-                scale_factor,
-            ),
+            district: district_seed(centre_x, centre_z, scale_factor),
         }
     };
     let style = BuildingStyle::resolve(
@@ -17859,6 +17887,10 @@ fn generate_roof(
     } else if let Some(override_block) = roof_block_override {
         config.roof_block = override_block;
     }
+    if crate::element_processing::surfaces::patches() {
+        config.roof_block =
+            patched_roof_block(config.roof_block, roof_type, osm_roof_block.is_some());
+    }
 
     config.add_dormers = add_dormers;
     config.trim = trim;
@@ -22211,6 +22243,38 @@ mod style_tests {
         ] {
             assert_eq!(roof_slab_for_stair(stairs), Some(slab), "{}", stairs.name());
         }
+    }
+
+    #[test]
+    fn surface_patches_roof_full_block_shares_its_stairs() {
+        for family in TILE_FAMILIES
+            .iter()
+            .chain(&[ORANGE_TERRACOTTA, SLATE, ZINC])
+        {
+            let full = full_block_like_its_stairs(*family);
+            assert_eq!(
+                get_stair_block_for_material(full),
+                get_stair_block_for_material(*family),
+                "{family:?}"
+            );
+            assert_eq!(
+                roof_slab_for_stair(get_stair_block_for_material(full)),
+                roof_slab_for_stair(get_stair_block_for_material(*family))
+            );
+        }
+        assert_eq!(full_block_like_its_stairs(TILE_RED), BRICK);
+        assert_eq!(full_block_like_its_stairs(TILE_ORANGE), GRANITE);
+        assert_eq!(patched_roof_block(TILE_RED, RoofType::Gabled, false), BRICK);
+        // Domes and mapped roofs keep their block.
+        assert_eq!(
+            patched_roof_block(TILE_RED, RoofType::Dome, false),
+            TILE_RED
+        );
+        assert_eq!(
+            patched_roof_block(TILE_ORANGE, RoofType::Gabled, true),
+            TILE_ORANGE
+        );
+        assert_eq!(patched_roof_block(TILE_RED, RoofType::Dome, true), TILE_RED);
     }
 
     #[test]

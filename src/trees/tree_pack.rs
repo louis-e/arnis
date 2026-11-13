@@ -1,32 +1,47 @@
 //! Schematic tree pack: bundled assets, a source abstraction, and the realm-by-location pick.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use include_dir::{include_dir, Dir};
 
 use crate::args::Args;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ecoregion::{self, EcoMap};
+use crate::trees::pack_dir::{PackDir, USER};
 use crate::trees::region::RegionLibrary;
 use crate::trees::tree_library::SizeFilter;
 
 // The bundled region tree packs (gzipped Sponge .schem grouped by realm/community).
 static EMBEDDED: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/assets/tree-packs");
 
-/// Reads a realm pack and its vanilla-plus sprinkle from the compiled-in bundle.
+/// Reads a realm pack and its vanilla-plus sprinkle from the compiled-in bundle,
+/// with the trees of a user folder (`--tree-pack-dir`) added or in their place.
 pub struct TreePackSource {
     realm: String,
+    dir: Option<Arc<PackDir>>,
 }
 
-fn embedded_read(key: &str) -> Option<Cow<'static, [u8]>> {
+pub(crate) fn embedded_read(key: &str) -> Option<Cow<'static, [u8]>> {
     EMBEDDED.get_file(key).map(|f| Cow::Borrowed(f.contents()))
 }
 
 impl TreePackSource {
+    #[cfg(test)]
     pub fn embedded(realm: &str) -> Self {
+        Self::with_dir(realm, None)
+    }
+
+    pub fn with_dir(realm: &str, dir: Option<Arc<PackDir>>) -> Self {
         TreePackSource {
             realm: realm.to_string(),
+            dir,
         }
+    }
+
+    /// The user folder, for packs loaded later from this one.
+    pub fn dir(&self) -> Option<Arc<PackDir>> {
+        self.dir.clone()
     }
 
     /// Pack directory, as ecoregion tree mixes name it.
@@ -34,22 +49,52 @@ impl TreePackSource {
         &self.realm
     }
 
+    fn manifest(&self, realm: &str) -> Option<Cow<'static, [u8]>> {
+        let base = embedded_read(&format!("{realm}/region.json"))?;
+        match self.dir.as_ref().and_then(|d| d.manifest(realm, &base)) {
+            Some(merged) => Some(Cow::Owned(merged)),
+            None => Some(base),
+        }
+    }
+
+    fn file(&self, realm: &str, rel: &str) -> Option<Cow<'static, [u8]>> {
+        match rel.strip_prefix(USER) {
+            Some(user) => self.dir.as_ref()?.read(user).map(Cow::Owned),
+            None => embedded_read(&format!("{realm}/{rel}")),
+        }
+    }
+
     pub fn realm_manifest(&self) -> Option<Cow<'static, [u8]>> {
-        embedded_read(&format!("{}/region.json", self.realm))
+        self.manifest(&self.realm)
     }
 
     pub fn realm_file(&self, rel: &str) -> Option<Cow<'static, [u8]>> {
-        embedded_read(&format!("{}/{rel}", self.realm))
+        self.file(&self.realm, rel)
     }
 
     pub fn vanilla_manifest(&self) -> Option<Cow<'static, [u8]>> {
-        embedded_read("vanilla-plus/region.json")
+        self.manifest("vanilla-plus")
     }
 
     pub fn vanilla_file(&self, rel: &str) -> Option<Cow<'static, [u8]>> {
-        embedded_read(&format!("vanilla-plus/{rel}"))
+        self.file("vanilla-plus", rel)
     }
 }
+
+/// Values `--tree-realm` accepts: "auto" plus every bundled realm pack.
+pub const REALMS: &[&str] = &[
+    "auto",
+    "afr",
+    "asn",
+    "aus",
+    "ena",
+    "eur",
+    "fl",
+    "ind",
+    "sam",
+    "wna",
+    "vanilla-plus",
+];
 
 /// Realm id for a point ("vanilla-plus" if none match); bounds inclusive, first match wins.
 pub fn realm_for_latlon(lat: f64, lon: f64) -> &'static str {
@@ -86,24 +131,38 @@ pub fn load(
     if args.legacy_trees {
         return None;
     }
-    let sizes = SizeFilter::up_to(args.max_tree_size);
+    let mut sizes = SizeFilter::up_to(args.max_tree_size);
+    if let Some(weights) = &args.tree_size_weights {
+        weights.restrict(&mut sizes);
+    }
     let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
     let lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+    // A forced realm drops the ecoregion mixes, which would otherwise pick the communities.
+    let forced = args.tree_realm.as_deref().filter(|&r| r != "auto");
     let mapped: Vec<(u16, &'static str)> = ecoregions
+        .filter(|_| forced.is_none())
         .map(EcoMap::by_area)
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(id, _)| ecoregion::tree_mix(id).map(|(pack, _)| (id, pack)))
         .collect();
-    let realm = mapped
-        .first()
-        .map_or_else(|| realm_for_latlon(lat, lon), |&(_, pack)| pack);
-    let source = TreePackSource::embedded(realm);
+    let realm = forced.unwrap_or_else(|| {
+        mapped
+            .first()
+            .map_or_else(|| realm_for_latlon(lat, lon), |&(_, pack)| pack)
+    });
+    let dir = args.tree_pack_dir.as_deref().map(|root| {
+        let dir = PackDir::scan(root, args.tree_pack_mode);
+        dir.report();
+        Arc::new(dir)
+    });
+    let source = TreePackSource::with_dir(realm, dir);
     let ids: Vec<u16> = mapped.iter().map(|&(id, _)| id).collect();
     // Palms stay loaded if any part of the area grows them; the ecoregion gates each cell.
     let abs_lat = lat.abs();
     let unmapped_palms = ecoregions.is_none_or(EcoMap::has_gaps) && abs_lat <= 35.0;
-    let exclude_palms = !unmapped_palms
+    let exclude_palms = forced.is_none()
+        && !unmapped_palms
         && !ids
             .iter()
             .filter_map(|&id| ecoregion::lookup(id))
@@ -118,8 +177,11 @@ pub fn load(
         exclude_palms,
     ) {
         Ok(mut lib) => {
+            if let Some(weights) = args.tree_size_weights {
+                lib.set_size_weights(weights);
+            }
             // Micro trees below this scale never stamp a model, so nothing to resolve.
-            if scale >= crate::element_processing::tree::MICRO_TREE_MAX_SCALE {
+            if forced.is_none() && scale >= crate::element_processing::tree::MICRO_TREE_MAX_SCALE {
                 lib.attach_ecoregions(&ids, abs_lat);
             }
             lib.report();
@@ -196,6 +258,17 @@ mod tests {
             .collect();
         assert!(orphans.is_empty(), "unlisted models: {orphans:?}");
         assert!(listed.len() > 2400, "{} models", listed.len());
+    }
+
+    #[test]
+    fn every_forceable_realm_is_bundled() {
+        for realm in &REALMS[1..] {
+            let source = TreePackSource::embedded(realm);
+            assert!(
+                source.realm_manifest().is_some(),
+                "{realm} has no region.json"
+            );
+        }
     }
 
     #[test]

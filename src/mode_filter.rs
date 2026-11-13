@@ -22,9 +22,16 @@ const MAN_MADE_KEYS: [&str; 14] = [
     "place",
 ];
 
-/// Drops what the mode leaves out. Runs after the land cover overrides, which still read
-/// roads and buildings as evidence of where the land is.
-pub fn retain_for_mode(elements: &mut Vec<ProcessedElement>, mode: GenerationMode) {
+/// Drops what the mode and `--no-buildings` leave out. Runs after the land cover overrides,
+/// which still read roads and buildings as evidence of where the land is.
+pub fn retain_for_mode(
+    elements: &mut Vec<ProcessedElement>,
+    mode: GenerationMode,
+    buildings: bool,
+) {
+    if !buildings {
+        elements.retain(|e| !is_building_element(e));
+    }
     match mode {
         GenerationMode::TerrainOnly => elements.retain(is_terrain_feature),
         GenerationMode::Blueprint => elements.retain(is_blueprint_feature),
@@ -100,6 +107,19 @@ fn is_blueprint_feature(element: &ProcessedElement) -> bool {
     .any(|k| tags.contains_key(*k))
 }
 
+/// What `--no-buildings` leaves out: building ways and relations, and their doors and entrances.
+fn is_building_element(element: &ProcessedElement) -> bool {
+    let tags = element.tags();
+    match element {
+        ProcessedElement::Node(_) => tags.contains_key("door") || tags.contains_key("entrance"),
+        _ => {
+            tags.contains_key("building")
+                || tags.contains_key("building:part")
+                || tag(tags, "type") == Some("building")
+        }
+    }
+}
+
 fn is_waterway_structure(waterway: &str) -> bool {
     matches!(waterway, "dam" | "weir" | "lock_gate" | "boatyard" | "fuel")
 }
@@ -111,7 +131,7 @@ fn tag<'a>(tags: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::osm_parser::{ProcessedNode, ProcessedWay};
+    use crate::osm_parser::{ProcessedNode, ProcessedRelation, ProcessedWay};
 
     fn way(tags: &[(&str, &str)]) -> ProcessedElement {
         ProcessedElement::Way(ProcessedWay {
@@ -161,6 +181,42 @@ mod tests {
             ("natural", "water"),
             ("leisure", "swimming_pool")
         ])));
+    }
+
+    #[test]
+    fn no_buildings_keeps_roads_and_water() {
+        let relation = |tags: &[(&str, &str)]| {
+            ProcessedElement::Relation(ProcessedRelation {
+                id: 3,
+                tags: tags
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+                members: Vec::new(),
+            })
+        };
+        let all = vec![
+            way(&[("building", "yes")]),
+            way(&[("building:part", "yes")]),
+            relation(&[("type", "building")]),
+            relation(&[("type", "multipolygon"), ("building", "house")]),
+            node(&[("entrance", "main")]),
+            node(&[("door", "hinged")]),
+            way(&[("highway", "residential")]),
+            way(&[("railway", "rail")]),
+            way(&[("natural", "water")]),
+            relation(&[("type", "multipolygon"), ("landuse", "grass")]),
+            node(&[("amenity", "bench")]),
+            node(&[("natural", "tree")]),
+        ];
+        let mut kept = all.clone();
+        retain_for_mode(&mut kept, GenerationMode::GeoTerrain, false);
+        let kept: Vec<_> = kept.iter().map(|e| e.tags().clone()).collect();
+        let want: Vec<_> = all[6..].iter().map(|e| e.tags().clone()).collect();
+        assert_eq!(kept, want);
+        let mut every = all.clone();
+        retain_for_mode(&mut every, GenerationMode::GeoTerrain, true);
+        assert_eq!(every.len(), all.len());
     }
 
     #[test]

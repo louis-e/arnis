@@ -308,7 +308,7 @@ pub fn recover(world_dir: &Path) -> Result<(), String> {
     println!("[live] Tidying up after the last live session...");
     // Before `finish`, which drops the journal that says the border needs it.
     if journal.border_set {
-        reset_border_offline(world_dir);
+        leave_border(world_dir);
     }
     finish(world_dir, &journal).map_err(|e| format!("Failed to tidy up after live mode: {e}"))
 }
@@ -413,6 +413,16 @@ fn finish(world_dir: &Path, journal: &Journal) -> Result<(), String> {
     }
     let _ = fs::remove_file(journal_path(world_dir));
     Ok(())
+}
+
+/// The border a session leaves: vanilla, or a One World's own `--world-border` around every
+/// area it holds now.
+fn leave_border(world_dir: &Path) {
+    reset_border_offline(world_dir);
+    let manifest = crate::one_world::Manifest::load(world_dir).ok().flatten();
+    if let Some(rect) = manifest.filter(|m| m.world_border).and_then(|m| m.extent()) {
+        crate::one_world::apply_world_border(world_dir, &rect);
+    }
 }
 
 /// The vanilla border, for a world a crashed session left with a small one.
@@ -1503,7 +1513,7 @@ fn play(
     let cancel = || controls.stopping();
     if let Err(e) = server.wait_ready(Duration::from_secs(900), &cancel) {
         server.stop(None, Duration::from_secs(60));
-        reset_border_offline(&world_dir);
+        leave_border(&world_dir);
         return Err(e);
     }
     // A 26.x server moves an older world into the new folder layout as it starts.
@@ -1525,7 +1535,7 @@ fn play(
         Ok(r) => r,
         Err(e) => {
             server.stop(None, Duration::from_secs(60));
-            reset_border_offline(&world_dir);
+            leave_border(&world_dir);
             return Err(format!("Could not talk to the server: {e}"));
         }
     };
@@ -1581,7 +1591,7 @@ fn play(
     }
     server.stop(Some(&mut rcon), Duration::from_secs(120));
     // A server that went down on its own saved the border it had.
-    reset_border_offline(&world_dir);
+    leave_border(&world_dir);
     live.journal.border_set = false;
     result
 }
@@ -2072,6 +2082,46 @@ fn session_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_gives_a_one_world_its_border_back() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+        use clap::Parser;
+        fn border_size(world: &Path) -> f64 {
+            let Ok(Value::Compound(root)) = read_gzip(&world.join("level.dat")) else {
+                panic!("level.dat");
+            };
+            match root.get("Data") {
+                Some(Value::Compound(data)) => match data.get("BorderSize") {
+                    Some(Value::Double(size)) => *size,
+                    other => panic!("BorderSize: {other:?}"),
+                },
+                _ => panic!("Data"),
+            }
+        }
+        let bbox = "48.130,11.560,48.145,11.590";
+        let tile = XZBBox::rect_from_min_max(0, 0, 511, 511).unwrap();
+        let played = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for bordered in [true, false] {
+            let world = dir.path().join(format!("w-{bordered}"));
+            fs::create_dir_all(&world).unwrap();
+            let mut args =
+                crate::args::Args::parse_from(["arnis", "--output-dir", ".", "--bbox", bbox]);
+            crate::one_world::create_empty(&world, &mut args, 48.13, 11.56).unwrap();
+            let ll = LLBBox::from_str(bbox).unwrap();
+            crate::one_world::record_live_tile(&world, &ll, &tile, None).unwrap();
+            if bordered {
+                crate::one_world::apply_world_border(&world, &tile);
+            }
+            // The session's own border, around where the players were.
+            crate::world_utils::set_world_border(&world, &played).unwrap();
+            leave_border(&world);
+            let want = if bordered { 512.0 } else { VANILLA_BORDER };
+            assert_eq!(border_size(&world), want);
+        }
+    }
 
     #[test]
     fn regions_around_cover_the_reach() {

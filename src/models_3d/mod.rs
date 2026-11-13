@@ -10,6 +10,84 @@ pub use pipeline::Models3dPipeline;
 use crate::block_definitions::Block;
 use crate::elevation::cache::{clear_cache_dir, CacheClearStats};
 use crate::world_editor::WorldEditor;
+use std::io::Read;
+use std::path::Path;
+
+/// Why a model download gave nothing.
+#[derive(Debug)]
+pub(crate) enum FetchError {
+    /// The server has none (404) or it is over the size cap: no cache miss, nothing to retry.
+    Absent(String),
+    Failed(String),
+}
+
+impl std::fmt::Display for FetchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Absent(e) | Self::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+impl From<String> for FetchError {
+    fn from(e: String) -> Self {
+        Self::Failed(e)
+    }
+}
+
+/// `fetch` for a model not in the cache, unless `marker` says the server has none. An absent
+/// answer leaves the marker, so neither a later run nor `--offline` asks again.
+pub(crate) fn unless_absent<T>(
+    marker: &Path,
+    what: &str,
+    fetch: impl FnOnce() -> Result<T, FetchError>,
+) -> Result<T, FetchError> {
+    if crate::elevation::cache::missing_marker_holds(marker) {
+        return Err(FetchError::Absent(format!(
+            "{what}: unavailable when last asked"
+        )));
+    }
+    let got = fetch();
+    if let Err(FetchError::Absent(_)) = got {
+        crate::elevation::cache::write_atomic(marker, b"");
+    }
+    got
+}
+
+/// `resp` if it succeeded; a 404 is absent.
+pub(crate) fn ok_status(
+    resp: reqwest::blocking::Response,
+    what: &str,
+) -> Result<reqwest::blocking::Response, FetchError> {
+    let status = resp.status();
+    let e = format!("{what}: HTTP {status}");
+    match status {
+        s if s.is_success() => Ok(resp),
+        reqwest::StatusCode::NOT_FOUND => Err(FetchError::Absent(e)),
+        _ => Err(FetchError::Failed(e)),
+    }
+}
+
+/// The body; one over `cap` bytes is absent.
+pub(crate) fn read_capped(
+    mut resp: reqwest::blocking::Response,
+    cap: u64,
+) -> Result<Vec<u8>, FetchError> {
+    if let Some(len) = resp.content_length() {
+        if len > cap {
+            return Err(FetchError::Absent(format!(
+                "model exceeds {cap}-byte cap (advertised {len})"
+            )));
+        }
+    }
+    let mut buf = Vec::new();
+    let mut taken = (&mut resp).take(cap + 1);
+    taken.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    if buf.len() as u64 > cap {
+        return Err(FetchError::Absent(format!("model exceeds {cap}-byte cap")));
+    }
+    Ok(buf)
+}
 
 /// Minimum ground Y across an XZ bbox: stride-sampled for ~16×16 samples plus explicit corners.
 /// Shared by every model placer so they all snap to identical terrain.
@@ -127,7 +205,7 @@ pub(crate) fn region_keys_around(cx: i32, cz: i32, r: i32) -> Vec<(i32, i32)> {
 
 /// Where the retired stadium model was cached; still listed so the panel can clear it.
 fn retired_archetype_cache_root() -> std::path::PathBuf {
-    dirs::cache_dir()
+    crate::elevation::cache::user_cache_dir()
         .map(|d| d.join("arnis/custom_models"))
         .unwrap_or_else(|| std::path::PathBuf::from("./.arnis_custom_cache"))
 }
@@ -147,4 +225,25 @@ pub fn clear_model_caches() -> CacheClearStats {
     clear_cache_dir(&three_dmr::client::cache_root())
         .combined(clear_cache_dir(&wikidata::client::cache_root()))
         .combined(clear_cache_dir(&retired_archetype_cache_root()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_model_the_server_lacks_is_not_asked_for_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("m.missing");
+        let gone = unless_absent::<()>(&marker, "m", || Err(FetchError::Absent("404".into())));
+        assert!(matches!(gone, Err(FetchError::Absent(_))));
+        assert!(marker.exists());
+        let again = unless_absent::<()>(&marker, "m", || panic!("asked again"));
+        assert!(matches!(again, Err(FetchError::Absent(_))));
+        // A download that failed may pass next time, so it leaves no marker.
+        let other = tmp.path().join("o.missing");
+        let failed = unless_absent::<()>(&other, "o", || Err(FetchError::Failed("reset".into())));
+        assert!(matches!(failed, Err(FetchError::Failed(_))));
+        assert!(!other.exists());
+    }
 }

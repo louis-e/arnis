@@ -41,7 +41,7 @@ pub fn maybe_place_crane(
     cells: &[(i32, i32)],
     building_footprints: &CoordinateBitmap,
 ) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Crane) {
         return;
     }
     if cells.len() < CRANE_MIN_CELLS {
@@ -85,7 +85,7 @@ pub fn maybe_place_crane(
 
 /// Stamp the crane with its mast at (x, z) on a building going up, turned by `roll`.
 pub fn place_on_site(editor: &mut WorldEditor, x: i32, z: i32, base_y: i32, roll: u64) {
-    if !editor.place_schematics() || editor.is_lc_water(x, z) {
+    if !editor.place_prop(super::Prop::Crane) || editor.is_lc_water(x, z) {
         return;
     }
     let Some(schem) = crane() else {
@@ -154,7 +154,7 @@ pub fn place_mapped(
     tags: &HashMap<String, String>,
     building_footprints: &CoordinateBitmap,
 ) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Crane) {
         return;
     }
     let kind = tags.get("crane:type").map(String::as_str).unwrap_or("");

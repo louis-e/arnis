@@ -63,12 +63,114 @@ impl Drop for NewWorldCleanup {
     }
 }
 
+/// Whether a One World job that failed takes its world with it: only one it
+/// created, that held no area before and finished no piece.
+fn remove_failed_new_world(
+    created_by_this_job: bool,
+    areas_before: usize,
+    pieces_done: usize,
+) -> bool {
+    created_by_this_job && areas_before == 0 && pieces_done == 0
+}
+
+/// Whether a pieces job that finished keeps its world: a `--prewarm` one only filled the
+/// caches (the coordinator warms each piece and drops its job folder), so a world made
+/// for it goes with the cleanup guard.
+fn pieces_job_keeps_world(prewarm: bool) -> bool {
+    !prewarm
+}
+
+/// Whether a run made `selected_world` for itself, so it sets that world's spawn and removes it
+/// when the run fails. A prewarm writes no world: whatever the window sends, the selected one
+/// (or none) is left as it is.
+fn owns_selected_world(is_new_world: bool, one_world: bool, flags: &[String]) -> bool {
+    is_new_world && !one_world && !flags.iter().any(|f| f == "--prewarm")
+}
+
+/// Whether a run names and places its output. A prewarm writes none, so it asks Nominatim for
+/// no Bedrock place name and creates no Luanti worlds folder.
+fn names_output(prewarm: bool) -> bool {
+    !prewarm
+}
+
+/// Runs `f` in the run's own pool (`--threads`), else where it is.
+fn in_pool<R: Send>(pool: Option<&rayon::ThreadPool>, f: impl FnOnce() -> R + Send) -> R {
+    match pool {
+        Some(p) => p.install(f),
+        None => f(),
+    }
+}
+
+/// Runs `f` on a thread of its own when called on a pool worker, which meanwhile helps with the
+/// pool's jobs: what `f` waits for may be one of them, in a pool of one thread too.
+fn off_worker<R: Send>(f: impl FnOnce() -> R + Send) -> R {
+    if rayon::current_thread_index().is_none() {
+        return f();
+    }
+    std::thread::scope(|s| {
+        let h = s.spawn(f);
+        while !h.is_finished() {
+            if rayon::yield_now() != Some(rayon::Yield::Executed) {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+        h.join().unwrap_or_else(|p| std::panic::resume_unwind(p))
+    })
+}
+
+/// The folder a run works in: the selected world, or the One World named in its saves folder.
+/// A prewarm writes no world, so its path never comes from `selected_world` (the window sends
+/// none): it works in `scratch`, a folder under the OS temp directory that the run removes.
+fn run_world_path(
+    selected_world: &str,
+    one_world_name: Option<&str>,
+    scratch: Option<&Path>,
+) -> PathBuf {
+    match (scratch, one_world_name) {
+        (Some(dir), Some(name)) => dir.join(one_world_dir("", name)),
+        (Some(dir), None) => dir.to_path_buf(),
+        (None, Some(name)) => one_world_dir(selected_world, name),
+        (None, None) => PathBuf::from(selected_world),
+    }
+}
+
+/// A One World prewarm warms what the build will read: the frame, areas and elevation source
+/// of the world it extends, from a copy of that world's manifest in the scratch folder.
+fn seed_prewarm_world(world: &Path, scratch_world: &Path) -> Result<(), String> {
+    if !world.join(crate::one_world::MANIFEST_FILE).is_file() {
+        return Ok(());
+    }
+    fs::create_dir_all(scratch_world)
+        .map_err(|e| format!("Failed to create {}: {e}", scratch_world.display()))?;
+    // `prepare` opens a manifest only beside a level.dat.
+    for name in [crate::one_world::MANIFEST_FILE, "level.dat"] {
+        let from = world.join(name);
+        if from.is_file() {
+            fs::copy(&from, scratch_world.join(name))
+                .map_err(|e| format!("Failed to copy {}: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// A name in the shared temp folder that no other user can guess and create first.
+fn unguessable_temp(prefix: &str, suffix: &str) -> PathBuf {
+    env::temp_dir().join(format!("{prefix}{:016x}{suffix}", rand::random::<u64>()))
+}
+
+/// A prewarm's scratch folder, removed with the guard. Made new, never taken over.
+fn prewarm_scratch() -> Result<NewWorldCleanup, String> {
+    let dir = unguessable_temp("arnis-prewarm-", "");
+    fs::create_dir(&dir).map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
+    Ok(NewWorldCleanup::new(dir))
+}
+
 pub fn run_gui() -> Result<(), String> {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
 
-    // Clean up old cached elevation tiles on startup
-    crate::elevation_data::cleanup_old_cached_tiles();
+    // Old cached elevation tiles are swept once the window has sent its Offline Mode.
+    remove_old_plan_masks(&env::temp_dir(), std::time::Duration::from_secs(24 * 3600));
 
     // Launch the UI
     println!("Launching UI...");
@@ -121,6 +223,15 @@ pub fn run_gui() -> Result<(), String> {
             gui_set_save_path,
             gui_pick_save_directory,
             gui_start_generation,
+            gui_pause_generation,
+            gui_default_archive_folder,
+            gui_data_plan,
+            gui_prepare_plan,
+            gui_bake_archive,
+            gui_cancel_bake,
+            gui_stop_generation,
+            gui_cells_control,
+            gui_cells_remove,
             gui_get_version,
             gui_get_update_info,
             gui_get_platform,
@@ -137,11 +248,18 @@ pub fn run_gui() -> Result<(), String> {
             gui_precompute_facades,
             gui_cancel_precompute,
             gui_one_world_info,
+            gui_list_one_worlds,
+            gui_world_thumbnail,
+            gui_set_place_name,
+            gui_rename_world,
             gui_one_world_overlap,
             gui_get_one_world_overlays,
+            gui_plan_job,
+            gui_write_plan_mask,
             gui_log,
             gui_set_telemetry_consent,
             gui_set_discord_status,
+            gui_set_offline_mode,
             gui_discord_available,
             gui_live_info,
             gui_live_start,
@@ -160,8 +278,17 @@ pub fn run_gui() -> Result<(), String> {
         .build(tauri::generate_context!())
         .map_err(|e| format!("Error while starting the application UI (Tauri): {e}"))?
         .run(|_, event| {
-            // The server holds the world; let it save before the process goes.
             if let tauri::RunEvent::Exit = event {
+                // A bake's arnis-tiles would run on without the window: stop it, and let the
+                // bake tidy up what it cut off.
+                BAKE_CANCEL.store(true, std::sync::atomic::Ordering::Release);
+                let asked = std::time::Instant::now();
+                while BUSY.load(std::sync::atomic::Ordering::Acquire) == BUSY_BAKE
+                    && asked.elapsed() < std::time::Duration::from_secs(10)
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                // The server holds the world; let it save before the process goes.
                 let session = LIVE_SESSION
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -624,6 +751,20 @@ fn gui_set_discord_status(enabled: bool) {
     crate::discord::set_enabled(enabled);
 }
 
+/// The Offline Mode setting, sent at start-up and on every change: on, telemetry and the
+/// update check stay in. The start-up sweep of old elevation tiles waits for the first one:
+/// offline, the cache is all there is.
+#[tauri::command]
+fn gui_set_offline_mode(offline: bool) {
+    crate::net::set_offline_mode(offline);
+    static STARTUP: std::sync::Once = std::sync::Once::new();
+    STARTUP.call_once(|| {
+        if !offline {
+            crate::elevation_data::cleanup_old_cached_tiles();
+        }
+    });
+}
+
 /// Whether the build has a Discord application, without which the toggle is hidden.
 #[tauri::command]
 fn gui_discord_available() -> bool {
@@ -1005,11 +1146,8 @@ pub fn update_player_spawn_y_after_generation(
     };
 
     // Write the updated level.dat file
-    if let Err(e) = std::fs::write(level_path, compressed_data) {
-        return Err(format!("Failed to write updated level.dat: {e}"));
-    }
-
-    Ok(())
+    crate::world_utils::replace_file_atomically(&level_path, &compressed_data)
+        .map_err(|e| format!("Failed to write updated level.dat: {e}"))
 }
 
 /// Fetches a reduced-resolution elevation + land-cover grid for the 3D
@@ -1021,6 +1159,7 @@ async fn gui_get_terrain_preview(
     aws_only: bool,
 ) -> Result<tauri::ipc::Response, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let _preview = crate::net::preview()?;
         crate::preview_3d::build_preview_payload(&bbox_text, aws_only)
     })
     .await
@@ -1033,6 +1172,7 @@ async fn gui_get_terrain_preview(
 #[tauri::command]
 async fn gui_get_preview_landcover(bbox_text: String) -> Result<tauri::ipc::Response, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let _preview = crate::net::preview()?;
         crate::preview_3d::build_landcover_grid(&bbox_text)
     })
     .await
@@ -1061,6 +1201,7 @@ async fn gui_get_preview_facades(bbox_text: String) -> Result<String, String> {
 #[tauri::command]
 async fn gui_get_preview_buildings(bbox_text: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let _preview = crate::net::preview()?;
         crate::preview_3d::build_buildings_geojson(&bbox_text)
     })
     .await
@@ -1131,7 +1272,10 @@ fn cache_size_string() -> String {
     total = total.saturating_add(dir_size_bytes(&crate::canopy::canopy_cache_dir()));
     // Its own root beside the tile cache, and Clear Cache deletes it.
     total = total.saturating_add(dir_size_bytes(&crate::overture::cache_root()));
-    if let Some(d) = crate::osm_tiles::cache_root() {
+    for d in [crate::osm_tiles::cache_root(), crate::osm_pbf::cache_dir()]
+        .into_iter()
+        .flatten()
+    {
         total = total.saturating_add(dir_size_bytes(&d));
     }
     for root in crate::models_3d::model_cache_roots() {
@@ -1208,6 +1352,7 @@ fn clear_tile_caches_now() -> Result<String, String> {
         .combined(crate::canopy::clear_canopy_cache())
         .combined(crate::overture::clear_overture_cache())
         .combined(crate::osm_tiles::clear_osm_tiles_cache())
+        .combined(crate::osm_pbf::clear_osm_pbf_cache())
         .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
@@ -1332,6 +1477,155 @@ struct WorldMapData {
     max_mc_z: i32,
 }
 
+/// The image a world's thumbnail is made from: its map, else its newest area preview.
+fn thumbnail_source(world: &Path) -> Option<PathBuf> {
+    let map = world.join("arnis_world_map.png");
+    if map.is_file() {
+        return Some(map);
+    }
+    fs::read_dir(world.join(crate::one_world::PREVIEW_DIR))
+        .ok()?
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "png"))
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+        .map(|e| e.path())
+}
+
+/// Where a world's thumbnail is kept, so the list need not shrink the image every time.
+const THUMB_FILE: &str = "arnis_one_world/thumb.png";
+const THUMB_WIDTH: u32 = 320;
+
+/// A small PNG of the world as a data URL, or None when it has no image.
+#[tauri::command(async)]
+fn gui_world_thumbnail(world_path: String) -> Result<Option<String>, String> {
+    let world = PathBuf::from(world_path);
+    let Some(source) = thumbnail_source(&world) else {
+        return Ok(None);
+    };
+    let thumb = world.join(THUMB_FILE);
+    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    let kept = modified(&thumb).filter(|t| Some(*t) >= modified(&source));
+    let png = match kept.and_then(|_| fs::read(&thumb).ok()) {
+        Some(png) => png,
+        None => {
+            let img = image::open(&source)
+                .map_err(|e| format!("Failed to read {}: {e}", source.display()))?;
+            let img = if img.width() > THUMB_WIDTH {
+                img.thumbnail(THUMB_WIDTH, u32::MAX)
+            } else {
+                img
+            };
+            let mut png = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .map_err(|e| format!("Failed to make a thumbnail: {e}"))?;
+            // Not kept (a read-only folder, say): made again next time.
+            let _ = fs::create_dir_all(world.join("arnis_one_world"))
+                .and_then(|_| fs::write(&thumb, &png));
+            png
+        }
+    };
+    Ok(Some(format!(
+        "data:image/png;base64,{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png)
+    )))
+}
+
+/// What a world in use is refused with: Minecraft or a generation holds its session.lock.
+const WORLD_IN_USE: &str = "The world is in use; close it in Minecraft or wait for the run.";
+
+/// Stores the place the world shows; an empty name clears it.
+#[tauri::command(async)]
+fn gui_set_place_name(world_path: String, place_name: String) -> Result<(), String> {
+    let world = PathBuf::from(world_path);
+    if !crate::one_world::Manifest::path_in(&world).is_file() {
+        return Err("Not a One World.".to_string());
+    }
+    // Locked before the read, so no run writes the manifest between the read and the save.
+    let _lock = SessionLock::acquire(&world).map_err(|_| WORLD_IN_USE.to_string())?;
+    let mut manifest = crate::one_world::Manifest::load(&world)?.ok_or("Not a One World.")?;
+    let name = place_name.trim();
+    manifest.place_name = (!name.is_empty()).then(|| name.to_string());
+    manifest.save(&world)
+}
+
+/// Renames a world's folder and its LevelName together; returns the new folder name.
+#[tauri::command(async)]
+fn gui_rename_world(
+    save_path: String,
+    old_name: String,
+    new_name: String,
+) -> Result<String, String> {
+    crate::world_utils::rename_world(Path::new(save_path.trim()), &old_name, &new_name)
+}
+
+#[derive(serde::Serialize)]
+struct OneWorldEntry {
+    name: String,
+    modified_ms: Option<u64>,
+    #[serde(flatten)]
+    info: OneWorldInfo,
+    place_name: Option<String>,
+    /// The areas' union, `[south, west, north, east]`; null without areas.
+    bbox: Option<[f64; 4]>,
+    jobs: Vec<JobEntry>,
+    /// A preview image exists, so `gui_world_thumbnail` has something to show.
+    preview: bool,
+}
+
+#[derive(serde::Serialize, Debug, PartialEq)]
+struct JobEntry {
+    name: String,
+    settings: Vec<String>,
+    /// The area the job was started on, `[south, west, north, east]`; null for old jobs.
+    bbox: Option<[f64; 4]>,
+    done: u32,
+    total: u32,
+    finished: bool,
+    last_run_ms: u64,
+    /// The job was cut to an outline; `mask` is the kept copy, null when it was not kept.
+    masked: bool,
+    mask: Option<String>,
+}
+
+/// Outlines jobs were cut to, by the hash their job names end in (`_m<hash>`), so a Resume
+/// or Rebuild runs the same job.
+const MASKS_DIR: &str = "arnis_one_world/masks";
+
+/// Keeps a copy of the outline a job in `world` is cut to.
+fn keep_job_mask(world: &Path, mask: &Path) -> Result<(), String> {
+    let (_, hash) = crate::work_units::Mask::read(mask)?;
+    let dir = world.join(MASKS_DIR);
+    let kept = dir.join(format!("{hash:016x}.geojson"));
+    if kept.is_file() {
+        return Ok(());
+    }
+    fs::create_dir_all(&dir)
+        .and_then(|_| fs::copy(mask, &kept).map(|_| ()))
+        .map_err(|e| format!("{}: {e}", kept.display()))
+}
+
+/// Whether job `name` is cut to an outline, and the kept copy of it.
+fn job_mask(world: &Path, name: &str) -> (bool, Option<String>) {
+    let Some(hash) = name
+        .rsplit_once("_m")
+        .map(|(_, h)| h)
+        .filter(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+    else {
+        return (false, None);
+    };
+    let kept = world.join(MASKS_DIR).join(format!("{hash}.geojson"));
+    (true, kept.is_file().then(|| kept.display().to_string()))
+}
+
+/// Whether a world has an image for its thumbnail, without reading every preview's date.
+fn has_thumbnail(world: &Path) -> bool {
+    world.join("arnis_world_map.png").is_file()
+        || fs::read_dir(world.join(crate::one_world::PREVIEW_DIR)).is_ok_and(|d| {
+            d.flatten()
+                .any(|e| e.path().extension().is_some_and(|x| x == "png"))
+        })
+}
+
 #[derive(serde::Serialize)]
 struct OneWorldInfo {
     world_path: String,
@@ -1346,6 +1640,10 @@ struct OneWorldInfo {
     terrain: Option<bool>,
     disable_height_limit: Option<bool>,
     aws_only_elevation: Option<bool>,
+    /// Blocks per metre are fixed at this latitude: the map shows how far the world can grow.
+    origin_lat: Option<f64>,
+    /// Land above this height is squashed.
+    knee_m: Option<f64>,
     /// Changes whenever an area is recorded.
     revision: u32,
 }
@@ -1365,18 +1663,87 @@ fn one_world_dir(save_path: &str, world_name: &str) -> PathBuf {
 
 #[tauri::command(async)]
 fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldInfo, String> {
-    let world_path = one_world_dir(&save_path, &world_name);
-    let manifest = crate::one_world::Manifest::load(&world_path)?;
+    one_world_info_at(&one_world_dir(&save_path, &world_name))
+}
+
+/// Every One World directly under the save folder, newest first.
+#[tauri::command(async)]
+fn gui_list_one_worlds(save_path: String) -> Result<Vec<OneWorldEntry>, String> {
+    let Ok(dir) = fs::read_dir(save_path.trim()) else {
+        return Ok(Vec::new());
+    };
+    let mut worlds: Vec<OneWorldEntry> = dir
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            // The window picks a One World by name; one it cannot name it could not open.
+            if crate::world_utils::world_folder_name(&name).as_deref() != Some(name.as_str()) {
+                return None;
+            }
+            let manifest = crate::one_world::Manifest::path_in(&e.path());
+            let modified_ms = fs::metadata(manifest)
+                .ok()?
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64);
+            // A damaged manifest is skipped here; the info command reports it.
+            let m = crate::one_world::Manifest::load(&e.path()).ok()?;
+            let info = one_world_info_of(&e.path(), m.as_ref());
+            let jobs = m.as_ref().map_or_else(Vec::new, |m| {
+                m.jobs
+                    .clone()
+                    .into_iter()
+                    .map(|j| {
+                        let (masked, mask) = job_mask(&e.path(), &j.name);
+                        JobEntry {
+                            name: j.name,
+                            settings: j.settings,
+                            bbox: j.bbox,
+                            done: j.status.done,
+                            total: j.status.total,
+                            finished: j.status.finished,
+                            last_run_ms: j.status.last_run_ms,
+                            masked,
+                            mask,
+                        }
+                    })
+                    .collect()
+            });
+            Some(OneWorldEntry {
+                name,
+                modified_ms,
+                info,
+                bbox: m.as_ref().and_then(|m| m.bounds()),
+                place_name: m.and_then(|m| m.place_name),
+                jobs,
+                preview: has_thumbnail(&e.path()),
+            })
+        })
+        .collect();
+    worlds.sort_by_key(|w| std::cmp::Reverse(w.modified_ms));
+    Ok(worlds)
+}
+
+fn one_world_info_at(world_path: &Path) -> Result<OneWorldInfo, String> {
+    let manifest = crate::one_world::Manifest::load(world_path)?;
+    Ok(one_world_info_of(world_path, manifest.as_ref()))
+}
+
+fn one_world_info_of(
+    world_path: &Path,
+    manifest: Option<&crate::one_world::Manifest>,
+) -> OneWorldInfo {
     let foreign = manifest.is_none()
         && world_path.exists()
-        && fs::read_dir(&world_path)
+        && fs::read_dir(world_path)
             .map(|mut d| d.next().is_some())
             .unwrap_or(false);
-    Ok(OneWorldInfo {
+    OneWorldInfo {
         world_path: world_path.display().to_string(),
         exists: manifest.is_some(),
         foreign,
-        locked: manifest.is_some() && crate::world_utils::world_is_locked(&world_path),
+        locked: manifest.is_some() && crate::world_utils::world_is_locked(world_path),
         area_count: manifest.as_ref().map(|m| m.areas.len()).unwrap_or(0),
         scale: manifest.as_ref().map(|m| m.scale),
         height_multiplier: manifest.as_ref().map(|m| m.height_multiplier),
@@ -1384,8 +1751,12 @@ fn gui_one_world_info(save_path: String, world_name: String) -> Result<OneWorldI
         terrain: manifest.as_ref().map(|m| m.terrain),
         disable_height_limit: manifest.as_ref().map(|m| m.disable_height_limit),
         aws_only_elevation: manifest.as_ref().map(|m| m.aws_only_elevation),
+        origin_lat: manifest.as_ref().map(|m| m.origin_lat),
+        knee_m: manifest
+            .as_ref()
+            .and_then(|m| m.elevation.as_ref()?.soft_top.as_ref().map(|t| t.knee_m)),
         revision: manifest.as_ref().map(|m| m.next_area_id).unwrap_or(0),
-    })
+    }
 }
 
 /// Chunks of the selected area that already exist in the One World.
@@ -1455,6 +1826,102 @@ fn gui_get_one_world_overlays(world_path: String) -> Result<Option<OneWorldOverl
     }))
 }
 
+/// How a job in pieces would cut the selection, with its estimates: the line `--plan-units`
+/// prints, from the same plan the job runs. Reads the world, writes nothing.
+#[tauri::command(async)]
+fn gui_plan_job(
+    save_path: String,
+    world_name: String,
+    bbox_text: String,
+    world_scale: f64,
+    flags: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let mut args = window_flag_args(&flags, true, "java", false)?;
+    if !args.units.coordinates() {
+        return Err("Only a job built in pieces has a plan.".to_string());
+    }
+    crate::args::validate_scale(world_scale)?;
+    args.scale = world_scale;
+    let size = args
+        .units
+        .unit_regions
+        .unwrap_or(crate::args::UnitSize::N(crate::scale::DEFAULT_UNIT_REGIONS));
+    let world_dir = one_world_dir(&save_path, &world_name);
+    let bbox = LLBBox::from_str(&bbox_text)?;
+    let mut line = crate::work_units::plan_line(&world_dir, &bbox, &args, size)?;
+    let proj = crate::one_world::frame_for(&world_dir, &bbox, &args)?;
+    // With an outline, the pieces it leaves out too, for the map to grey: the same plan
+    // without it, less the pieces the outline touches.
+    let mask = args.units.plan_mask.take();
+    let all = crate::work_units::plan_in(&world_dir, &proj, &bbox, &args, size)?;
+    // Pieces around the job still within 5% stretch, drawn faint: room to grow later. Auto
+    // sizes show the job's largest piece.
+    let n = match size {
+        crate::args::UnitSize::N(n) => n,
+        crate::args::UnitSize::Auto => all.units.iter().map(|u| u.size).max().unwrap_or(1),
+    };
+    line["room"] = crate::work_units::room(&proj, &all.rect, n, 0.05, 400)
+        .iter()
+        .map(|b| b.arg())
+        .collect();
+    if let Some(path) = mask {
+        let mask = crate::work_units::Mask::load(&path, &proj, &all.rect)?;
+        line["excluded"] = all
+            .units
+            .iter()
+            .filter(|u| !mask.touches(&u.rect))
+            .map(|u| u.bbox.arg())
+            .collect();
+    }
+    Ok(line)
+}
+
+/// An outline picked on the map, as the file `--plan-mask` reads: a new file in the temp
+/// folder (the same outline again keeps its file), read back the way the job reads it.
+#[tauri::command(async)]
+fn gui_write_plan_mask(geojson: String) -> Result<String, String> {
+    use std::hash::Hasher;
+    let mut h = fnv::FnvHasher::default();
+    h.write(geojson.as_bytes());
+    let hash = h.finish();
+    static LAST: std::sync::Mutex<Option<(PathBuf, u64)>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((path, _)) = last.as_ref().filter(|(p, h)| *h == hash && p.is_file()) {
+        return Ok(path.display().to_string());
+    }
+    let path = unguessable_temp("arnis-plan-mask-", ".geojson");
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(geojson.as_bytes()))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    crate::work_units::Mask::read(&path)?;
+    // The outline it replaces is read by nothing any more: a job loads its mask as it starts.
+    if let Some((old, _)) = last.replace((path.clone(), hash)) {
+        let _ = fs::remove_file(old);
+    }
+    Ok(path.display().to_string())
+}
+
+/// Removes the outlines [`gui_write_plan_mask`] left in `dir` older than `max_age`.
+fn remove_old_plan_masks(dir: &Path, max_age: std::time::Duration) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > max_age));
+        if old && name.starts_with("arnis-plan-mask-") && name.ends_with(".geojson") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Reveals a file or folder in the system file explorer.
 /// On Windows, opens files with the default application (e.g. .mcworld with Minecraft
 /// Bedrock), except OneDrive paths which are revealed in Explorer to avoid the shell's
@@ -1463,25 +1930,21 @@ fn gui_get_one_world_overlays(world_path: String) -> Result<Option<OneWorldOverl
 fn gui_show_in_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // OneDrive files can be cloud placeholders / mid-sync that `start` can't launch
+        // Explorer opens a file with its default app (e.g. .mcworld with Minecraft Bedrock) and a
+        // folder in place; no shell reads the path, so `&` in a world name stays a character.
+        use std::os::windows::process::CommandExt;
+        let mut explorer = std::process::Command::new("explorer");
+        // OneDrive files can be cloud placeholders / mid-sync that cannot be launched
         // ("Windows cannot find <path>"), so reveal-and-highlight instead of opening.
         if path.to_lowercase().contains("onedrive") {
-            std::process::Command::new("explorer")
-                .args(["/select,", &path])
-                .spawn()
-                .map_err(|e| format!("Failed to open explorer: {}", e))?;
-        } else if std::process::Command::new("cmd")
-            // Otherwise open with the default app (e.g. .mcworld with Minecraft Bedrock);
-            // for directories `start ""` opens Explorer. Falls back to explorer /select.
-            .args(["/C", "start", "", &path])
-            .spawn()
-            .is_err()
-        {
-            std::process::Command::new("explorer")
-                .args(["/select,", &path])
-                .spawn()
-                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+            explorer.arg("/select,");
         }
+        explorer
+            // Quoted by hand: Rust quotes only for spaces, and explorer splits a bare path
+            // at its commas. No Windows path holds a quote.
+            .raw_arg(format!("\"{}\"", path.replace('"', "")))
+            .spawn()
+            .map_err(|e| format!("Failed to open explorer: {}", e))?;
     }
 
     #[cfg(target_os = "macos")]
@@ -1646,6 +2109,7 @@ const BUSY_IDLE: u8 = 0;
 const BUSY_GENERATION: u8 = 1;
 const BUSY_PRECOMPUTE: u8 = 2;
 const BUSY_CLEAR: u8 = 3;
+const BUSY_BAKE: u8 = 4;
 
 /// Owns [`BUSY`] for the length of one job and clears it on drop, including
 /// on the early-return paths before the worker is spawned.
@@ -1663,6 +2127,7 @@ impl BusySlot {
             // short one that finishes.
             Err(BUSY_PRECOMPUTE) => Err("A precompute is running.".to_string()),
             Err(BUSY_CLEAR) => Err("The caches are being cleared.".to_string()),
+            Err(BUSY_BAKE) => Err("A bake is running.".to_string()),
             Err(_) => Err("A generation is already running.".to_string()),
         }
     }
@@ -1672,6 +2137,478 @@ impl Drop for BusySlot {
     fn drop(&mut self) {
         BUSY.store(BUSY_IDLE, std::sync::atomic::Ordering::Release);
     }
+}
+
+/// The long flag names the window sends (`js/meld-features.js`). Anything else in `flags` is
+/// refused: the pieces repeat `flags` verbatim, so a flag the parent ignores would reach them.
+const WINDOW_FLAGS: &[&str] = &[
+    "one-world-workers",
+    "only-pieces",
+    "unit-regions",
+    "snap-regions",
+    "margin-regions",
+    "piece-order",
+    "skip-built",
+    "skip-cells",
+    "stitch-map",
+    "plan-mask",
+    "threads",
+    "ram-budget-mb",
+    "seed",
+    "min-y",
+    "max-y",
+    "road-detail",
+    "surface-patches",
+    "no-buildings",
+    "props",
+    "rocks",
+    "rock-density",
+    "bushes",
+    "bush-density",
+    "tree-realm",
+    "tree-pack-dir",
+    "tree-pack-mode",
+    "cave-style",
+    "cave-ores",
+    "river-bed",
+    "water-detail",
+    "climate-mode",
+    "origin",
+    "world-border",
+    "region-format",
+    "blinear-level",
+    "osm-pbf",
+    "osm-pbf-url",
+    "osm-tiles-url",
+    "overpass-url",
+    "offline",
+    "prewarm",
+];
+
+/// `flags` as the window may send them: `--name` or `--name=value`, the name one of
+/// [`WINDOW_FLAGS`] (all of them `--capabilities` flags).
+fn check_window_flags(flags: &[String]) -> Result<(), String> {
+    for flag in flags {
+        let name = flag.strip_prefix("--").and_then(|f| f.split('=').next());
+        if !name.is_some_and(|n| WINDOW_FLAGS.contains(&n)) {
+            return Err(format!("{flag}: not a setting the window can pass."));
+        }
+    }
+    Ok(())
+}
+
+/// The "Meld features" settings, parsed by the CLI's own parser so the window accepts exactly
+/// what the flags accept, and checked the way `validate_args` checks them: the window never
+/// runs it. No flags is the stock run.
+fn window_flag_args(
+    flags: &[String],
+    one_world: bool,
+    world_format: &str,
+    is_new_world: bool,
+) -> Result<Args, String> {
+    use clap::Parser;
+    check_window_flags(flags)?;
+    let mut extra =
+        Args::try_parse_from(std::iter::once("arnis").chain(flags.iter().map(String::as_str)))
+            .map_err(|e| {
+                let text = e.to_string();
+                let line = text.lines().next().unwrap_or_default();
+                line.trim_start_matches("error: ").to_string()
+            })?;
+    // The CLI also reads these from the environment; the window passes them only as flags.
+    let sent = |name: &str| flags.iter().any(|f| f.split('=').next() == Some(name));
+    if !sent("--offline") {
+        extra.offline = false;
+    }
+    if !sent("--overpass-url") {
+        extra.overpass_url.clear();
+    }
+    // Pieces are a One World feature; anywhere else the fields are inert.
+    if !one_world {
+        extra.units = Default::default();
+    }
+    extra.one_world = one_world;
+    extra.bedrock = world_format == "bedrock";
+    extra.luanti = world_format.starts_with("luanti");
+    if extra.units.only_pieces.is_some() && !extra.units.coordinates() {
+        return Err("Retrying pieces only applies to a job built in pieces.".to_string());
+    }
+    if extra.min_y.is_some() || extra.max_y.is_some() {
+        if !(is_new_world || extra.prewarm) || extra.bedrock || extra.luanti {
+            return Err("Lowest and highest Y only apply to a new Java world.".to_string());
+        }
+        extra.disable_height_limit = true;
+    }
+    crate::y_bounds::check(&extra)?;
+    crate::output_args::validate(&extra)?;
+    Ok(extra)
+}
+
+/// `flags` as a job keeps them for a later Resume or Rebuild: without paths, and servers
+/// without credentials or query.
+fn job_settings(flags: &[String]) -> Vec<String> {
+    flags
+        .iter()
+        .filter_map(|f| crate::scale::kept_option(f))
+        .collect()
+}
+
+/// The command line a job's pieces repeat. A piece is a run of this executable, and the window
+/// was started without a command line, so it is rebuilt from the settings: the window's own
+/// fields, then `flags`. `--bbox`, the spawn and the per-process knobs are the coordinator's
+/// to set per piece.
+fn piece_argv(args: &Args, world_path: &Path, flags: &[String]) -> Vec<std::ffi::OsString> {
+    use clap::ValueEnum;
+    fn name<T: ValueEnum>(v: &T) -> String {
+        v.to_possible_value()
+            .map(|p| p.get_name().to_string())
+            .unwrap_or_default()
+    }
+    let mut out: Vec<std::ffi::OsString> = vec!["--one-world".into()];
+    // One token each: a world named like a flag must stay a value.
+    let joined = |flag: &str, value: &std::ffi::OsStr| {
+        let mut token = std::ffi::OsString::from(format!("{flag}="));
+        token.push(value);
+        token
+    };
+    if let (Some(dir), Some(world)) = (world_path.parent(), world_path.file_name()) {
+        out.push(joined("--output-dir", dir.as_os_str()));
+        out.push(joined("--world-name", world));
+    }
+    let mut values = vec![
+        format!("--downloader={}", args.downloader),
+        format!("--scale={}", args.scale),
+        format!("--height-multiplier={}", args.height_multiplier),
+        format!("--body={}", name(&args.body)),
+        format!("--projection={}", args.projection),
+        format!("--ground-level={}", args.ground_level),
+        format!("--mode={}", name(&args.mode)),
+        format!("--post-apocalyptic={}", args.post_apocalyptic),
+        format!("--winter={}", args.winter),
+        format!("--interior={}", args.interior),
+        format!("--fields={}", name(&args.fields)),
+        format!("--max-tree-size={}", name(&args.max_tree_size)),
+        format!("--canopy-height={}", args.canopy_height),
+        format!("--overture={}", args.overture),
+        format!("--overture-source={}", name(&args.overture_source)),
+        format!("--rotation={}", args.rotation),
+        format!("--map-item={}", args.map_item),
+        format!("--gamemode={}", name(&args.gamemode)),
+        format!("--world-time={}", args.world_time),
+        format!("--world-type={}", name(&args.world_type)),
+        format!("--mob-spawning={}", name(&args.mob_spawning)),
+        format!("--signage={}", name(&args.signage)),
+        format!(
+            "--mapillary-facade-mode={}",
+            name(&args.mapillary_facade_mode)
+        ),
+        format!("--facade-detail={}", name(&args.facade_detail)),
+        format!("--facade-px={}", args.facade_px),
+    ];
+    let switches = [
+        ("--fillground", args.fillground),
+        ("--caves", args.caves),
+        ("--legacy-trees", args.legacy_trees),
+        ("--no-3d", !args.use_3d),
+        ("--debug", args.debug),
+        ("--vanilla-height", args.vanilla_height),
+        ("--disable-height-limit", args.disable_height_limit),
+        ("--aws-only-elevation", args.aws_only_elevation),
+        ("--bake-lighting", args.bake_lighting),
+        ("--voxy-lod", args.voxy_lod),
+        ("--dh-lod", args.dh_lod),
+        ("--map-preview", args.map_preview),
+        ("--building-facades", args.building_facades),
+        ("--body-gravity", args.body_gravity),
+        ("--traffic-lights", args.traffic_lights),
+        ("--discoveries", args.discoveries),
+        ("--pause-menu", args.pause_menu),
+        ("--zombie-outbreak", args.zombie_outbreak),
+        ("--disasters", args.disasters),
+        ("--moving-vehicles", args.moving_vehicles),
+        ("--pedestrians", args.pedestrians),
+    ];
+    values.extend(switches.iter().filter(|f| f.1).map(|f| f.0.to_string()));
+    if let Some(t) = args.timeout {
+        values.push(format!("--timeout={}", t.as_secs()));
+    }
+    // Without a token a piece refuses the facades it is asked for; the window builds without.
+    if let Some(on) = args.mapillary_facades {
+        let on = on && args.mapillary_api_token().is_some();
+        values.push(format!("--mapillary-facades={on}"));
+    }
+    // The Mapillary token is not here: the coordinator hands it to each piece in its
+    // environment, where other processes cannot read it off the command line.
+    out.extend(
+        values
+            .into_iter()
+            .chain(flags.iter().cloned())
+            .map(Into::into),
+    );
+    out
+}
+
+fn cache_root() -> PathBuf {
+    crate::elevation::cache::user_cache_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// The Local Archive folder an empty field means.
+#[tauri::command]
+fn gui_default_archive_folder() -> String {
+    crate::arnis_tiles::default_folder(&cache_root())
+        .display()
+        .to_string()
+}
+
+/// The archive folder a Local Archive field names; empty is the default.
+fn archive_folder(folder: &str) -> Result<PathBuf, String> {
+    let folder = folder.trim();
+    let path = if folder.is_empty() {
+        crate::arnis_tiles::default_folder(&cache_root())
+    } else {
+        crate::overture::pmtiles::local_path(folder)
+            .ok_or_else(|| format!("{folder} is not a folder on this computer."))?
+    };
+    // arnis-tiles runs in a folder of its own, where a relative path is another place.
+    std::path::absolute(&path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The Download Plan panel: what a run of the selection with these settings reads, and how
+/// much of it the caches already hold. Reads the disk only.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+fn gui_data_plan(
+    bbox_text: String,
+    world_scale: f64,
+    terrain_enabled: bool,
+    skip_osm_objects: bool,
+    canopy_height_enabled: bool,
+    overture_enabled: bool,
+    aws_only_elevation: bool,
+    flags: Vec<String>,
+) -> Result<crate::data_plan::DataPlan, String> {
+    let mut args = window_flag_args(&flags, false, "java", false)?;
+    crate::args::validate_scale(world_scale)?;
+    args.scale = world_scale;
+    args.mode = if skip_osm_objects {
+        crate::args::GenerationMode::TerrainOnly
+    } else if terrain_enabled {
+        crate::args::GenerationMode::GeoTerrain
+    } else {
+        crate::args::GenerationMode::GeoOnly
+    };
+    args.canopy_height = canopy_height_enabled;
+    args.overture = overture_enabled;
+    args.aws_only_elevation = aws_only_elevation;
+    let bbox = LLBBox::from_str(&bbox_text)?;
+    Ok(crate::data_plan::plan(&cache_root(), &args, bbox))
+}
+
+/// arnis-tiles' own index cache and scratch.
+fn arnis_tiles_state() -> PathBuf {
+    cache_root().join("arnis").join("arnis-tiles")
+}
+
+fn arnis_tiles_exe() -> Result<PathBuf, String> {
+    crate::arnis_tiles::locate().ok_or_else(|| {
+        format!(
+            "arnis-tiles not found; get it from {}",
+            crate::arnis_tiles::HOME
+        )
+    })
+}
+
+/// One extract of the Prepare Countries list.
+#[derive(serde::Serialize)]
+struct PrepareRow {
+    #[serde(flatten)]
+    extract: crate::arnis_tiles::Extract,
+    /// The folder already holds its archive.
+    baked: bool,
+    /// Its archive: on disk once baked, else estimated from the download.
+    archive_bytes: u64,
+}
+
+#[derive(serde::Serialize)]
+struct PreparePlan {
+    extracts: Vec<PrepareRow>,
+    total_bytes: u64,
+    uncovered_points: u64,
+    /// The folder the archives go to, and the free space on its disk.
+    folder: String,
+    free_bytes: Option<u64>,
+    /// The most a bake of the extracts not yet baked holds on disk at once.
+    peak_bytes: u64,
+}
+
+/// Prepare Countries: the Geofabrik extracts covering the selection (`arnis-tiles prepare
+/// --dry-run`), each marked baked when the folder already holds its archive, with the sizes
+/// of what a bake downloads and leaves.
+#[tauri::command(async)]
+fn gui_prepare_plan(bbox_text: String, folder: String) -> Result<PreparePlan, String> {
+    let bbox = LLBBox::from_str(&bbox_text)?;
+    let folder = archive_folder(&folder)?;
+    let exe = arnis_tiles_exe()?;
+    let plan = crate::arnis_tiles::dry_run(&exe, &arnis_tiles_state(), &bbox)?;
+    let archives = crate::osm_tiles::local_coverage(&folder, &bbox)
+        .map(|c| c.archives)
+        .unwrap_or_default();
+    let on_disk = |id: &str| archives.iter().find(|a| a.name == id);
+    let todo: Vec<u64> = plan
+        .extracts
+        .iter()
+        .filter(|e| on_disk(&e.id).is_none())
+        .map(|e| e.bytes)
+        .collect();
+    Ok(PreparePlan {
+        extracts: plan
+            .extracts
+            .into_iter()
+            .map(|e| {
+                let baked = on_disk(&e.id);
+                PrepareRow {
+                    baked: baked.is_some(),
+                    archive_bytes: baked
+                        .and_then(|a| a.bytes)
+                        .unwrap_or_else(|| crate::data_plan::archive_bytes(e.bytes)),
+                    extract: e,
+                }
+            })
+            .collect(),
+        total_bytes: plan.total_bytes,
+        uncovered_points: plan.uncovered_points,
+        free_bytes: crate::data_plan::free_bytes(&folder),
+        folder: folder.display().to_string(),
+        peak_bytes: crate::data_plan::archive_peak_bytes(&todo),
+    })
+}
+
+/// Set by Stop: ends a country bake.
+static BAKE_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Download & Bake: `arnis-tiles prepare` for the selection into the folder, on the threads a
+/// generation would get (`flags`), with its progress on the main bar. `Ok(false)` when stopped.
+#[tauri::command(async)]
+fn gui_bake_archive(bbox_text: String, folder: String, flags: Vec<String>) -> Result<bool, String> {
+    let args = window_flag_args(&flags, false, "java", false)?;
+    let cores = crate::transfer::cores();
+    let threads = args.thread_count().unwrap_or(cores * 9 / 10).max(1);
+    let bbox = LLBBox::from_str(&bbox_text)?;
+    let folder = archive_folder(&folder)?;
+    let exe = arnis_tiles_exe()?;
+    let _slot = BusySlot::acquire(BUSY_BAKE)?;
+    BAKE_CANCEL.store(false, std::sync::atomic::Ordering::Release);
+    progress::reset_progress_floor();
+    progress::emit_gui_progress_update(0.0, "Choosing the extracts to bake...");
+    let result = crate::arnis_tiles::dry_run(&exe, &arnis_tiles_state(), &bbox).and_then(|plan| {
+        crate::arnis_tiles::bake(
+            &exe,
+            &arnis_tiles_state(),
+            &folder,
+            &bbox,
+            &plan.extracts,
+            0.0,
+            threads,
+            &BAKE_CANCEL,
+            &mut |pct, msg, t| progress::emit_gui_transfer(pct, msg, t),
+        )
+    });
+    match &result {
+        Ok(true) => progress::emit_gui_progress_update(100.0, "Done! The local archive is ready."),
+        Ok(false) => progress::emit_gui_progress_update(
+            progress::MESSAGE_ONLY,
+            "Bake stopped. Finished countries are kept; nothing half written was left.",
+        ),
+        Err(e) => progress::emit_gui_error(e),
+    }
+    result
+}
+
+/// Stops a running bake. Harmless when nothing runs.
+#[tauri::command]
+fn gui_cancel_bake() {
+    BAKE_CANCEL.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// What a prewarm says when not everything reached the cache, as the CLI does.
+fn uncached_error(uncached: &[String]) -> Option<String> {
+    (!uncached.is_empty()).then(|| {
+        format!(
+            "Not cached: {}. An Offline Mode run would stop on these.",
+            uncached.join(", ")
+        )
+    })
+}
+
+/// The end of a `--prewarm` run: the caches are filled and no world is kept.
+fn prewarmed(args: &Args, bbox: LLBBox) -> Result<(), String> {
+    if let Some(msg) = uncached_error(&crate::net::uncached()) {
+        progress::emit_gui_error(&msg);
+        return Err(msg);
+    }
+    crate::data_plan::refresh(&cache_root(), args, bbox);
+    emit_gui_progress_update(100.0, "Done! Inputs for this area are cached.");
+    println!(
+        "{}",
+        "Done! Inputs for this area are cached; no world was written."
+            .green()
+            .bold()
+    );
+    Ok(())
+}
+
+/// Offline Mode stops a run the caches could not serve, naming what they lacked, rather than
+/// build flat or empty ground there.
+fn offline_complete() -> Result<(), String> {
+    let missing = crate::net::offline_misses();
+    if !crate::net::offline() || missing.is_empty() {
+        return Ok(());
+    }
+    let what: Vec<String> = missing.into_iter().map(|(what, _)| what).collect();
+    let msg = format!(
+        "Offline Mode: not downloaded yet: {}. Turn it off to fetch the area first.",
+        what.join(", ")
+    );
+    progress::emit_gui_error(&msg);
+    Err(msg)
+}
+
+/// Pause holds a job's queue: the running pieces finish, none starts until Resume.
+#[tauri::command]
+fn gui_pause_generation(paused: bool) {
+    crate::scale::PAUSE.store(paused, std::sync::atomic::Ordering::Release);
+}
+
+/// Stop: a job kills its running pieces and keeps the finished ones, so starting the same
+/// area again resumes it.
+#[tauri::command]
+fn gui_stop_generation() {
+    crate::scale::STOP.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// A cell action on the running job (`hold`, `resume`, `front`, `cancel`, `retry`, `skip`,
+/// `include`) for the cells given by plan index; an error when no job runs.
+#[tauri::command]
+fn gui_cells_control(
+    action: String,
+    cells: Vec<u32>,
+) -> Result<crate::scale::CellsControlResult, String> {
+    crate::scale::control(&action, &cells)
+}
+
+/// Deletes the region files of the given cells (plan indexes) of `job` and takes them out of the
+/// manifest; refused while a job, live mode or Minecraft has the world.
+#[tauri::command(async)]
+fn gui_cells_remove(
+    world_path: String,
+    cells: Vec<u32>,
+    job: String,
+) -> Result<crate::one_world::RemoveReport, String> {
+    let world = PathBuf::from(world_path);
+    if live_plays(&world) {
+        return Err("Live mode is playing this world. Stop it first.".to_string());
+    }
+    crate::one_world::remove_cells(&world, &job, &cells)
 }
 
 // Everything before the `spawn` below - the spawn point written into level.dat -
@@ -1734,10 +2671,13 @@ fn gui_start_generation(
     body_gravity: bool,
     one_world: bool,
     one_world_name: String,
+    // The "Meld features" settings as CLI flags (`--name=value`); none when the switch is off.
+    flags: Vec<String>,
     selection_shapes: Option<Vec<Vec<(f64, f64)>>>,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
+    let is_new_world = owns_selected_world(is_new_world, one_world, &flags);
 
     // Shapes replace the rectangle; the status line holds 35 characters, so details go to the log.
     let shapes = match selection_shapes.filter(|rings| !rings.is_empty()) {
@@ -1788,12 +2728,13 @@ fn gui_start_generation(
         emit_gui_error(&e);
         return Err(e);
     }
-    if one_world && live_plays(&one_world_dir(&selected_world, &one_world_name)) {
+    // A prewarm works in a scratch folder, so live mode cannot be playing its world.
+    let prewarm = flags.iter().any(|f| f == "--prewarm");
+    if one_world && !prewarm && live_plays(&one_world_dir(&selected_world, &one_world_name)) {
         let e = "Live mode is playing this world. Stop it first.".to_string();
         emit_gui_error(&e);
         return Err(e);
     }
-    let is_new_world = is_new_world && !one_world;
 
     // Claim the process before touching any shared state. The frontend disables its button
     // for the same reason; this is the authoritative check behind it.
@@ -1801,11 +2742,44 @@ fn gui_start_generation(
         Ok(slot) => slot,
         Err(msg) => {
             emit_gui_error(&msg);
+            // The frontend made a new world for this run.
+            if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
+                remove_new_java_world(&PathBuf::from(&selected_world));
+            }
             return Err(msg);
         }
     };
 
     progress::reset_progress_floor();
+    crate::scale::PAUSE.store(false, std::sync::atomic::Ordering::Release);
+    crate::scale::STOP.store(false, std::sync::atomic::Ordering::Release);
+
+    let extra = match window_flag_args(&flags, one_world, &world_format, is_new_world) {
+        Ok(extra) => extra,
+        Err(msg) => {
+            emit_gui_error(&msg);
+            // The frontend made a new world for this run.
+            if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
+                remove_new_java_world(&PathBuf::from(&selected_world));
+            }
+            return Err(msg);
+        }
+    };
+    // Process-wide: Offline Mode and prewarm end with the run, and a run without an Overpass
+    // of its own gets Arnis's back.
+    let run_net = crate::net::begin_run(extra.offline, extra.prewarm);
+    crate::retrieve_data::set_overpass_urls(extra.overpass_url.clone());
+    // The global pool was built at startup; a thread count asked for here gets its own.
+    let pool = extra
+        .thread_count()
+        .and_then(|n| rayon::ThreadPoolBuilder::new().num_threads(n).build().ok())
+        .map(std::sync::Arc::new);
+    crate::data_processing::set_ram_budget_mb(extra.ram_budget_mb.unwrap_or(0));
+    crate::net::set_max_requests(
+        extra
+            .max_downloads
+            .map_or(crate::net::MAX_CONCURRENT_REQUESTS, |n| n as usize),
+    );
     // Dropped with the slot, so the Discord status leaves "generating" on every way out.
     let presence = crate::discord::Generation::begin();
 
@@ -1885,13 +2859,33 @@ fn gui_start_generation(
     tauri::async_runtime::spawn(async move {
         // Held until the worker finishes, on every path, so the globals stay this run's.
         let _generation_slot = generation_slot;
+        // Declared after the slot, so it is reset before the next run can set its own.
+        let _run_net = run_net;
         let _presence = presence;
-        if let Err(e) = tokio::task::spawn_blocking(move || {
-            let world_path = if one_world {
-                one_world_dir(&selected_world, &one_world_name)
-            } else {
-                PathBuf::from(&selected_world)
+        let run_pool = pool.clone();
+        let work = move || -> Result<(), String> {
+            // Declared first, so it is removed last: after the lock and the cleanup guard.
+            let scratch = match extra.prewarm.then(prewarm_scratch).transpose() {
+                Ok(scratch) => scratch,
+                Err(e) => {
+                    emit_gui_error(&e);
+                    return Err(e);
+                }
             };
+            let world_path = run_world_path(
+                &selected_world,
+                one_world.then_some(one_world_name.as_str()),
+                scratch.as_ref().map(|g| g.path.as_path()),
+            );
+            // No saves folder, no world to read: the name alone would be a path in the
+            // working directory.
+            if one_world && scratch.is_some() && !selected_world.trim().is_empty() {
+                let world = one_world_dir(&selected_world, &one_world_name);
+                if let Err(e) = seed_prewarm_world(&world, &world_path) {
+                    emit_gui_error(&e);
+                    return Err(e);
+                }
+            }
 
             // Determine world format from UI selection first (needed for session lock decision)
 
@@ -1939,9 +2933,9 @@ fn gui_start_generation(
             // Acquire session lock for Java worlds only
             // Session lock prevents Minecraft from having the world open during generation
             // Bedrock worlds are generated as .mcworld files and don't need this lock.
-            // A One World is locked by `prepare` below.
+            // A One World is locked by `prepare` below; a prewarm writes no world.
             let mut _session_lock: Option<SessionLock> =
-                if world_format == WorldFormat::JavaAnvil && !one_world {
+                if world_format == WorldFormat::JavaAnvil && !one_world && !extra.prewarm {
                     match SessionLock::acquire(&world_path) {
                         Ok(lock) => Some(lock),
                         Err(e) => {
@@ -1975,6 +2969,7 @@ fn gui_start_generation(
 
             // Create an Args instance with the chosen bounding box
             // Note: path is used for Java-specific features like spawn point update
+            let tall_forced = extra.disable_height_limit;
             let mut args: Args = Args {
                 bbox: Some(bbox),
                 polygon: Vec::new(),
@@ -2023,7 +3018,6 @@ fn gui_start_generation(
                 // Parquet reader drops entirely - but both differences are far
                 // below a block, so the choice is not worth a GUI setting.
                 overture_source: crate::args::OvertureSource::Auto,
-                osm_tiles_url: crate::osm_tiles::DEFAULT_OSM_TILES_URL.to_string(),
                 no_tile_archive: false,
                 use_3d: use_3d_enabled,
                 debug: false,
@@ -2092,19 +3086,44 @@ fn gui_start_generation(
                 moving_vehicles,
                 pedestrians,
                 live: Default::default(),
+                progress: None,
+                no_update_check: false,
+                no_cache_sweep: false,
+                capabilities: false,
+                map_item_only: false,
+                dh_lod_only: false,
+                climate_map: None,
+                export_tree_packs: None,
+                loot_table: None,
+                dump_loot_table: None,
+                prewarm_first: false,
+                ..extra
             };
+            if tall_forced {
+                args.disable_height_limit = true;
+                args.vanilla_height = false;
+            }
             // Same helper the CLI uses. Anything read before this point (the world prep
             // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
             crate::args::apply_feature_needs(&mut args);
+            crate::y_bounds::apply(&mut args);
+            crate::scale::budget::single_below_break_even(&mut args, one_world);
 
             let mut one_world_extending = false;
             if one_world {
+                // Asked for before `prepare` settles the world's values, as the user's own
+                // command line would ask.
+                let pieces_argv = args
+                    .units
+                    .coordinates()
+                    .then(|| piece_argv(&args, &world_path, &flags));
                 let session = match crate::one_world::prepare(&world_path, &bbox, &mut args) {
                     Ok(session) => session,
                     Err(e) => {
                         eprintln!("{e}");
                         emit_gui_error(&e);
+                        // The whole reason, for the One World line under Start.
                         emit_gui_progress_update(progress::MESSAGE_ONLY, &format!("Error! {e}"));
                         return Err(e);
                     }
@@ -2132,7 +3151,69 @@ fn gui_start_generation(
                         .and_then(|n| n.to_str())
                         .unwrap_or(crate::one_world::DEFAULT_WORLD_NAME),
                 );
+                if let Some(mut argv) = pieces_argv {
+                    // The coordinator places the spawn, as --spawn-lat/--spawn-lng, and
+                    // hands them on to the piece that holds it, as from the command line.
+                    (args.spawn_lat, args.spawn_lng) = spawn_point.unzip();
+                    if let Some((lat, lng)) = spawn_point {
+                        argv.push(format!("--spawn-lat={lat}").into());
+                        argv.push(format!("--spawn-lng={lng}").into());
+                    }
+                    if let Some(mask) = args.units.plan_mask.as_deref().filter(|_| !args.prewarm) {
+                        if let Err(e) = keep_job_mask(&world_path, mask) {
+                            eprintln!("Warning: the job's outline was not kept, so Projects cannot run it again: {e}");
+                        }
+                    }
+                    emit_gui_progress_update(progress::MESSAGE_ONLY, "Building cells...");
+                    // Unreadable counts as built, so a doubt keeps the world.
+                    let areas = || {
+                        crate::one_world::Manifest::load(&world_path)
+                            .ok()
+                            .flatten()
+                            .map_or(1, |m| m.areas.len())
+                    };
+                    let areas_before = areas();
+                    if let Err(e) =
+                        crate::scale::run_with(&args, &world_path, argv, &job_settings(&flags))
+                    {
+                        eprintln!("{e}");
+                        // Finished pieces are kept: generating the same area again resumes.
+                        // A world this job made and nothing was built in goes with the guard.
+                        if !remove_failed_new_world(session.created, areas_before, areas()) {
+                            if let Some(g) = cleanup_guard.as_mut() {
+                                g.disarm();
+                            }
+                        }
+                        if e == crate::scale::STOPPED {
+                            emit_gui_progress_update(
+                                progress::MESSAGE_ONLY,
+                                "Stopped. Finished cells are kept; starting again resumes them.",
+                            );
+                        } else if e == crate::scale::PARTIAL {
+                            emit_gui_progress_update(
+                                progress::MESSAGE_ONLY,
+                                "The retried cells are built; starting again builds the rest.",
+                            );
+                        } else {
+                            emit_gui_error(&e);
+                        }
+                        return Err(e);
+                    }
+                    if !pieces_job_keeps_world(args.prewarm) {
+                        return prewarmed(&args, bbox);
+                    }
+                    if let Some(g) = cleanup_guard.as_mut() {
+                        g.disarm();
+                    }
+                    drop(_session_lock);
+                    emit_gui_progress_update(100.0, "Done! World generation completed.");
+                    println!("{}", "Done! World generation completed.".green().bold());
+                    return Ok(());
+                }
             }
+            // Same as run_cli: after a One World has applied the seed it keeps, before
+            // anything rolls a die. Process-wide, so set every run.
+            crate::deterministic_rng::set_world_seed(args.seed.unwrap_or(0));
             let args = args;
 
             // Same as run_cli: checked with the run's final scale and options, and a One
@@ -2157,6 +3238,7 @@ fn gui_start_generation(
 
             // Determine output path and level name based on format
             let (generation_path, level_name) = match world_format {
+                _ if !names_output(args.prewarm) => (world_path.clone(), None),
                 WorldFormat::JavaAnvil => {
                     // Java: use the selected world path, add localized name if new
                     let updated_path = if is_new_world {
@@ -2253,7 +3335,10 @@ fn gui_start_generation(
             // Same as run_cli: the facade pipeline needs only the bbox, and its
             // downloads are the longest part of a run that uses it, so it starts
             // now and is collected just before the buildings.
-            generation_options.facades = crate::mapillary::FacadeJob::start(&args, bbox);
+            // Offline, as in run_cli, there is no street-level imagery to fetch.
+            if !crate::net::offline() && !args.prewarm {
+                generation_options.facades = crate::mapillary::FacadeJob::start(&args, bbox);
+            }
             let generation_options = generation_options;
 
             // Same as run_cli: fix the dimension span before the editor is touched.
@@ -2290,6 +3375,9 @@ fn gui_start_generation(
                     bbox,
                     &crate::elevation::PeakSource::none(),
                 );
+                if args.prewarm {
+                    return prewarmed(&args, bbox);
+                }
                 let mut args = args;
                 settle(&mut args, &ground)?;
                 let args = args;
@@ -2348,68 +3436,100 @@ fn gui_start_generation(
 
             // OSM, Overture and elevation/land-cover fetches only need the bbox, run them in parallel
             let (peak_tx, peaks) = crate::elevation::PeakSource::channel();
-            let (fetch_result, overture_data, ground) = std::thread::scope(|s| {
-                let overture_handle = s.spawn(|| {
-                    if args.overture && !args.skip_objects() {
-                        overture::fetch_overture_buildings(
-                            &bbox,
-                            &crate::projection::ProjectionSpec::from_args(&args),
-                            args.overture_source,
-                            args.debug,
-                        )
-                    } else {
+            // Terrain works in the run's pool; the downloads wait on each other, so they stay out.
+            let fetch_all = || {
+                std::thread::scope(|s| {
+                    let overture_handle = s.spawn(|| {
+                        if args.overture && !args.skip_objects() {
+                            overture::fetch_overture_buildings(
+                                &bbox,
+                                &crate::projection::ProjectionSpec::from_args(&args),
+                                args.overture_source,
+                                args.debug,
+                            )
+                        } else {
+                            overture::OvertureData::default()
+                        }
+                    });
+                    let ground_handle = s.spawn(|| {
+                        in_pool(run_pool.as_deref(), || {
+                            ground::generate_ground_data(&args, bbox, &peaks)
+                        })
+                    });
+                    let fetch_result = retrieve_data::fetch_osm_data(
+                        bbox,
+                        args.scale,
+                        args.debug,
+                        "requests",
+                        None,
+                        &args.osm_tiles_url,
+                        !args.no_tile_archive,
+                        crate::osm_pbf::Source::from_args(&args).as_ref(),
+                    );
+                    // The terrain thread waits on this before fitting its height range. Overture's
+                    // building heights follow once it is in, for the thread to wait on only if
+                    // needed. Without OSM there is nothing to follow, so the sender goes now.
+                    let peak_tx = match fetch_result.as_ref() {
+                        Ok(raw) => {
+                            let _ =
+                                peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args));
+                            Some(peak_tx)
+                        }
+                        Err(_) => {
+                            drop(peak_tx);
+                            None
+                        }
+                    };
+                    // A panicked worker already reported itself through the panic hook.
+                    // Overture is supplementary, so drop it and keep going; terrain is
+                    // not, so hand the failure back instead of taking the app down.
+                    let overture_data = overture_handle.join().unwrap_or_else(|_| {
+                        eprintln!("Overture fetch failed, continuing without Overture buildings.");
                         overture::OvertureData::default()
+                    });
+                    if let (Some(tx), Ok(raw)) = (&peak_tx, fetch_result.as_ref()) {
+                        if crate::elevation::TerrainHints::wants_overture(&args) {
+                            let _ = tx.send(crate::elevation::TerrainHints::from_overture(
+                                raw,
+                                &args,
+                                &overture_data,
+                            ));
+                        }
                     }
-                });
-                let ground_handle = s.spawn(|| ground::generate_ground_data(&args, bbox, &peaks));
-                let fetch_result = retrieve_data::fetch_osm_data(
-                    bbox,
-                    args.scale,
-                    args.debug,
-                    "requests",
-                    None,
-                    &args.osm_tiles_url,
-                    !args.no_tile_archive,
-                );
-                // The terrain thread waits on this before fitting its height range. Overture's
-                // building heights follow once it is in, for the thread to wait on only if
-                // needed. Without OSM there is nothing to follow, so the sender goes now.
-                let peak_tx = match fetch_result.as_ref() {
-                    Ok(raw) => {
-                        let _ = peak_tx.send(crate::elevation::TerrainHints::from_osm(raw, &args));
-                        Some(peak_tx)
-                    }
-                    Err(_) => {
-                        drop(peak_tx);
-                        None
-                    }
-                };
-                // A panicked worker already reported itself through the panic hook.
-                // Overture is supplementary, so drop it and keep going; terrain is
-                // not, so hand the failure back instead of taking the app down.
-                let overture_data = overture_handle.join().unwrap_or_else(|_| {
-                    eprintln!("Overture fetch failed, continuing without Overture buildings.");
-                    overture::OvertureData::default()
-                });
-                if let (Some(tx), Ok(raw)) = (&peak_tx, fetch_result.as_ref()) {
-                    if crate::elevation::TerrainHints::wants_overture(&args) {
-                        let _ = tx.send(crate::elevation::TerrainHints::from_overture(
-                            raw,
-                            &args,
-                            &overture_data,
-                        ));
-                    }
-                }
-                drop(peak_tx);
-                (fetch_result, overture_data, ground_handle.join().ok())
-            });
+                    drop(peak_tx);
+                    // The error as its text, which is all that is read of it, so it can cross threads.
+                    let fetch_result = fetch_result.map_err(|e| e.to_string());
+                    (fetch_result, overture_data, ground_handle.join().ok())
+                })
+            };
+            let (fetch_result, overture_data, ground) = off_worker(fetch_all);
 
+            offline_complete()?;
             let Some(ground) = ground else {
                 let error_msg = "Terrain fetch failed unexpectedly".to_string();
                 eprintln!("{error_msg}");
                 emit_gui_error(&error_msg);
                 return Err(error_msg);
             };
+            if args.prewarm && fetch_result.is_ok() {
+                // Same as run_cli: 3D models download while they are placed, so their prescan
+                // fetches them. A prewarm owns no selected world, so nothing is removed.
+                if let (true, Ok(raw)) = (args.use_3d && !args.skip_objects(), fetch_result) {
+                    let (elements, ..) = osm_parser::parse_osm_data(
+                        raw,
+                        bbox,
+                        args.debug,
+                        &crate::projection::ProjectionSpec::from_args(&args),
+                    );
+                    crate::models_3d::Models3dPipeline::prescan(
+                        &elements,
+                        &args,
+                        &Default::default(),
+                    )
+                    .prewarm();
+                }
+                return prewarmed(&args, bbox);
+            }
             // Nothing to settle when the fetch failed: the run ends below.
             let mut args = args;
             if fetch_result.is_ok() {
@@ -2466,7 +3586,11 @@ fn gui_start_generation(
                     ground.finish_land_cover(args.mode);
 
                     // Matches run_cli: the overrides read roads as land, then the mode drops them.
-                    crate::mode_filter::retain_for_mode(&mut parsed_elements, args.mode);
+                    crate::mode_filter::retain_for_mode(
+                        &mut parsed_elements,
+                        args.mode,
+                        args.buildings,
+                    );
                     let outline_suppression = crate::mode_filter::outline_suppression_for_mode(
                         outline_suppression,
                         args.mode,
@@ -2529,9 +3653,12 @@ fn gui_start_generation(
                     Err(e.to_string())
                 }
             }
-        })
-        .await
-        {
+        };
+        let blocking = move || match pool {
+            Some(pool) => pool.install(work),
+            None => work(),
+        };
+        if let Err(e) = tokio::task::spawn_blocking(blocking).await {
             let error_msg = format!("Error in blocking task: {e}");
             eprintln!("{error_msg}");
             emit_gui_error(&error_msg);
@@ -2719,6 +3846,555 @@ mod locale_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Startup removes only plan outlines, and only old ones.
+    #[test]
+    fn old_plan_masks_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = std::time::Duration::from_secs(24 * 3600);
+        let file = |name: &str, age: u32| {
+            let p = dir.path().join(name);
+            let f = fs::File::create(&p).unwrap();
+            f.set_modified(std::time::SystemTime::now() - day * age)
+                .unwrap();
+            p
+        };
+        let old = file("arnis-plan-mask-0000000000000001.geojson", 2);
+        let new = file("arnis-plan-mask-0000000000000002.geojson", 0);
+        let other = file("other.geojson", 2);
+        remove_old_plan_masks(dir.path(), day);
+        assert!(!old.exists() && new.exists() && other.exists());
+    }
+
+    /// Temp names are not the content or the process id, and the outline stays its file.
+    #[test]
+    fn temp_files_are_new_and_unguessable() {
+        let a = prewarm_scratch().unwrap();
+        let b = prewarm_scratch().unwrap();
+        assert!(a.path.is_dir() && b.path.is_dir() && a.path != b.path);
+        let name = a.path.file_name().unwrap().to_string_lossy().into_owned();
+        let random = name.strip_prefix("arnis-prewarm-").unwrap();
+        assert!(
+            random.len() == 16 && u64::from_str_radix(random, 16).is_ok(),
+            "{name}"
+        );
+        let (pa, pb) = (a.path.clone(), b.path.clone());
+        drop((a, b));
+        assert!(!pa.exists() && !pb.exists());
+        let square = |d: f64| {
+            serde_json::json!({"type": "Polygon", "coordinates": [[
+                [13.0, 52.0], [13.0 + d, 52.0], [13.0 + d, 52.0 + d], [13.0, 52.0]
+            ]]})
+            .to_string()
+        };
+        let first = gui_write_plan_mask(square(0.1)).unwrap();
+        assert_eq!(gui_write_plan_mask(square(0.1)).unwrap(), first);
+        let second = gui_write_plan_mask(square(0.2)).unwrap();
+        assert!(second != first && !Path::new(&first).exists());
+        let _ = fs::remove_file(second);
+    }
+
+    /// A prewarm leaves an existing selected world alone, even sent as a new world, and runs
+    /// with no world selected at all.
+    #[test]
+    fn prewarm_never_owns_the_selected_world() {
+        let prewarm = vec!["--prewarm".to_string()];
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("Built World");
+        fs::create_dir(&world).unwrap();
+        fs::write(world.join("level.dat"), b"kept").unwrap();
+        for is_new_world in [true, false] {
+            let owns = owns_selected_world(is_new_world, false, &prewarm);
+            assert!(!owns);
+            // What gui_start_generation arms for a world it owns.
+            drop(owns.then(|| NewWorldCleanup::new(world.clone())));
+        }
+        assert_eq!(fs::read(world.join("level.dat")).unwrap(), b"kept");
+        assert!(owns_selected_world(true, false, &[]));
+        assert!(!owns_selected_world(true, true, &[]));
+        // A fresh session's prewarm: no world, and Lowest Y still accepted.
+        let flags = vec!["--prewarm".to_string(), "--min-y=-128".to_string()];
+        assert!(
+            window_flag_args(&flags, false, "java", false)
+                .unwrap()
+                .prewarm
+        );
+    }
+
+    /// A One World prewarm, sent with no selected world, opens its world in the scratch folder:
+    /// never a path made from the empty selection, so a One World of that name in the current
+    /// directory is left as it is.
+    #[test]
+    fn prewarm_one_world_stays_in_its_scratch_folder() {
+        use clap::Parser;
+        let name = format!("arnis-prewarm-test-{}", std::process::id());
+        let in_cwd = one_world_dir("", &name);
+        assert!(in_cwd.is_relative());
+        fs::create_dir(&in_cwd).unwrap();
+        // Removes the stand-in even if an assert fails.
+        let _remove = NewWorldCleanup::new(in_cwd.clone());
+        fs::write(in_cwd.join("level.dat"), b"kept").unwrap();
+
+        let scratch = tempfile::tempdir().unwrap();
+        let world = run_world_path("", Some(&name), Some(scratch.path()));
+        assert!(world.starts_with(scratch.path()) && world != in_cwd);
+        assert_eq!(
+            run_world_path("", None, Some(scratch.path())),
+            scratch.path()
+        );
+        let bbox = "48.130,11.560,48.145,11.590";
+        let mut args = Args::parse_from(["arnis", "--output-dir", ".", "--bbox", bbox]);
+        let session =
+            crate::one_world::prepare(&world, &LLBBox::from_str(bbox).unwrap(), &mut args).unwrap();
+        assert!(session.created);
+        drop(session);
+
+        let names: Vec<_> = fs::read_dir(&in_cwd)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["level.dat"]);
+        assert_eq!(fs::read(in_cwd.join("level.dat")).unwrap(), b"kept");
+        // Without a prewarm a run still goes to the selected world.
+        assert_eq!(
+            run_world_path("saves", Some(&name), None),
+            one_world_dir("saves", &name)
+        );
+        assert_eq!(run_world_path("w", None, None), PathBuf::from("w"));
+    }
+
+    /// "Download now" for a One World that exists warms in that world's frame, and leaves
+    /// the world itself as it is.
+    #[test]
+    fn a_one_world_prewarm_takes_the_existing_worlds_frame() {
+        use clap::Parser;
+        let saves = tempfile::tempdir().unwrap();
+        let world = one_world_dir(&saves.path().display().to_string(), "Frame");
+        let first = "48.130,11.560,48.145,11.590";
+        let mut args = Args::parse_from(["arnis", "--output-dir", ".", "--bbox", first]);
+        args.aws_only_elevation = true;
+        let frame = |args: &Args| {
+            let run = args.one_world_run.as_ref().unwrap();
+            (run.origin_lat, run.origin_lon)
+        };
+        let made = crate::one_world::prepare(&world, &LLBBox::from_str(first).unwrap(), &mut args);
+        drop(made.unwrap());
+        let origin = frame(&args);
+        let manifest = fs::read(world.join(crate::one_world::MANIFEST_FILE)).unwrap();
+
+        let scratch = tempfile::tempdir().unwrap();
+        let warm = run_world_path("", Some("Frame"), Some(scratch.path()));
+        seed_prewarm_world(&world, &warm).unwrap();
+        let second = "48.200,11.700,48.215,11.730";
+        let mut args = Args::parse_from(["arnis", "--output-dir", ".", "--bbox", second]);
+        let session =
+            crate::one_world::prepare(&warm, &LLBBox::from_str(second).unwrap(), &mut args)
+                .unwrap();
+        assert!(!session.created);
+        assert!(args.aws_only_elevation);
+        assert_eq!(frame(&args), origin);
+        drop(session);
+        assert_eq!(
+            fs::read(world.join(crate::one_world::MANIFEST_FILE)).unwrap(),
+            manifest
+        );
+
+        // A world that does not exist yet seeds nothing: the prewarm starts its own.
+        let fresh = scratch.path().join("fresh");
+        seed_prewarm_world(&saves.path().join("None"), &fresh).unwrap();
+        assert!(!fresh.exists());
+    }
+
+    /// A relative Local Archive folder is the same place for Arnis and for arnis-tiles.
+    #[test]
+    fn an_archive_folder_is_absolute() {
+        let typed = archive_folder(" archive ").unwrap();
+        assert_eq!(typed, env::current_dir().unwrap().join("archive"));
+        assert!(archive_folder("").unwrap().is_absolute());
+        assert!(archive_folder("https://example.com/tiles").is_err());
+    }
+
+    /// A prewarm that left something out of the cache says what, not "Done!".
+    #[test]
+    fn a_prewarm_names_what_it_could_not_cache() {
+        assert_eq!(uncached_error(&[]), None);
+        let said = uncached_error(&["canopy height".into(), "land cover".into()]).unwrap();
+        assert!(said.contains("canopy height, land cover"), "{said}");
+    }
+
+    /// A Bedrock or Luanti prewarm names no output: no place-name request, no worlds folder.
+    #[test]
+    fn prewarm_names_no_output() {
+        assert!(!names_output(true));
+        assert!(names_output(false));
+    }
+
+    /// The switch off sends no flags, and no flags leave every setting at the stock run's.
+    #[test]
+    fn switch_off_passes_no_new_flags() {
+        use clap::Parser;
+        let extra = window_flag_args(&[], false, "java", true).unwrap();
+        let mut stock = Args::try_parse_from(["arnis"]).unwrap();
+        // The window never takes these from the environment (ARNIS_OFFLINE, ARNIS_OVERPASS_URL).
+        stock.offline = false;
+        stock.overpass_url.clear();
+        assert_eq!(format!("{extra:?}"), format!("{stock:?}"));
+        let sent = window_flag_args(
+            &["--offline".into(), "--overpass-url=http://x".into()],
+            false,
+            "java",
+            true,
+        )
+        .unwrap();
+        assert!(sent.offline && sent.overpass_url == ["http://x"]);
+    }
+
+    /// Every flag the window can send is one the CLI parser takes.
+    #[test]
+    fn every_flag_the_window_sends_parses() {
+        let flags: Vec<String> = [
+            "--seed=7",
+            "--min-y=-64",
+            "--max-y=319",
+            "--road-detail=compact",
+            "--no-buildings",
+            "--props=none",
+            "--rocks=false",
+            "--bushes=false",
+            "--tree-realm=vanilla-plus",
+            "--tree-pack-dir=trees",
+            "--tree-pack-mode=replace",
+            "--cave-style=more-mix",
+            "--cave-ores=more",
+            "--river-bed=v1",
+            "--water-detail=scaled",
+            "--climate-mode=per-position",
+            "--world-border",
+            "--region-format=blinear",
+            "--ram-budget-mb=4096",
+            "--threads=4",
+            "--rock-density=0.1",
+            "--bush-density=0.2",
+            "--blinear-level=9",
+            "--osm-pbf=geofabrik",
+            "--osm-pbf-url=https://example.org/x.osm.pbf",
+            "--osm-tiles-url=archive",
+            "--overpass-url=https://a.example,https://b.example",
+            "--offline",
+        ]
+        .map(String::from)
+        .to_vec();
+        let extra = window_flag_args(&flags, false, "java", true).unwrap();
+        assert!(!extra.buildings && extra.world_border && extra.disable_height_limit);
+        assert!(extra.offline && extra.overpass_url.len() == 2 && extra.osm_pbf.is_some());
+        let one = ["--origin=44.4,26.1".to_string()];
+        assert!(window_flag_args(&one, true, "java", false)
+            .unwrap()
+            .origin
+            .is_some());
+        // Y limits are refused for a world that cannot take them.
+        let y = ["--min-y=-64".to_string()];
+        assert!(window_flag_args(&y, true, "java", false).is_err());
+        assert!(window_flag_args(&y, false, "bedrock", true).is_err());
+    }
+
+    /// The window draws the plan the job would run, from the same flags, and writes nothing.
+    #[test]
+    fn the_window_plans_the_job_it_would_run() {
+        let dir = std::env::temp_dir().join(format!("arnis-plan-{}", std::process::id()));
+        let save = dir.display().to_string();
+        let bbox = "44.4450,26.0950,44.4480,26.1030";
+        let plan = |flags: &[&str]| {
+            let flags = flags.iter().map(|f| f.to_string()).collect();
+            gui_plan_job(save.clone(), "W".into(), bbox.into(), 1.0, flags)
+        };
+        assert!(plan(&[]).is_err(), "no pieces, no plan");
+        let bad = gui_plan_job(
+            save.clone(),
+            "W".into(),
+            bbox.into(),
+            f64::NAN,
+            vec!["--one-world-workers=2".into()],
+        );
+        assert!(bad.is_err(), "a scale that is not a number has no plan");
+        let p = plan(&[
+            "--one-world-workers=2",
+            "--unit-regions=1",
+            "--snap-regions=cover",
+        ])
+        .unwrap();
+        let units = p["units"].as_array().unwrap();
+        assert_eq!(units.len(), 4);
+        assert!(units.iter().all(|u| u["size"] == 1 && u["done"] == false));
+        assert_eq!(p["estimate"]["workers"], 2);
+        assert!(units.iter().all(|u| u["ring"] == false));
+        // A margin of one region: 4 pieces inside, a ring of 12 around them.
+        let p = plan(&[
+            "--one-world-workers=2",
+            "--unit-regions=1",
+            "--snap-regions=cover",
+            "--margin-regions=1",
+        ])
+        .unwrap();
+        let units = p["units"].as_array().unwrap();
+        assert_eq!(units.len(), 16);
+        assert_eq!(units.iter().filter(|u| u["ring"] == true).count(), 12);
+        assert!(!dir.exists());
+    }
+
+    /// The names the window may send exist, and nothing else gets through.
+    #[test]
+    fn only_the_windows_own_flags_are_accepted() {
+        let known: Vec<String> = serde_json::from_str(&crate::args::capabilities_json()).unwrap();
+        for name in WINDOW_FLAGS {
+            assert!(known.iter().any(|k| k == name), "--{name} is not a flag");
+        }
+        for bad in [
+            "--output-dir=x",
+            "--path",
+            "--spawn-lat=1",
+            "seed=1",
+            "--world-name=a",
+        ] {
+            assert!(check_window_flags(&[bad.to_string()]).is_err(), "{bad}");
+        }
+        assert!(check_window_flags(&["--seed=1".into(), "--offline".into()]).is_ok());
+    }
+
+    /// A world folder named like a flag stays a value on the pieces' command line.
+    #[test]
+    fn a_world_named_like_a_flag_stays_a_value() {
+        use clap::Parser;
+        let args = Args::try_parse_from(["arnis"]).unwrap();
+        let argv = piece_argv(&args, Path::new("saves/--seed=9"), &[]);
+        let back =
+            Args::try_parse_from(std::iter::once(std::ffi::OsString::from("arnis")).chain(argv))
+                .unwrap();
+        assert_eq!(back.world_name.as_deref(), Some("--seed=9"));
+        assert_eq!(back.seed, None);
+    }
+
+    #[test]
+    fn the_flags_reach_the_run_and_its_pieces() {
+        use clap::Parser;
+        let flags: Vec<String> = [
+            "--one-world-workers=2",
+            "--seed=7",
+            "--road-detail=clean",
+            "--no-buildings",
+            "--only-pieces=2,3",
+        ]
+        .map(String::from)
+        .to_vec();
+        let extra = window_flag_args(&flags, true, "java", false).unwrap();
+        assert!(extra.units.coordinates() && !extra.buildings && extra.seed == Some(7));
+        // Pieces are a One World feature: elsewhere the job flags are dropped.
+        let solo = window_flag_args(&flags, false, "java", true).unwrap();
+        assert!(!solo.units.coordinates() && solo.units.only_pieces.is_none());
+        // A piece asked with the window's settings parses back to them.
+        let mut args = Args {
+            scale: 2.0,
+            winter: true,
+            ..extra
+        };
+        let argv = piece_argv(&args, Path::new("saves/World"), &flags);
+        let back =
+            Args::try_parse_from(std::iter::once(std::ffi::OsString::from("arnis")).chain(argv))
+                .unwrap();
+        assert_eq!((back.scale, back.winter, back.seed), (2.0, true, Some(7)));
+        assert_eq!(back.world_name.as_deref(), Some("World"));
+        // The token goes to the pieces in their environment, never on a command line.
+        args.mapillary_token = Some("MLY|secret".into());
+        let argv = piece_argv(&args, Path::new("saves/World"), &flags);
+        assert!(!argv
+            .iter()
+            .any(|a| a.to_string_lossy().contains("MLY|secret")));
+        // Mapillary chosen with no token saved: what a piece is given passes its own check.
+        args.mapillary_token = None;
+        args.mapillary_facades = Some(true);
+        let argv = piece_argv(&args, Path::new("saves/World"), &flags);
+        assert!(argv.iter().any(|a| a == "--mapillary-facades=false"));
+        let piece = crate::scale::child_args(
+            argv.into_iter(),
+            "44.44,26.09,44.45,26.1",
+            Path::new("lease.json"),
+            false,
+        );
+        let piece =
+            Args::try_parse_from(std::iter::once(std::ffi::OsString::from("arnis")).chain(piece))
+                .unwrap();
+        crate::args::validate_args(&piece).unwrap();
+    }
+
+    #[test]
+    fn new_one_world_removed_only_when_nothing_built() {
+        assert!(remove_failed_new_world(true, 0, 0));
+        assert!(!remove_failed_new_world(false, 0, 0));
+        assert!(pieces_job_keeps_world(false) && !pieces_job_keeps_world(true));
+        assert!(!remove_failed_new_world(true, 1, 0));
+        assert!(!remove_failed_new_world(true, 0, 1));
+    }
+
+    #[test]
+    fn lists_only_one_worlds_newest_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save = tmp.path();
+        let manifest = |name: &str| {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&save.join(name), &mut args, 40.0, -74.0).unwrap();
+        };
+        manifest("old");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        manifest("new");
+        fs::create_dir_all(save.join("plain")).unwrap();
+        fs::write(save.join("file.txt"), "x").unwrap();
+        let names: Vec<_> = gui_list_one_worlds(save.display().to_string())
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, ["new", "old"]);
+        let missing = save.join("nope").display().to_string();
+        assert!(gui_list_one_worlds(missing).unwrap().is_empty());
+    }
+
+    /// No image, no thumbnail; with one, a data URL at most 320 px wide, kept beside the world.
+    #[test]
+    fn a_thumbnail_is_made_once_from_a_preview() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = tmp.path().join("w");
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&world, &mut args, 40.0, -74.0).unwrap();
+        }
+        let path = world.display().to_string();
+        assert_eq!(gui_world_thumbnail(path.clone()).unwrap(), None);
+        assert!(!gui_list_one_worlds(tmp.path().display().to_string()).unwrap()[0].preview);
+        let previews = world.join(crate::one_world::PREVIEW_DIR);
+        fs::create_dir_all(&previews).unwrap();
+        image::RgbImage::new(640, 100)
+            .save(previews.join("area-1.png"))
+            .unwrap();
+        assert!(gui_list_one_worlds(tmp.path().display().to_string()).unwrap()[0].preview);
+        let url = gui_world_thumbnail(path.clone()).unwrap().unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+        let thumb = world.join(THUMB_FILE);
+        assert_eq!(image::open(&thumb).unwrap().width(), 320);
+        let made = fs::metadata(&thumb).unwrap().modified().unwrap();
+        assert_eq!(gui_world_thumbnail(path).unwrap().unwrap(), url);
+        assert_eq!(
+            fs::metadata(&thumb).unwrap().modified().unwrap(),
+            made,
+            "kept"
+        );
+    }
+
+    /// A place name is stored, cleared by an empty one, and refused while the world is in use.
+    #[test]
+    fn a_place_name_is_set_and_cleared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = tmp.path().join("w");
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&world, &mut args, 40.0, -74.0).unwrap();
+        }
+        let path = world.display().to_string();
+        let place = || {
+            gui_list_one_worlds(tmp.path().display().to_string()).unwrap()[0]
+                .place_name
+                .clone()
+        };
+        gui_set_place_name(path.clone(), " Bucharest ".into()).unwrap();
+        assert_eq!(place().as_deref(), Some("Bucharest"));
+        let held = SessionLock::acquire(&world).unwrap();
+        assert_eq!(
+            gui_set_place_name(path.clone(), "Paris".into()),
+            Err(WORLD_IN_USE.to_string())
+        );
+        drop(held);
+        gui_set_place_name(path, String::new()).unwrap();
+        assert_eq!(place(), None);
+    }
+
+    /// A renamed One World lists under its new name.
+    #[test]
+    fn a_renamed_world_lists_under_its_new_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&tmp.path().join("w"), &mut args, 40.0, -74.0).unwrap();
+        }
+        let save = tmp.path().display().to_string();
+        let new = gui_rename_world(save.clone(), "w".into(), "Paris".into()).unwrap();
+        let list = gui_list_one_worlds(save).unwrap();
+        assert_eq!((new.as_str(), list[0].name.as_str()), ("Paris", "Paris"));
+        assert!(list[0].info.exists);
+    }
+
+    /// An old world lists with no place and no jobs; a recorded job lists with its settings.
+    #[test]
+    fn listed_worlds_carry_their_jobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world = tmp.path().join("w");
+        {
+            use clap::Parser;
+            let mut args = Args::parse_from(["arnis", "--output-dir", "."]);
+            crate::one_world::create_empty(&world, &mut args, 40.0, -74.0).unwrap();
+        }
+        let list = || gui_list_one_worlds(tmp.path().display().to_string()).unwrap();
+        let old = &list()[0];
+        assert!(old.place_name.is_none() && old.jobs.is_empty() && old.bbox.is_none());
+        let flags = job_settings(&[
+            "--unit-regions=8".into(),
+            "--plan-mask=C:/tmp/m.geojson".into(),
+            "--tree-pack-dir=/packs".into(),
+            "--osm-pbf=x.pbf".into(),
+            "--osm-tiles-url=/Users/me/archive".into(),
+            "--overpass-url=https://me:pw@x.org/api?key=1".into(),
+        ]);
+        assert_eq!(
+            flags,
+            ["--unit-regions=8", "--overpass-url=https://x.org/api"]
+        );
+        crate::one_world::record_job(
+            &world,
+            "j",
+            Some(&flags),
+            Some([1.0, 2.0, 3.0, 4.0]),
+            2,
+            5,
+            false,
+        )
+        .unwrap();
+        let job = &list()[0].jobs[0];
+        assert_eq!(job.bbox, Some([1.0, 2.0, 3.0, 4.0]));
+        assert_eq!((job.name.as_str(), job.settings.clone()), ("j", flags));
+        assert_eq!((job.done, job.total, job.finished), (2, 5, false));
+    }
+
+    /// A job cut to an outline keeps a copy of it under the hash its name ends in.
+    #[test]
+    fn a_job_cut_to_an_outline_keeps_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mask = tmp.path().join("m.geojson");
+        fs::write(
+            &mask,
+            r#"{"type":"Polygon","coordinates":[[[13.3,52.5],[13.4,52.5],[13.4,52.6],[13.3,52.5]]]}"#,
+        )
+        .unwrap();
+        let world = tmp.path().join("w");
+        let (_, hash) = crate::work_units::Mask::read(&mask).unwrap();
+        let name = format!("0_0_511_511_n4_merge_m{hash:016x}");
+        assert_eq!(job_mask(&world, &name), (true, None));
+        keep_job_mask(&world, &mask).unwrap();
+        let kept = job_mask(&world, &name).1.unwrap();
+        assert_eq!(fs::read(&kept).unwrap(), fs::read(&mask).unwrap());
+        assert_eq!(job_mask(&world, "0_0_511_511_n4_merge"), (false, None));
+    }
 
     #[test]
     fn a_one_world_off_java_or_off_earth_is_refused() {

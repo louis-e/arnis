@@ -10,6 +10,7 @@ use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::land_cover::{coord_hash, LC_WATER};
+use crate::water_detail::WaterDetail;
 use crate::world_editor::{min_y, WorldEditor};
 use fnv::FnvHashMap;
 
@@ -20,7 +21,7 @@ const SHOAL_DT_UNITS: u16 = 9;
 const DT_MAX: u8 = u8::MAX;
 
 /// Maximum water carve depth, in blocks (the deepest tier).
-const MAX_WATER_DEPTH: i32 = 6;
+pub(crate) const MAX_WATER_DEPTH: i32 = 6;
 
 /// Room a tunnel needs under the deepest bed, on top of the floor the carve leaves it. That
 /// bed lies on `min_y() + 1`; a bore keeping its cover under it needs it at `min_y() + 9`.
@@ -88,17 +89,63 @@ pub struct BigWaterField {
     height: usize,
     min_x: i32,
     min_z: i32,
+    /// `--river-bed` depths, which take precedence; empty when off.
+    river: crate::river_bed::RiverBedField,
+    /// The water options dig below the crust the ground pass leaves beside water.
+    deeper_than_crust: bool,
+    has_river: bool,
 }
 
 impl BigWaterField {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             depth: Vec::new(),
             width: 0,
             height: 0,
             min_x: 0,
             min_z: 0,
+            river: Default::default(),
+            deeper_than_crust: false,
+            has_river: false,
         }
+    }
+
+    pub fn set_river_bed(&mut self, river: crate::river_bed::RiverBedField) {
+        self.has_river = !river.is_empty();
+        self.deeper_than_crust |= self.has_river;
+        self.river = river;
+    }
+
+    /// Lowest Y the carve can put water at in a column next to (x, z), or None where no
+    /// neighbour is carved or the options are off. From the field and the raw terrain
+    /// alone, so every tile gets the same answer.
+    pub fn lowest_water_beside(
+        &self,
+        ground: &Ground,
+        origin: (i32, i32),
+        x: i32,
+        z: i32,
+    ) -> Option<i32> {
+        if !self.deeper_than_crust {
+            return None;
+        }
+        [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .into_iter()
+            .filter_map(|(dx, dz)| {
+                let (nx, nz) = (x + dx, z + dz);
+                let depth = self.depth_at(nx, nz);
+                (depth > 0).then(|| {
+                    let surface = ground.water_level(XZPoint::new(nx - origin.0, nz - origin.1));
+                    surface - carve_depth(depth, surface)
+                })
+            })
+            .min()
+    }
+
+    /// True where the depth comes from the `--river-bed` field.
+    #[inline]
+    pub fn is_river(&self, x: i32, z: i32) -> bool {
+        self.river.depth_override(x, z).is_some()
     }
 
     #[inline]
@@ -106,11 +153,12 @@ impl BigWaterField {
     pub fn reaches(&self, x: i32, z: i32, r: i32) -> bool {
         let (x0, z0) = (i64::from(self.min_x), i64::from(self.min_z));
         let (x, z, r) = (i64::from(x), i64::from(z), i64::from(r));
-        self.width > 0
-            && x + r >= x0
-            && z + r >= z0
-            && x - r < x0 + self.width as i64
-            && z - r < z0 + self.height as i64
+        self.has_river
+            || (self.width > 0
+                && x + r >= x0
+                && z + r >= z0
+                && x - r < x0 + self.width as i64
+                && z - r < z0 + self.height as i64)
     }
 
     fn local_idx(&self, x: i32, z: i32) -> Option<usize> {
@@ -125,6 +173,14 @@ impl BigWaterField {
     /// Carve depth at the cell; 0 outside the water sub-rect.
     #[inline]
     pub fn depth_at(&self, x: i32, z: i32) -> i32 {
+        self.river
+            .depth_override(x, z)
+            .unwrap_or_else(|| self.legacy_depth_at(x, z))
+    }
+
+    /// Carve depth from the land-cover distance field alone.
+    #[inline]
+    pub fn legacy_depth_at(&self, x: i32, z: i32) -> i32 {
         match self.local_idx(x, z) {
             Some(i) => i32::from(nibble_get(&self.depth, i)),
             None => 0,
@@ -136,7 +192,7 @@ impl BigWaterField {
         let mut m = 0;
         for dz in -3..=3 {
             for dx in -3..=3 {
-                m = m.max(self.depth_at(x + dx, z + dz));
+                m = m.max(self.legacy_depth_at(x + dx, z + dz));
                 if m >= MAX_WATER_DEPTH {
                     return m;
                 }
@@ -163,7 +219,12 @@ pub(crate) fn grid_span_to_block_span(
 }
 
 /// Run a chamfer DT over the LC_WATER mask and bake per-cell carve depth.
-pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterField {
+pub fn compute_big_water_field(
+    ground: &Ground,
+    xzbbox: &XZBBox,
+    detail: WaterDetail,
+    scale: f64,
+) -> BigWaterField {
     let min_x = xzbbox.min_x();
     let max_x = xzbbox.max_x();
     let min_z = xzbbox.min_z();
@@ -245,7 +306,7 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
                 let idx = c as usize;
                 let x = smin_x + (idx % sw) as i32;
                 let z = smin_z + (idx / sw) as i32;
-                let d = ocean_depth_for_cell(x, z, u16::from(dt[idx]), cm);
+                let d = ocean_depth_for_cell(x, z, u16::from(dt[idx]), cm, detail, scale);
                 nibble_set(&mut depth, idx, d as u8);
                 for_each_neighbor(idx, sw, sh, |n| {
                     if dt[n] != 0 && !bit_get(&baked, n) {
@@ -266,6 +327,9 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
         height: sh,
         min_x: smin_x,
         min_z: smin_z,
+        river: Default::default(),
+        deeper_than_crust: detail != WaterDetail::Default,
+        has_river: false,
     }
 }
 
@@ -333,7 +397,8 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
 }
 
 /// Depth from an effective DT: local_max * sqrt(dist/span), tier-clamped.
-fn depth_from_dt(dt_eff: f64, component_max_units: u16) -> i32 {
+/// `round` is `--water-detail scaled`: flooring drops half a block on every column.
+fn depth_from_dt(dt_eff: f64, component_max_units: u16, round: bool) -> i32 {
     if dt_eff < f64::from(SHOAL_DT_UNITS) {
         return 0;
     }
@@ -350,16 +415,32 @@ fn depth_from_dt(dt_eff: f64, component_max_units: u16) -> i32 {
         35.0
     };
     let t = (dist_blocks / span).clamp(0.0, 1.0);
-    ((f64::from(local_max) * t.sqrt()).floor() as i32).clamp(0, local_max)
+    let depth = f64::from(local_max) * t.sqrt();
+    let depth = if round { depth.round() } else { depth.floor() };
+    (depth as i32).clamp(0, local_max)
 }
 
 /// Per-cell carve depth, with deterministic contour wobble on the bank lines.
-fn ocean_depth_for_cell(x: i32, z: i32, dt_units: u16, component_max_units: u16) -> i32 {
+fn ocean_depth_for_cell(
+    x: i32,
+    z: i32,
+    dt_units: u16,
+    component_max_units: u16,
+    detail: WaterDetail,
+    scale: f64,
+) -> i32 {
     if dt_units == 0 {
         return 0;
     }
+    if detail.uses_bowl(scale) {
+        return crate::water_detail::bowl_depth(x, z, dt_units, component_max_units, scale);
+    }
     let wobble = (crate::ground_generation::value_noise_01(x, z, 12) - 0.5) * 4.0;
-    depth_from_dt(f64::from(dt_units) + wobble, component_max_units)
+    depth_from_dt(
+        f64::from(dt_units) + wobble,
+        component_max_units,
+        detail.rounds_depth(),
+    )
 }
 
 /// Safe upper bound on a map's deepest carve, from the pre-repair water mask.
@@ -393,7 +474,15 @@ pub fn estimate_max_carve_depth(
     let hr = world_height.saturating_sub(1).max(1) as f64 / gh.saturating_sub(1).max(1) as f64;
     let block_max_dt = f64::from(grid_max_dt) * wr.max(hr).max(1.0);
     let comp_max = block_max_dt.min(f64::from(u16::MAX)) as u16;
-    depth_from_dt(block_max_dt + 2.0, comp_max)
+    depth_from_dt(block_max_dt + 2.0, comp_max, false)
+}
+
+/// The run's water options for `bore_crossings`, which the elevation fetch calls without them.
+static CROSSING_CARVE: std::sync::RwLock<crate::water_detail::CarveDepth> =
+    std::sync::RwLock::new(crate::water_detail::CarveDepth::NONE);
+
+pub fn set_crossing_carve(carve: crate::water_detail::CarveDepth) {
+    *CROSSING_CARVE.write().unwrap_or_else(|p| p.into_inner()) = carve;
 }
 
 /// Water a tunnel crosses: how deep the carve can dig there, and the lowest terrain of the
@@ -470,6 +559,7 @@ pub fn bore_crossings(
         }
     }
 
+    let carve = *CROSSING_CARVE.read().unwrap_or_else(|p| p.into_inner());
     cells
         .iter()
         .zip(lowest)
@@ -485,9 +575,10 @@ pub fn bore_crossings(
             // One body size from each depth tier.
             let depth = [0u16, 21, 45, 75]
                 .into_iter()
-                .map(|size| depth_from_dt(dt_eff, size))
+                .map(|size| depth_from_dt(dt_eff, size, false))
                 .max()
                 .unwrap_or(0);
+            let depth = carve.crossing(depth);
             BoreCrossing { depth, lowest_m }
         })
         .collect()
@@ -525,11 +616,15 @@ pub fn lc_carved_bed(
     z: i32,
     ground_y: i32,
 ) -> Option<i32> {
+    if ground.cover_class(coord) != LC_WATER {
+        // A river polygon or channel is dug to the river's depth without land-cover water.
+        return bwf.is_river(x, z).then(|| {
+            let water_y = ground.water_level(coord).min(ground_y);
+            water_y - carve_depth(bwf.depth_at(x, z), water_y) - 1
+        });
+    }
     // The carve only walks the water sub-rect; past it a cell keeps its terrain.
     bwf.local_idx(x, z)?;
-    if ground.cover_class(coord) != LC_WATER {
-        return None;
-    }
     let water_y = lc_water_surface(ground, coord, ground_y)?;
     Some(water_y - carve_depth(bwf.depth_at(x, z), water_y) - 1)
 }
@@ -541,6 +636,14 @@ pub(crate) const BORE_SHELL: &[Block] = &[
     MOSSY_STONE_BRICKS,
     POLISHED_DEEPSLATE,
 ];
+
+/// Over a bore, or with the opt-in beds also right beside one: they reach down its wall.
+pub(crate) fn at_bore(bwf: &BigWaterField, footprint: &RoadMaskBitmap, x: i32, z: i32) -> bool {
+    footprint.contains(x, z)
+        || (bwf.deeper_than_crust
+            && !footprint.is_empty()
+            && (-1..=1).any(|dx| (-1..=1).any(|dz| footprint.contains(x + dx, z + dz))))
+}
 
 /// The deepest carve up to `depth` that keeps the bed and the block under it on top of a
 /// tunnel shell in the column, or None where the shell reaches up into the bed itself.
@@ -572,7 +675,12 @@ pub fn carve_water_column(
         depth <= MAX_WATER_DEPTH,
         "water carve depth {depth} exceeds the max tier {MAX_WATER_DEPTH}"
     );
-    let depth = carve_depth(depth, water_y);
+    let mut depth = carve_depth(depth, water_y);
+    // Opt-in beds leave water that stands over a lower neighbour one block deep, or more
+    // of its side would show than the default bed does.
+    if depth > 0 && bwf.deeper_than_crust && editor.water_stands_over_neighbour(x, z, water_y) {
+        depth = 0;
+    }
     // Bridge piers continue down to the bed.
     if let Some(pier) = editor.support_column(x, z) {
         for dy in 0..=depth {
@@ -585,12 +693,18 @@ pub fn carve_water_column(
     }
     clear_stranded_vegetation(editor, x, z, water_y);
     let bed_y = water_y - depth - 1;
+    // River beds: their own palette, no soul sand pits, no dunes.
+    let is_river = bwf.is_river(x, z);
 
     // Keep the bed plain near causeways so blobs/dunes/veg don't clutter piers.
     let near_bridge = depth >= 2 && !road_mask.is_empty() && bridge_adjacent(road_mask, x, z);
 
     // Layered bed: gravel base with noise-driven sand/clay/dirt patches over stone.
     let (top_block, under_block) = match depth {
+        _ if is_river => {
+            let sandy = depth <= 1 && editor.near_beach(x, z, (4.0 * editor.scale()).max(1.0));
+            crate::river_bed::bed_blocks(x, z, depth, sandy)
+        }
         0..=1 => shallow_bed(editor, x, z),
         2..=6 if near_bridge => {
             if crate::ground_generation::value_noise_01(x, z, 6) < 0.4 && depth <= 3 {
@@ -625,7 +739,7 @@ pub fn carve_water_column(
                 } else {
                     GRAVEL
                 }
-            } else if d >= 5 && vn(727, 911, 8) > 0.96 {
+            } else if d >= 5 && !is_river && vn(727, 911, 8) > 0.96 {
                 SOUL_SAND
             } else if vn(73, 109, 64) > 0.74 {
                 CLAY
@@ -659,14 +773,34 @@ pub fn carve_water_column(
 
     // Dunes return their crest so veg plants on top instead of inside them.
     // 7x7 body max is sampled lazily; depth 1 always yields amp 0, skip it too.
-    let bump = if depth >= 2 && !near_bridge {
+    let bump = if depth >= 2 && !near_bridge && !is_river {
         let amp = dune_amp(bwf.body_max_7x7(x, z), depth);
         place_underwater_dunes(editor, x, z, water_y, bed_y, amp, top_block)
     } else {
         0
     };
-    if depth >= 3 && !near_bridge {
+    if is_river {
+        // Fresh water: grass only, and from two blocks down so a canal gets some.
+        if depth >= 2 && !near_bridge {
+            place_river_grass(editor, x, z, water_y, bed_y);
+        }
+    } else if depth >= 3 && !near_bridge {
         place_underwater_vegetation(editor, x, z, water_y, bed_y + bump, depth);
+    }
+}
+
+/// Seagrass in clumps on a river bed; kelp and sea pickles are left to the sea.
+fn place_river_grass(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32, bed_y: i32) {
+    let meadow = crate::ground_generation::ground_noise(x, z, 12, 0x5256_0010);
+    if meadow < 0.72 || crate::land_cover::coord_hash(x + 17, z + 31) % 10 >= 5 {
+        return;
+    }
+    let y = bed_y + 1;
+    if y + 1 < water_y && crate::land_cover::coord_hash(x + 211, z + 73) % 100 < 35 {
+        editor.set_block_absolute(TALL_SEAGRASS_BOTTOM, x, y, z, None, Some(&[AIR]));
+        editor.set_block_absolute(TALL_SEAGRASS_TOP, x, y + 1, z, None, Some(&[AIR]));
+    } else if y < water_y {
+        editor.set_block_absolute(SEAGRASS, x, y, z, None, Some(&[AIR]));
     }
 }
 
@@ -920,8 +1054,7 @@ pub fn carve_lc_water_pass(
     tunnel_footprint: &RoadMaskBitmap,
     bridge_surface: &BridgeSurfaceMap,
 ) {
-    let x1 = bwf.min_x + bwf.width as i32 - 1;
-    let z1 = bwf.min_z + bwf.height as i32 - 1;
+    // The whole area: river beds over bores lie outside the water sub-rect too.
     carve_lc_water_region(
         editor,
         ground,
@@ -930,10 +1063,10 @@ pub fn carve_lc_water_pass(
         road_mask,
         tunnel_footprint,
         bridge_surface,
-        bwf.min_x,
-        x1,
-        bwf.min_z,
-        z1,
+        xzbbox.min_x(),
+        xzbbox.max_x(),
+        xzbbox.min_z(),
+        xzbbox.max_z(),
     );
 }
 
@@ -982,13 +1115,79 @@ pub fn carve_lc_water_region(
             // A bore runs under the bed wherever the water leaves it room, so the column
             // over it is carved like the rest of the body. Where it cannot, up a portal
             // ramp or on the world's floor, the bed stops on top of the shell instead.
-            if tunnel_footprint.contains(x, z) {
+            if at_bore(bwf, tunnel_footprint, x, z) {
                 match depth_over_bore(editor, x, z, water_y, depth) {
                     Some(fits) => depth = fits,
                     None => continue,
                 }
             }
             carve_water_column(editor, x, z, water_y, depth, road_mask, bwf);
+        }
+    }
+    if bwf.has_river {
+        deepen_shallow_rivers(
+            editor,
+            ground,
+            xzbbox,
+            bwf,
+            road_mask,
+            tunnel_footprint,
+            bridge_surface,
+            (iter_min_x, iter_max_x, iter_min_z, iter_max_z),
+        );
+    }
+}
+
+/// River columns a fill left one block deep, dug to the river's depth: a closed way drawn
+/// as a sheet of water, and a column over a bore now that its shell is built. Land-cover
+/// water was handled by the carve.
+#[allow(clippy::too_many_arguments)]
+fn deepen_shallow_rivers(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    xzbbox: &XZBBox,
+    bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
+    (x0, x1, z0, z1): (i32, i32, i32, i32),
+) {
+    // A still surface stands at most this far over the terrain (`MAX_STILL_FILL_DROP`).
+    const SURFACE_REACH: i32 = 20;
+    for z in z0.max(xzbbox.min_z())..=z1.min(xzbbox.max_z()) {
+        for x in x0.max(xzbbox.min_x())..=x1.min(xzbbox.max_x()) {
+            if !bwf.is_river(x, z) {
+                continue;
+            }
+            let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
+            if ground.cover_class(coord) == LC_WATER {
+                continue;
+            }
+            let ground_y = editor.get_ground_level(x, z);
+            let lowest = ground.water_level(coord).min(ground_y);
+            let Some(water_y) = (lowest..=ground_y + SURFACE_REACH)
+                .rev()
+                .find(|&y| editor.check_for_block_absolute(x, y, z, Some(&[WATER]), None))
+            else {
+                continue;
+            };
+            if road_mask.contains(x, z)
+                && (!bridge_surface.deck_clears(x, z, water_y)
+                    || bridge_surface.over_grade_way(x, z))
+            {
+                continue;
+            }
+            let depth = carve_depth(bwf.depth_at(x, z), water_y);
+            let depth = if at_bore(bwf, tunnel_footprint, x, z) {
+                depth_over_bore(editor, x, z, water_y, depth)
+            } else {
+                // A column a fill already dug keeps what was put into its water since.
+                let dug = editor.check_for_block_absolute(x, water_y - 1, z, Some(&[WATER]), None);
+                (!dug).then_some(depth)
+            };
+            if let Some(depth) = depth {
+                carve_water_column(editor, x, z, water_y, depth, road_mask, bwf);
+            }
         }
     }
 }
@@ -1052,13 +1251,36 @@ mod tests {
 
     #[test]
     fn depth_zero_inside_shoal_and_on_land() {
-        assert_eq!(ocean_depth_for_cell(0, 0, 0, 0), 0);
-        assert_eq!(ocean_depth_for_cell(10, 10, 3, 200), 0);
+        assert_eq!(
+            ocean_depth_for_cell(0, 0, 0, 0, WaterDetail::Default, 1.0),
+            0
+        );
+        assert_eq!(
+            ocean_depth_for_cell(10, 10, 3, 200, WaterDetail::Default, 1.0),
+            0
+        );
+    }
+
+    #[test]
+    fn rounded_depth_is_never_shallower_and_still_steps_one_block() {
+        for cm in [10u16, 30, 60, 200] {
+            let mut prev = 0;
+            for dt in 0..=300u32 {
+                let d = depth_from_dt(f64::from(dt), cm, true);
+                let floored = depth_from_dt(f64::from(dt), cm, false);
+                assert!(d == floored || d == floored + 1, "dt={dt} cm={cm}");
+                assert!(d >= prev && d - prev <= 1, "dt={dt} cm={cm}");
+                prev = d;
+            }
+        }
     }
 
     #[test]
     fn depth_clamps_to_tier_max() {
-        assert_eq!(ocean_depth_for_cell(5, 5, u16::from(DT_MAX), 200), 6);
+        assert_eq!(
+            ocean_depth_for_cell(5, 5, u16::from(DT_MAX), 200, WaterDetail::Default, 1.0),
+            6
+        );
         assert_eq!(polygon_local_max(10), 2);
         assert_eq!(polygon_local_max(60), 4);
         assert_eq!(polygon_local_max(100), 6);
@@ -1070,7 +1292,7 @@ mod tests {
             let lm = polygon_local_max(cm);
             let mut prev = 0;
             for dt in 0..=300u32 {
-                let d = depth_from_dt(f64::from(dt), cm);
+                let d = depth_from_dt(f64::from(dt), cm, false);
                 assert!(d >= prev, "non-monotonic at dt={dt} cm={cm}");
                 assert!(d - prev <= 1, "step >1 at dt={dt} cm={cm}");
                 assert!(d <= lm);
@@ -1090,6 +1312,9 @@ mod tests {
             height: 4,
             min_x: 0,
             min_z: 0,
+            river: Default::default(),
+            deeper_than_crust: false,
+            has_river: false,
         };
         assert_eq!(
             bwf.body_max_7x7(0, 0),
@@ -1230,7 +1455,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let (bbox, ground) = lake();
-        let bwf = compute_big_water_field(&ground, &bbox);
+        let bwf = compute_big_water_field(&ground, &bbox, WaterDetail::Default, 1.0);
         let bed_at = |x: i32, z: i32| {
             lc_carved_bed(&ground, &bwf, XZPoint::new(x, z), x, z, 0).expect("lake")
         };
@@ -1278,6 +1503,109 @@ mod tests {
         }
     }
 
+    /// A tunnel under a river bed keeps its roof, and the carve over it matches a river's.
+    #[test]
+    fn river_bed_respects_tunnels() {
+        use crate::block_definitions::STONE_BRICKS;
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let (bbox, ground) = lake();
+        let mut bwf = compute_big_water_field(&ground, &bbox, WaterDetail::Default, 1.0);
+        bwf.set_river_bed(crate::river_bed::RiverBedField::uniform(0, 0, 120, 120, 4));
+        let bed_at = |x: i32, z: i32| {
+            lc_carved_bed(&ground, &bwf, XZPoint::new(x, z), x, z, 0).expect("lake")
+        };
+        let mut plain = lake_editor(&bbox, &ground);
+        let mut bored = lake_editor(&bbox, &ground);
+        let mut footprint = RoadMaskBitmap::new(&bbox);
+        let columns: Vec<(i32, i32)> = (12..=60)
+            .flat_map(|x| (58..=62).map(move |z| (x, z)))
+            .collect();
+        for &(x, z) in &columns {
+            footprint.set(x, z);
+            let bed = bed_at(x, z);
+            for y in bed - 7..=bed - 2 {
+                bored.set_block_absolute(STONE_BRICKS, x, y, z, None, None);
+            }
+        }
+        carve_lake(
+            &mut plain,
+            &ground,
+            &bbox,
+            &bwf,
+            &RoadMaskBitmap::new_empty(),
+        );
+        carve_lake(&mut bored, &ground, &bbox, &bwf, &footprint);
+        assert_eq!(bed_at(60, 60), -5, "the river depth, not the lake's");
+        for &(x, z) in &columns {
+            let bed = bed_at(x, z);
+            for y in bed - 1..=3 {
+                assert_eq!(
+                    bored.get_block_absolute(x, y, z),
+                    plain.get_block_absolute(x, y, z)
+                );
+            }
+            for y in bed - 7..=bed - 2 {
+                assert!(
+                    bored.check_for_block_absolute(x, y, z, Some(&[STONE_BRICKS]), None),
+                    "the carve replaced a tunnel block at ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+
+    /// A closed way is drawn as a sheet of water outside land-cover water; the carve digs it
+    /// to the river's depth, once, and leaves a dry river column alone.
+    #[test]
+    fn a_sheet_of_river_water_is_dug_to_the_river_bed() {
+        use crate::block_definitions::OAK_PLANKS;
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let (bbox, ground) = lake();
+        let mut bwf = compute_big_water_field(&ground, &bbox, WaterDetail::Default, 1.0);
+        // West of the lake, on land the land cover does not call water.
+        bwf.set_river_bed(crate::river_bed::RiverBedField::uniform(2, 40, 6, 20, 3));
+        let mut editor = lake_editor(&bbox, &ground);
+        for z in 40..60 {
+            for x in 2..7 {
+                editor.set_block_absolute(WATER, x, 0, z, None, None);
+            }
+        }
+        let none = RoadMaskBitmap::new_empty();
+        carve_lake(&mut editor, &ground, &bbox, &bwf, &none);
+        // River grass grows in the dug water.
+        let wet = [WATER, SEAGRASS, TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP];
+        let water =
+            |e: &WorldEditor, x, y, z| e.check_for_block_absolute(x, y, z, Some(&wet), None);
+        for z in 40..60 {
+            for x in 2..7 {
+                assert!((-3..=0).all(|y| water(&editor, x, y, z)), "({x}, {z})");
+                assert!(!water(&editor, x, -4, z) && editor.block_exists_absolute(x, -4, z));
+            }
+            assert!(!water(&editor, 7, 0, z), "no water was drawn at (7, {z})");
+        }
+        // A post set into the dug water stays through a second pass.
+        editor.set_block_absolute(OAK_PLANKS, 4, -2, 50, None, Some(&[]));
+        carve_lake(&mut editor, &ground, &bbox, &bwf, &none);
+        assert!(editor.check_for_block_absolute(4, -2, 50, Some(&[OAK_PLANKS]), None));
+    }
+
+    /// Beside a river dug four deep the bank is backed down to the river's lowest water;
+    /// without the options nothing is asked for.
+    #[test]
+    fn a_bank_is_backed_down_to_the_river_bed() {
+        let (_, ground) = lake();
+        let mut bwf = BigWaterField::empty();
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 39, 60), None);
+        bwf.set_river_bed(crate::river_bed::RiverBedField::uniform(40, 40, 20, 40, 4));
+        // The lake fixture is flat at Y 0, so the river's water reaches down to -4.
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 39, 60), Some(-4));
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 60, 60), Some(-4));
+        assert_eq!(bwf.lowest_water_beside(&ground, (0, 0), 38, 60), None);
+    }
+
     /// Up a portal ramp or on the world's floor a bore cannot get under the bed; the bed
     /// then stops on top of its shell, never in it.
     #[test]
@@ -1287,7 +1615,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let (bbox, ground) = lake();
-        let bwf = compute_big_water_field(&ground, &bbox);
+        let bwf = compute_big_water_field(&ground, &bbox, WaterDetail::Default, 1.0);
         let mut editor = lake_editor(&bbox, &ground);
         let mut footprint = RoadMaskBitmap::new(&bbox);
         // Roofs four and two under the surface, where the lake is carved six deep.
@@ -1520,7 +1848,8 @@ mod water_field_traversal_tests {
                 let idx = c as usize;
                 let x = smin_x + (idx % sw) as i32;
                 let z = smin_z + (idx / sw) as i32;
-                let d = ocean_depth_for_cell(x, z, u16::from(dt[idx]), cm);
+                let d =
+                    ocean_depth_for_cell(x, z, u16::from(dt[idx]), cm, WaterDetail::Default, 1.0);
                 nibble_set(&mut depth, idx, d as u8);
             }
         }
@@ -1530,7 +1859,7 @@ mod water_field_traversal_tests {
     fn assert_matches_reference(label: &str, grid: Vec<Vec<u8>>) -> BigWaterField {
         let bbox = XZBBox::rect_from_min_max(0, 0, SIDE as i32 - 1, SIDE as i32 - 1).unwrap();
         let ground = ground_from(grid);
-        let field = compute_big_water_field(&ground, &bbox);
+        let field = compute_big_water_field(&ground, &bbox, WaterDetail::Default, 1.0);
         let (depth, sw, sh, smin_x, smin_z) = single_pass_reference(&ground, &bbox);
         assert_eq!((field.width, field.height), (sw, sh), "{label}: sub-rect");
         assert_eq!(

@@ -552,16 +552,16 @@ impl Site<'_> {
     /// Read from the data grids alone, so an origin outside this pass's bounds
     /// resolves exactly as its own tile resolves it.
     fn habitat(&self, x: i32, z: i32) -> Option<Habitat> {
+        let point = XZPoint::new(x - self.origin_x, z - self.origin_z);
         let terrain_y = if self.terrain {
-            self.ground
-                .level(XZPoint::new(x - self.origin_x, z - self.origin_z))
+            self.ground.level(point)
         } else {
             self.flat_y
         };
         habitat(
             self.cover(x, z),
-            self.climate,
-            self.abs_lat,
+            self.ground.local_climate(point).unwrap_or(self.climate),
+            self.ground.local_lat(point).map_or(self.abs_lat, f64::abs),
             terrain_y >= self.alpine_from_y,
             self.ecoregion(x, z),
         )
@@ -584,9 +584,9 @@ pub fn decorate_region(
     if !ground.has_land_cover() || !ground.body().is_earth() || min_x > max_x || min_z > max_z {
         return;
     }
-    let (lat, lon) = args
-        .bbox
-        .as_ref()
+    let (lat, lon) = ground
+        .anchor()
+        .or(args.bbox.as_ref())
         .map(|b| {
             (
                 (b.min().lat() + b.max().lat()) * 0.5,

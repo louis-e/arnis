@@ -8,21 +8,38 @@ const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
 /// Also bounds the staleness of Mapterhorn's negative 404 markers.
 const TILE_CACHE_MAX_AGE_DAYS: u64 = 30;
 
+/// The directory every Arnis cache lives under: `ARNIS_CACHE_ROOT` when set, else the OS cache
+/// directory. Several processes (or a test) can then share one cache on a drive of the caller's
+/// choosing. Read once, so a run never splits its caches across two roots.
+pub fn user_cache_dir() -> Option<PathBuf> {
+    static ROOT: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        std::env::var_os("ARNIS_CACHE_ROOT")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(dirs::cache_dir)
+    })
+    .clone()
+}
+
+/// A provider's tile cache under the cache root `root`.
+pub fn provider_cache_dir(root: &std::path::Path, provider_name: &str) -> PathBuf {
+    root.join(TILE_CACHE_DIR_NAME).join(provider_name)
+}
+
 /// Returns the tile cache directory path for a specific provider.
 /// Uses the OS-standard cache directory (e.g. AppData/Local on Windows, ~/.cache on Linux).
 /// Falls back to ./arnis-tile-cache if the OS cache directory is unavailable.
 pub fn get_cache_dir(provider_name: &str) -> PathBuf {
-    let base = if let Some(cache_dir) = dirs::cache_dir() {
-        cache_dir.join(TILE_CACHE_DIR_NAME)
-    } else {
-        PathBuf::from(format!("./{TILE_CACHE_DIR_NAME}"))
-    };
-    base.join(provider_name)
+    match user_cache_dir() {
+        Some(root) => provider_cache_dir(&root, provider_name),
+        None => PathBuf::from(format!("./{TILE_CACHE_DIR_NAME}")).join(provider_name),
+    }
 }
 
 /// Returns the base tile cache directory path (without provider subdirectory).
 pub fn get_base_cache_dir() -> PathBuf {
-    if let Some(cache_dir) = dirs::cache_dir() {
+    if let Some(cache_dir) = user_cache_dir() {
         cache_dir.join(TILE_CACHE_DIR_NAME)
     } else {
         PathBuf::from(format!("./{TILE_CACHE_DIR_NAME}"))
@@ -48,6 +65,50 @@ impl CacheClearStats {
             errors: self.errors + other.errors,
         }
     }
+}
+
+/// Writes `bytes` to `path` via a temporary (pid + counter, so no two writers share one) and a
+/// rename, so readers never see half a file. Whether it landed; a cache write never fails a run.
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> bool {
+    use std::io::Write;
+    static WRITE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return false;
+    }
+    let tmp = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("cache"),
+        std::process::id(),
+        WRITE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let written = std::fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(bytes)?;
+        // The rename orders only the directory entry, not the file's data.
+        f.sync_all()
+    });
+    if written.is_err() || std::fs::rename(&tmp, path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return false;
+    }
+    true
+}
+
+/// How long a marker for a tile a server does not have is trusted online.
+pub const MISSING_MARKER_MAX_AGE: std::time::Duration =
+    std::time::Duration::from_secs(TILE_CACHE_MAX_AGE_DAYS * 24 * 60 * 60);
+
+/// Whether the marker at `path` still says the tile does not exist: younger than
+/// [`MISSING_MARKER_MAX_AGE`], or of any age offline, where it cannot be asked again.
+pub fn missing_marker_holds(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .is_ok_and(|t| {
+            crate::net::offline() || t.elapsed().is_ok_and(|age| age < MISSING_MARKER_MAX_AGE)
+        })
 }
 
 /// Bytes held by every regular file under `dir`, symlinks counted but not
@@ -391,6 +452,36 @@ fn cleanup_dir_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_marker_expires_online_but_not_offline() {
+        // Same locks as the net test: offline refuses downloads elsewhere while it is on.
+        let _net = crate::net::PERMIT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _floor = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("t.missing");
+        assert!(!missing_marker_holds(&marker));
+        assert!(write_atomic(&marker, b""));
+        assert!(missing_marker_holds(&marker));
+        let old = std::time::SystemTime::now()
+            - MISSING_MARKER_MAX_AGE
+            - std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&marker)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(!missing_marker_holds(&marker));
+        crate::net::set_offline(true);
+        let offline = missing_marker_holds(&marker);
+        crate::net::set_offline(false);
+        assert!(offline);
+    }
 
     #[test]
     fn sweep_due_without_stamp_then_throttled() {

@@ -1,4 +1,6 @@
-const DEFAULT_LOCALE_PATH = `./locales/en.json`;
+// en.json is a git symlink to en-US.json, which a Windows checkout leaves as a plain text file
+// naming its target; a build from there must not read it.
+const DEFAULT_LOCALE_PATH = `./locales/en-US.json`;
 
 // Browser tags of languages Arnis files under another code.
 const LANGUAGE_ALIASES = { uk: 'ua' };
@@ -37,6 +39,7 @@ export function invalidJSON(response) {
  */
 export async function fetchLanguage(languageCode) {
 
+    if (languageCode === 'en') languageCode = 'en-US';
     let response = await fetch(`./locales/${languageCode}.json`);
 
     // Try with only first part of language code if not found

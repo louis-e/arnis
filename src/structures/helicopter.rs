@@ -25,7 +25,7 @@ fn helicopter() -> Option<&'static StructureSchematic> {
 
 /// Sometimes parks a helicopter at the pad centre; seeded by coordinates for tile-seam determinism.
 pub fn maybe_place_helicopter(editor: &mut WorldEditor, cx: i32, cz: i32) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Helicopter) {
         return;
     }
     let Some(schem) = helicopter() else {

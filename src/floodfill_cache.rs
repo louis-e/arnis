@@ -282,8 +282,8 @@ impl CoordinateBitmap {
                 urban_count += (first_byte & first_mask).count_ones() as usize;
 
                 // Full bytes in between
-                for byte_idx in (start_byte + 1)..end_byte {
-                    urban_count += self.bits[byte_idx].count_ones() as usize;
+                for byte in self.bits.iter().take(end_byte).skip(start_byte + 1) {
+                    urban_count += byte.count_ones() as usize;
                 }
 
                 // Last partial byte
@@ -1161,6 +1161,13 @@ fn relation_rings(
         closed.push(coords);
     }
     closed
+}
+
+/// `--threads`: the global Rayon pool with exactly `threads` workers, over RAYON_NUM_THREADS.
+pub fn configure_rayon_threads(threads: usize) {
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.max(1))
+        .build_global();
 }
 
 /// Configures the global Rayon thread pool with a CPU usage cap.

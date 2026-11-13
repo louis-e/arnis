@@ -92,7 +92,7 @@ fn park(
     h: u64,
     max_height: i32,
 ) {
-    if !editor.place_schematics() || h % 100 >= OCCUPANCY_PERCENT {
+    if !editor.place_prop(super::Prop::Car) || h % 100 >= OCCUPANCY_PERCENT {
         return;
     }
     let pool: Vec<&(StructureSchematic, u8)> = cars()

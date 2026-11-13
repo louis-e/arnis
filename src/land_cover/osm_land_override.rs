@@ -649,11 +649,11 @@ mod tests {
         ];
         let elements = vec![way(2, ring, &[("natural", "water")])];
         run(&mut lc, &bbox, &elements);
-        for x in 30..34 {
-            assert_ne!(lc.grid[30][x], LC_WATER, "x={x} should be land");
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(34).skip(30) {
+            assert_ne!(cell, LC_WATER, "x={x} should be land");
         }
-        for x in 34..60 {
-            assert_eq!(lc.grid[30][x], LC_WATER, "x={x} should stay water");
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(60).skip(34) {
+            assert_eq!(cell, LC_WATER, "x={x} should stay water");
         }
     }
 
@@ -674,8 +674,8 @@ mod tests {
             &[("waterway", "stream")],
         )];
         run(&mut lc, &bbox, &elements);
-        for x in 20..40 {
-            assert_eq!(lc.grid[30][x], LC_WATER, "x={x} should stay water");
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(40).skip(20) {
+            assert_eq!(cell, LC_WATER, "x={x} should stay water");
         }
     }
 
@@ -698,11 +698,8 @@ mod tests {
         ];
         let elements = vec![way(4, ring, &[("natural", "water")])];
         run(&mut lc, &bbox, &elements);
-        for x in 40..55 {
-            assert_eq!(
-                lc.grid[30][x], LC_WATER,
-                "unmapped body at x={x} was trimmed"
-            );
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(55).skip(40) {
+            assert_eq!(cell, LC_WATER, "unmapped body at x={x} was trimmed");
         }
     }
 
@@ -728,14 +725,11 @@ mod tests {
             &bbox,
             &[way(5, ring, &[("leisure", "swimming_pool")])],
         );
-        for x in 18..32 {
-            assert_eq!(lc.grid[22][x], LC_GRASSLAND, "x={x} still water");
+        for (x, &cell) in lc.grid[22].iter().enumerate().take(32).skip(18) {
+            assert_eq!(cell, LC_GRASSLAND, "x={x} still water");
         }
-        for z in 18..28 {
-            assert_eq!(
-                lc.grid[z][19], LC_GRASSLAND,
-                "coping cell z={z} still water"
-            );
+        for (z, row) in lc.grid.iter().enumerate().take(28).skip(18) {
+            assert_eq!(row[19], LC_GRASSLAND, "coping cell z={z} still water");
         }
     }
 

@@ -82,6 +82,9 @@ impl ElevationProvider for Mapterhorn {
             )
             .into());
         }
+        if outcome.failed_downloads > 0 {
+            crate::net::note_uncached("elevation tiles (Mapterhorn)");
+        }
 
         println!(
             "Sampling {} Mapterhorn tiles into {}x{} grid...",
@@ -192,6 +195,44 @@ fn covering_tile_keys(bbox: &LLBBox, zoom: u8) -> Vec<TileKey> {
         }
     }
     keys
+}
+
+/// The files a fetch of `bbox` at the grid's zoom reads from `dir`: each tile's cache file, or
+/// its 404 marker where one stands in for a tile known to be absent.
+pub(crate) fn cache_files(
+    dir: &Path,
+    bbox: &LLBBox,
+    grid_width: usize,
+    grid_height: usize,
+) -> Vec<PathBuf> {
+    let zoom = choose_zoom(bbox, grid_width, grid_height);
+    let keys = covering_tile_keys(bbox, zoom);
+    // A level the probe found empty has markers on the probed tiles only; the fetch read the
+    // rest from coarser tiles, which stand in for them.
+    let probed_empty = keys.iter().any(|k| k.marker_path(dir).exists());
+    let mut files: Vec<PathBuf> = keys
+        .into_iter()
+        .map(|k| {
+            let marker = k.marker_path(dir);
+            if marker.exists() {
+                return marker;
+            }
+            let tile = k.cache_path(dir);
+            if probed_empty && !tile.exists() {
+                let coarser = std::iter::successors(k.parent(), TileKey::parent)
+                    .take_while(|a| a.z >= MIN_ZOOM)
+                    .map(|a| a.cache_path(dir))
+                    .find(|p| p.exists());
+                if let Some(coarser) = coarser {
+                    return coarser;
+                }
+            }
+            tile
+        })
+        .collect();
+    files.sort_unstable();
+    files.dedup();
+    files
 }
 
 /// Tile containing the given normalized mercator coords at a zoom level.
@@ -437,7 +478,22 @@ fn fetch_tile_pyramid(
         }
     }
 
-    // Persist 404 markers only when this run saw at least one good download.
+    // Persist 404 markers only when this run saw at least one good download. Under --prewarm, when every tile it
+    // found came from disk, one live known-land request gives that proof, since --offline can
+    // only replay the 404s that were stored.
+    if crate::net::prewarm()
+        && !state.pending_markers.is_empty()
+        && !state
+            .saw_network_success
+            .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        let _ = download_tile(
+            &client,
+            &KNOWN_LAND_TILE,
+            &KNOWN_LAND_TILE.cache_path(cache_dir),
+            &state.saw_network_success,
+        );
+    }
     if state
         .saw_network_success
         .load(std::sync::atomic::Ordering::Relaxed)
@@ -463,11 +519,13 @@ fn fetch_tile(
 ) -> TileFetch {
     let marker = key.marker_path(cache_dir);
     if let Ok(meta) = std::fs::metadata(&marker) {
-        let fresh = meta
-            .modified()
-            .ok()
-            .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())
-            .is_some_and(|age| age.as_secs() < MISSING_MARKER_MAX_AGE_SECS);
+        // Offline, any marker beats a refused request.
+        let fresh = crate::net::offline()
+            || meta
+                .modified()
+                .ok()
+                .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())
+                .is_some_and(|age| age.as_secs() < MISSING_MARKER_MAX_AGE_SECS);
         if fresh {
             return TileFetch::Missing { cached: true };
         }
@@ -499,6 +557,9 @@ fn download_tile(
     tile_path: &Path,
     net_ok: &std::sync::atomic::AtomicBool,
 ) -> TileFetch {
+    if let Err(e) = crate::net::ensure_online("elevation tiles (Mapterhorn)") {
+        return TileFetch::Failed(e);
+    }
     let url = key.url();
     let mut last_error = String::new();
 
@@ -625,9 +686,10 @@ fn sample_grid(
         .map(|z| source_pixel_m(bbox, z, zoom) as f32)
         .collect();
 
+    let mut tiles = FnvHashMap::default();
     for chunk_start in (0..grid_height).step_by(SAMPLE_CHUNK_ROWS) {
         let chunk_end = (chunk_start + SAMPLE_CHUNK_ROWS).min(grid_height);
-        let tiles = load_chunk_tiles(
+        tiles = load_chunk_tiles(
             outcome,
             cache_dir,
             bbox,
@@ -637,6 +699,7 @@ fn sample_grid(
             chunk_end,
             grid_height,
             &mut unreadable,
+            tiles,
         );
 
         let rows: Vec<(Vec<f64>, SourceRow)> = (chunk_start..chunk_end)
@@ -709,7 +772,8 @@ fn tap_tile_range(z: u8, lo: f64, hi: f64) -> (u32, u32) {
     )
 }
 
-/// Decode the available tiles a row chunk can touch, across all pyramid levels.
+/// Decode the available tiles a row chunk can touch, across all pyramid levels. Those the
+/// chunk before decoded (`carried`) are kept as they are.
 #[allow(clippy::too_many_arguments)]
 fn load_chunk_tiles(
     outcome: &FetchOutcome,
@@ -721,13 +785,14 @@ fn load_chunk_tiles(
     chunk_end: usize,
     grid_height: usize,
     unreadable: &mut FnvHashSet<TileKey>,
+    carried: FnvHashMap<TileKey, TileImage>,
 ) -> FnvHashMap<TileKey, TileImage> {
     let norm_y_top = norm_y_for_lat(row_lat(bbox, chunk_start, grid_height));
     let norm_y_bot = norm_y_for_lat(row_lat(bbox, chunk_end.saturating_sub(1), grid_height));
     let norm_x_min = (bbox.min().lng() + 180.0) / 360.0;
     let norm_x_max = (bbox.max().lng() + 180.0) / 360.0;
 
-    let mut tiles: FnvHashMap<TileKey, TileImage> = FnvHashMap::default();
+    let mut wanted: Vec<TileKey> = Vec::new();
     for z in floor..=zoom {
         let (ty_min, ty_max) = tap_tile_range(z, norm_y_top, norm_y_bot);
         let (tx_min, tx_max) = tap_tile_range(z, norm_x_min, norm_x_max);
@@ -735,21 +800,34 @@ fn load_chunk_tiles(
         for ty in ty_min..=ty_max {
             for tx in tx_min..=tx_max {
                 let key = TileKey { z, x: tx, y: ty };
-                if !outcome.available.contains(&key) || unreadable.contains(&key) {
-                    continue;
+                if outcome.available.contains(&key) && !unreadable.contains(&key) {
+                    wanted.push(key);
                 }
-                match image::open(key.cache_path(cache_dir)) {
-                    Ok(img) => {
-                        tiles.insert(key, img.to_rgb8());
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: cached Mapterhorn tile z{} x{} y{} unreadable during sampling: {e}",
-                            key.z, key.x, key.y
-                        );
-                        unreadable.insert(key);
-                    }
-                }
+            }
+        }
+    }
+    let mut tiles = carried;
+    let keep: FnvHashSet<TileKey> = wanted.iter().copied().collect();
+    tiles.retain(|key, _| keep.contains(key));
+    let decoded: Vec<(TileKey, image::ImageResult<TileImage>)> = wanted
+        .into_par_iter()
+        .filter(|key| !tiles.contains_key(key))
+        .map(|key| {
+            let tile = image::open(key.cache_path(cache_dir)).map(|img| img.to_rgb8());
+            (key, tile)
+        })
+        .collect();
+    for (key, tile) in decoded {
+        match tile {
+            Ok(tile) => {
+                tiles.insert(key, tile);
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: cached Mapterhorn tile z{} x{} y{} unreadable during sampling: {e}",
+                    key.z, key.x, key.y
+                );
+                unreadable.insert(key);
             }
         }
     }
@@ -835,6 +913,28 @@ mod tests {
     use super::super::tile_math::bbox_dimensions_m;
     use super::*;
     use crate::elevation::providers::tile_math::TERRARIUM_OFFSET;
+
+    #[test]
+    fn a_level_the_probe_found_empty_counts_its_coarser_tiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let bbox = LLBBox::new(44.40, 26.00, 44.50, 26.15).unwrap();
+        let (w, h) = (1200, 1100);
+        let keys = covering_tile_keys(&bbox, choose_zoom(&bbox, w, h));
+        assert!(keys.len() > 1);
+        let touch = |p: PathBuf| std::fs::write(p, b"").unwrap();
+        // Coarser tiles alone could be another scale's; nothing is claimed.
+        for k in &keys {
+            touch(k.parent().unwrap().cache_path(dir));
+        }
+        let files = cache_files(dir, &bbox, w, h);
+        assert!(files.iter().all(|f| !f.exists()), "{files:?}");
+        // With one probed tile marked absent, the rest come from the coarser level.
+        touch(keys[0].marker_path(dir));
+        let files = cache_files(dir, &bbox, w, h);
+        assert!(files.iter().all(|f| f.exists()), "{files:?}");
+        assert!(files.len() < keys.len());
+    }
 
     fn flat_tile(height_m: f64) -> TileImage {
         let raw = (height_m + TERRARIUM_OFFSET).round() as u32;
@@ -1121,6 +1221,49 @@ mod tests {
                 assert!((v - 300.0).abs() < 0.51, "got {v}");
             }
         }
+    }
+
+    #[test]
+    fn a_tile_two_chunks_share_is_decoded_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        // The z6 tile rows 22/23 meet at lat 45.0879, inside the bbox.
+        let bbox = LLBBox::new(45.0, 7.7, 45.2, 7.72).unwrap();
+        let north = TileKey { z: 6, x: 33, y: 22 };
+        let south = TileKey { z: 6, x: 33, y: 23 };
+        for key in [north, south] {
+            flat_tile(300.0).save(key.cache_path(tmp.path())).unwrap();
+        }
+        let outcome = FetchOutcome {
+            available: [north, south].into_iter().collect(),
+            confirmed_missing: FnvHashSet::default(),
+            failed_downloads: 0,
+        };
+        let mut unreadable = FnvHashSet::default();
+        let mut load = |rows: std::ops::Range<usize>, carried| {
+            let (dir, h) = (tmp.path(), 2500);
+            load_chunk_tiles(
+                &outcome,
+                dir,
+                &bbox,
+                6,
+                6,
+                rows.start,
+                rows.end,
+                h,
+                &mut unreadable,
+                carried,
+            )
+        };
+        let both = load(0..2500, FnvHashMap::default());
+        assert_eq!(both.len(), 2);
+        // With the files gone, a chunk keeps what the one before decoded and drops the
+        // tile it does not touch.
+        for key in [north, south] {
+            std::fs::remove_file(key.cache_path(tmp.path())).unwrap();
+        }
+        let top = load(0..512, both);
+        assert!(top.len() == 1 && top.contains_key(&north));
+        assert!(unreadable.is_empty());
     }
 
     #[test]

@@ -47,6 +47,8 @@ const SALT_BARE_EARTH: u32 = 0xBA4E_EA27;
 const SALT_SWARD: u32 = 0x5A7D_0001;
 const SALT_TALL_SWARD: u32 = 0x5A7D_0002;
 const SALT_WETLAND_POOLS: u32 = 0x9001_5E75;
+const SALT_PAVING_WEAR: u32 = 0xBA7E_3EA1;
+const SALT_PAVING_KIND: u32 = 0xBA7E_3EA2;
 
 /// Per-chunk cache of ground Y values.
 ///
@@ -273,9 +275,9 @@ pub fn generate_ground_region(
     // `Some` only off Earth, where the body's palette replaces land cover and
     // every Earth-only surface pass is off.
     let planetary_body = (!args.body.is_earth()).then_some(args.body);
-    let center_lat = args
-        .bbox
-        .as_ref()
+    let center_lat = ground
+        .anchor()
+        .or(args.bbox.as_ref())
         .map(|b| (b.min().lat() + b.max().lat()) * 0.5)
         .unwrap_or(0.0);
     let has_land_cover = ground.has_land_cover();
@@ -283,7 +285,6 @@ pub fn generate_ground_region(
     let tree_spacing = editor.tree_slot_spacing();
     let tree_pack = editor.tree_pack();
     let terrain_enabled = ground.elevation_enabled;
-    let climate = ground.climate();
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -328,7 +329,7 @@ pub fn generate_ground_region(
     // Share of forest-floor grass that grows as ferns, by the habitat the forest is in.
     // Undergrowth thins out with dryness: sparse in deserts, thinner on steppe,
     // full in savanna, temperate and boreal country.
-    let climate_sward = match climate {
+    let climate_sward = |climate| match climate {
         crate::climate::Climate::HotDesert => 0.25,
         crate::climate::Climate::ColdDesert => 0.3,
         crate::climate::Climate::IceCap => 0.3,
@@ -340,16 +341,19 @@ pub fn generate_ground_region(
         crate::climate::Climate::Temperate | crate::climate::Climate::TropicalSavanna => 1.0,
     };
     // Read per chunk, as the ecoregion under the forest can change across the area.
-    let fern_share_at = |x: i32, z: i32| match crate::ground_decoration::habitat(
-        land_cover::LC_TREE_COVER,
-        climate,
-        center_lat.abs(),
-        false,
-        ground.ecoregion(XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z())),
-    ) {
-        Some(crate::ground_decoration::Habitat::Taiga) => 0.45,
-        Some(crate::ground_decoration::Habitat::Jungle) => 0.3,
-        _ => 0.12,
+    let fern_share_at = |x: i32, z: i32| {
+        let point = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
+        match crate::ground_decoration::habitat(
+            land_cover::LC_TREE_COVER,
+            ground.climate_at(point),
+            ground.local_lat(point).unwrap_or(center_lat).abs(),
+            false,
+            ground.ecoregion(point),
+        ) {
+            Some(crate::ground_decoration::Habitat::Taiga) => 0.45,
+            Some(crate::ground_decoration::Habitat::Jungle) => 0.3,
+            _ => 0.12,
+        }
     };
 
     // A flat world fills columns the outline leaves out, so a cut chunk's edge is no trench;
@@ -491,6 +495,7 @@ pub fn generate_ground_region(
                     };
 
                     let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
+                    let climate = ground.climate_at(coord);
                     // Slope once per column (used for surface selection and depth), from
                     // unrounded heights so a contour doesn't flicker between tiers.
                     let (slope_f, gradient) = if terrain_enabled {
@@ -768,6 +773,11 @@ pub fn generate_ground_region(
                                             }
                                             _ => (FARMLAND, DIRT),
                                         },
+                                        // Ground reads the flag from args; roads and roofs read the
+                                        // process flag set from the same args (surfaces::patches).
+                                        land_cover::LC_BUILT_UP if args.surface_patches => {
+                                            built_up_patch(x, z)
+                                        }
                                         land_cover::LC_BUILT_UP => {
                                             let h = land_cover::coord_hash(x, z) % 100;
                                             if h < 72 {
@@ -1110,7 +1120,7 @@ pub fn generate_ground_region(
                                     Some(&[COARSE_DIRT]),
                                     None,
                                 );
-                                let sward = climate_sward * if worn { 0.5 } else { 1.0 };
+                                let sward = climate_sward(climate) * if worn { 0.5 } else { 1.0 };
 
                                 match cover {
                                     land_cover::LC_TREE_COVER
@@ -1476,6 +1486,13 @@ pub fn generate_ground_region(
                         }
                     }
 
+                    // A river or bowl bed next door digs below this column's crust.
+                    if !args.fillground {
+                        if let Some(lowest) = editor.lowest_water_beside(x, z) {
+                            editor.fill_column_absolute(STONE, x, z, lowest, ground_y - 1, true);
+                        }
+                    }
+
                     // Fill underground; column_fill_y_min skips already-Uniform sections.
                     if args.fillground {
                         editor.fill_column_absolute(
@@ -1519,7 +1536,11 @@ pub fn generate_ground_region(
         // at the end of generation for maximum throughput.
     }
 
-    // Plant patches need every column of the region finished first.
+    // Plant patches need every column of the region finished first, and grow
+    // around any rocks and bushes scattered there.
+    crate::ground_scatter::scatter_region(
+        editor, ground, args, xzbbox, iter_min_x, iter_max_x, iter_min_z, iter_max_z,
+    );
     crate::ground_decoration::decorate_region(
         editor, ground, args, xzbbox, iter_min_x, iter_max_x, iter_min_z, iter_max_z,
     );
@@ -1580,6 +1601,16 @@ pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
 /// about 27 degrees to the block grid, so patches don't come out boxy and
 /// lined up with the axes.
 pub(crate) fn value_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
+    salted_noise_with(x, z, scale, salt, land_cover::coord_hash)
+}
+
+/// `value_noise_salted` that `--seed` leaves alone, for geography such as climate borders.
+pub(crate) fn geo_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
+    salted_noise_with(x, z, scale, salt, land_cover::geo_coord_hash)
+}
+
+#[inline(always)]
+fn salted_noise_with(x: i32, z: i32, scale: i32, salt: u32, hash: impl Fn(i32, i32) -> u64) -> f64 {
     const COS: f64 = 0.891_006_524_188_368;
     const SIN: f64 = 0.453_990_499_739_547;
     let s = f64::from(scale.max(1));
@@ -1593,12 +1624,27 @@ pub(crate) fn value_noise_salted(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
     let (cu, cv) = (u0 as i32, v0 as i32);
     let salt_x = salt as i32;
     let salt_z = salt.rotate_left(16) as i32;
-    let sample = |cx: i32, cz: i32| {
-        (land_cover::coord_hash(cx ^ salt_x, cz ^ salt_z) % 1000) as f64 / 1000.0
-    };
+    let sample = |cx: i32, cz: i32| (hash(cx ^ salt_x, cz ^ salt_z) % 1000) as f64 / 1000.0;
     let a = sample(cu, cv) * (1.0 - su) + sample(cu + 1, cv) * su;
     let b = sample(cu, cv + 1) * (1.0 - su) + sample(cu + 1, cv + 1) * su;
     a * (1.0 - sv) + b * sv
+}
+
+/// Built-up paving for `--surface-patches`: stone bricks with worn patches of
+/// cracked bricks, stone and cobblestone, in about the shares of the speckle.
+fn built_up_patch(x: i32, z: i32) -> (Block, Block) {
+    if ground_noise(x, z, 5, SALT_PAVING_WEAR) >= 0.28 {
+        return (STONE_BRICKS, STONE);
+    }
+    let kind = ground_noise(x, z, 12, SALT_PAVING_KIND);
+    let top = if kind < 0.54 {
+        CRACKED_STONE_BRICKS
+    } else if kind < 0.71 {
+        STONE
+    } else {
+        COBBLESTONE
+    };
+    (top, STONE)
 }
 
 /// `patch_noise` bent by a coarser field and mixed with a finer octave: irregular, still uniform.

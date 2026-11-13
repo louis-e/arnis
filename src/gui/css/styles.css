@@ -224,8 +224,10 @@ a:hover {
   margin-bottom: 5px;
 }
 
-/* Time-remaining centered on the bar. White to match the percentage label; a
-   text-shadow keeps it legible over the green fill and the lighter track. */
+.progress-info-text.is-notice {
+  color: #fecc44 !important; /* the listener sets an inline colour */
+}
+
 .progress-eta-overlay {
   position: absolute;
   top: 50%;
@@ -241,6 +243,11 @@ a:hover {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.7);
   opacity: 0;
   transition: opacity 0.3s ease;
+}
+
+/* The text is written twice (main.js); one copy is enough. */
+.progress-eta-overlay .eta-on {
+  display: none;
 }
 
 .progress-eta-overlay.visible {
@@ -278,6 +285,16 @@ a:hover {
   white-space: nowrap;
   min-width: 0;
   flex: 0 1 auto;
+}
+
+/* The world's name can be clicked to rename it */
+.world-name-label[data-renamable] {
+  cursor: text;
+}
+
+.world-name-label[data-renamable]:hover {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 /* A custom name waiting for the next Start, not a world that exists yet */
@@ -871,4 +888,598 @@ input[type="range"] {
   .start-button-wrap.is-stopping:hover {
     background-color: #0f0f0f98;
   }
+}
+
+/* The plan of a job in pieces, before it runs (Meld features) */
+.job-plan {
+  margin: 4px 0 11px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.job-plan[hidden],
+.plan-expand[hidden] {
+  display: none;
+}
+
+/* What the map shows, in the map's own colours (bbox.js PIECE_COLORS, the selection's yellow) */
+.job-plan-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px 12px;
+  margin-top: 2px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+
+/* The plan: time, size and the one "?" on a single small row, then the disk line, then the legend */
+.plan-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px 8px;
+}
+
+.job-plan .plan-help {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  cursor: help;
+  box-shadow: none;
+}
+
+.plan-help.is-warn {
+  color: #fecc44;
+}
+
+.plan-help.is-error {
+  color: #fa7878;
+}
+
+.plan-tip {
+  display: none;
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--ui-card-border);
+  border-radius: 6px;
+  background: var(--ui-card);
+  color: var(--ui-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.plan-tip .legend-card {
+  margin-top: 6px;
+  padding: 6px 0 0;
+  border: 0;
+  border-top: 1px solid var(--ui-card-border);
+  border-radius: 0;
+}
+
+.plan-help:hover ~ .plan-tip,
+.plan-help:focus-visible ~ .plan-tip,
+.plan-help.is-open ~ .plan-tip,
+.plan-tip:hover {
+  display: block;
+}
+
+.plan-disk {
+  margin-top: 2px;
+  text-align: center;
+  color: #6fcf8f;
+}
+
+.plan-disk.is-low {
+  color: #fa7878;
+}
+
+.plan-disk[hidden] {
+  display: none;
+}
+
+/* How stretched a One World is here: amber past 5%, red past 10% */
+.plan-stretch {
+  color: var(--ui-muted);
+}
+.plan-stretch.is-warn {
+  color: #fecc44;
+}
+.plan-stretch.is-error {
+  color: #fa7878;
+}
+
+.plan-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.plan-stat::before {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  opacity: 0.7;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+.plan-stat-disk {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M5 13 7 5h10l2 8'/%3E%3Crect x='3' y='13' width='18' height='7' rx='2'/%3E%3Cpath d='M16 16.5h1'/%3E%3C/svg%3E");
+}
+
+.plan-stat-ram {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Crect x='6' y='6' width='12' height='12' rx='2'/%3E%3Cpath d='M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4'/%3E%3C/svg%3E");
+}
+
+.plan-stat-time {
+  --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E");
+}
+
+/* Before a job in pieces: its warnings and a button held to start it (main.js holdToConfirm) */
+.run-confirm {
+  margin: 8px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid rgba(254, 204, 68, 0.45);
+  border-radius: 8px;
+  background: rgba(254, 204, 68, 0.08);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.run-confirm[hidden],
+.run-confirm:not([hidden]) ~ .plan-expand {
+  display: none;
+}
+
+.run-confirm p {
+  margin: 0 0 2px;
+}
+
+.run-confirm a {
+  color: var(--ui-link);
+}
+
+.run-confirm-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.job-plan-legend > * {
+  display: inline-flex;
+  align-items: center;
+}
+
+.job-plan-legend .swatch {
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border: 2px solid #fecc44;
+  border-radius: 2px;
+}
+
+.job-plan-legend .swatch-pieces {
+  border: 1px solid #5aa9ff;
+  background: rgba(90, 169, 255, 0.25);
+}
+
+.job-plan-legend .swatch-ring {
+  border: 1px dotted #5aa9ff;
+  opacity: 0.8;
+}
+
+/* The card behind the "?": one line per thing the map shows now, in the map's own line patterns */
+.legend-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--ui-card-border);
+  border-radius: 6px;
+  color: var(--ui-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  /* A long language scrolls inside the card, not the panel */
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.legend-card > div {
+  display: flex;
+  align-items: center;
+  text-align: left;
+}
+
+.legend-card .swatch {
+  display: inline-flex;
+  flex: none;
+  width: 24px;
+  height: 12px;
+  margin-right: 8px;
+  border: 0;
+}
+
+.legend-card .swatch svg {
+  display: block;
+}
+
+.plan-expand {
+  width: 100%;
+  margin-top: 6px;
+}
+
+/* A quiet secondary action: text, no box */
+.run-button.plan-expand {
+  height: auto;
+  line-height: 1.2;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--ui-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.run-button.plan-expand:hover {
+  background: none;
+  color: var(--ui-text);
+}
+
+/* Run controls of a job built in pieces (Meld features) */
+.run-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.run-controls[hidden],
+.run-controls .run-button[hidden] {
+  display: none;
+}
+
+.run-failed {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #fa7878;
+}
+
+.run-failed:empty {
+  display: none;
+}
+
+.run-button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 10px;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ececec;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.run-button[hidden] {
+  display: none;
+}
+
+.run-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Show overlap: a toggle, pressed like the selected Java / Bedrock segment */
+.run-button.run-toggle {
+  flex: 1.6 1 auto;
+  width: auto; /* .controls-box button is 100 % wide */
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.run-button.run-toggle[aria-pressed="true"] {
+  background: var(--primary-accent);
+  border-color: var(--primary-accent);
+  color: #0f0f0f;
+  font-weight: 600;
+}
+
+.run-button.run-toggle[aria-pressed="true"]:hover {
+  background: var(--primary-accent-dark);
+}
+
+/* The fill grows while the button is held (1.5 s, HOLD_MS in main.js) and drains on release */
+.run-button.run-hold {
+  flex: 2;
+  border-color: var(--primary-accent);
+  color: var(--primary-accent);
+  font-weight: 600;
+  background-image: linear-gradient(rgba(254, 204, 68, 0.4), rgba(254, 204, 68, 0.4));
+  background-repeat: no-repeat;
+  background-size: 0 100%;
+  transition: background-size 0.2s;
+  touch-action: none;
+  user-select: none;
+}
+
+.run-button.run-hold.is-holding {
+  background-size: 100% 100%;
+  transition: background-size 1.5s linear;
+}
+
+/* Pressed once without holding: half full until the second press (arnisHold) */
+.run-button.run-hold.is-armed {
+  background-size: 50% 100%;
+}
+
+.run-button.run-hold:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Under a size warning: the way to Advanced features, centred, as wide as the warning */
+#bbox-features-cta {
+  display: block;
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: var(--primary-accent);
+  font-size: 0.85em;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.3em;
+  white-space: normal;
+  cursor: pointer;
+}
+
+/* An arrow into a corner after it says it leads somewhere, without an underline. */
+#bbox-features-cta::after {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-left: 5px;
+  vertical-align: -1px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+#bbox-features-cta[hidden] {
+  display: none;
+}
+
+#bbox-features-cta:hover {
+  color: var(--primary-accent-dark);
+}
+
+/* Meld features: the world line under Start Generation is plain text. The block's drop
+   shadow ran right under it and read as a glow; the grey status takes the panel's own colour (no opacity: a
+   translucent layer loses the crisp text rendering). */
+body:not(.meld-off) .button-block {
+  box-shadow: none;
+}
+
+body:not(.meld-off) .one-world-status:not(.is-warn):not(.is-error) {
+  color: inherit;
+}
+
+.plan-expand.is-running {
+  display: none;
+}
+
+/* ---- Map-first main page (Meld features; off = the 3.4.0 layout above) ----
+   The map fills the window; logo, title, the control cards, the 3D preview and the footer
+   float over it. CSS only: every element keeps its place in the markup. */
+body.map-first .container {
+  position: relative;
+  padding: 0;
+}
+
+body.map-first .flex-container {
+  position: absolute;
+  inset: 6px;
+  margin: 0;
+  min-height: 0;
+  display: block;
+}
+
+body.map-first .map-box {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  min-height: 0;
+}
+
+/* The logo is the title: centred on the window at the top, level with the control card, no box
+   behind it. A click opens the Arnis site (its link); on hover the version shows under it
+   (main.js sets data-version). */
+body.map-first .row {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+}
+
+body.map-first .row a {
+  position: relative;
+  display: block;
+}
+
+/* !important: the img's inline style sizes it for the 3.4.0 page. */
+body.map-first #arnis-logo {
+  width: auto !important;
+  height: 46px !important;
+  padding: 0;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+}
+
+body.map-first .row a::after {
+  content: attr(data-version);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: rgba(30, 30, 30, 0.9);
+  color: #f2f2f2;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+body.map-first .row a:hover::after {
+  opacity: 1;
+}
+
+/* The controls: one stack of cards on the map's right, under the city search */
+body.map-first .controls-box {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  width: min(340px, 40vw);
+  max-height: calc(100% - 54px);
+  overflow-y: auto;
+}
+
+body.map-first .controls-content {
+  height: auto;
+  padding: 10px;
+  border-radius: 10px;
+  background: #2a2a2a; /* opaque: the cell grid and labels must not show through */
+  color: var(--ui-text, #f2f2f2);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+body.map-first .controls-box .progress-section {
+  margin-top: 4px;
+}
+
+/* An empty status line takes no height: it was a blank band between the format row and the plan. */
+body.map-first .progress-info-text:empty {
+  display: none;
+}
+
+/* The card's header names the world and its plan block the pieces: these lines would repeat
+   them (a warning or an error still shows). */
+body.map-first .bbox-selection-text.is-plan,
+body.map-first .one-world-status:not(.is-warn):not(.is-error) {
+  display: none;
+}
+
+/* The 3D preview: a card docked bottom-right over the map, clear of Leaflet's attribution.
+   Its grip in the top-left corner (#preview3d-grip, meld-features.js) resizes it, the bottom-right
+   staying put; the height follows the width (aspect-ratio), 200 px to 60 % of the window. A click
+   still opens the full preview; meld-features.js remembers the width. */
+body.map-first .preview3d-mini {
+  position: fixed;
+  right: 18px;
+  bottom: 34px;
+  z-index: 6;
+  width: 300px;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  min-width: 200px;
+  max-width: 60vw;
+  max-height: 60vh;
+  margin: 0;
+}
+
+/* Three diagonal strokes in the corner, as the native grip draws them (mirrored to the top-left) */
+.preview3d-mini .preview3d-grip { /* two classes: .controls-box button sets width, margin and shadow */
+  position: absolute;
+  margin: 0;
+  box-shadow: none;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: linear-gradient(135deg, transparent 0 3px, rgba(255, 255, 255, 0.85) 3px 4.5px, transparent 4.5px 7px, rgba(255, 255, 255, 0.85) 7px 8.5px, transparent 8.5px 11px, rgba(255, 255, 255, 0.85) 11px 12.5px, transparent 12.5px);
+  background-color: rgba(0, 0, 0, 0.25);
+  border-radius: 8px 0 8px 0;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.preview3d-mini .preview3d-grip:focus-visible {
+  outline: 2px solid var(--primary-accent);
+  outline-offset: -2px;
+}
+
+body:not(.map-first) .preview3d-mini .preview3d-grip {
+  display: none;
+}
+
+/* The footer: the search bar's box (same height, row, fill, radius and font size; map-controls.css) but
+   narrow and centred in the window, quiet until pointed at. Bottom is the search bar's: its 12 px
+   inside the 6 px map inset. */
+body.map-first .footer {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 18px;
+  z-index: 5;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  height: 35px;
+  margin: 0;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(46, 46, 46, 0.9);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  line-height: 17px;
+  white-space: nowrap;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+body.map-first .footer:hover,
+body.map-first .footer:focus-within {
+  opacity: 1;
+}
+
+body.map-first .footer a {
+  color: #ececec;
 }

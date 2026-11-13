@@ -490,6 +490,7 @@ pub fn fetch_land_cover_data(
         ) {
             Ok(()) => {}
             Err(e) => {
+                crate::net::note_uncached("land cover (ESA WorldCover)");
                 eprintln!("Warning: Failed to read ESA tile {tile_url}: {e}");
             }
         }
@@ -542,8 +543,66 @@ pub fn fetch_land_cover_data(
 
 // ─── Cache helpers ────────────────────────────────────────────────────────
 
+/// The files a read of `bbox` takes from the land cover cache under `root`: each ESA tile's
+/// header and the 1024 px blocks of it the box touches.
+pub(crate) fn cache_files(root: &Path, bbox: &LLBBox) -> Vec<PathBuf> {
+    // ESA's fixed layout (36000 px tiles cut in 1024 px COG tiles), not read from each header.
+    const PPD: f64 = 12_000.0;
+    const COG_TILE: i64 = 1024;
+    let dir = root.join(LAND_COVER_CACHE_DIR);
+    let px = |deg: f64| (deg * PPD).floor() as i64;
+    let (x0, x1) = (px(bbox.min().lng() + 180.0), px(bbox.max().lng() + 180.0));
+    let (y0, y1) = (px(90.0 - bbox.max().lat()), px(90.0 - bbox.min().lat()));
+    let side = (ESA_TILE_DEGREES * PPD) as i64;
+    let mut out = Vec::new();
+    for (lat, lng, url) in get_esa_tile_specs(bbox) {
+        let tx = ((lng + 180.0) * PPD).round() as i64;
+        let ty = ((90.0 - lat - ESA_TILE_DEGREES) * PPD).round() as i64;
+        let (lx0, lx1) = ((x0 - tx).max(0), (x1 + 1 - tx).min(side));
+        let (ly0, ly1) = ((y0 - ty).max(0), (y1 + 1 - ty).min(side));
+        if lx0 >= lx1 || ly0 >= ly1 {
+            continue;
+        }
+        let marker = missing_marker_path(&dir, &url);
+        if marker.exists() {
+            out.push(marker);
+            continue;
+        }
+        let name = url
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .replace(".tif", "");
+        out.push(dir.join(format!("{name}_header.bin")));
+        for ity in ly0 / COG_TILE..=(ly1 - 1) / COG_TILE {
+            for itx in lx0 / COG_TILE..=(lx1 - 1) / COG_TILE {
+                out.push(dir.join(format!("{name}_tile_{itx}_{ity}.bin")));
+            }
+        }
+    }
+    out
+}
+
+/// A 404 for an ESA tile: the product has none there (open ocean).
+#[derive(Debug)]
+struct TileAbsent;
+
+impl std::fmt::Display for TileAbsent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no ESA tile here (HTTP 404)")
+    }
+}
+
+impl std::error::Error for TileAbsent {}
+
+/// Marks an ESA tile the bucket does not have.
+fn missing_marker_path(cache_dir: &Path, url: &str) -> PathBuf {
+    let name = url.rsplit('/').next().unwrap_or("tile.tif");
+    cache_dir.join(name.replace(".tif", ".missing"))
+}
+
 fn get_cache_dir() -> PathBuf {
-    if let Some(cache_dir) = dirs::cache_dir() {
+    if let Some(cache_dir) = crate::elevation::cache::user_cache_dir() {
         cache_dir.join(LAND_COVER_CACHE_DIR)
     } else {
         PathBuf::from(format!("./{LAND_COVER_CACHE_DIR}"))
@@ -795,15 +854,25 @@ fn read_esa_tile_into_raster(
         .unwrap_or("tile.tif")
         .replace(".tif", "_header.bin");
     let header_cache_path = cache_dir.join(&cache_filename);
+    let marker = missing_marker_path(cache_dir, url);
+    if crate::elevation::cache::missing_marker_holds(&marker) {
+        return Ok(());
+    }
 
     // Step 1: Read the TIFF/BigTIFF header to get IFD location
     // Read first 64KB which should contain the IFD for COG files
     let header_bytes = if header_cache_path.exists() {
         std::fs::read(&header_cache_path)?
     } else {
-        let bytes = fetch_range(client, url, 0, 65536)?;
-        // Cache the header for future use
-        let _ = std::fs::write(&header_cache_path, &bytes);
+        let bytes = match fetch_range(client, url, 0, 65536) {
+            // Open ocean has no tile; remembered so neither a later run nor --offline asks.
+            Err(e) if e.is::<TileAbsent>() => {
+                crate::elevation::cache::write_atomic(&marker, b"");
+                return Ok(());
+            }
+            r => r?,
+        };
+        crate::elevation::cache::write_atomic(&header_cache_path, &bytes);
         bytes
     };
 
@@ -914,7 +983,7 @@ fn read_esa_tile_into_raster(
                 std::fs::read(&tile_cache_file)?
             } else {
                 let data = fetch_range(client, url, offset, byte_count)?;
-                let _ = std::fs::write(&tile_cache_file, &data);
+                crate::elevation::cache::write_atomic(&tile_cache_file, &data);
                 data
             };
 
@@ -959,12 +1028,16 @@ fn fetch_range(
     length: u64,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let end = start + length - 1;
+    crate::net::ensure_online("land cover (ESA WorldCover)")?;
     let response = client
         .get(url)
         .header("Range", format!("bytes={start}-{end}"))
         .send()?;
 
     let status = response.status();
+    if status.as_u16() == 404 {
+        return Err(Box::new(TileAbsent));
+    }
     // Must be 206 Partial Content. If the server ignores the Range header and
     // sends 200 OK, it would return the entire ~500MB GeoTIFF file.
     if status.as_u16() != 206 {
@@ -1614,8 +1687,19 @@ fn smooth_class_boundaries(
 }
 
 /// Simple deterministic hash from coordinates (for dithering and block variety).
+/// Mixes in `--seed` (none by default) before the final multiply.
 pub fn coord_hash(x: i32, z: i32) -> u64 {
-    let mut h = (x as u32 as u64).wrapping_mul(0x9E3779B97F4A7C15);
+    coord_hash_with(x, z, crate::deterministic_rng::seeded)
+}
+
+/// `coord_hash` without `--seed`, for geography every seed shares.
+pub fn geo_coord_hash(x: i32, z: i32) -> u64 {
+    coord_hash_with(x, z, |h| h)
+}
+
+#[inline(always)]
+fn coord_hash_with(x: i32, z: i32, seed: impl Fn(u64) -> u64) -> u64 {
+    let mut h = seed((x as u32 as u64).wrapping_mul(0x9E3779B97F4A7C15));
     h ^= (z as u32 as u64).wrapping_mul(0x517CC1B727220A95);
     h = h.wrapping_mul(0x6C62272E07BB0142);
     h ^ (h >> 32)
@@ -1847,5 +1931,25 @@ mod inland_water_tests {
         assert!(m.get(1, 1));
         assert!(!m.get(1, 3) && !m.get(4, 0));
         assert!(!m.get(usize::MAX, 0) && !m.get(0, usize::MAX));
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn a_tile_marked_missing_stands_in_for_its_files() {
+        let root = tempfile::tempdir().unwrap();
+        // Open Atlantic: one ESA tile, which the bucket does not have.
+        let bbox = LLBBox::new(1.0, -29.0, 1.01, -28.99).unwrap();
+        let before = cache_files(root.path(), &bbox);
+        assert!(before.len() >= 2, "header and a block: {before:?}");
+        let (_, _, url) = get_esa_tile_specs(&bbox).remove(0);
+        let marker = missing_marker_path(&root.path().join(LAND_COVER_CACHE_DIR), &url);
+        assert!(marker.to_string_lossy().ends_with("_N00W030_Map.missing"));
+        std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        std::fs::write(&marker, b"").unwrap();
+        assert_eq!(cache_files(root.path(), &bbox), vec![marker]);
     }
 }

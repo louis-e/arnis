@@ -1,17 +1,36 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::field_texture::PLOT_PLANTS;
+use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::ProcessedWay;
+use crate::water_depth::{at_bore, carve_water_column, BigWaterField};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
-pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
+/// What a channel needs to dig its `--river-bed`; the field marks no river when that is off.
+pub struct ChannelBed<'a> {
+    pub field: &'a BigWaterField,
+    pub road_mask: &'a RoadMaskBitmap,
+    pub tunnel_footprint: &'a RoadMaskBitmap,
+    /// Set with a water option on: a channel under a road at grade is then left out, so a
+    /// path along a stream leaves no strips of water on its sides.
+    pub piped_under_roads: Option<&'a BridgeSurfaceMap>,
+}
+
+/// `width_cap` narrows every channel (`--water-detail scaled` on small maps).
+pub fn generate_waterways(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    width_cap: Option<i32>,
+    bed: &ChannelBed,
+) {
     if let Some(waterway_type) = element.tags.get("waterway") {
         // waterway=* structures are not channels; outlining a dam draws canals down it.
         if !is_channel_waterway(waterway_type) {
             return;
         }
-        let waterway_width = waterway_width(waterway_type, &element.tags);
+        let waterway_width = capped_waterway_width(waterway_type, &element.tags, width_cap);
 
         // Culverts and pipes are not open water; they would cut channels through banks.
         if is_underground_waterway(&element.tags) {
@@ -49,7 +68,13 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
                     y0.min(y1)
                 };
                 let seg_water_y = ramped.min(editor.get_water_level(bx, bz));
-                create_water_channel(editor, bx, bz, waterway_width, seg_water_y);
+                if bed.piped_under_roads.is_some_and(|decks| {
+                    bed.road_mask.contains(bx, bz)
+                        && (!decks.deck_clears(bx, bz, seg_water_y) || decks.over_grade_way(bx, bz))
+                }) {
+                    continue;
+                }
+                create_water_channel(editor, bx, bz, waterway_width, seg_water_y, bed);
             }
         }
     }
@@ -125,6 +150,21 @@ pub fn waterway_width(waterway_type: &str, tags: &HashMap<String, String>) -> i3
     }
 }
 
+/// `waterway_width` under the small-map cap: `cap` for rivers and canals, and the narrowest
+/// channel for streams and ditches, so the two still read apart.
+pub fn capped_waterway_width(
+    waterway_type: &str,
+    tags: &HashMap<String, String>,
+    cap: Option<i32>,
+) -> i32 {
+    let width = waterway_width(waterway_type, tags);
+    match cap {
+        Some(cap) if get_waterway_width(waterway_type) <= 3 => width.min(cap).min(1),
+        Some(cap) => width.min(cap),
+        None => width,
+    }
+}
+
 /// Creates a water channel at a target water level with the given width.
 /// Skips blocks where terrain is above the water surface, with a small tolerance
 /// to avoid gaps on gentle slopes (can create stepped banks).
@@ -134,6 +174,7 @@ fn create_water_channel(
     center_z: i32,
     width: i32,
     target_water_y: i32,
+    bed: &ChannelBed,
 ) {
     const BANK_TOLERANCE: i32 = 2;
     let half_width = width / 2;
@@ -160,6 +201,15 @@ fn create_water_channel(
 
                 if let Some(water_y) = water_y {
                     editor.set_block_absolute(WATER, x, water_y, z, None, None);
+                    // The river's depth and bed, unless a road or a bore owns the column.
+                    if bed.field.is_river(x, z)
+                        && !bed.road_mask.contains(x, z)
+                        && !at_bore(bed.field, bed.tunnel_footprint, x, z)
+                        && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
+                    {
+                        let depth = bed.field.depth_at(x, z);
+                        carve_water_column(editor, x, z, water_y, depth, bed.road_mask, bed.field);
+                    }
 
                     // Clear vegetation above the water, a sunflower's top half too.
                     editor.set_block_absolute(AIR, x, water_y + 1, z, Some(PLOT_PLANTS), None);
@@ -225,6 +275,19 @@ mod waterway_profile_tests {
         }
     }
 
+    fn no_bed() -> ChannelBed<'static> {
+        static FIELD: std::sync::LazyLock<BigWaterField> =
+            std::sync::LazyLock::new(BigWaterField::empty);
+        static NONE: std::sync::LazyLock<RoadMaskBitmap> =
+            std::sync::LazyLock::new(RoadMaskBitmap::new_empty);
+        ChannelBed {
+            field: &FIELD,
+            road_mask: &NONE,
+            tunnel_footprint: &NONE,
+            piped_under_roads: None,
+        }
+    }
+
     fn water_ys(editor: &WorldEditor, x: i32, z: i32) -> Vec<i32> {
         (-8..40)
             .filter(|&y| editor.check_for_block_absolute(x, y, z, Some(&[WATER]), None))
@@ -235,7 +298,7 @@ mod waterway_profile_tests {
     fn a_dropping_channel_follows_the_terrain_instead_of_pooling_at_the_lower_node() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 16.0, 0.25);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z));
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);
@@ -253,11 +316,44 @@ mod waterway_profile_tests {
         }
     }
 
+    /// With a river bed field a line-only channel is dug to the field's depth and gets a
+    /// bed, except under a road.
+    #[test]
+    fn a_line_channel_is_dug_to_the_river_bed() {
+        let bbox = world_bbox();
+        let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
+        let mut field = BigWaterField::empty();
+        field.set_river_bed(crate::river_bed::RiverBedField::uniform(
+            0, 0, SIDE, SIDE, 2,
+        ));
+        let mut road_mask = RoadMaskBitmap::new(&bbox);
+        road_mask.set(CENTER_X, 30);
+        let none = RoadMaskBitmap::new_empty();
+        let decks = BridgeSurfaceMap::empty();
+        let bed = ChannelBed {
+            field: &field,
+            road_mask: &road_mask,
+            tunnel_footprint: &none,
+            piped_under_roads: Some(&decks),
+        };
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &bed);
+
+        // Two blocks deeper; the lowest may hold seagrass instead of plain water.
+        assert!(water_ys(&editor, CENTER_X, 20).ends_with(&[7, 8]));
+        assert!(editor.block_exists_absolute(CENTER_X, 6, 20), "not dug");
+        assert!(
+            !editor.check_for_block_absolute(CENTER_X, 5, 20, Some(&[WATER]), None)
+                && editor.block_exists_absolute(CENTER_X, 5, 20),
+            "no bed"
+        );
+        assert_eq!(water_ys(&editor, CENTER_X, 30), vec![8], "dug under a road");
+    }
+
     #[test]
     fn a_flat_channel_sits_at_the_single_shared_level() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z));
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
 
         for z in FIRST_Z..=LAST_Z {
             assert_eq!(
@@ -272,7 +368,7 @@ mod waterway_profile_tests {
     fn a_one_block_drop_moves_the_upper_half_by_at_most_one_block() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.02);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z));
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);
