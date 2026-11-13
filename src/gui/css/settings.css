@@ -645,6 +645,26 @@ button.setting-reason:focus-visible {
 }
 
 
+/* "New!" on a feature of this release (main.js, initNewBadges) */
+.new-badge {
+  height: 18px;
+  width: auto;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.settings-nav-item .new-badge {
+  flex-shrink: 0;
+  height: 15px;
+  margin-left: 4px;
+}
+
+.settings-page .segmented-control .segment .new-badge {
+  height: 12px;
+  margin-left: 5px;
+  vertical-align: -1px;
+}
+
 /* Notices: status lines and explanations under a setting */
 .settings-page .settings-notice {
   margin: 0;

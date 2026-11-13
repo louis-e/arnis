@@ -87,6 +87,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  initNewBadges();
   syncDiscordStatus();
   initOfflineModeSync();
   // The store's restore fired the toggle's change event before the save path
@@ -209,6 +210,9 @@ async function applyLocalization(localization) {
   });
   document.querySelectorAll("[data-localize-aria-label]").forEach((el) => {
     el.setAttribute("aria-label", loc(el.dataset.localizeAriaLabel, el.getAttribute("aria-label")));
+  });
+  document.querySelectorAll("[data-localize-alt]").forEach((el) => {
+    el.alt = loc(el.dataset.localizeAlt, el.alt);
   });
 
   // settings-store.js creates these buttons and owns their text.
@@ -2262,6 +2266,58 @@ function updateFormatToggleUI(format) {
 window.setWorldFormat = setWorldFormat;
 
 // The backend shows nothing on Discord until it is told the toggle is on.
+// "New!" on what came with this release. Each badge (data-new, its key) shows on the first three
+// starts and goes for good once data-new-when matches, so once the user has tried it. A section in
+// the settings sidebar carries one while a badge in it is still up.
+function initNewBadges() {
+  const all = Array.from(document.querySelectorAll('.new-badge[data-new]'));
+  if (!all.length) return;
+  const template = all[0].cloneNode();
+  const read = (key) => {
+    try { return { starts: 0, used: false, ...JSON.parse(localStorage.getItem(`arnis-new-${key}`) || '{}') }; } catch (_) { return { starts: 0, used: false }; }
+  };
+  const write = (key, s) => { try { localStorage.setItem(`arnis-new-${key}`, JSON.stringify(s)); } catch (_) { /* shown again */ } };
+  const drop = (key) => document.querySelectorAll(`.new-badge[data-new="${key}"]`).forEach((b) => b.remove());
+  const markSections = () => {
+    document.querySelectorAll('.settings-nav-item').forEach((item) => {
+      const up = !!document.getElementById(item.dataset.target)?.querySelector('.new-badge[data-new]');
+      const mark = item.querySelector('.new-badge');
+      if (up && !mark) {
+        const b = template.cloneNode();
+        delete b.dataset.new;
+        delete b.dataset.newWhen;
+        item.insertBefore(b, item.querySelector('.settings-nav-dot'));
+      } else if (!up && mark) mark.remove();
+    });
+  };
+  const open = new Map();
+  for (const key of new Set(all.map((b) => b.dataset.new))) {
+    const when = all.find((b) => b.dataset.new === key && b.dataset.newWhen)?.dataset.newWhen || '';
+    const seen = read(key);
+    if (when && document.querySelector(when)) seen.used = true;
+    if (seen.used || seen.starts >= 3) {
+      write(key, seen);
+      drop(key);
+      continue;
+    }
+    seen.starts += 1;
+    write(key, seen);
+    if (when) open.set(key, when);
+  }
+  markSections();
+  if (!open.size) return;
+  const check = () => {
+    for (const [key, when] of open) {
+      if (!document.querySelector(when)) continue;
+      write(key, { ...read(key), used: true });
+      drop(key);
+      open.delete(key);
+    }
+    markSections();
+  };
+  for (const ev of ['change', 'click']) document.addEventListener(ev, () => setTimeout(check, 0));
+}
+
 function syncDiscordStatus() {
   const toggle = document.getElementById("discord-status-toggle");
   const enabled = !!(toggle && toggle.checked);

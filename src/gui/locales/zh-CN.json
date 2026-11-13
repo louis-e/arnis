@@ -502,6 +502,7 @@
   "reason_token": "请输入 Mapillary 令牌。",
   "reason_outbreak": "请关闭“僵尸爆发”。",
   "reason_disasters": "请关闭“灾难”。",
+  "new_badge": "新功能",
   "meld_open_folder": "打开文件夹",
   "meld_plan_download": "立即下载",
   "meld_downloading": "正在下载。进度显示在主进度条上。",

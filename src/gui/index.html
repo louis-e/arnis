@@ -496,7 +496,7 @@
                         <!-- data-default marks the shipped default; the active class is moved by JS -->
                         <button type="button" class="segment active" data-default data-one-world="off" data-localize="one_world_off">Off</button>
                         <button type="button" class="segment" data-one-world="on" data-localize="one_world_on">On</button>
-                        <button type="button" class="segment" data-one-world="live" data-localize="one_world_live">Live</button>
+                        <button type="button" class="segment" data-one-world="live"><span data-localize="one_world_live">Live</span><img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="live" data-new-when="#one-world-group .segment.active[data-one-world=&quot;live&quot;]"></button>
                       </div>
                     </div>
                   </div>
@@ -1055,6 +1055,7 @@
                       <span class="setting-heading">
                         <span data-localize="pedestrians">Pedestrians</span>
                         <span class="tooltip-icon" data-tooltip-key="pedestrians_tip" data-tooltip="People walk the mapped footways, sidewalks, squares and pedestrian streets, busier by day and near shops and sights. They wait at kerbs and, with Working Traffic Lights, for the green man, and cars stop for them. Only people near a player walk. Java 1.21.9+ shows them in the game's own skins; older versions use villagers.">?</span>
+                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="pedestrians" data-new-when="#pedestrians-toggle:checked">
                       </span>
                       <span class="setting-desc" data-localize="pedestrians_desc">People who walk your sidewalks and pedestrian streets.</span>
                     </span>
@@ -1130,6 +1131,7 @@
                       <span class="setting-heading">
                         <span data-localize="advanced_meld_features">Advanced features</span>
                         <span class="tooltip-icon" data-tooltip-key="advanced_meld_features_tip" data-tooltip="Shows the Projects, Large Worlds, Data Sources and Fine Tuning sections. Turning it off hides them and uses none of their settings. Experimental.">?</span>
+                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="advanced" data-new-when="#advanced-meld-features-toggle:checked">
                       </span>
                       <span class="setting-desc" data-localize="advanced_meld_features_desc">Extra settings for large worlds and finer control.</span>
                       <span class="setting-desc"><span data-localize="advanced_meld_credit_pre">Ported from the </span><strong>Meld</strong><span data-localize="advanced_meld_credit_post"> project.</span></span>
