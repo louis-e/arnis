@@ -1366,7 +1366,7 @@ export async function resumeJob(job, rebuild, { select = selectBounds, current, 
 // job data from the engine) only Open and Expand are offered.
 // `busy()`: a run is under way, so no world is picked, renamed or run. `canRun()`: Resume and
 // Rebuild can start a run here (not in Live).
-export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null }) {
+export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null }) {
   const list = el('projects-list');
   let view = readView();
   const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
@@ -1517,6 +1517,76 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     return input;
   }
 
+  // New One World: a name card heads the list until it is used or cancelled, refreshes included.
+  // The engine checks the name; the world itself is made by the first Start.
+  const newButton = el('projects-new');
+  let draft = null;
+  let draftInput = null;
+  let shown = [];
+  const show = () => list.replaceChildren(...(draft ? [draft] : []), ...shown);
+  const newOff = () => !savePath() || !available() || busy();
+  const closeDraft = () => {
+    if (!draft) return;
+    draft = null;
+    draftInput = null;
+    show();
+  };
+  function newWorldCard() {
+    const card = document.createElement('div');
+    card.className = 'projects-row projects-new-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'projects-rename';
+    input.maxLength = 48;
+    input.value = '';
+    input.placeholder = t('projects_new_placeholder', 'Name of the new One World');
+    input.setAttribute('aria-label', t('projects_new', 'New One World'));
+    const err = text('projects-error', '');
+    const make = button('projects_new_create', 'Create', false, () => submit());
+    const dismiss = () => { closeDraft(); newButton?.focus?.(); };
+    const cancel = button('one_world_confirm_cancel', 'Cancel', false, dismiss);
+    const submit = async () => {
+      const name = input.value.trim();
+      if (!name) return input.focus?.();
+      if (make.disabled) return;
+      if (newOff()) return closeDraft();
+      make.disabled = true;
+      err.textContent = '';
+      let folder;
+      try {
+        folder = (await invoke('gui_new_one_world_name', { savePath: savePath(), name })) || name;
+      } catch (e) {
+        make.disabled = false;
+        err.textContent = String((e && e.message) || e);
+        return;
+      }
+      try {
+        localStorage.setItem('arnis-one-world-name', folder);
+        localStorage.setItem('arnis-one-world-picked', 'new');
+      } catch (_) { /* not kept */ }
+      closeDraft();
+      if (created) await created(folder);
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation?.();
+      if (e.key === 'Enter') { e.preventDefault?.(); submit(); } else if (e.key === 'Escape') { e.preventDefault?.(); dismiss(); }
+    });
+    const actions = document.createElement('div');
+    actions.className = 'projects-actions';
+    actions.append(make, cancel);
+    card.append(input, actions, err);
+    draftInput = input;
+    return card;
+  }
+  newButton?.addEventListener('click', () => {
+    if (newOff()) return;
+    if (!draft) {
+      draft = newWorldCard();
+      show();
+    }
+    draftInput?.focus?.();
+  });
+
   async function refresh() {
     let worlds = [];
     try { worlds = savePath() ? (await invoke('gui_list_one_worlds', { savePath: savePath() })) || [] : []; } catch (e) { console.error(e); }
@@ -1609,7 +1679,13 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       return row;
     });
     if (!rows.length) rows.push(text('projects-empty', t('projects_empty', 'No worlds yet. Build one with One World on.')));
-    list.replaceChildren(...rows);
+    if (newButton) {
+      newButton.disabled = newOff();
+      newButton.title = available() ? '' : t('one_world_desc_on', 'Each area joins one growing world at its real position.');
+      if (newButton.disabled) { draft = null; draftInput = null; }
+    }
+    shown = rows;
+    show();
     fillPlaces(worlds);
   }
   return refresh;

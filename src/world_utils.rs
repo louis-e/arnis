@@ -1355,6 +1355,28 @@ pub fn remove_one_world(
     remove(&world)
 }
 
+/// The folder a new One World typed as `raw` gets in `save`. Refused when the name would not
+/// land on disk as typed, or a world or folder already has it.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn new_world_name(save: &Path, raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if let Some(why) = bad_world_name(name) {
+        return Err(why.to_string());
+    }
+    if world_folder_name(name).as_deref() != Some(name) {
+        return Err(format!(
+            "The name is longer than {MAX_CUSTOM_WORLD_NAME_CHARS} characters."
+        ));
+    }
+    if !save.is_dir() {
+        return Err("The saves folder does not exist.".to_string());
+    }
+    if save.join(name).exists() {
+        return Err(format!("A world named {name} already exists."));
+    }
+    Ok(name.to_string())
+}
+
 /// `Data.LevelName` of a world's `level.dat`.
 pub(crate) fn level_name(world: &Path) -> Option<String> {
     let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
@@ -1621,6 +1643,24 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_world_name_must_be_free_and_land_as_typed() {
+        let save = tempfile::tempdir().unwrap();
+        fs::create_dir(save.path().join("Paris")).unwrap();
+        assert_eq!(new_world_name(save.path(), "  Tokyo ").unwrap(), "Tokyo");
+        assert!(new_world_name(save.path(), "Paris")
+            .unwrap_err()
+            .contains("already exists"));
+        let long = "x".repeat(MAX_CUSTOM_WORLD_NAME_CHARS + 1);
+        for refused in ["", "   ", "a/b", "..", "CON", "Tokyo.", &long] {
+            assert!(
+                new_world_name(save.path(), refused).is_err(),
+                "{refused:?} must be refused"
+            );
+        }
+        assert!(new_world_name(&save.path().join("missing"), "Tokyo").is_err());
+    }
 
     #[test]
     fn only_a_one_world_that_is_not_in_use_is_removed() {

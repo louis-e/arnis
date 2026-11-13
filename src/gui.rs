@@ -252,6 +252,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_world_thumbnail,
             gui_set_place_name,
             gui_rename_world,
+            gui_new_one_world_name,
             gui_trash_one_world,
             gui_one_world_overlap,
             gui_get_one_world_overlays,
@@ -1547,6 +1548,12 @@ fn gui_set_place_name(world_path: String, place_name: String) -> Result<(), Stri
     let name = place_name.trim();
     manifest.place_name = (!name.is_empty()).then(|| name.to_string());
     manifest.save(&world)
+}
+
+/// Checks the name of a One World about to be started from Projects; returns its folder name.
+#[tauri::command(async)]
+fn gui_new_one_world_name(save_path: String, name: String) -> Result<String, String> {
+    crate::world_utils::new_world_name(Path::new(save_path.trim()), &name)
 }
 
 /// Moves a One World in the saves folder to the system trash (the Recycle Bin on Windows),

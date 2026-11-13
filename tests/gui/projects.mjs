@@ -75,9 +75,83 @@ worlds.length = 0;
 await refresh();
 assert.strictEqual(document.getElementById('projects-list').children[0].textContent, 'No worlds yet. Build one with One World on.');
 
+// New One World: the button opens a name card at the head of the list; the engine checks the name.
+const made = [];
+const checked = [];
+let taken = null;
+let busyNow = false;
+let avail = true;
+let save = 's';
+const fresh = initProjects({
+  invoke: async (cmd, args) => {
+    if (cmd !== 'gui_new_one_world_name') return worlds;
+    checked.push(args);
+    if (taken) throw taken;
+    return args.name.trim();
+  },
+  savePath: () => save, scale: () => 1, open: async () => {}, available: () => avail, busy: () => busyNow,
+  created: async (n) => made.push(n),
+});
+await fresh();
+const newBtn = document.getElementById('projects-new');
+const listEl = document.getElementById('projects-list');
+const isCard = (c) => c?.className === 'projects-row projects-new-row';
+const settleNew = () => new Promise((r) => setTimeout(r, 0));
+assert.ok(!newBtn.disabled);
+await newBtn.listeners.click();
+const card = listEl.children[0];
+assert.ok(isCard(card) && listEl.children.length === 2, 'the card heads the list');
+const input = card.children[0];
+const [create, cancel] = card.children[1].children;
+assert.deepStrictEqual([create.textContent, cancel.textContent], ['Create', 'Cancel']);
+await create.listeners.click();
+assert.strictEqual(checked.length, 0, 'no name, nothing asked');
+taken = 'A world named Rome already exists.';
+input.value = 'Rome';
+input.listeners.keydown({ key: 'Enter' });
+await settleNew();
+assert.strictEqual(card.children[2].textContent, taken, 'a refusal shows in the card');
+await fresh();
+assert.strictEqual(listEl.children[0], card, 'a refresh keeps the card and what was typed');
+taken = null;
+input.value = '  Tokyo ';
+await create.listeners.click();
+await settleNew();
+assert.deepStrictEqual(checked.at(-1), { savePath: 's', name: 'Tokyo' });
+assert.deepStrictEqual(made, ['Tokyo'], 'the window takes the new world');
+assert.strictEqual(store.get('arnis-one-world-name'), 'Tokyo');
+assert.strictEqual(store.get('arnis-one-world-picked'), 'new');
+assert.ok(!isCard(listEl.children[0]), 'and the card closes');
+await newBtn.listeners.click();
+listEl.children[0].children[0].listeners.keydown({ key: 'Escape' });
+assert.ok(!isCard(listEl.children[0]), 'Escape closes it');
+await newBtn.listeners.click();
+listEl.children[0].children[1].children[1].listeners.click();
+assert.ok(!isCard(listEl.children[0]), 'so does Cancel');
+assert.strictEqual(made.length, 1, 'neither makes a world');
+await newBtn.listeners.click();
+busyNow = true;
+await fresh();
+assert.ok(newBtn.disabled && !isCard(listEl.children[0]), 'a run closes the card and holds the button');
+await newBtn.listeners.click();
+assert.ok(!isCard(listEl.children[0]), 'a held button opens nothing');
+busyNow = false;
+avail = false;
+await fresh();
+assert.ok(newBtn.disabled, 'not without One World');
+avail = true;
+save = '';
+await fresh();
+assert.ok(newBtn.disabled, 'not without a saves folder');
+save = 's';
+await fresh();
+assert.ok(!newBtn.disabled);
+
 // Advanced features off hides the tab.
 const html = fs.readFileSync(new URL('../../src/gui/index.html', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../../src/gui/css/settings.css', import.meta.url), 'utf8');
 assert.match(html, /class="settings-nav-item meld-only" data-target="settings-section-projects"/);
+assert.match(html, /id="projects-new"[^>]*><svg class="icon" aria-hidden="true"><use href="#i-plus"><\/use><\/svg><span data-localize="projects_new">/);
+assert.match(html, /<symbol id="i-plus"/);
 assert.match(css, /body\.meld-off \.meld-only\s*\{\s*display: none !important/);
 console.log('projects ok');
