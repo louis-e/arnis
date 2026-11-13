@@ -309,10 +309,23 @@ fn item_slot(entry: &Value) -> Option<i8> {
     }
 }
 
-// Puts the map into slot 0, only ever replacing a filled map there; other items
-// (including the player's own maps in other slots) are left untouched. If slot 0
-// holds something else, the map goes into the first free slot instead.
-fn insert_into_inventory(world_path: &Path, map_id: i32) -> Result<(), String> {
+fn item_map_id(entry: &Value) -> Option<i32> {
+    let Value::Compound(m) = entry else {
+        return None;
+    };
+    match m.get("components") {
+        Some(Value::Compound(c)) => match c.get("minecraft:map_id") {
+            Some(Value::Int(id)) => Some(*id),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// Puts the map into slot 0, or into the first free slot where that is taken. A world being
+// made replaces a filled map there, its own earlier one; a redraw replaces nothing, and
+// leaves a map the player already holds where it is.
+fn insert_into_inventory(world_path: &Path, map_id: i32, new_world: bool) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     let mut root = read_gzip_nbt(&level_path)?;
     {
@@ -331,7 +344,11 @@ fn insert_into_inventory(world_path: &Path, map_id: i32) -> Result<(), String> {
         let Value::List(ref mut items) = inventory else {
             return Err("Player.Inventory is not a list".to_string());
         };
-        items.retain(|e| !(is_filled_map(e) && item_slot(e) == Some(0)));
+        if new_world {
+            items.retain(|e| !(is_filled_map(e) && item_slot(e) == Some(0)));
+        } else if items.iter().any(|e| item_map_id(e) == Some(map_id)) {
+            return Ok(());
+        }
         let slot = if items.iter().any(|e| item_slot(e) == Some(0)) {
             (0..36i8)
                 .find(|s| !items.iter().any(|e| item_slot(e) == Some(*s)))
@@ -438,7 +455,7 @@ pub fn write_map_item(
     store.write_counter(branding_id)?;
 
     // Only the preview goes in the hotbar; branding is world-only.
-    insert_into_inventory(world_path, map_id)
+    insert_into_inventory(world_path, map_id, true)
 }
 
 /// Writes only the arnismc.com branding map, as `map_id`, when the preview map is off.
@@ -474,9 +491,9 @@ pub fn sync_map_counter(world_path: &Path) -> Result<(), String> {
 }
 
 /// Redraws a One World's map item from the area previews its manifest
-/// records, so it shows every area instead of the first. Repaints the locked
-/// map in the player's first hotbar slot (the one the spawn frame shows too),
-/// or adds a new one there. Returns the map id.
+/// records, so it shows every area instead of the first. Repaints the map
+/// Arnis made for the world (the one the spawn frame shows too), or adds a
+/// new one; the player's own maps are never touched. Returns the map id.
 pub fn redraw_one_world_map(world_path: &Path) -> Result<i32, String> {
     if crate::one_world::Manifest::load(world_path)?.is_none() {
         return Err(format!(
@@ -490,8 +507,8 @@ pub fn redraw_one_world_map(world_path: &Path) -> Result<i32, String> {
 }
 
 /// What a finished job in pieces does with the map item its head piece drew from that
-/// piece alone: repaints it over every area. `None` when the world has no locked map in
-/// the first hotbar slot to repaint. The caller holds the world's lock.
+/// piece alone: repaints it over every area. `None` when the world has no map item of
+/// Arnis's to repaint. The caller holds the world's lock.
 pub fn repaint_job_map(world_path: &Path) -> Result<Option<i32>, String> {
     redraw(world_path, false)
 }
@@ -502,7 +519,11 @@ fn redraw(world_path: &Path, add: bool) -> Result<Option<i32>, String> {
         .ok_or_else(|| format!("{} is not a One World.", world_path.display()))?;
     let ext = manifest.extent().ok_or("the One World has no areas yet")?;
     let store = MapStore::open(world_path)?;
-    let existing = hotbar_map_id(world_path).filter(|&id| {
+    // A world from before the id was recorded: its map is the first one Arnis numbers.
+    let own = manifest
+        .map_id
+        .or_else(|| hotbar_map_id(world_path).filter(|&id| id == FIRST_MAP_ID));
+    let existing = own.filter(|&id| {
         matches!(read_gzip_nbt(&store.map_path(id)),
             Ok(Value::Compound(root)) if matches!(root.get("data"),
                 Some(Value::Compound(d)) if d.get("locked") == Some(&Value::Byte(1))))
@@ -568,7 +589,12 @@ fn redraw(world_path: &Path, add: bool) -> Result<Option<i32>, String> {
     store.write_map(map_id, &map_dat)?;
     if existing.is_none() {
         sync_map_counter(world_path)?;
-        insert_into_inventory(world_path, map_id)?;
+    }
+    if manifest.map_id != Some(map_id) {
+        crate::one_world::record_map_item(world_path, map_id)?;
+    }
+    if add {
+        insert_into_inventory(world_path, map_id, false)?;
     }
     Ok(Some(map_id))
 }
@@ -588,19 +614,10 @@ fn hotbar_map_id(world_path: &Path) -> Option<i32> {
     let Some(Value::List(items)) = player.get("Inventory") else {
         return None;
     };
-    let item = items
+    items
         .iter()
-        .find(|e| is_filled_map(e) && item_slot(e) == Some(0))?;
-    match item {
-        Value::Compound(m) => match m.get("components") {
-            Some(Value::Compound(c)) => match c.get("minecraft:map_id") {
-                Some(Value::Int(id)) => Some(*id),
-                _ => None,
-            },
-            _ => None,
-        },
-        _ => None,
-    }
+        .find(|e| is_filled_map(e) && item_slot(e) == Some(0))
+        .and_then(item_map_id)
 }
 
 /// Writes one locked map per decal tile and bumps the id counter past them.
@@ -1102,11 +1119,8 @@ mod tests {
         };
         assert_eq!(items.iter().filter(|e| is_filled_map(e)).count(), 1);
     }
-    #[test]
-    fn map_item_only_touches_no_region() {
-        let tmp = tempfile::tempdir().unwrap();
-        let world =
-            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+    /// Makes `world` a One World of two recorded areas with previews.
+    fn two_areas(world: &Path) {
         let previews = world.join(crate::one_world::PREVIEW_DIR);
         std::fs::create_dir_all(&previews).unwrap();
         // Two 128x256 areas side by side, one red and one blue.
@@ -1130,10 +1144,86 @@ mod tests {
             "areas": [area(1, 0, [200, 0, 0]), area(2, 128, [0, 0, 200])],
         });
         std::fs::write(
-            crate::one_world::Manifest::path_in(&world),
+            crate::one_world::Manifest::path_in(world),
             manifest.to_string(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_redraw_leaves_the_players_maps_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        two_areas(&world);
+        // The player's own locked map, kept in the first hotbar slot.
+        let store = MapStore::open(&world).unwrap();
+        let theirs = build_map_dat(vec![5; 128 * 128], 0, false, 0, 0, store.data_version);
+        store.write_map(7, &theirs).unwrap();
+        let before = std::fs::read(store.map_path(7)).unwrap();
+        let level = world.join("level.dat");
+        let mut root = read_gzip_nbt(&level).unwrap();
+        if let Value::Compound(r) = &mut root {
+            if let Some(Value::Compound(data)) = r.get_mut("Data") {
+                if let Some(Value::Compound(player)) = data.get_mut("Player") {
+                    player.insert(
+                        "Inventory".to_string(),
+                        Value::List(vec![map_item_entry(7, 0)]),
+                    );
+                }
+            }
+        }
+        write_gzip_nbt(&level, &root).unwrap();
+
+        assert_eq!(repaint_job_map(&world).unwrap(), None);
+        let id = redraw_one_world_map(&world).unwrap();
+        assert_ne!(id, 7);
+        assert_eq!(std::fs::read(store.map_path(7)).unwrap(), before);
+        let held = |slot: i8, map: i32| {
+            inventory_items(&world)
+                .iter()
+                .any(|e| item_slot(e) == Some(slot) && item_map_id(e) == Some(map))
+        };
+        assert!(held(0, 7) && held(1, id));
+        let recorded = || {
+            crate::one_world::Manifest::load(&world)
+                .unwrap()
+                .unwrap()
+                .map_id
+        };
+        assert_eq!(recorded(), Some(id));
+        // Later redraws repaint that map and hand out no second one.
+        assert_eq!(redraw_one_world_map(&world).unwrap(), id);
+        assert_eq!(repaint_job_map(&world).unwrap(), Some(id));
+        assert_eq!(inventory_items(&world).len(), 2);
+        assert_eq!(std::fs::read(store.map_path(7)).unwrap(), before);
+    }
+
+    #[test]
+    fn a_world_from_before_the_id_was_recorded_keeps_its_map() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        write_map_item(
+            &world,
+            &PreviewAccumulator::new(&xzbbox),
+            &xzbbox,
+            FIRST_MAP_ID,
+        )
+        .unwrap();
+        two_areas(&world);
+        assert_eq!(repaint_job_map(&world).unwrap(), Some(FIRST_MAP_ID));
+        assert_eq!(redraw_one_world_map(&world).unwrap(), FIRST_MAP_ID);
+        assert_eq!(inventory_items(&world).len(), 1);
+    }
+
+    #[test]
+    fn map_item_only_touches_no_region() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+        two_areas(&world);
 
         // A region file of the world: the redraw must not touch it.
         let region = world.join("region");

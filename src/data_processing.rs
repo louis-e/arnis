@@ -2555,7 +2555,17 @@ pub fn generate_world_with_options(
     if wants_map_item {
         if let Some(p) = preview.as_ref() {
             match crate::map_item::write_map_item(&output_path, p, &own_rect, first_map_id) {
-                Ok(()) => println!("World map item added to the player inventory."),
+                Ok(()) => {
+                    println!("World map item added to the player inventory.");
+                    // A piece's map is recorded by its coordinator, like its area.
+                    if let Some(run) = one_world.filter(|run| run.unit.is_none()) {
+                        if let Err(e) =
+                            crate::one_world::record_map_item(&run.world_dir, first_map_id)
+                        {
+                            eprintln!("Warning: Failed to record the world map item: {e}");
+                        }
+                    }
+                }
                 Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
             }
         }

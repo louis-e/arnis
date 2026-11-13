@@ -1206,6 +1206,12 @@ pub fn run_with(
                 preview.is_file().then_some(preview.as_path()),
             )
             .map_err(|e| format!("The area was written but could not be recorded: {e}"))?;
+            // The head piece made the world's map item, the one `--stitch-map` repaints.
+            if head == Some(i) && args.map_item {
+                if let Err(e) = one_world::record_map_item(world_dir, job.first_map_id(unit)) {
+                    eprintln!("Warning: Failed to record the world map item: {e}");
+                }
+            }
         }
         write(&job.done_path(unit), &json!(r))?;
         // The world has its extras: a resume owes no head.

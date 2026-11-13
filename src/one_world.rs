@@ -143,6 +143,9 @@ pub struct Manifest {
     /// Jobs built in pieces, kept after their folder goes so the window can rebuild them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub jobs: Vec<JobRecord>,
+    /// The world map item Arnis made: the only map a redraw repaints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_id: Option<i32>,
 }
 
 /// A job built in pieces: the window's settings for it and how far it got.
@@ -204,6 +207,13 @@ pub fn record_job(
     manifest.save(world_dir)
 }
 
+/// Records the world map item Arnis made. Called by the manifest's one writer.
+pub fn record_map_item(world_dir: &Path, map_id: i32) -> Result<(), String> {
+    let mut manifest = Manifest::load(world_dir)?.ok_or("The One World vanished.")?;
+    manifest.map_id = Some(map_id);
+    manifest.save(world_dir)
+}
+
 fn real_height() -> f64 {
     1.0
 }
@@ -250,6 +260,7 @@ impl Manifest {
             areas: Vec::new(),
             place_name: None,
             jobs: Vec::new(),
+            map_id: None,
         }
     }
 
