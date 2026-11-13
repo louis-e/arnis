@@ -429,7 +429,8 @@ fn job_name(
 }
 
 /// The largest piece size of the auto job the world at `world_dir` has over `selection`,
-/// when the size the memory gives now would start another one: the job that ran last.
+/// when the size the memory gives now would start another one: the job that ran last. Any
+/// outline counts, so a plan with and without it (the window greys what it leaves out) agree.
 fn kept_auto_max(
     world_dir: &std::path::Path,
     proj: &WebMercatorProjection,
@@ -438,24 +439,35 @@ fn kept_auto_max(
 ) -> Option<i32> {
     let units = &args.units;
     let (requested, _) = snap_bbox_to_chunks(proj, selection).ok()?;
-    let mask = match &units.plan_mask {
-        Some(path) => Some(Mask::read(path).ok()?.1),
-        None => None,
-    };
     let merge = units.snap_regions == Some(crate::args::SnapRegions::Merge);
     let jobs = crate::one_world::Manifest::load(world_dir)
         .ok()
         .flatten()
         .map_or_else(Vec::new, |m| m.jobs);
+    let folders: Vec<String> = std::fs::read_dir(world_dir.join(crate::one_world::JOBS_DIR))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
     // When the job cut with `max` last ran; 0 for a folder no run recorded yet.
     let ran = |max: i32| {
         let rect = job_rect(&requested, units, auto_leaves(max)[0]).ok()?;
-        let name = job_name(&rect, UnitSize::Auto, Some(max), merge, mask);
-        let record = jobs.iter().find(|j| j.name == name);
-        let folder = world_dir.join(crate::one_world::JOBS_DIR).join(&name);
-        record
+        let base = job_name(&rect, UnitSize::Auto, Some(max), merge, None);
+        let is_job = |name: &str| {
+            let outline = name
+                .strip_prefix(base.as_str())
+                .and_then(|r| r.strip_prefix("_m"));
+            name == base
+                || outline
+                    .is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+        };
+        let record = jobs
+            .iter()
+            .filter(|j| is_job(&j.name))
             .map(|j| j.status.last_run_ms)
-            .or_else(|| folder.is_dir().then_some(0))
+            .max();
+        record.or_else(|| folders.iter().any(|f| is_job(f)).then_some(0))
     };
     if ran(crate::scale::budget::auto_max_regions(args)).is_some() {
         return None;
@@ -465,7 +477,8 @@ fn kept_auto_max(
     last.map(|(_, max)| max)
 }
 
-/// The plan a job runs and `--plan-units` prints: both call `plan_in`, so they agree.
+/// `plan_in` without a world: the size follows the memory.
+#[cfg(test)]
 pub fn plan(
     proj: &WebMercatorProjection,
     selection: &LLBBox,
@@ -476,8 +489,9 @@ pub fn plan(
     plan_sized(proj, selection, args, size, auto_max)
 }
 
-/// `plan` in the world at `world_dir`: an auto job the world already has over the selection
-/// keeps its piece size, so a changed memory budget resumes it instead of starting another.
+/// The plan a job runs and `--plan-units` prints: both call this, so they agree. An auto job
+/// the world already has over the selection keeps its piece size, so a changed memory budget
+/// resumes it instead of starting another.
 pub fn plan_in(
     world_dir: &std::path::Path,
     proj: &WebMercatorProjection,
@@ -999,6 +1013,12 @@ mod tests {
         // A folder no run recorded yet counts too.
         std::fs::create_dir_all(w.join(crate::one_world::JOBS_DIR).join(&four)).unwrap();
         assert_eq!(name(2000, &mut args), four);
+        // Another outline over the same rectangle is the same job's size.
+        std::fs::remove_dir_all(w.join(crate::one_world::JOBS_DIR).join(&four)).unwrap();
+        let outlined = format!("{twelve}_m0123456789abcdef");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        crate::one_world::record_job(&w, &outlined, None, None, 1, 4, false).unwrap();
+        assert_eq!(name(2000, &mut args), twelve);
         // A fixed size is never changed.
         let fixed = plan_in(&w, &proj, &wide, &args, UnitSize::N(2)).unwrap();
         assert!(fixed.name.ends_with("_n2"));

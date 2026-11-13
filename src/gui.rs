@@ -1853,7 +1853,7 @@ fn gui_plan_job(
     // With an outline, the pieces it leaves out too, for the map to grey: the same plan
     // without it, less the pieces the outline touches.
     let mask = args.units.plan_mask.take();
-    let all = crate::work_units::plan(&proj, &bbox, &args, size)?;
+    let all = crate::work_units::plan_in(&world_dir, &proj, &bbox, &args, size)?;
     // Pieces around the job still within 5% stretch, drawn faint: room to grow later. Auto
     // sizes show the job's largest piece.
     let n = match size {
