@@ -645,7 +645,18 @@ fn write(path: &Path, value: &Value) -> Result<(), String> {
 /// Builds the selection `args` was opened on, piece by piece. Each piece runs this
 /// command line again with its own bbox and lease.
 pub fn run(args: &Args, world_dir: &Path) -> Result<(), String> {
+    // The window clears them in its start command, where a click may already have set them.
+    PAUSE.store(false, Ordering::Release);
+    STOP.store(false, Ordering::Release);
     run_with(args, world_dir, std::env::args_os().skip(1).collect(), &[])
+}
+
+/// Waits while Pause holds the job; false once Stop ends it.
+fn wait_while_paused() -> bool {
+    while PAUSE.load(Ordering::Acquire) && !STOP.load(Ordering::Acquire) {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    !STOP.load(Ordering::Acquire)
 }
 
 /// `run` with the command line the pieces repeat; the window has none of its own to give.
@@ -656,9 +667,6 @@ pub fn run_with(
     argv: Vec<OsString>,
     settings: &[String],
 ) -> Result<(), String> {
-    // Left over from an earlier job of this process.
-    PAUSE.store(false, Ordering::Release);
-    STOP.store(false, Ordering::Release);
     let ctx = args
         .one_world_run
         .as_ref()
@@ -905,7 +913,7 @@ pub fn run_with(
             .collect();
         let stopped = || STOP.load(Ordering::Acquire);
         for (k, &i) in warm.iter().enumerate() {
-            if STOP.load(Ordering::Acquire) {
+            if !wait_while_paused() {
                 return Err(STOPPED.to_string());
             }
             // Warm what the piece will build: its rect plus the halo.
@@ -1190,8 +1198,11 @@ pub fn run_with(
         q.prologue.insert(i);
     }
     let work = |w: usize| -> Result<(), String> {
+        // Pause holds the head too; Stop while it waits ends the job below.
         if let (0, Some(i)) = (w, head) {
-            build(i, 0)?;
+            if wait_while_paused() {
+                build(i, 0)?;
+            }
         }
         while !aborting.load(Ordering::Relaxed) && !STOP.load(Ordering::Acquire) {
             let next = {
@@ -1845,6 +1856,24 @@ second
         q.finish(0, Outcome::Built);
         assert_eq!(q.next(true), Next::Done);
         assert!(q.apply("explode", &[0]).is_err());
+    }
+
+    #[test]
+    fn pause_holds_until_resumed_and_stop_ends_the_wait() {
+        assert!(wait_while_paused());
+        PAUSE.store(true, Ordering::Release);
+        let resume = std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            PAUSE.store(false, Ordering::Release);
+        });
+        let t = std::time::Instant::now();
+        assert!(wait_while_paused() && t.elapsed().as_millis() >= 300);
+        resume.join().unwrap();
+        PAUSE.store(true, Ordering::Release);
+        STOP.store(true, Ordering::Release);
+        assert!(!wait_while_paused());
+        PAUSE.store(false, Ordering::Release);
+        STOP.store(false, Ordering::Release);
     }
 
     #[test]
