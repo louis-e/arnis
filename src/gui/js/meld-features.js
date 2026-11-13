@@ -1,6 +1,8 @@
 // The "Advanced features" switch (Settings > Advanced) and the flags it sends. Off, every
 // control marked meld-only is hidden and generation gets no flags, so it runs as stock.
 
+import { interfaceLocale, languageTag } from './language.js';
+
 const el = (id) => document.getElementById(id);
 const value = (id) => (el(id) ? el(id).value.trim() : '');
 const choice = (id) => {
@@ -27,12 +29,11 @@ export const tn = (key, fallback, one, n) =>
 
 // A count in the language's plural category (one / few / other ...): `<key>_<category>`, else
 // `<key>_other`, else the plain `<key>`, else English's. The category comes from the language
-// the app is showing (`arnis-language`, as language-selector.js); `lang` overrides it.
+// the window shows; `lang` overrides it.
 export const tp = (key, fallback, n, lang) => {
   let cat = n === 1 ? 'one' : 'other';
   try {
-    lang ||= globalThis.localStorage?.getItem('arnis-language') || globalThis.navigator?.language || 'en';
-    cat = new Intl.PluralRules(lang).select(n);
+    cat = new Intl.PluralRules(lang ? languageTag(lang) : interfaceLocale()).select(n);
   } catch {}
   const L = window.localization || {};
   const k = [`${key}_${cat}`, `${key}_other`, key].find((x) => L[x]);
@@ -1163,7 +1164,7 @@ export function refreshStretch() {
     // The selection's heights are not known here: said as information.
     if (s.knee != null) {
       stretchRows.push(div('plan-stretch', t('plan_soft_top', 'Land above {m} m is squashed', {
-        m: (Math.round(s.knee / 100) * 100).toLocaleString(),
+        m: (Math.round(s.knee / 100) * 100).toLocaleString(interfaceLocale()),
       })));
     }
   }
@@ -1636,7 +1637,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
         text('projects-meta', t('projects_areas', 'Areas: {n}', { n: w.area_count })),
         text(odd ? 'projects-meta is-warn' : 'projects-meta', t('projects_scale', 'Scale {scale}', { scale: w.scale ? ratio(w.scale) : '-' })),
       ];
-      if (w.modified_ms) kids.push(text('projects-meta', new Date(w.modified_ms).toLocaleDateString()));
+      if (w.modified_ms) kids.push(text('projects-meta', new Date(w.modified_ms).toLocaleDateString(interfaceLocale())));
       if (w.locked) kids.push(text('projects-meta is-warn', t('projects_in_use', 'In use')));
       // One World needs Java on Earth; a run holds every world.
       const off = !available();
@@ -1644,7 +1645,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       const job = resume ? projectJob(w) : null;
       const acts = [];
       if (job && job.total > 0) {
-        const lang = (() => { try { return localStorage.getItem('arnis-language') || undefined; } catch (_) { return undefined; } })();
+        const lang = interfaceLocale();
         const n = (x) => { try { return Number(x).toLocaleString(lang); } catch (_) { return String(x); } };
         if (!job.finished) kids.push(text('projects-meta', t('projects_cells', '{done} / {total} cells', { done: n(job.done), total: n(job.total) })));
         const go = async (rebuild) => { await pick(w.name, false); await resume(w, job, rebuild); };

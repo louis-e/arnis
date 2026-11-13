@@ -26,6 +26,9 @@ const ro = (n) => tp('run_failed', '{n} failed', n, 'ro');
 assert.deepEqual([1, 2, 19, 20, 21, 100, 101].map(ro), ['1 eșuată', '2 eșuate', '19 eșuate', '20 de eșuate', '21 de eșuate', '100 de eșuate', '101 eșuate']);
 window.localization = {};
 assert.equal(tp('run_failed', '{n} failed', 3, 'en'), '3 failed');
+// Ukrainian is filed as "ua", which Intl does not know: it takes uk's rule, whose many (5 to 20) is _other.
+window.localization = { run_failed_one: 'one', run_failed_few: 'few', run_failed_other: 'other' };
+assert.deepEqual([1, 2, 5, 21].map((n) => tp('run_failed', '{n} failed', n, 'ua')), ['one', 'few', 'other', 'one']);
 for (const f of fs.readdirSync(new URL('../../src/gui/locales/', import.meta.url)).filter((f) => f.endsWith('.json') && f !== 'en.json')) {
   const l = loc(f.slice(0, -5));
   for (const c of ['one', 'few', 'other']) assert.ok(l[`run_failed_${c}`], `${f} lacks run_failed_${c}`);

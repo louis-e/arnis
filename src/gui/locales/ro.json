@@ -12,7 +12,7 @@
   "world_scale": "Scara lumii",
   "height_multiplier": "Înălțimea terenului",
   "world_scale_objects_skipped": "Sub 0,30 clădirile și drumurile sunt prea mici pentru a fi randate; se generează doar terenul și acoperirea solului.",
-  "custom_bounding_box": "Casetă de delimitare",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Limită de timp Floodfill (sec.)",
   "ground_level": "Nivelul solului",
   "customization_settings": "Setări",
