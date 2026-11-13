@@ -5,8 +5,23 @@ const DEFAULT_LOCALE_PATH = `./locales/en-US.json`;
 // Browser tags of languages Arnis files under another code.
 const LANGUAGE_ALIASES = { uk: 'ua' };
 
-// The language tag of an Arnis language code, for Intl: Ukrainian is filed as "ua", its tag is "uk".
-export const languageTag = (code) => (code === 'ua' ? 'uk' : code);
+// The language tag Intl knows for an Arnis language code: an aliased one's browser tag, "uk" for "ua".
+export const languageTag = (code) => Object.keys(LANGUAGE_ALIASES).find((tag) => LANGUAGE_ALIASES[tag] === code) || code;
+
+/**
+ * The locale dates, numbers and plurals are shown in: the language the window shows (the saved
+ * one if offered, else the browser's closest), in the browser's region when it is the same language.
+ * @returns {string} A language tag for Intl
+ */
+export function interfaceLocale() {
+    const select = globalThis.document?.getElementById?.('language-select');
+    const offered = Array.from(select?.options || [], (o) => o.value);
+    const browser = globalThis.navigator?.language || 'en';
+    let saved = null;
+    try { saved = globalThis.localStorage?.getItem('arnis-language'); } catch (_) { /* no storage */ }
+    const shown = languageTag(offered.includes(saved) ? saved : matchLanguage(browser, offered));
+    return browser.split('-')[0].toLowerCase() === shown.split('-')[0].toLowerCase() ? browser : shown;
+}
 
 // Chinese as written in Taiwan, Hong Kong and Macau, in the traditional script zh-CN is not.
 const TRADITIONAL_CHINESE = /^zh-(hant|tw|hk|mo)\b/i;

@@ -1,5 +1,5 @@
 import { licenseText } from './license.js';
-import { fetchLanguage, invalidJSON, languageTag, matchLanguage } from './language.js';
+import { fetchLanguage, interfaceLocale, invalidJSON, matchLanguage } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
 import {
   initSettingsStore,
@@ -463,12 +463,6 @@ function renderReleaseMeta(metaEl, info, rel) {
     if (i > 0) metaEl.append(" · ");
     metaEl.append(part);
   });
-}
-
-// The interface language as a locale for dates and numbers, rather than the
-// system one.
-function interfaceLocale() {
-  return languageTag(localStorage.getItem("arnis-language") || navigator.language);
 }
 
 function formatReleaseDate(iso) {
