@@ -570,6 +570,13 @@ label[for].setting-label {
   margin-bottom: 8px;
 }
 
+/* A choice row has no description line, so its reason goes under the title as one */
+.setting-choice.has-reason > .setting-label {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
 /* A row that does not apply to the current world or format */
 .settings-row-unavailable {
   opacity: 0.4;
