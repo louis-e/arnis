@@ -181,11 +181,11 @@ globalThis.arnisCells = {
         return out;
     },
     // What the menu offers for `cells` (records): only what fits every one of them. An action that
-    // fits but cannot be done to the head cell (it builds alone) carries `why`: [key, English].
+    // fits but cannot be done to the head cell (the job needs it) carries `why`: [key, English].
     actions(cells, running) {
         const all = (...states) => cells.length > 0 && cells.every((c) => states.includes(c.state));
         const live = ['start', 'retry'];
-        const why = cells.some((c) => c.head) ? ['cell_head_why', 'The first cell builds alone and cannot be paused or cancelled.'] : undefined;
+        const why = cells.some((c) => c.head) ? ['cell_head_why', "The job needs the first cell: it builds the world's map and extras. Pause or stop the whole job instead."] : undefined;
         const out = [];
         const add = (ok, id, label, w) => ok && out.push({ id, label, why: w });
         if (running) {

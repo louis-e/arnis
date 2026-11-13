@@ -824,6 +824,7 @@ function setCelestialBody(body) {
   refreshHeightLimitRow();
   refreshGameplayRows();
   refreshWorldTypeRow();
+  refreshJavaOnlyRows();
   refreshFacadeRows();
   refreshOneWorldState();
 
@@ -2225,6 +2226,7 @@ function updateFormatToggleUI(format) {
   refreshHeightLimitRow(format);
   refreshGameplayRows(format);
   refreshWorldTypeRow(format);
+  refreshJavaOnlyRows(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
@@ -3552,9 +3554,9 @@ function refreshOneWorldDesc() {
   if (!desc) return;
   const mode = oneWorldMode();
   const texts = {
-    off: ['one_world_desc_off', 'Every area becomes a world of its own. Java only.'],
-    on: ['one_world_desc_on', 'Each area joins one growing world at its real position. Java only.'],
-    live: ['one_world_desc_live', 'Play that world in Minecraft while Arnis generates the land around you. Java only.']
+    off: ['one_world_desc_off', 'Every area becomes a world of its own.'],
+    on: ['one_world_desc_on', 'Each area joins one growing world at its real position.'],
+    live: ['one_world_desc_live', 'One growing world that you play in Minecraft while Arnis generates the land around you.']
   };
   const [key, fallback] = texts[mode] || texts.off;
   desc.dataset.localize = key;
@@ -3857,12 +3859,30 @@ function pinControl(id, value) {
   writeControl(el, value);
 }
 
+// Settings the backend builds into Java worlds only.
+function refreshJavaOnlyRows(format) {
+  const java = (format || selectedWorldFormat) === 'java';
+  if (!oneWorldPinned) {
+    setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
+    setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
+  }
+  const signWhy = why([java, 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth']);
+  setSegmentedRowAvailable('signage-group', !signWhy, signWhy);
+  refreshWorldNameRow(format);
+}
+
+function refreshWorldNameRow(format) {
+  const reason = why([(format || selectedWorldFormat) === 'java', 'reason_java'], [!liveActive(), 'reason_live_running']);
+  setSettingsRowAvailable('custom-world-name-toggle', !reason, reason);
+}
+
 function restoreNaturalRows() {
+  const java = selectedWorldFormat === 'java';
   setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth', 'reason_earth');
   setSettingsRowAvailable('height-multiplier-slider', true);
   setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth', 'reason_earth');
-  setSettingsRowAvailable('voxy-lod-toggle', true);
-  setSettingsRowAvailable('dh-lod-toggle', true);
+  setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
+  setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
   setSettingsRowAvailable('disable-height-limit-toggle', true);
   refreshHeightLimitRow();
 }
@@ -4185,7 +4205,7 @@ function refreshLiveRows() {
   setSettingsRowAvailable('live-view-distance-select', !liveActive(), 'reason_live_running');
   // The world the session plays is fixed until it ends.
   setSettingsRowAvailable('save-path-input', !liveActive(), 'reason_live_running');
-  setSettingsRowAvailable('custom-world-name-toggle', !liveActive(), 'reason_live_running');
+  refreshWorldNameRow();
   if (liveInfo && liveInfoKey !== (savePath || '') + '|' + oneWorldFolderName()) liveInfo = null;
   if (live && !liveInfo) loadLiveInfo();
 }

@@ -663,7 +663,7 @@ export function notePiece(piece) {
   const was = pieces.get(piece.piece);
   // A cell left out by --skip-cells is not one that was already built.
   if (piece.state === 'skipped' && piece.reason === 'skip_cells') piece = { ...piece, state: 'omitted' };
-  // The head cell builds alone first, in a job with nothing built yet: the first to start then.
+  // The head cell starts first, in a job with nothing built yet.
   if (piece.state === 'start' && headCell < 0 && ![...pieces.values()].some((p) => RUNNING.has(p.state) || p.state === 'done' || p.state === 'skipped')) headCell = piece.piece;
   // Progress records repeat the running state: the clock starts with the first.
   const since = RUNNING.has(piece.state) ? (was && RUNNING.has(was.state) ? was.since : Date.now()) : was?.since;
@@ -1583,7 +1583,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       }
       acts.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
       acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
-      if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position. Java only.'); });
+      if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position.'); });
       const actions = document.createElement('div');
       actions.className = 'projects-actions';
       actions.append(...acts);
