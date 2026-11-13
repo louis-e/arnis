@@ -145,9 +145,9 @@ impl CarveDepth {
     }
 
     pub fn bound(self, estimate: i32) -> i32 {
-        // No water in the land cover, nothing to carve: the datum stays where flags-off puts it.
+        // No water in the land cover: only a river bed, dug without it, needs room.
         if estimate == 0 {
-            return 0;
+            return self.floor;
         }
         self.detail
             .max_carve_depth(estimate, self.scale)
@@ -252,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn no_water_keeps_the_datum() {
+    fn no_water_leaves_room_for_a_river_bed_only() {
         for detail in [WaterDetail::Default, WaterDetail::Scaled] {
             for scale in [0.25, 1.0] {
                 for floor in [0, crate::water_depth::MAX_WATER_DEPTH] {
@@ -261,7 +261,7 @@ mod tests {
                         detail,
                         scale,
                     };
-                    assert_eq!(c.bound(0), 0, "{detail:?} {scale} {floor}");
+                    assert_eq!(c.bound(0), floor, "{detail:?} {scale} {floor}");
                 }
             }
         }

@@ -548,13 +548,13 @@ impl Ground {
             bench.mark("elev_landcover_fetch");
 
             // Raise the floor for the deepest water carve (elevation path only).
-            let max_depth = land_cover.as_ref().map(|lc| {
-                frame
-                    .carve_depth
-                    .bound(crate::water_depth::estimate_max_carve_depth(
-                        &lc.grid, world_w, world_h,
-                    ))
-            });
+            let max_depth = match &land_cover {
+                Some(lc) => Some(frame.carve_depth.bound(
+                    crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h),
+                )),
+                // A river bed is dug without land cover too.
+                None => Some(frame.carve_depth.floor).filter(|&depth| depth > 0),
+            };
             let band = |h: WorldHeight| {
                 let carve_floor = match max_depth {
                     Some(depth) => h.min_y + depth + 2,
