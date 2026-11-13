@@ -109,6 +109,7 @@ await newBtn.listeners.click();
 const card = listEl.children[0];
 assert.ok(isCard(card) && listEl.children.length === 2, 'the card heads the list');
 const input = card.children[0];
+assert.strictEqual(input.maxLength, 32, "Minecraft's own name limit");
 const [create, cancel] = card.children[1].children;
 assert.deepStrictEqual([create.textContent, cancel.textContent], ['Create', 'Cancel']);
 await create.listeners.click();

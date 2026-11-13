@@ -127,10 +127,9 @@ fn sanitize_chars_and_trim(name: &str) -> String {
 /// these names get wrapped in longer strings (`Arnis {name}.mcworld`).
 const MAX_FILENAME_BYTES: usize = 64;
 
-/// Longest custom world name a user may set, counted in characters (not
-/// bytes) so the limit means the same thing in every script. Mirrored by the
-/// world-name editor's `maxlength` and character counter in the GUI, so what
-/// the user is allowed to type is exactly what lands on disk.
+/// Longest custom world name kept, counted in characters (not bytes) so the
+/// limit means the same thing in every script. The window's name fields take
+/// 32, Minecraft's own limit; 48 here keeps longer names from before working.
 pub const MAX_CUSTOM_WORLD_NAME_CHARS: usize = 48;
 
 /// Byte budget for a custom world name. Sized so the character cap above is
@@ -1367,10 +1366,10 @@ pub fn new_world_name(save: &Path, raw: &str) -> Result<String, String> {
     if let Some(why) = bad_world_name(name) {
         return Err(why.to_string());
     }
-    if world_folder_name(name).as_deref() != Some(name) {
-        return Err(format!(
-            "The name is longer than {MAX_CUSTOM_WORLD_NAME_CHARS} characters."
-        ));
+    // Minecraft's own Create World screen takes 32 characters.
+    const LONGEST: usize = 32;
+    if name.chars().count() > LONGEST {
+        return Err(format!("The name is longer than {LONGEST} characters."));
     }
     if !save.is_dir() {
         return Err("The saves folder does not exist.".to_string());
@@ -1656,7 +1655,8 @@ mod tests {
         assert!(new_world_name(save.path(), "Paris")
             .unwrap_err()
             .contains("already exists"));
-        let long = "x".repeat(MAX_CUSTOM_WORLD_NAME_CHARS + 1);
+        assert!(new_world_name(save.path(), &"x".repeat(32)).is_ok());
+        let long = "x".repeat(33);
         for refused in ["", "   ", "a/b", "..", "CON", "Tokyo.", &long] {
             assert!(
                 new_world_name(save.path(), refused).is_err(),
@@ -2053,8 +2053,7 @@ mod tests {
 
     #[test]
     fn a_full_length_custom_name_survives_in_any_script() {
-        // The editor caps input at MAX_CUSTOM_WORLD_NAME_CHARS characters, so
-        // a name of exactly that many characters must come back untouched -
+        // A name of exactly MAX_CUSTOM_WORLD_NAME_CHARS characters must come back untouched -
         // in every script, not just Latin-1. A byte-based cap would quietly
         // cut a Japanese or Cyrillic name to a third of what was typed.
         let tmp = tempfile::tempdir().unwrap();

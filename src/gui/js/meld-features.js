@@ -9,6 +9,8 @@ const choice = (id) => {
 };
 let defaultArchive = '';
 const on = (id) => Boolean(el(id) && el(id).checked);
+// Longest world name typed here: Minecraft's own Create World limit.
+const NAME_MAX = 32;
 
 // A string from the loaded language, `{name}` placeholders filled in; the English text is the
 // fallback while no language is loaded.
@@ -1487,7 +1489,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'projects-rename';
-    input.maxLength = 48;
+    input.maxLength = NAME_MAX;
     input.value = w.name;
     input.setAttribute('aria-label', t('projects_rename', 'Rename'));
     const err = text('projects-error', '');
@@ -1546,7 +1548,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'projects-rename';
-    input.maxLength = 48;
+    input.maxLength = NAME_MAX;
     input.value = '';
     input.placeholder = t('projects_new_placeholder', 'Name of the new One World');
     input.setAttribute('aria-label', t('projects_new', 'New One World'));
