@@ -1,0 +1,3 @@
+  romania                         329.5 MB  Romania
+1 extract(s), 329.5 MB to download
+{"bbox":[44.445,26.095,44.448,26.103],"extracts":[{"bytes":329538806,"id":"romania","name":"Romania","url":"https://download.geofabrik.de/europe/romania-latest.osm.pbf"}],"total_bytes":329538806,"uncovered_points":0}

@@ -472,7 +472,19 @@ fn process_element(
                         still_surfaces,
                     );
                 } else {
-                    waterways::generate_waterways(editor, way);
+                    waterways::generate_waterways(
+                        editor,
+                        way,
+                        args.water.water_detail.channel_width_cap(args.scale),
+                        &waterways::ChannelBed {
+                            field: big_water_field,
+                            road_mask,
+                            tunnel_footprint,
+                            piped_under_roads: (args.water.river_bed != Default::default()
+                                || args.water.water_detail != Default::default())
+                            .then_some(bridge_surface),
+                        },
+                    );
                 }
             } else if way.tags.contains_key("railway") {
                 railways::generate_railways(
@@ -747,8 +759,19 @@ fn tile_processing_threads(pool_threads: usize, available_mb: u64, fillground: b
     pool_threads.min(usize::try_from(memory_bound).unwrap_or(usize::MAX))
 }
 
-/// Free RAM in MB.
-fn available_memory_mb() -> u64 {
+/// `--ram-budget-mb`: 0 means read the machine.
+static RAM_BUDGET_MB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn set_ram_budget_mb(mb: u64) {
+    RAM_BUDGET_MB.store(mb, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Free RAM in MB, or the `--ram-budget-mb` the caller promised.
+pub(crate) fn available_memory_mb() -> u64 {
+    let budget = RAM_BUDGET_MB.load(std::sync::atomic::Ordering::Relaxed);
+    if budget > 0 {
+        return budget;
+    }
     #[cfg(target_os = "macos")]
     if let Some(mb) = macos_available_memory_mb() {
         return mb;
@@ -803,7 +826,41 @@ pub fn generate_world_with_options(
     // first area of a One World.
     let one_world = args.one_world_run.as_ref();
     let extending = one_world.is_some_and(|run| run.extending);
+    // A piece of a job builds `PIECE_HALO_BLOCKS` past its own chunks, so what is rooted
+    // there reaches in as it does in a single run, and writes and previews only its own.
+    let own_rect = match one_world.and_then(|run| run.unit.as_ref()) {
+        Some(u) => XZBBox::rect_from_min_max(u.rect[0], u.rect[1], u.rect[2], u.rect[3])
+            .map_err(|e| format!("piece lease rect {:?} is invalid: {e}", u.rect))?,
+        None => xzbbox.clone(),
+    };
+    // Every piece of a job carves against the job's rect and one datum, so caves run on across
+    // its seams as in a single run.
+    let piece_caves = one_world
+        .and_then(|run| run.unit.as_ref())
+        .filter(|_| args.caves);
+    let cave_world = match piece_caves {
+        Some(u) => XZBBox::rect_from_min_max(u.job[0], u.job[1], u.job[2], u.job[3])
+            .map_err(|e| format!("piece lease job {:?} is invalid: {e}", u.job))?,
+        None => xzbbox.clone(),
+    };
+    crate::caves::set_piece_datum(
+        piece_caves
+            .filter(|_| args.cave_datum_y.is_none())
+            .and(args.units.one_world_unit.as_deref())
+            .and_then(std::path::Path::parent)
+            .map(|dir| {
+                crate::caves::share_piece_datum(dir, crate::world_editor::terrain_floor_y())
+            }),
+    );
     let clip_bbox = crate::projection::ProjectionSpec::from_args(args).clip_bbox(&xzbbox);
+    if let Some(shape) = xzbbox.outline() {
+        let all = shape.rect().total_blocks();
+        let inside = shape.covered_columns();
+        println!(
+            "  Area shape covers {inside} of the {all} columns around it ({:.0}%)",
+            inside as f64 * 100.0 / all.max(1) as f64
+        );
+    }
 
     // Before anything reads a footprint: nothing is built on a runway.
     let dropped = highways::drop_buildings_on_aircraft_pavement(&mut elements, args.scale);
@@ -814,6 +871,13 @@ pub fn generate_world_with_options(
     waterfront::drop_paths_on_piers(&mut elements, args.scale, args.timeout.as_ref());
     // A peak's summit cross that is also mapped on its own stands once, as the mapped one.
     man_made::drop_doubled_summit_crosses(&mut elements, args.scale);
+
+    crate::element_processing::surfaces::set_patches(args.surface_patches);
+
+    // --road-detail compact leaves the minor ways out before anything sees them.
+    if args.road_detail != road_detail::RoadDetail::Max {
+        elements.retain(|element| !args.road_detail.drops_element(element));
+    }
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
@@ -848,12 +912,18 @@ pub fn generate_world_with_options(
     let void_world =
         world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
     editor.set_void_world(void_world);
-    if void_world && !extending {
+    editor.set_blinear_level(args.blinear_level());
+    // An outline can miss it in a flat world too, where its template chunks would stand in the plain.
+    if (void_world
+        || args.blinear_level().is_some()
+        || (xzbbox.outline().is_some() && world_format == WorldFormat::JavaAnvil))
+        && !extending
+    {
         // A world made by `create_new_world` starts with the flat template region. The area
         // rewrites it when it reaches that region; one it misses would stay a grass square.
         crate::world_utils::remove_untouched_template_region(&output_path);
     }
-    editor.set_place_schematics(args.use_3d);
+    editor.set_props(args.props());
     editor.set_game_settings(args.gamemode, args.world_time, args.mob_spawning);
     editor.set_start_with_map(args.map_item);
     editor.set_size_options(crate::world_utils::WorldSizeOptions::of(args));
@@ -861,17 +931,23 @@ pub fn generate_world_with_options(
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     if let Some(run) = one_world {
         editor.set_merge_into_existing(crate::world_utils::WorldLayout::of(&run.world_dir));
+        editor.set_write_bounds(own_rect.clone());
         // metadata.json describes the whole world, not this area alone.
         if let Ok(Some(manifest)) = crate::one_world::Manifest::load(&run.world_dir) {
+            // A piece describes its whole job, which the other pieces are still building.
+            let job = run.unit.as_ref().map_or(xzbbox.clone(), |u| {
+                XZBBox::rect_from_min_max(u.job[0], u.job[1], u.job[2], u.job[3])
+                    .unwrap_or_else(|_| xzbbox.clone())
+            });
             let union = match manifest.extent() {
                 Some(ext) => XZBBox::rect_from_min_max(
-                    ext.min_x().min(xzbbox.min_x()),
-                    ext.min_z().min(xzbbox.min_z()),
-                    ext.max_x().max(xzbbox.max_x()),
-                    ext.max_z().max(xzbbox.max_z()),
+                    ext.min_x().min(job.min_x()),
+                    ext.min_z().min(job.min_z()),
+                    ext.max_x().max(job.max_x()),
+                    ext.max_z().max(job.max_z()),
                 )
                 .unwrap_or_else(|_| xzbbox.clone()),
-                None => xzbbox.clone(),
+                None => job,
             };
             if let Ok(ll) = crate::projection::llbbox_for_rect(&manifest.projection(), &union) {
                 editor.set_metadata_extent(union, ll);
@@ -962,7 +1038,10 @@ pub fn generate_world_with_options(
     // generated into again after its last. The preview and branding maps come first.
     let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil && !extending;
     let place_branding = world_format == WorldFormat::JavaAnvil && !extending;
-    let first_map_id = if world_format == WorldFormat::JavaAnvil {
+    let first_map_id = if let Some(unit) = one_world.and_then(|run| run.unit.as_ref()) {
+        // A piece of a job has its own range, as pieces build side by side.
+        unit.first_map_id
+    } else if world_format == WorldFormat::JavaAnvil {
         let layout = crate::world_utils::WorldLayout::of(&output_path);
         crate::map_item::next_map_id(&layout.maps_dir(&output_path))
     } else {
@@ -1006,16 +1085,22 @@ pub fn generate_world_with_options(
     // (512 = 4x supersampling) instead of the full-resolution preview buffer.
     let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
     let preview = (wants_png || wants_map_item || wants_local_maps).then(|| {
-        Arc::new(if wants_png && one_world.is_some() {
-            // Every area of a One World is sent to the map overlay at once.
-            PreviewAccumulator::new_capped(&xzbbox, 2048)
+        Arc::new(if let (true, Some(run)) = (wants_png, one_world) {
+            // Every area of a One World is sent to the map overlay at once. A piece gets its
+            // share of the job's picture, enough for the map item and the boards that crop it.
+            let floor = if wants_local_maps { 1024 } else { 512 };
+            let side = run
+                .unit
+                .as_ref()
+                .map_or(2048, |u| u.preview_side(2048, floor));
+            PreviewAccumulator::new_capped(&own_rect, side)
         } else if wants_png {
-            PreviewAccumulator::new(&xzbbox)
+            PreviewAccumulator::new(&own_rect)
         } else if wants_local_maps {
             // "You are here" boards crop this, so give them a little more resolution.
-            PreviewAccumulator::new_capped(&xzbbox, 1024)
+            PreviewAccumulator::new_capped(&own_rect, 1024)
         } else {
-            PreviewAccumulator::new_capped(&xzbbox, 512)
+            PreviewAccumulator::new_capped(&own_rect, 512)
         })
     });
     if let Some(p) = &preview {
@@ -1059,22 +1144,41 @@ pub fn generate_world_with_options(
     // Uses the area's floor, not args: the montane check measures blocks above it, and the
     // base sinks when the relief needs the extended floor. Its blocks-per-metre turns those
     // blocks back into metres, which compression makes far smaller than args.scale.
+    // A piece of a job picks the pack and the sign region a single run of the job would.
+    let anchor = *ground.anchor().unwrap_or(&llbbox);
     let tree_pack = crate::trees::tree_pack::load(
         args,
-        llbbox,
+        anchor,
         args.scale,
         crate::ground::area_floor_for(&ground, args),
         ground.blocks_per_meter(),
-        ground.ecoregion_map(),
+        ground
+            .job_ecoregions(args)
+            .as_deref()
+            .or(ground.ecoregion_map()),
     )
     .map(Arc::new);
     bench.reset();
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     // Shared with the editors, so a bore under water keeps its cover under the carved bed.
-    let big_water_field = Arc::new(crate::water_depth::compute_big_water_field(
-        &ground, &xzbbox,
+    let mut big_water_field = crate::water_depth::compute_big_water_field(
+        &ground,
+        &xzbbox,
+        args.water.water_detail,
+        args.scale,
+    );
+    big_water_field.set_river_bed(crate::river_bed::compute_river_bed_field(
+        args.water.river_bed,
+        &elements,
+        &ground,
+        &big_water_field,
+        &xzbbox,
+        &clip_bbox,
+        args.scale,
+        args.water.water_detail.channel_width_cap(args.scale),
     ));
+    let big_water_field = Arc::new(big_water_field);
     // Resolved once here: a body spanning many tiles must not be measured per tile.
     let still_surfaces = water_areas::prescan_still_surfaces(&elements, &ground, &xzbbox);
 
@@ -1083,15 +1187,23 @@ pub fn generate_world_with_options(
 
     // Build highway connectivity map once before processing
     let mut highway_connectivity = highways::build_highway_connectivity_map(&elements);
-    // Each area clips ways at its own padding, so roads keep level where areas meet.
+    // Each area clips ways at its own padding, so roads keep level where areas meet; a piece
+    // meets its neighbours at its own edge, not its halo's.
     if one_world.is_some() {
-        highway_connectivity.meet_at_edge_of(xzbbox.clone());
+        highway_connectivity.meet_at_edge_of(own_rect.clone());
     }
     let sign_region = crate::decals::region::SignRegion::detect(
-        (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
-        (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
+        (anchor.min().lat() + anchor.max().lat()) / 2.0,
+        (anchor.min().lng() + anchor.max().lng()) / 2.0,
     );
-    let road_markings = road_markings::RoadMarkingIndex::build(&elements, args.scale, sign_region);
+    let road_markings = road_markings::RoadMarkingIndex::build_with(
+        &elements,
+        args.scale,
+        sign_region,
+        args.road_detail.paints_crossings(),
+        // A One World piece sees only its clipped share of the signalised crossings.
+        one_world.is_none() || args.road_detail == road_detail::RoadDetail::Max,
+    );
     // What the world format runs is settled here, so the uses below need no format checks.
     let mut extras = crate::datapack::Extras::from_args(args).for_format(world_format);
 
@@ -1114,7 +1226,7 @@ pub fn generate_world_with_options(
 
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
-    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
+    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &clip_bbox);
 
     // Tenants and surrounding areas per building, for interiors furnished by use.
     let interior_uses = if args.interior {
@@ -1126,14 +1238,18 @@ pub fn generate_world_with_options(
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
     let building_passages =
-        highways::collect_building_passage_coords(&elements, &xzbbox, args.scale);
+        highways::collect_building_passage_coords(&elements, &clip_bbox, args.scale);
 
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = Arc::new(highways::collect_road_surface_coords(
-        &elements, &editor, &xzbbox, args.scale,
+        &elements,
+        &editor,
+        &clip_bbox,
+        args.scale,
+        args.water.water_detail,
     ));
     let barrier_clearance =
         barriers::RoadClearance::build(&elements, &editor, args.scale, Arc::clone(&road_mask));
@@ -1211,7 +1327,7 @@ pub fn generate_world_with_options(
     let mut rail_joins = railways::RailJoins::build(&elements, railways::track_level);
     // Each area clips ways at its own padding, so tracks keep level where areas meet.
     if one_world.is_some() {
-        rail_joins.meet_at_edge_of(xzbbox.clone());
+        rail_joins.meet_at_edge_of(own_rect.clone());
     }
 
     let tunnel_internal_endpoints = highways::collect_tunnel_internal_endpoints(&elements, &xzbbox);
@@ -1256,23 +1372,21 @@ pub fn generate_world_with_options(
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
 
     let car_network = extras.cars.then(|| {
-        let rel = |x: i32, z: i32| {
-            crate::coordinate_system::cartesian::XZPoint::new(
-                x - xzbbox.min_x(),
-                z - xzbbox.min_z(),
-            )
-        };
+        let surfaces = highways::RoadSurfaces::new(
+            &editor,
+            &bridge_structures,
+            &highway_connectivity,
+            &tunnel_portals,
+            args.scale,
+        );
         let net = crate::element_processing::cars::CarNetwork::build(
             &elements,
             args.scale,
             sign_region.drives_on_left(),
             extras.traffic_lights,
             &xzbbox,
-            |x, z| {
-                bridge_surface
-                    .nearby_deck_y(x, z, 0)
-                    .unwrap_or_else(|| ground.level(rel(x, z)))
-            },
+            |way, x, z| surfaces.y_at(way, x, z),
+            |x, z| building_footprints.contains(x, z),
         );
         println!(
             "  Moving cars: {} cars on the road network",
@@ -1280,6 +1394,32 @@ pub fn generate_world_with_options(
         );
         Arc::new(net)
     });
+    let mut walk_network = extras
+        .pedestrians
+        .then(|| {
+            let surfaces = highways::RoadSurfaces::new(
+                &editor,
+                &bridge_structures,
+                &highway_connectivity,
+                &tunnel_portals,
+                args.scale,
+            );
+            crate::element_processing::pedestrians::WalkNetwork::build(
+                &elements,
+                args.scale,
+                sign_region.drives_on_left(),
+                extras.traffic_lights,
+                &xzbbox,
+                |way, x, z| surfaces.y_at(way, x, z),
+            )
+        })
+        .filter(|net| !net.is_empty());
+    // People walk the pavement as it was built, so it is read back along their lanes.
+    let walk_probe = walk_network.as_ref().map(|net| Arc::new(net.probe()));
+    if let Some(probe) = &walk_probe {
+        editor.set_walk_probe(Arc::clone(probe));
+    }
+    extras.pedestrians = walk_network.is_some();
     // Java places the cars as the roads are built; Bedrock's add-on brings them in itself.
     let placed_cars = car_network
         .clone()
@@ -1287,17 +1427,41 @@ pub fn generate_world_with_options(
     if let Some(cars) = &placed_cars {
         editor.set_car_network(Arc::clone(cars));
     }
+    // Boats float on the water as it was built, so it is read back along their routes.
+    let ship_plan = extras
+        .cars
+        .then(|| {
+            crate::element_processing::ships::ShipPlan::build(
+                &elements,
+                args.scale,
+                &xzbbox,
+                |x, z| {
+                    let rel = crate::coordinate_system::cartesian::XZPoint::new(
+                        x - xzbbox.min_x(),
+                        z - xzbbox.min_z(),
+                    );
+                    ground.cover_class(rel) == crate::land_cover::LC_WATER
+                },
+            )
+        })
+        .filter(|plan| !plan.is_empty());
+    let water_probe = ship_plan.as_ref().map(|plan| Arc::new(plan.probe()));
+    if let Some(probe) = &water_probe {
+        editor.set_water_probe(Arc::clone(probe));
+    }
     // Trains ride the rails as they were laid, so the editors note where each one went.
-    let train_network = extras
+    let mut train_network = extras
         .cars
         .then(|| {
             crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
         })
-        .filter(|net| !net.is_empty());
+        .filter(|net| !net.is_empty() || ship_plan.is_some());
+    // Only trains need the rails' heights; boats find the water themselves.
     let rail_heights: Option<crate::world_editor::RailHeights> = train_network
         .as_ref()
+        .filter(|net| !net.is_empty())
         .map(|_| Arc::new(std::sync::Mutex::new(fnv::FnvHashMap::default())));
-    if let Some(net) = &train_network {
+    if let Some(net) = train_network.as_ref().filter(|net| !net.is_empty()) {
         println!(
             "  Moving vehicles: {} trains on the rail network",
             net.train_count()
@@ -1346,6 +1510,17 @@ pub fn generate_world_with_options(
     let models_3d_pipeline = args.use_3d.then(|| {
         crate::models_3d::Models3dPipeline::prescan(&elements, args, landmarks.suppressed())
     });
+    // Offline, a model the cache lacks stops the run here instead of after the build.
+    if crate::net::offline() {
+        if let Some(p) = &models_3d_pipeline {
+            p.prewarm();
+        }
+        let missing = crate::net::offline_misses();
+        if !missing.is_empty() {
+            let what: Vec<String> = missing.into_iter().map(|(what, _)| what).collect();
+            return Err(format!("Not in the cache yet: {}.", what.join(", ")));
+        }
+    }
     let empty_suppressed: HashSet<(&'static str, u64)> = HashSet::new();
     let models_3d_suppressed: &HashSet<(&'static str, u64)> = models_3d_pipeline
         .as_ref()
@@ -1420,7 +1595,7 @@ pub fn generate_world_with_options(
         let (sx, sz) = options
             .spawn_point
             .or_else(|| crate::map_item::read_spawn_xz(&output_path))
-            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+            .unwrap_or_else(|| xzbbox.default_spawn());
         (sx >> 9, sz >> 9)
     });
 
@@ -1428,11 +1603,18 @@ pub fn generate_world_with_options(
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
     let tiles = tile::create_tiles(&xzbbox, tile::DEFAULT_TILE_SIZE);
 
-    // Tile editors are created as JavaAnvil (WorldEditor::new), so their
-    // format-dependent block-entity schema (banners) only matches Java output.
-    // Restrict the parallel tile path to Java; Bedrock/Luanti large worlds use
-    // the sequential path (correct, just not tile-parallel).
-    let use_parallel_tiles = tiles.len() >= 3 && matches!(world_format, WorldFormat::JavaAnvil);
+    // Tile editors take the world's format, so what they write that depends on it (a
+    // banner's block entity) matches the output. Luanti keeps the sequential path: its
+    // editor carries a game and a ground level that the tile editors are not given.
+    // A piece of a job takes the path the whole job would, or its blocks differ from a single run's.
+    let wants_tiles = one_world
+        .and_then(|run| run.unit.as_ref())
+        .map_or(tiles.len() >= 3, |unit| unit.tiled);
+    let use_parallel_tiles = wants_tiles
+        && matches!(
+            world_format,
+            WorldFormat::JavaAnvil | WorldFormat::BedrockMcWorld
+        );
 
     if use_parallel_tiles {
         // Large area: process tiles in parallel using rayon.
@@ -1565,21 +1747,31 @@ pub fn generate_world_with_options(
             // max_* are exclusive; rect_from_min_max treats max as inclusive,
             // so subtract 1. Clamp to the world bbox so edge-tile halos don't
             // extend past world bounds.
-            let tile_xzbbox = XZBBox::rect_from_min_max(
-                (tile_bounds.min_x - tile::TILE_EDITOR_HALO).max(xzbbox.min_x()),
-                (tile_bounds.min_z - tile::TILE_EDITOR_HALO).max(xzbbox.min_z()),
-                (tile_bounds.max_x - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_x()),
-                (tile_bounds.max_z - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_z()),
-            )
-            .expect("Failed to create tile XZBBox");
+            // A crop keeps a drawn outline's mask, so tiles write only inside it too.
+            let tile_xzbbox = xzbbox
+                .crop(
+                    (tile_bounds.min_x - tile::TILE_EDITOR_HALO).max(xzbbox.min_x()),
+                    (tile_bounds.min_z - tile::TILE_EDITOR_HALO).max(xzbbox.min_z()),
+                    (tile_bounds.max_x - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_x()),
+                    (tile_bounds.max_z - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_z()),
+                )
+                .expect("Failed to create tile XZBBox");
 
-            let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
+            let mut tile_editor = WorldEditor::new_with_format_and_name(
+                PathBuf::new(),
+                &tile_xzbbox,
+                llbbox,
+                world_format,
+                None,
+                None,
+                false,
+            );
             tile_editor.set_ground(Arc::clone(&ground));
             tile_editor.set_water_field(Arc::clone(&big_water_field));
             tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
             // Ground generation runs on tile editors, so they need the real scale.
             tile_editor.set_projection_info(&args.projection.to_string(), args.scale);
-            tile_editor.set_place_schematics(args.use_3d);
+            tile_editor.set_props(args.props());
             tile_editor.set_map_decals(world_format == WorldFormat::JavaAnvil);
             if let Some(ref tp) = tree_pack {
                 tile_editor.set_tree_pack(Arc::clone(tp));
@@ -1692,7 +1884,7 @@ pub fn generate_world_with_options(
                 crate::caves::carve_region(
                     &mut tile_editor,
                     args,
-                    &xzbbox,
+                    &cave_world,
                     g_min_x,
                     g_max_x,
                     g_min_z,
@@ -2142,7 +2334,7 @@ pub fn generate_world_with_options(
                 (!tunnel_footprint.is_empty() && tunnel_footprint.contains(x, z))
                     || stations.digs(x, z)
             };
-            crate::caves::carve(&mut editor, args, &xzbbox, &dug);
+            crate::caves::carve(&mut editor, args, &cave_world, &xzbbox, &dug);
         } else if args.fillground {
             crate::ore_generation::generate_ores(&mut editor, &xzbbox);
         }
@@ -2317,7 +2509,7 @@ pub fn generate_world_with_options(
         let (sx, sz) = options
             .spawn_point
             .or_else(|| crate::map_item::read_spawn_xz(&output_path))
-            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+            .unwrap_or_else(|| xzbbox.default_spawn());
         if wants_map_item {
             editor.place_map_item_frame(sx, sz, first_map_id, first_map_id + 1);
         } else {
@@ -2339,6 +2531,13 @@ pub fn generate_world_with_options(
     }
 
     if world_format == WorldFormat::BedrockMcWorld && extras.cars {
+        // Nothing is streamed out on Bedrock, so all the water is still there to read.
+        editor.probe_resident();
+        launch_ships(
+            train_network.as_mut(),
+            ship_plan.as_ref(),
+            water_probe.as_deref(),
+        );
         // Every editor is done laying rails, so the record can be read in place.
         let laid = rail_heights.as_ref().and_then(|h| h.lock().ok());
         match crate::bedrock_addon::vehicles(
@@ -2374,8 +2573,18 @@ pub fn generate_world_with_options(
 
     if wants_map_item {
         if let Some(p) = preview.as_ref() {
-            match crate::map_item::write_map_item(&output_path, p, &xzbbox, first_map_id) {
-                Ok(()) => println!("World map item added to the player inventory."),
+            match crate::map_item::write_map_item(&output_path, p, &own_rect, first_map_id) {
+                Ok(()) => {
+                    println!("World map item added to the player inventory.");
+                    // A piece's map is recorded by its coordinator, like its area.
+                    if let Some(run) = one_world.filter(|run| run.unit.is_none()) {
+                        if let Err(e) =
+                            crate::one_world::record_map_item(&run.world_dir, first_map_id)
+                        {
+                            eprintln!("Warning: Failed to record the world map item: {e}");
+                        }
+                    }
+                }
                 Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
             }
         }
@@ -2427,10 +2636,10 @@ pub fn generate_world_with_options(
             max_lat: llbbox.max().lat(),
             min_lon: llbbox.min().lng(),
             max_lon: llbbox.max().lng(),
-            min_mc_x: xzbbox.min_x(),
-            max_mc_x: xzbbox.max_x(),
-            min_mc_z: xzbbox.min_z(),
-            max_mc_z: xzbbox.max_z(),
+            min_mc_x: own_rect.min_x(),
+            max_mc_x: own_rect.max_x(),
+            min_mc_z: own_rect.min_z(),
+            max_mc_z: own_rect.max_z(),
         };
         let finalize = move || {
             // Skip if a newer generation already started.
@@ -2455,7 +2664,8 @@ pub fn generate_world_with_options(
     }
     bench.mark("map_preview");
 
-    if let Some(run) = one_world {
+    // A piece of a job is recorded by its coordinator, once it has seen the piece succeed.
+    if let Some(run) = one_world.filter(|run| run.unit.is_none()) {
         let png = run.preview_path();
         let preview_path = png.is_file().then_some(png.as_path());
         crate::one_world::record_area(
@@ -2491,7 +2701,31 @@ pub fn generate_world_with_options(
         }
     }
 
+    // After the area is recorded, so a One World's border holds all its areas. A piece leaves it
+    // to the coordinator.
+    if args.world_border
+        && world_format == WorldFormat::JavaAnvil
+        && one_world.is_none_or(|run| run.unit.is_none())
+    {
+        crate::one_world::apply_world_border(&output_path, &xzbbox);
+    }
+
     if world_format == WorldFormat::JavaAnvil && extras.any() {
+        // The save read the water and the pavement of every region it wrote.
+        launch_ships(
+            train_network.as_mut(),
+            ship_plan.as_ref(),
+            water_probe.as_deref(),
+        );
+        // Kept for its boats, it may have ended up with none.
+        train_network = train_network.filter(|net| !net.is_empty());
+        extras.trains = train_network.is_some();
+        if let (Some(net), Some(probe)) = (walk_network.as_mut(), walk_probe.as_deref()) {
+            net.finish(probe);
+            println!("  Pedestrians: {} footway lanes to walk", net.lane_count());
+        }
+        walk_network = walk_network.filter(|net| !net.is_empty());
+        extras.pedestrians = walk_network.is_some();
         let (places, settlement) = extras_places.unwrap_or_default();
         let surface = crate::datapack::disasters::Surface::finish();
         let disasters = disaster_woods.map(|wooded| {
@@ -2532,8 +2766,10 @@ pub fn generate_world_with_options(
             car_functions: car_network
                 .as_ref()
                 .map(|net| {
-                    let mut functions = net.look_functions();
+                    let mut functions = net.look_functions(extras.pedestrians);
                     functions.extend(net.body_functions());
+                    functions.push(net.kind_function());
+                    functions.push(net.seat_function());
                     functions.push((
                         "data/arnis/function/cars/network.mcfunction".to_string(),
                         net.storage_function(),
@@ -2541,11 +2777,17 @@ pub fn generate_world_with_options(
                     functions
                 })
                 .unwrap_or_default(),
+            walk_functions: walk_network
+                .as_ref()
+                .map(|net| net.pack_functions())
+                .unwrap_or_default(),
             train_functions: train_network
                 .as_ref()
-                .zip(rail_heights.as_ref())
-                .map(|(net, heights)| {
-                    let laid = heights.lock().map(|m| m.clone()).unwrap_or_default();
+                .map(|net| {
+                    let laid = rail_heights
+                        .as_ref()
+                        .and_then(|h| h.lock().ok().map(|m| m.clone()))
+                        .unwrap_or_default();
                     net.pack_functions(|way, x, z| laid.get(&(way, x, z)).copied())
                 })
                 .unwrap_or_default(),
@@ -2613,6 +2855,22 @@ pub fn generate_world_with_options(
     }
 
     Ok(output_path)
+}
+
+/// Puts the boats on the routes whose water turned out to carry them.
+fn launch_ships(
+    trains: Option<&mut crate::element_processing::trains::TrainNetwork>,
+    plan: Option<&crate::element_processing::ships::ShipPlan>,
+    probe: Option<&crate::water_probe::WaterProbe>,
+) {
+    let (Some(trains), Some(plan), Some(probe)) = (trains, plan, probe) else {
+        return;
+    };
+    trains.add_ships(plan.finish(probe));
+    let boats = trains.ship_count();
+    if boats > 0 {
+        println!("  Moving vehicles: {boats} ferries, ships and boats on the water");
+    }
 }
 
 /// The area's name for titles and dialogs: the one the GUI already put in the world's

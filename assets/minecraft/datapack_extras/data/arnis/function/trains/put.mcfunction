@@ -5,3 +5,5 @@ $execute positioned $(x) $(y) $(z) rotated $(h) 0 positioned ^ ^ ^$(f) as @e[typ
 # Not there yet: it has just come into view, or into the area.
 $execute if score #found arnis.train matches 0 positioned $(x) $(y) $(z) rotated $(h) 0 positioned ^ ^ ^$(f) run function arnis:trains/body/$(b) with storage arnis:trains c
 $execute if score #found arnis.train matches 0 positioned $(x) $(y) $(z) rotated $(h) 0 positioned ^ ^ ^$(f) as @e[type=block_display,tag=arnis.tc$(c),distance=..0.5] run scoreboard players operation @s arnis.te = #now arnis.train
+# Places to get on, only where someone could reach them.
+$execute positioned $(x) $(y) $(z) rotated $(h) 0 positioned ^ ^ ^$(f) if entity @a[distance=..40] run function arnis:trains/door/$(d) with storage arnis:trains c

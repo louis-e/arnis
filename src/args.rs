@@ -1,4 +1,6 @@
 use crate::coordinate_system::geographic::LLBBox;
+use crate::element_processing::road_detail::RoadDetail;
+use clap::builder::FalseyValueParser;
 use clap::{ArgAction, Parser};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -13,6 +15,26 @@ pub struct Args {
     /// always required.
     #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
     pub bbox: Option<LLBBox>,
+
+    /// Generate only inside this outline instead of a rectangle: "lat,lng lat,lng lat,lng ...".
+    /// Repeat it to merge several shapes into one world, where they keep their real
+    /// positions. Data is still downloaded for the rectangle around all of them.
+    #[arg(
+        long = "polygon",
+        value_name = "POINTS",
+        allow_hyphen_values = true,
+        conflicts_with = "bbox"
+    )]
+    pub polygon: Vec<String>,
+
+    /// Like --polygon, from the Polygon and MultiPolygon features of a GeoJSON file (holes
+    /// are kept out). Combines with --polygon.
+    #[arg(long = "polygon-file", value_name = "FILE", conflicts_with = "bbox")]
+    pub polygon_file: Option<PathBuf>,
+
+    /// The shapes of --polygon and --polygon-file, read by `resolve_shapes`.
+    #[arg(skip)]
+    pub shapes: Option<crate::coordinate_system::geographic::LLShapes>,
 
     /// Local OSM data to generate from instead of downloading it: an .osm/.xml file (OSM XML)
     /// or Overpass JSON. Without --bbox, the area is taken from the file.
@@ -410,10 +432,652 @@ pub struct Args {
 
     /// Cars that drive the streets at the speed limit, queue behind each other, turn at
     /// junctions and, with --traffic-lights, stop at red; and trains, S-Bahns, metros and
-    /// trams that run the mapped tracks and stop at their stations. Java 1.21.4+ or
-    /// Bedrock 1.21.120+; Bedrock has no traffic lights to stop at.
+    /// trams that run the mapped tracks and stop at their stations. On Java, right-click a
+    /// car or train to get in, or click one as a spectator to follow it. Java 1.21.4+ or Bedrock
+    /// 1.21.120+; Bedrock has no traffic lights to stop at.
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
+
+    /// People who walk the mapped footways, sidewalks, squares, pedestrian streets and
+    /// paths, busier by day and near shops and sights, waiting at kerbs and, with
+    /// --traffic-lights, for the green man. Cars stop for them. Java 1.21.9+ shows them as mannequins in the
+    /// game's own skins, older versions as villagers.
+    #[arg(long, default_value_t = false)]
+    pub pedestrians: bool,
+
+    #[command(flatten)]
+    pub live: LiveArgs,
+
+    /// Also report progress as JSON lines on stdout for programs driving the CLI.
+    #[arg(long, value_enum)]
+    pub progress: Option<ProgressFormat>,
+
+    /// Worker threads for generation. Defaults to 90% of the cores, or to RAYON_NUM_THREADS
+    /// when that is set; this flag wins over both. In a --one-world job built in pieces it is
+    /// the count for each piece, several of which run at once, and RAYON_NUM_THREADS is not
+    /// read.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=4096))]
+    pub threads: Option<u32>,
+
+    /// Memory this run may assume it has, in MB, in place of the free-RAM reading when sizing
+    /// its parallel work, so several processes can split one machine.
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..=100_000_000))]
+    pub ram_budget_mb: Option<u64>,
+
+    /// Downloads this process keeps in flight at once (default 16). The pieces of a --one-world
+    /// job share twice this, at least 2 each.
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+    pub max_downloads: Option<u32>,
+
+    /// Skip the check for a newer release on GitHub.
+    #[arg(long, env = "ARNIS_NO_UPDATE_CHECK", value_parser = FalseyValueParser::new())]
+    pub no_update_check: bool,
+
+    /// Skip the startup sweep that deletes cached elevation tiles older than 30 days.
+    #[arg(long, env = "ARNIS_NO_CACHE_SWEEP", value_parser = FalseyValueParser::new())]
+    pub no_cache_sweep: bool,
+
+    /// Print the flags this build supports as one JSON line and exit, so a program driving the
+    /// CLI can probe before using them.
+    #[arg(long)]
+    pub capabilities: bool,
+
+    #[command(flatten)]
+    pub units: UnitArgs,
+
+    /// EXPERIMENTAL. Java region container; blinear writes Leaf 1.21.11+ and 26.x B_Linear regions (not with --one-world, --voxy-lod or --dh-lod).
+    #[arg(long = "region-format", value_enum, default_value_t = crate::output_args::RegionFormat::Mca)]
+    pub region_format: crate::output_args::RegionFormat,
+
+    /// zstd level for --region-format blinear (Leaf's own default is 6).
+    #[arg(long = "blinear-level", default_value_t = 6, value_parser = clap::value_parser!(i32).range(1..=22))]
+    pub blinear_level: i32,
+
+    /// LAT,LON for block (0, 0) of a --one-world world this run creates, instead of the centre of the first --bbox.
+    #[arg(long, value_name = "LAT,LON", value_parser = crate::output_args::parse_origin, allow_hyphen_values = true)]
+    pub origin: Option<(f64, f64)>,
+
+    /// Java only: put the world border around the generated area (a One World: around all its areas) after the run.
+    #[arg(long, default_value_t = false)]
+    pub world_border: bool,
+
+    /// Redraw the map item of the One World at --output-dir and --world-name from its area previews and exit.
+    #[arg(long, default_value_t = false)]
+    pub map_item_only: bool,
+
+    /// Write the Distant Horizons LODs of the One World at --output-dir and --world-name from its region files and exit.
+    #[arg(long, default_value_t = false)]
+    pub dh_lod_only: bool,
+    #[command(flatten)]
+    pub water: WaterArgs,
+
+    /// Experimental. Where the Köppen climate behind surfaces and biomes is read:
+    /// origin (once, at the centre of the area, default) or per-position (across
+    /// the area, with organic borders, so a large world crosses climate zones;
+    /// biome latitude follows each block too).
+    #[arg(long, value_enum, default_value_t = crate::climate_field::ClimateMode::Origin)]
+    pub climate_mode: crate::climate_field::ClimateMode,
+
+    /// Experimental. Render the per-position Köppen climate layout for --bbox to
+    /// `<PREFIX>.png` and exit without generating a world; prints a
+    /// `CLIMATEMAP {json}` line with each climate's share.
+    #[arg(long = "climate-map", value_name = "PREFIX")]
+    pub climate_map: Option<PathBuf>,
+
+    /// Lowest Y of the extended-height world, a multiple of 16 from -2032 to -64. Turns on the
+    /// extended build height; the default is the pack's -2032.
+    #[arg(
+        long,
+        value_name = "Y",
+        allow_hyphen_values = true,
+        conflicts_with = "vanilla_height"
+    )]
+    pub min_y: Option<i32>,
+
+    /// Highest Y of the extended-height world, one less than a multiple of 16 from 319 to
+    /// 2031. Turns on the extended build height; the default is the pack's 2031.
+    #[arg(
+        long,
+        value_name = "Y",
+        allow_hyphen_values = true,
+        conflicts_with = "vanilla_height"
+    )]
+    pub max_y: Option<i32>,
+
+    /// EXPERIMENTAL. World seed mixed into most random choices (trees, rocks, flowers,
+    /// building variety), so the same area can be rebuilt with a different but repeatable
+    /// look; trains, facades and rooftop details keep theirs, and climate borders stay put.
+    /// Omitted or 0 keeps the default look. A One World keeps the seed its first area was
+    /// built with.
+    #[arg(long, value_name = "SEED")]
+    pub seed: Option<u64>,
+    #[command(flatten)]
+    pub scatter: ScatterArgs,
+
+    /// Force a tree realm instead of picking one from the area's location: auto, afr, asn,
+    /// aus, ena, eur, fl, ind, sam, wna or vanilla-plus. A forced realm skips the ecoregion
+    /// mixes and keeps its palms.
+    #[arg(long, value_name = "REALM", value_parser = clap::builder::PossibleValuesParser::new(crate::trees::tree_pack::REALMS))]
+    pub tree_realm: Option<String>,
+
+    /// Relative popularity of the schematic tree sizes, as name=percent pairs
+    /// (small, medium, big, tall, giant; 0-200, omitted ones stay 100). 0 turns a
+    /// size off. Measured canopy heights still pick their own size.
+    /// Example: --tree-size-weights big=150,tall=50,giant=0
+    #[arg(long, value_name = "LIST", value_parser = crate::trees::size_weights::SizeWeights::parse)]
+    pub tree_size_weights: Option<crate::trees::size_weights::SizeWeights>,
+
+    /// Experimental. A folder of your own tree schematics, laid out like the
+    /// bundled packs: <realm>/<community>/<tree type>/[<size>/]<any name>.schem.
+    /// The folders say what a file is; the size folder (small, medium, big,
+    /// tall, giant) is optional and otherwise measured from the height. A file
+    /// that does not load, is over 8 MB, wider than 64 blocks or taller than 256
+    /// is skipped with a warning.
+    #[arg(long, value_name = "FOLDER")]
+    pub tree_pack_dir: Option<PathBuf>,
+
+    /// With --tree-pack-dir: add the folder's trees to the built-in ones, or
+    /// replace a realm's built-in trees wherever the folder has any for it.
+    #[arg(long, value_enum, default_value_t = crate::trees::pack_dir::TreePackMode::Add)]
+    pub tree_pack_mode: crate::trees::pack_dir::TreePackMode,
+
+    /// Write every bundled tree schematic into the --tree-pack-dir layout in
+    /// FOLDER, to edit or adapt, and exit. Files already there are kept.
+    #[arg(long, value_name = "FOLDER")]
+    pub export_tree_packs: Option<PathBuf>,
+
+    /// How much of the underground the themed cave biomes take: vanilla (plain caves only),
+    /// more-vanilla (about 30% themed), all-mix (every theme at its default amount, about 77%
+    /// themed, the default) or more-mix (about 89% themed). --cave-biomes amounts override the
+    /// style's per theme.
+    #[arg(long = "cave-style", value_enum)]
+    pub cave_style: Option<crate::caves::CaveStyle>,
+
+    /// Ore veins in --caves: normal (vanilla's ore table, the default) or more (twice the
+    /// veins of every metal and gem ore, at vanilla's heights).
+    #[arg(long = "cave-ores", value_enum)]
+    pub cave_ores: Option<crate::caves::CaveOres>,
+
+    /// Seed for --caves and --cave-zone-map: each seed gives the same area a different cave
+    /// layout. Omitted keeps the built-in seed, so an area always gets the same caves.
+    #[arg(long = "cave-seed", value_name = "SEED")]
+    pub cave_seed: Option<u64>,
+
+    /// Y that stands for vanilla's world floor in the cave passes, a multiple of 16 from
+    /// -2032 to 2016. One value for every run makes caves, the lava sea and the deepslate
+    /// line continuous across them, and plans pools, rivers and geodes past the run's edge.
+    #[arg(long = "cave-datum-y", value_name = "Y", allow_hyphen_values = true)]
+    pub cave_datum_y: Option<i32>,
+    /// How much road marking and how many minor ways to build: max, clean or compact.
+    #[arg(long, value_enum, default_value_t = RoadDetail::Max)]
+    pub road_detail: RoadDetail,
+
+    /// Lay asphalt, concrete and paving mixes and built-up stone ground in patches a few
+    /// blocks across instead of a per-block speckle, and give pitched clay roofs a full
+    /// block in their stairs' colour, so no single block stands out as a dot.
+    #[arg(long)]
+    pub surface_patches: bool,
+
+    /// Leave out buildings: OSM buildings, building parts, doors and entrances, the
+    /// Overture footprints, landmarks and Mapillary facades. Roads, rail, water, land cover
+    /// and terrain are built as usual.
+    #[arg(long = "no-buildings", default_value_t = true, action = ArgAction::SetFalse)]
+    pub buildings: bool,
+
+    /// Which 3D props to place: all, none, or a list of boat, car, crane, excavator,
+    /// fountain, helicopter, jetbridge, landmark, lighthouse, plane, playground, starship,
+    /// tombstone, tractor and windturbine. Given, it decides the props whatever --no-3d
+    /// says; left out, they follow --no-3d.
+    #[arg(long, value_parser = crate::structures::PropSet::parse)]
+    pub props: Option<crate::structures::PropSet>,
+
+    /// Leave out every schematic prop below this world scale. Props keep their block size
+    /// at any scale, so on a small-scale world they tower over the buildings around them.
+    #[arg(long, value_parser = parse_props_min_scale)]
+    pub props_min_scale: Option<f64>,
+
+    /// Chest loot table (JSON) for --interior, in place of the built-in one. A file that
+    /// cannot be read or fails validation stops the run with an error.
+    #[arg(long, value_name = "FILE")]
+    pub loot_table: Option<PathBuf>,
+
+    /// Write the built-in chest loot table to FILE as JSON to start from, and exit.
+    #[arg(long, value_name = "FILE")]
+    pub dump_loot_table: Option<PathBuf>,
+    /// Read OpenStreetMap from an .osm.pbf file, or from `geofabrik` for the smallest Geofabrik region holding the area, instead of the tile archive.
+    #[arg(long, value_name = "PATH|geofabrik", conflicts_with = "file")]
+    pub osm_pbf: Option<String>,
+
+    /// The extract to download for `--osm-pbf geofabrik`, instead of picking one.
+    #[arg(long, value_name = "URL", requires = "osm_pbf")]
+    pub osm_pbf_url: Option<String>,
+
+    /// Overpass server(s) to use in place of Arnis's own, tried in order; repeat the flag or separate with commas. The tile archive is still read first and these are its fallback; with --no-tile-archive they are the primary source.
+    #[arg(
+        long,
+        env = "ARNIS_OVERPASS_URL",
+        value_name = "URL",
+        value_delimiter = ','
+    )]
+    pub overpass_url: Vec<String>,
+
+    /// Never use the network: read everything from the caches and stop with a list of what they lack.
+    #[arg(long, env = "ARNIS_OFFLINE", value_parser = FalseyValueParser::new())]
+    pub offline: bool,
+
+    /// Download and cache every input this command would read for --bbox, then exit without writing a world.
+    #[arg(long, conflicts_with = "offline")]
+    pub prewarm: bool,
+
+    /// With --unit-regions, warm the caches for every piece, one at a time, before the pieces start building.
+    #[arg(long, conflicts_with = "offline")]
+    pub prewarm_first: bool,
+}
+
+/// Water options. Off unless asked for, so the GUI runs on `WaterArgs::default()`.
+#[derive(clap::Args, Debug, Default)]
+pub struct WaterArgs {
+    /// River bed shape. `v1` digs mapped rivers, canals and streams a U-shaped bed that
+    /// deepens with their width, in patches of earth, sand and gravel; lakes and the sea
+    /// keep their bed.
+    #[arg(long, value_enum, default_value_t = crate::river_bed::RiverBed::Off)]
+    pub river_bed: crate::river_bed::RiverBed,
+
+    /// Water detail. `scaled` rounds bed depths instead of flooring them and, on small
+    /// maps, gives narrow water a bowl-shaped bed, draws streams narrower and lets water
+    /// run over a road where it crosses a short stretch of water without a bridge.
+    #[arg(long, value_enum, default_value_t = crate::water_detail::WaterDetail::Default)]
+    pub water_detail: crate::water_detail::WaterDetail,
+}
+
+impl WaterArgs {
+    /// How far these options can carve beyond the land-cover estimate.
+    pub fn carve_depth(&self, scale: f64) -> crate::water_detail::CarveDepth {
+        crate::water_detail::CarveDepth {
+            floor: if self.river_bed == crate::river_bed::RiverBed::Off {
+                0
+            } else {
+                crate::water_depth::MAX_WATER_DEPTH
+            },
+            detail: self.water_detail,
+            scale,
+        }
+    }
+}
+
+/// Rocks and bushes on open land. On unless turned off.
+#[derive(clap::Args, Debug)]
+pub struct ScatterArgs {
+    /// Scatter small andesite and tuff rocks over grassland and cropland outside towns
+    /// (--rocks false turns it off). Needs land cover.
+    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub rocks: bool,
+
+    /// Share of 16x16 chunks that get a rock, from 0.0 to 1.0.
+    #[arg(long, default_value_t = 0.02, value_parser = parse_density)]
+    pub rock_density: f64,
+
+    /// Scatter small bushes of ten species over grassland and cropland outside towns
+    /// (--bushes false turns it off). Needs land cover.
+    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub bushes: bool,
+
+    /// Share of 16x16 chunks that get a bush, from 0.0 to 1.0.
+    /// Where a chunk rolls both, the rock wins.
+    #[arg(long, default_value_t = 0.05, value_parser = parse_density)]
+    pub bush_density: f64,
+}
+
+impl Default for ScatterArgs {
+    fn default() -> Self {
+        Self {
+            rocks: true,
+            rock_density: 0.02,
+            bushes: true,
+            bush_density: 0.05,
+        }
+    }
+}
+
+fn parse_density(s: &str) -> Result<f64, String> {
+    match s.trim().parse::<f64>() {
+        Ok(v) if (0.0..=1.0).contains(&v) => Ok(v),
+        _ => Err(format!("{s}: expected a share from 0.0 to 1.0")),
+    }
+}
+
+/// Large One World jobs cut into region-group pieces.
+#[derive(clap::Args, Debug, Default)]
+pub struct UnitArgs {
+    /// Print how --one-world would cut --bbox into pieces of at most N x N regions (one JSON
+    /// line on stdout) and exit without generating.
+    #[arg(long, value_name = "auto|N", value_parser = parse_unit_size)]
+    pub plan_units: Option<UnitSize>,
+
+    /// Piece size of a --one-world job, at most N x N regions. auto takes 8 x 8 pieces, 12 x 12
+    /// or 16 x 16 with memory to spare, 4 x 4 or 2 x 2 short of it, split smaller along a
+    /// --plan-mask; with --one-world-workers auto a small selection is built in one run.
+    #[arg(long, value_name = "auto|N", value_parser = parse_unit_size)]
+    pub unit_regions: Option<UnitSize>,
+
+    /// One piece of a job, run by the job's coordinator.
+    #[arg(long, hide = true)]
+    pub one_world_unit: Option<PathBuf>,
+
+    /// Build a --one-world selection in pieces, this many at once, each in its own process
+    /// with all of --threads and a share of the job's memory and downloads. auto picks 1 to 6
+    /// from the free RAM and cores: 1 with six cores or fewer, or too little memory for a piece.
+    /// Pieces are 8 x 8 regions unless --unit-regions says otherwise; run the same command
+    /// again to resume an interrupted job.
+    #[arg(long, value_name = "auto|N", value_parser = parse_workers)]
+    pub one_world_workers: Option<Workers>,
+
+    /// Build only these pieces of the job (numbered from 1, as the job prints them), say one
+    /// that failed; the others wait for the next run of the same job.
+    #[arg(long, value_name = "N,N...", value_delimiter = ',',
+          value_parser = clap::value_parser!(u32).range(1..))]
+    pub only_pieces: Option<Vec<u32>>,
+
+    /// Snap a --one-world job to whole pieces on the world's region lattice: cover grows it,
+    /// fit shrinks it; merge keeps its edges but folds an edge strip thinner than a quarter
+    /// region into its neighbour.
+    #[arg(long, value_enum, value_name = "cover|fit|merge")]
+    pub snap_regions: Option<SnapRegions>,
+
+    /// Regions added on every side of a --one-world job, after any --snap-regions.
+    #[arg(long, value_name = "K", default_value_t = 0,
+          value_parser = clap::value_parser!(i32).range(0..=64))]
+    pub margin_regions: i32,
+
+    /// Skip the pieces of a --one-world job whose every chunk is already in the world, say
+    /// from an earlier job over part of this one.
+    #[arg(long)]
+    pub skip_built: bool,
+
+    /// Order a --one-world job builds its pieces in: from the centre out (the default), from
+    /// one side, or the listed piece numbers first and the rest from the centre out.
+    #[arg(long, value_name = "centre|west|east|north|south|N,N...", value_parser = parse_piece_order)]
+    pub piece_order: Option<PieceOrder>,
+
+    /// Keep only the pieces of a --one-world job that touch this polygon, a GeoJSON
+    /// (Multi)Polygon, Feature or FeatureCollection, or an Osmosis .poly file.
+    #[arg(long, value_name = "FILE")]
+    pub plan_mask: Option<PathBuf>,
+
+    /// Once every piece of a --one-world job is built, redraw the world's map item over all
+    /// of them; without it the map shows the first piece only.
+    #[arg(long)]
+    pub stitch_map: bool,
+
+    /// Leave these cells of a --one-world job out (plan indexes from 0, as --plan-units lists
+    /// them); kept with the job, and an empty list builds every cell again.
+    #[arg(long, hide = true, value_name = "N,N...", value_parser = parse_cells)]
+    pub skip_cells: Option<std::collections::BTreeSet<u32>>,
+}
+
+/// `--skip-cells`: plan indexes, comma separated; empty for none.
+fn parse_cells(s: &str) -> Result<std::collections::BTreeSet<u32>, String> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.parse().map_err(|_| format!("{t}: not a cell number")))
+        .collect()
+}
+
+/// `--piece-order`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PieceOrder {
+    Centre,
+    West,
+    East,
+    North,
+    South,
+    /// Piece numbers, from 1.
+    List(Vec<u32>),
+}
+
+fn parse_piece_order(s: &str) -> Result<PieceOrder, String> {
+    Ok(match s {
+        "centre" | "center" => PieceOrder::Centre,
+        "west" => PieceOrder::West,
+        "east" => PieceOrder::East,
+        "north" => PieceOrder::North,
+        "south" => PieceOrder::South,
+        _ => PieceOrder::List(
+            s.split(',')
+                .map(|n| match n.trim().parse::<u32>() {
+                    Ok(n @ 1..) => Ok(n),
+                    _ => Err(format!(
+                        "{s}: expected centre, west, east, north, south or piece numbers like 3,1,2"
+                    )),
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+    })
+}
+
+/// How `--snap-regions` fits a job to the region lattice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum SnapRegions {
+    /// Grow to whole pieces.
+    Cover,
+    /// Shrink to whole pieces; at least the one under the centre.
+    Fit,
+    /// Keep the edges, merge thin edge strips into their neighbours.
+    Merge,
+}
+
+impl UnitArgs {
+    /// Whether this run coordinates a job of pieces rather than building one area itself.
+    pub fn coordinates(&self) -> bool {
+        (self.unit_regions.is_some() || self.one_world_workers.is_some())
+            && self.one_world_unit.is_none()
+    }
+}
+
+/// Piece size of a job: N x N regions, or mixed sizes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnitSize {
+    Auto,
+    N(i32),
+}
+
+impl std::fmt::Display for UnitSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnitSize::Auto => f.write_str("auto"),
+            UnitSize::N(n) => write!(f, "{n}"),
+        }
+    }
+}
+
+fn parse_unit_size(s: &str) -> Result<UnitSize, String> {
+    match s {
+        "auto" => Ok(UnitSize::Auto),
+        _ => match s.parse::<i32>() {
+            Ok(n @ 1..=64) => Ok(UnitSize::N(n)),
+            _ => Err(format!("{s}: expected auto or a size from 1 to 64")),
+        },
+    }
+}
+
+/// How many pieces of a job run at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Workers {
+    Auto,
+    N(u32),
+}
+
+fn parse_workers(s: &str) -> Result<Workers, String> {
+    match s {
+        "auto" => Ok(Workers::Auto),
+        _ => match s.parse::<u32>() {
+            Ok(n @ 1..=64) => Ok(Workers::N(n)),
+            _ => Err(format!("{s}: expected auto or a count from 1 to 64")),
+        },
+    }
+}
+
+impl Args {
+    /// The thread count asked for with --threads, if any.
+    pub fn thread_count(&self) -> Option<usize> {
+        self.threads.map(|n| n as usize)
+    }
+}
+
+/// Live tiles build with the stock settings only, so `--live` refuses every flag that would
+/// be dropped on its tiles. `--seed`, `--cave-seed` and `--cave-datum-y` travel in the
+/// world's manifest; `--no-update-check` and `--no-cache-sweep` act on this process only.
+pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
+    if !args.live.live {
+        return Ok(());
+    }
+    let (u, w, sc) = (&args.units, &args.water, &args.scatter);
+    let used: Vec<&str> = [
+        (args.progress.is_some(), "--progress"),
+        (args.threads.is_some(), "--threads"),
+        (args.ram_budget_mb.is_some(), "--ram-budget-mb"),
+        (args.max_downloads.is_some(), "--max-downloads"),
+        (u.plan_units.is_some(), "--plan-units"),
+        (u.unit_regions.is_some(), "--unit-regions"),
+        (u.one_world_unit.is_some(), "--one-world-unit"),
+        (
+            !matches!(u.one_world_workers, None | Some(Workers::N(1))),
+            "--one-world-workers",
+        ),
+        (u.only_pieces.is_some(), "--only-pieces"),
+        (u.snap_regions.is_some(), "--snap-regions"),
+        (u.margin_regions != 0, "--margin-regions"),
+        (u.skip_built, "--skip-built"),
+        (u.piece_order.is_some(), "--piece-order"),
+        (u.plan_mask.is_some(), "--plan-mask"),
+        (u.stitch_map, "--stitch-map"),
+        (u.skip_cells.is_some(), "--skip-cells"),
+        (
+            args.region_format != crate::output_args::RegionFormat::Mca,
+            "--region-format",
+        ),
+        (args.blinear_level != 6, "--blinear-level"),
+        (args.origin.is_some(), "--origin"),
+        (args.world_border, "--world-border"),
+        (args.map_item_only, "--map-item-only"),
+        (args.dh_lod_only, "--dh-lod-only"),
+        (w.river_bed != Default::default(), "--river-bed"),
+        (w.water_detail != Default::default(), "--water-detail"),
+        (args.climate_mode != Default::default(), "--climate-mode"),
+        (args.climate_map.is_some(), "--climate-map"),
+        (args.min_y.is_some(), "--min-y"),
+        (args.max_y.is_some(), "--max-y"),
+        (
+            sc.rock_density != ScatterArgs::default().rock_density,
+            "--rock-density",
+        ),
+        (
+            sc.bush_density != ScatterArgs::default().bush_density,
+            "--bush-density",
+        ),
+        (args.tree_realm.is_some(), "--tree-realm"),
+        (args.tree_size_weights.is_some(), "--tree-size-weights"),
+        (args.tree_pack_dir.is_some(), "--tree-pack-dir"),
+        (
+            args.tree_pack_mode != Default::default(),
+            "--tree-pack-mode",
+        ),
+        (args.export_tree_packs.is_some(), "--export-tree-packs"),
+        (args.cave_style.is_some(), "--cave-style"),
+        (args.cave_ores.is_some(), "--cave-ores"),
+        (args.road_detail != RoadDetail::Max, "--road-detail"),
+        (args.surface_patches, "--surface-patches"),
+        (!args.buildings, "--no-buildings"),
+        (args.props.is_some(), "--props"),
+        (args.props_min_scale.is_some(), "--props-min-scale"),
+        (args.loot_table.is_some(), "--loot-table"),
+        (args.dump_loot_table.is_some(), "--dump-loot-table"),
+        (args.osm_pbf.is_some(), "--osm-pbf"),
+        (args.osm_pbf_url.is_some(), "--osm-pbf-url"),
+        (!args.overpass_url.is_empty(), "--overpass-url"),
+        (args.offline, "--offline"),
+        (args.prewarm, "--prewarm"),
+        (args.prewarm_first, "--prewarm-first"),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect();
+    if used.is_empty() {
+        return Ok(());
+    }
+    let mut msg = format!(
+        "--live builds its tiles with the standard settings only, so it cannot take {}.",
+        used.join(", ")
+    );
+    if args.offline {
+        msg.push_str(
+            " --offline is not supported in Live mode: the tiles and the server download need the network.",
+        );
+    }
+    Err(msg)
+}
+
+/// The line `--capabilities` prints: a JSON array of every long flag.
+pub fn capabilities_json() -> String {
+    use clap::CommandFactory;
+    let flags: Vec<String> = Args::command()
+        .get_arguments()
+        .filter_map(|a| a.get_long().map(str::to_string))
+        .collect();
+    serde_json::to_string(&flags).unwrap_or_default()
+}
+
+/// Machine-readable progress formats for `--progress`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum ProgressFormat {
+    /// One JSON object per line.
+    Json,
+}
+
+/// Live mode: the One World on a local Minecraft server, generated around the players.
+#[derive(clap::Args, Debug, Clone)]
+pub struct LiveArgs {
+    /// Play the One World on a local Minecraft Java server that keeps generating the land
+    /// around you while you play. Needs --one-world; --bbox, if given, is where you start.
+    /// Runs until Ctrl+C.
+    #[arg(long, requires = "one_world")]
+    pub live: bool,
+
+    /// Agree to the Minecraft EULA (https://aka.ms/MinecraftEULA), which a server needs.
+    #[arg(long)]
+    pub accept_eula: bool,
+
+    /// Minecraft version of the live server, which must match the game. Default: the
+    /// version the launcher played last.
+    #[arg(long = "live-version", id = "live_version", value_name = "VERSION")]
+    pub version: Option<String>,
+
+    /// How many chunks around each player the live server loads and sends.
+    #[arg(long = "live-view-distance", default_value_t = crate::live::DEFAULT_VIEW_DISTANCE,
+        value_parser = clap::value_parser!(u32).range(4..=32))]
+    pub view_distance: u32,
+
+    /// Port the live server listens on (default 25565, or a free one).
+    #[arg(long = "live-port")]
+    pub port: Option<u16>,
+
+    /// Internal: one tile of a live session.
+    #[arg(long = "live-tile", hide = true)]
+    pub tile: bool,
+}
+
+impl Default for LiveArgs {
+    fn default() -> Self {
+        Self {
+            live: false,
+            accept_eula: false,
+            version: None,
+            view_distance: crate::live::DEFAULT_VIEW_DISTANCE,
+            port: None,
+            tile: false,
+        }
+    }
 }
 
 /// Accepts the panel resolutions the atlas budget logic can halve cleanly.
@@ -605,6 +1269,20 @@ impl Args {
     /// Whether this run skips OSM/Overture objects (terrain-only, or too small a scale).
     pub fn skip_objects(&self) -> bool {
         self.mode.skip_objects() || self.scale < OBJECT_SKIP_SCALE
+    }
+
+    /// The prop families this run places: `--props`, else all or none by `--no-3d`;
+    /// none below `--props-min-scale`.
+    pub fn props(&self) -> crate::structures::PropSet {
+        use crate::structures::PropSet;
+        if self.props_min_scale.is_some_and(|min| self.scale < min) {
+            return PropSet::NONE;
+        }
+        self.props.unwrap_or(if self.use_3d {
+            PropSet::ALL
+        } else {
+            PropSet::NONE
+        })
     }
 
     /// Whether objects are being skipped only because the scale is below `OBJECT_SKIP_SCALE`.
@@ -811,6 +1489,12 @@ pub const DISASTER_GROUND_LEVEL: i32 = -40;
 /// beside Animals, and need mob griefing for their meteors to crater, so both keep natural
 /// spawning off.
 pub fn apply_feature_needs(args: &mut Args) {
+    // Overture only adds buildings and Mapillary only dresses them, so --no-buildings has
+    // nothing to fetch.
+    args.overture &= args.buildings;
+    if !args.buildings {
+        args.mapillary_facades = Some(false);
+    }
     if args.caves || args.disasters {
         args.fillground = true;
     }
@@ -819,6 +1503,13 @@ pub fn apply_feature_needs(args: &mut Args) {
     }
     if args.zombie_outbreak || args.disasters {
         args.mob_spawning = MobSpawning::Off;
+    }
+}
+
+fn parse_props_min_scale(s: &str) -> Result<f64, String> {
+    match s.trim().parse::<f64>() {
+        Ok(v) if v.is_finite() && v >= 0.0 => Ok(v),
+        _ => Err(format!("{s}: expected a scale of 0 or more")),
     }
 }
 
@@ -860,6 +1551,7 @@ pub fn apply_body_defaults(args: &mut Args) {
     args.traffic_lights = false;
     args.discoveries = false;
     args.moving_vehicles = false;
+    args.pedestrians = false;
     // Nothing lives there, and the one barren biome would still spawn zombies.
     args.mob_spawning = MobSpawning::Off;
     // Airless bodies look right at night. Only a default: comparing against the
@@ -890,7 +1582,135 @@ pub const DEFAULT_WORLD_TIME: i64 = 6_000;
 /// Minecraft tick for midnight (tick 0 is 06:00).
 pub const MIDNIGHT_TICKS: i64 = 18_000;
 
+/// Reads --polygon/--polygon-file into `args.shapes` and sets --bbox to their rectangle.
+pub fn resolve_shapes(args: &mut Args) -> Result<(), String> {
+    use crate::coordinate_system::geographic::LLShapes;
+    let mut polygons = Vec::new();
+    for (i, points) in args.polygon.iter().enumerate() {
+        let ring =
+            LLShapes::parse_points(points).map_err(|e| format!("--polygon {}: {e}", i + 1))?;
+        polygons.push(vec![ring]);
+    }
+    if let Some(path) = &args.polygon_file {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("--polygon-file {}: {e}", path.display()))?;
+        polygons.extend(
+            LLShapes::from_geojson(&text)
+                .map_err(|e| format!("--polygon-file {}: {e}", path.display()))?,
+        );
+    }
+    if polygons.is_empty() {
+        return Ok(());
+    }
+    let shapes = LLShapes::new(polygons).map_err(|e| format!("--polygon: {e}"))?;
+    args.bbox = Some(shapes.bbox());
+    args.shapes = Some(shapes);
+    Ok(())
+}
+
 pub fn validate_args(args: &Args) -> Result<(), String> {
+    let cave_preview = args.cave_zone_map.is_some();
+    if (args.cave_style.is_some() || args.cave_seed.is_some()) && !args.caves && !cave_preview {
+        return Err(
+            "--cave-style and --cave-seed only apply to --caves or --cave-zone-map.".to_string(),
+        );
+    }
+    if args.cave_ores.is_some() && !args.caves {
+        return Err("--cave-ores only applies to --caves.".to_string());
+    }
+    if let Some(y) = args.cave_datum_y {
+        if !args.caves {
+            return Err("--cave-datum-y only applies to --caves.".to_string());
+        }
+        if y.rem_euclid(16) != 0 || !(-2032..=2016).contains(&y) {
+            return Err("--cave-datum-y must be a multiple of 16 from -2032 to 2016.".to_string());
+        }
+        // A One World always has the extended height; a run that picks its own may extend.
+        let extended =
+            args.disable_height_limit || args.one_world || crate::ground::auto_height(args);
+        let (bottom, top) = (
+            crate::ground::world_min_y(args, extended),
+            crate::ground::world_top_y(args, extended),
+        );
+        if !(bottom..=top).contains(&y) {
+            return Err(format!(
+                "--cave-datum-y must lie inside this world's height, {bottom} to {top} (got {y})."
+            ));
+        }
+    }
+    for warning in ignored_flags(args) {
+        eprintln!("Warning: {warning}");
+    }
+    if !args.one_world
+        && (args.units.plan_units.is_some()
+            || args.units.unit_regions.is_some()
+            || args.units.one_world_unit.is_some()
+            || args.units.one_world_workers.is_some()
+            || args.units.only_pieces.is_some())
+    {
+        return Err(
+            "--plan-units, --unit-regions, --one-world-workers and --only-pieces only apply to --one-world."
+                .to_string(),
+        );
+    }
+    if (args.units.skip_built || args.units.piece_order.is_some() || args.units.stitch_map)
+        && !args.units.coordinates()
+    {
+        return Err(
+            "--skip-built, --piece-order and --stitch-map only apply to a job built in pieces (--unit-regions)."
+                .to_string(),
+        );
+    }
+    if args.units.stitch_map && !args.map_item {
+        return Err("--stitch-map redraws the map item, so it needs --map-item.".to_string());
+    }
+    let planned = args.units.coordinates() || args.units.plan_units.is_some();
+    if (args.units.snap_regions.is_some()
+        || args.units.margin_regions != 0
+        || args.units.plan_mask.is_some())
+        && !planned
+    {
+        return Err(
+            "--snap-regions, --margin-regions and --plan-mask only apply to a job built in pieces (--unit-regions or --plan-units)."
+                .to_string(),
+        );
+    }
+    if args.units.only_pieces.is_some() && !args.units.coordinates() {
+        return Err(
+            "--only-pieces only applies to a job built in pieces (--unit-regions).".to_string(),
+        );
+    }
+    if args.units.skip_cells.is_some() && !args.units.coordinates() {
+        return Err(
+            "--skip-cells only applies to a job built in pieces (--unit-regions).".to_string(),
+        );
+    }
+    refuse_live_extras(args)?;
+    crate::output_args::validate(args)?;
+    if args.climate_map.is_some() && args.bbox.is_none() {
+        return Err("--climate-map needs --bbox.".to_string());
+    }
+    // Rotation resamples the ground grids, which the per-position climate does not follow.
+    if args.climate_mode == crate::climate_field::ClimateMode::PerPosition && args.rotation != 0.0 {
+        return Err("--climate-mode per-position does not support --rotation.".to_string());
+    }
+    crate::y_bounds::check(args)?;
+    if args.prewarm_first && !args.units.coordinates() {
+        return Err(
+            "--prewarm-first only applies to a job built in pieces (--unit-regions).".to_string(),
+        );
+    }
+    if args.offline && args.mapillary_probe {
+        return Err("--mapillary-probe asks Mapillary, so it cannot run --offline.".to_string());
+    }
+    // One World and live mode track their areas as rectangles of whole chunks.
+    if args.shapes.is_some() && (args.one_world || args.live.live) {
+        return Err(
+            "--polygon makes a world of its own; --one-world and --live generate rectangles."
+                .to_string(),
+        );
+    }
+
     // Moon/Mars scale is ours, and sits below MIN_SCALE by design.
     if args.body.is_earth() {
         validate_scale(args.scale)?;
@@ -917,6 +1737,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (args.disasters, "--disasters"),
         (args.body_gravity, "--body-gravity"),
         (args.moving_vehicles, "--moving-vehicles"),
+        (args.pedestrians, "--pedestrians"),
     ];
     if args.bedrock || args.luanti {
         // Bedrock runs the vehicles from an add-on of its own.
@@ -1056,6 +1877,14 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             ));
         }
     }
+    if let Some(dir) = &args.tree_pack_dir {
+        if !dir.is_dir() {
+            return Err(format!(
+                "--tree-pack-dir: {} is not a directory.",
+                dir.display()
+            ));
+        }
+    }
 
     let cave_preview = args.cave_zone_map.is_some();
     if let Some(spec) = &args.cave_biomes {
@@ -1091,7 +1920,8 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
 
     // A bounding box is required unless a local --file supplies one to derive it from.
     // A run that loads no OSM data ignores --file, so it always needs --bbox.
-    if args.bbox.is_none() {
+    // Live mode can continue a One World where its players left off.
+    if args.bbox.is_none() && !args.live.live {
         if args.skip_osm() {
             return Err(
                 "--bbox is required: below scale 0.3, or off Earth, no OpenStreetMap data is loaded and --file is ignored."
@@ -1126,8 +1956,9 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 return Err(format!("Path is not a directory: {}", path.display()));
             }
         }
-    } else if args.mapillary_probe || cave_preview {
-        // The probe and the cave preview write no world, so they need no output directory.
+    } else if args.mapillary_probe || cave_preview || args.climate_map.is_some() || args.prewarm {
+        // The probe, the cave preview, the climate map and a prewarm write no world, so they need
+        // no output directory.
     } else {
         // Java: path is required. If it exists, it must be a directory.
         // If it doesn't exist, create_new_world will create it.
@@ -1171,6 +2002,12 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                     );
                 }
             }
+            if args.shapes.as_ref().is_some_and(|s| !s.contains(&llpoint)) {
+                return Err(
+                    "Spawn point (--spawn-lat, --spawn-lng) must be inside the --polygon shapes."
+                        .to_string(),
+                );
+            }
         }
         _ => {}
     }
@@ -1189,6 +2026,40 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Flags that were given but do nothing with the rest of the command line.
+fn ignored_flags(args: &Args) -> Vec<&'static str> {
+    let scatter = ScatterArgs::default();
+    let pack_flags = args.tree_realm.is_some()
+        || args.tree_size_weights.is_some()
+        || args.tree_pack_dir.is_some();
+    [
+        (
+            args.loot_table.is_some() && !args.interior,
+            "--loot-table only applies to --interior; it is ignored.",
+        ),
+        (
+            !args.scatter.rocks && args.scatter.rock_density != scatter.rock_density,
+            "--rock-density does nothing with --rocks false.",
+        ),
+        (
+            !args.scatter.bushes && args.scatter.bush_density != scatter.bush_density,
+            "--bush-density does nothing with --bushes false.",
+        ),
+        (
+            args.blinear_level != 6
+                && args.region_format != crate::output_args::RegionFormat::Blinear,
+            "--blinear-level only applies to --region-format blinear; it is ignored.",
+        ),
+        (
+            pack_flags && args.legacy_trees,
+            "--tree-realm, --tree-size-weights and --tree-pack-dir do nothing with --legacy-trees.",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(ignored, warning)| ignored.then_some(warning))
+    .collect()
 }
 
 /// Legal `--ground-level` range for the chosen output format. The scaler clamps every column
@@ -1211,6 +2082,155 @@ mod tests {
     use super::*;
 
     #[test]
+    fn flags_that_do_nothing_are_named_and_kept() {
+        let p = |x: &[&str]| {
+            Args::try_parse_from(
+                ["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"]
+                    .iter()
+                    .chain(x),
+            )
+            .unwrap()
+        };
+        assert!(ignored_flags(&p(&[])).is_empty());
+        for (flags, named) in [
+            (&["--loot-table", "x.json"][..], "--loot-table"),
+            (
+                &["--rocks", "false", "--rock-density", "0.5"],
+                "--rock-density",
+            ),
+            (
+                &["--bushes", "false", "--bush-density", "0.5"],
+                "--bush-density",
+            ),
+            (&["--blinear-level", "9"], "--blinear-level"),
+            (&["--legacy-trees", "--tree-realm", "eur"], "--legacy-trees"),
+        ] {
+            let args = p(flags);
+            let warned = ignored_flags(&args);
+            assert!(warned.len() == 1 && warned[0].contains(named), "{flags:?}");
+            assert!(validate_args(&args).is_ok(), "{flags:?}");
+        }
+        // On by default: no land cover is no reason to speak up.
+        assert!(ignored_flags(&p(&["--rock-density", "0.5", "--mode", "geo-only"])).is_empty());
+        assert!(ignored_flags(&p(&["--interior", "--loot-table", "x.json"])).is_empty());
+    }
+
+    #[test]
+    fn cave_datum_stays_inside_the_world() {
+        let p = |x: &[&str]| {
+            Args::try_parse_from(
+                ["arnis", "--output-dir", ".", "--bbox", "1,2,3,4", "--caves"]
+                    .iter()
+                    .chain(x),
+            )
+            .unwrap()
+        };
+        let vanilla = |y: &str| validate_args(&p(&["--vanilla-height", "--cave-datum-y", y]));
+        assert!(vanilla("-64").is_ok() && vanilla("304").is_ok());
+        assert!(vanilla("-128").unwrap_err().contains("-64 to 319"));
+        assert!(vanilla("2016").is_err());
+        assert!(validate_args(&p(&["--disable-height-limit", "--cave-datum-y", "-1024"])).is_ok());
+    }
+
+    #[test]
+    fn capabilities_lists_every_long_flag() {
+        use clap::CommandFactory;
+        let line = capabilities_json();
+        assert!(line.starts_with('[') && !line.contains('\n'));
+        let v: Vec<String> = serde_json::from_str(&line).unwrap();
+        let flags: Vec<&str> = v.iter().map(String::as_str).collect();
+        for a in Args::command().get_arguments() {
+            if let Some(l) = a.get_long() {
+                assert!(flags.contains(&l), "missing --{l}");
+            }
+        }
+        assert!(flags.contains(&"threads") && flags.contains(&"capabilities"));
+    }
+
+    #[test]
+    fn piece_fitting_flags_need_a_job_and_no_live() {
+        let p = |x: &[&str]| Args::try_parse_from(["arnis"].iter().chain(x));
+        let refused = |x: &[&str], flag: &str| {
+            let err = validate_args(&p(x).unwrap()).err().unwrap_or_default();
+            err.contains(flag)
+        };
+        let job = ["--one-world", "--bbox", "44.44,26.09,44.45,26.10"];
+        let with = |extra: &[&'static str]| [&job[..], extra].concat();
+        assert!(refused(
+            &with(&["--snap-regions", "cover"]),
+            "--snap-regions"
+        ));
+        assert!(refused(
+            &with(&["--margin-regions", "2"]),
+            "--margin-regions"
+        ));
+        for ok in [
+            with(&[
+                "--unit-regions",
+                "2",
+                "--snap-regions",
+                "fit",
+                "--margin-regions",
+                "1",
+            ]),
+            with(&["--plan-units", "2", "--snap-regions", "merge"]),
+        ] {
+            assert!(!refused(&ok, "--snap-regions"), "{ok:?}");
+        }
+        for flags in [["--snap-regions", "cover"], ["--margin-regions", "1"]] {
+            let live = p(&[&["--live", "--one-world"], &flags[..]].concat()).unwrap();
+            let err = refuse_live_extras(&live).unwrap_err();
+            assert!(err.contains(flags[0]), "{err}");
+        }
+        assert!(p(&["--snap-regions", "square"]).is_err());
+        assert!(p(&["--margin-regions", "-1"]).is_err());
+        assert_eq!(p(&[]).unwrap().units.margin_regions, 0);
+        assert!(refused(&with(&["--skip-built"]), "--skip-built"));
+        assert!(!refused(
+            &with(&["--unit-regions", "2", "--skip-built"]),
+            "--skip-built"
+        ));
+        let order = |v: &str| p(&["--piece-order", v]).map(|a| a.units.piece_order);
+        assert_eq!(order("west").unwrap(), Some(PieceOrder::West));
+        assert_eq!(order("center").unwrap(), Some(PieceOrder::Centre));
+        assert_eq!(order("3,1").unwrap(), Some(PieceOrder::List(vec![3, 1])));
+        assert!(order("0,1").is_err() && order("up").is_err());
+        assert!(refused(&with(&["--piece-order", "west"]), "--piece-order"));
+        assert!(refused(&with(&["--plan-mask", "m.geojson"]), "--plan-mask"));
+        assert!(refused(&with(&["--stitch-map"]), "--stitch-map"));
+        assert!(!refused(
+            &with(&["--unit-regions", "1", "--stitch-map"]),
+            "--stitch-map"
+        ));
+        let live = p(&["--live", "--one-world", "--stitch-map"]).unwrap();
+        assert!(refuse_live_extras(&live)
+            .unwrap_err()
+            .contains("--stitch-map"));
+        let live = p(&["--live", "--one-world", "--plan-mask", "m.geojson"]).unwrap();
+        assert!(refuse_live_extras(&live)
+            .unwrap_err()
+            .contains("--plan-mask"));
+        let live = p(&["--live", "--one-world", "--skip-built"]).unwrap();
+        assert!(refuse_live_extras(&live)
+            .unwrap_err()
+            .contains("--skip-built"));
+        let size = |v: &str| p(&["--unit-regions", v]).map(|a| a.units.unit_regions);
+        assert_eq!(size("auto").unwrap(), Some(UnitSize::Auto));
+        assert_eq!(size("4").unwrap(), Some(UnitSize::N(4)));
+        assert!(size("0").is_err() && size("65").is_err() && size("big").is_err());
+        let plan = p(&["--plan-units", "auto"]).unwrap().units.plan_units;
+        assert_eq!(plan, Some(UnitSize::Auto));
+    }
+
+    #[test]
+    fn threads_must_be_positive() {
+        let p = |x: &[&str]| Args::try_parse_from(["arnis"].iter().chain(x));
+        assert!(p(&["--threads", "0"]).is_err());
+        assert_eq!(p(&["--threads", "4"]).unwrap().thread_count(), Some(4));
+        assert_eq!(p(&[]).unwrap().thread_count(), None);
+    }
+
+    #[test]
     fn gameplay_extras_are_java_only_but_vehicles_and_gravity_needs_another_body() {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
@@ -1228,6 +2248,10 @@ mod tests {
         assert!(validate_args(&parse(&["--bedrock", "--moving-vehicles"])).is_ok());
         let luanti = validate_args(&parse(&["--luanti", "--moving-vehicles"])).unwrap_err();
         assert!(luanti.contains("--moving-vehicles"), "{luanti}");
+        // Walkers are Java only.
+        let walkers = validate_args(&parse(&["--bedrock", "--pedestrians"])).unwrap_err();
+        assert!(walkers.contains("--pedestrians"), "{walkers}");
+        assert!(validate_args(&parse(&["--pedestrians", "--moving-vehicles"])).is_ok());
         let lights = validate_args(&parse(&[
             "--bedrock",
             "--moving-vehicles",
@@ -1239,6 +2263,29 @@ mod tests {
         assert!(validate_args(&parse(&["--body", "moon", "--body-gravity"])).is_ok());
         let one_world = validate_args(&parse(&["--one-world", "--pause-menu"])).unwrap_err();
         assert!(one_world.contains("--pause-menu"), "{one_world}");
+    }
+
+    #[test]
+    fn missing_tree_pack_dir_is_refused() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let check = |dir: &str| {
+            let mut args = Args::parse_from([
+                "arnis",
+                "--output-dir",
+                tmp_path,
+                "--bbox",
+                "1,2,3,4",
+                "--tree-pack-dir",
+                dir,
+            ]);
+            apply_body_defaults(&mut args);
+            validate_args(&args)
+        };
+        assert!(check(tmp_path).is_ok());
+        let missing = tmpdir.path().join("nope");
+        let err = check(missing.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("--tree-pack-dir"), "{err}");
     }
 
     #[test]
@@ -1638,6 +2685,27 @@ mod tests {
         let args = Args::parse_from(cmd.iter());
         let result = validate_args(&args);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn live_flags_parse_beside_the_version_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp.path().to_str().unwrap(),
+            "--one-world",
+            "--live",
+            "--live-version",
+            "26.3",
+            "--live-view-distance",
+            "16",
+        ];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(args.live.live);
+        assert_eq!(args.live.version.as_deref(), Some("26.3"));
+        assert_eq!(args.live.view_distance, 16);
+        assert!(validate_args(&args).is_ok());
     }
 
     #[test]
@@ -2135,5 +3203,243 @@ mod tests {
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(validate_args(&args).is_err());
+    }
+
+    #[test]
+    fn gameplay_extras_are_refused_in_pieces() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        for flag in ["--traffic-lights", "--pedestrians"] {
+            let cmd = [
+                "arnis",
+                "--output-dir",
+                tmp_path,
+                "--one-world",
+                "--unit-regions=1",
+            ];
+            let args = Args::parse_from(cmd.iter().chain(&["--bbox=1,2,3,4", flag]));
+            assert!(validate_args(&args).unwrap_err().contains(flag));
+        }
+    }
+
+    #[test]
+    fn live_with_advanced_flags_is_refused() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--live", "--one-world"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        // Harmless or manifest-borne flags stay allowed.
+        let plain = parse(&["--seed", "7", "--cave-seed", "3", "--no-update-check"]);
+        assert!(refuse_live_extras(&plain).is_ok());
+        let err = refuse_live_extras(&parse(&[
+            "--river-bed",
+            "v1",
+            "--no-buildings",
+            "--surface-patches",
+            "--threads",
+            "4",
+        ]))
+        .unwrap_err();
+        for name in [
+            "--river-bed",
+            "--no-buildings",
+            "--surface-patches",
+            "--threads",
+        ] {
+            assert!(err.contains(name), "{err}");
+        }
+        assert!(!err.contains("--offline"), "{err}");
+        let err = validate_args(&parse(&["--offline"])).unwrap_err();
+        assert!(
+            err.contains("--offline is not supported in Live mode"),
+            "{err}"
+        );
+        // Without --live nothing changes.
+        let off = Args::parse_from(["arnis", "--river-bed", "v1"]);
+        assert!(refuse_live_extras(&off).is_ok());
+    }
+
+    #[test]
+    fn unit_flags_need_one_world_and_a_sane_range() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        assert!(validate_args(&parse(&["--one-world", "--plan-units", "4"])).is_ok());
+        assert!(validate_args(&parse(&["--plan-units", "4"])).is_err());
+        assert!(validate_args(&parse(&["--unit-regions", "4"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--unit-regions", "64"])).is_ok());
+        for bad in ["0", "65"] {
+            assert!(Args::try_parse_from(["arnis", "--plan-units", bad]).is_err());
+            assert!(Args::try_parse_from(["arnis", "--unit-regions", bad]).is_err());
+        }
+        // Pieces built side by side, or only some of them, need a One World job.
+        let w = parse(&["--one-world", "--one-world-workers", "auto"]);
+        assert!(validate_args(&w).is_ok() && w.units.coordinates());
+        assert_eq!(
+            parse(&["--one-world", "--one-world-workers", "3"])
+                .units
+                .one_world_workers,
+            Some(Workers::N(3))
+        );
+        assert!(validate_args(&parse(&["--one-world-workers", "auto"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--only-pieces", "2"])).is_err());
+        let retry = parse(&["--one-world", "--unit-regions", "2", "--only-pieces", "2,5"]);
+        assert!(validate_args(&retry).is_ok());
+        assert_eq!(retry.units.only_pieces, Some(vec![2, 5]));
+        assert!(Args::try_parse_from(["arnis", "--one-world-workers", "0"]).is_err());
+        assert!(Args::try_parse_from(["arnis", "--only-pieces", "0"]).is_err());
+    }
+
+    #[test]
+    fn blinear_with_lod_is_refused() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        let bl = ["--region-format", "blinear"];
+        assert!(validate_args(&parse(&bl)).is_ok());
+        assert_eq!(parse(&bl).blinear_level(), Some(6));
+        assert_eq!(parse(&[]).blinear_level(), None);
+        for refused in ["--dh-lod", "--voxy-lod", "--one-world", "--bedrock"] {
+            let args = parse(&[bl[0], bl[1], refused]);
+            assert!(validate_args(&args).is_err(), "{refused}");
+        }
+        assert!(Args::try_parse_from(["arnis", "--blinear-level", "23"]).is_err());
+    }
+
+    #[test]
+    fn origin_border_and_map_item_only_validate() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::parse_from(cmd.iter())
+        };
+        assert_eq!(
+            parse(&["--origin", "-45.5, 170"]).origin,
+            Some((-45.5, 170.0))
+        );
+        assert!(Args::try_parse_from(["arnis", "--origin", "90,0"]).is_err());
+        assert!(validate_args(&parse(&["--origin", "1,2"])).is_err());
+        assert!(validate_args(&parse(&["--one-world", "--origin", "1,2"])).is_ok());
+        assert!(validate_args(&parse(&["--world-border"])).is_ok());
+        assert!(validate_args(&parse(&["--world-border", "--bedrock"])).is_err());
+        assert!(validate_args(&parse(&["--map-item-only"])).is_err());
+        assert!(validate_args(&parse(&["--dh-lod-only"])).is_err());
+        let world_only = Args::parse_from(["arnis", "--one-world", "--map-item-only"]);
+        assert!(
+            crate::output_args::validate(&world_only).is_ok(),
+            "no bbox needed"
+        );
+        let dh_only = Args::parse_from(["arnis", "--one-world", "--dh-lod-only"]);
+        assert!(crate::output_args::validate(&dh_only).is_ok());
+    }
+
+    #[test]
+    fn no_buildings_skips_overture_fetch() {
+        let fetched = |extra: &[&str]| {
+            let mut args = Args::parse_from(
+                ["arnis", "--bbox", "1,2,3,4", "--mapillary-token", "t"]
+                    .iter()
+                    .chain(extra),
+            );
+            apply_feature_needs(&mut args);
+            (args.overture, args.mapillary_pipeline_on())
+        };
+        assert_eq!(fetched(&[]), (true, true));
+        assert_eq!(fetched(&["--no-buildings"]), (false, false));
+    }
+
+    #[test]
+    fn props_override_no_3d() {
+        use crate::structures::{Prop, PropSet};
+        let parse =
+            |extra: &[&str]| Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter().chain(extra));
+        assert_eq!(parse(&[]).props(), PropSet::ALL);
+        assert_eq!(parse(&["--no-3d"]).props(), PropSet::NONE);
+        let car = parse(&["--no-3d", "--props", "car"]).props();
+        assert!(car.has(Prop::Car) && !car.has(Prop::Boat));
+        assert_eq!(parse(&["--props", "none"]).props(), PropSet::NONE);
+    }
+
+    #[test]
+    fn below_min_scale_no_props() {
+        use crate::structures::PropSet;
+        let at = |scale: &str| {
+            Args::parse_from([
+                "arnis",
+                "--bbox",
+                "1,2,3,4",
+                "--scale",
+                scale,
+                "--props-min-scale",
+                "0.5",
+            ])
+            .props()
+        };
+        assert_eq!(at("0.4"), PropSet::NONE);
+        assert_eq!(at("0.5"), PropSet::ALL);
+        assert!(Args::try_parse_from(["arnis", "--props-min-scale", "-1"]).is_err());
+    }
+
+    #[test]
+    fn polygons_set_the_area_and_its_rectangle() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        let resolved = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", tmp_path];
+            cmd.extend_from_slice(extra);
+            let mut args = Args::try_parse_from(cmd.iter()).map_err(|e| e.to_string())?;
+            resolve_shapes(&mut args)?;
+            validate_args(&args)?;
+            Ok::<Args, String>(args)
+        };
+
+        let tri = "52.50,13.37 52.53,13.37 52.50,13.42";
+        let args = resolved(&[
+            "--polygon",
+            tri,
+            "--polygon",
+            "52.6,13.5 52.61,13.5 52.61,13.52",
+        ])
+        .unwrap();
+        let shapes = args.shapes.as_ref().unwrap();
+        assert_eq!(shapes.polygons().len(), 2);
+        let bbox = args.bbox.unwrap();
+        assert_eq!((bbox.min().lat(), bbox.min().lng()), (52.50, 13.37));
+        assert_eq!((bbox.max().lat(), bbox.max().lng()), (52.61, 13.52));
+
+        // The rectangle and the shape are two ways of saying where; one is enough.
+        assert!(resolved(&["--bbox", "1,2,3,4", "--polygon", tri]).is_err());
+        assert!(resolved(&["--polygon", "52.5,13.3 52.6,13.3"]).is_err());
+        assert!(resolved(&["--polygon", tri, "--one-world"]).is_err());
+
+        let inside = ["--spawn-lat", "52.505", "--spawn-lng", "13.38"];
+        assert!(resolved(&[&["--polygon", tri][..], &inside[..]].concat()).is_ok());
+        // Inside the rectangle, across the diagonal from the triangle.
+        let outside = ["--spawn-lat", "52.528", "--spawn-lng", "13.415"];
+        assert!(resolved(&[&["--polygon", tri][..], &outside[..]].concat()).is_err());
+
+        let geojson = tmpdir.path().join("area.geojson");
+        std::fs::write(
+            &geojson,
+            r#"{"type":"Polygon","coordinates":[[[13.37,52.5],[13.42,52.5],[13.42,52.53],[13.37,52.5]]]}"#,
+        )
+        .unwrap();
+        let file = geojson.to_str().unwrap();
+        let args = resolved(&["--polygon-file", file, "--polygon", tri]).unwrap();
+        assert_eq!(args.shapes.unwrap().polygons().len(), 2);
+        assert!(resolved(&["--polygon-file", "/no/such/file.geojson"]).is_err());
     }
 }

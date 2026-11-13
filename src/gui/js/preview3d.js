@@ -812,7 +812,7 @@
       return;
     }
     lastRequestedBBox = bboxKey(bboxText);
-    miniLoader("Rendering terrain preview…");
+    miniLoader((window.localization && window.localization.preview3d_rendering) || "Rendering terrain preview…");
     loadMini(bboxText, token);
   }
 

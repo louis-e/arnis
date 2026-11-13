@@ -1,31 +1,20 @@
 name: PR Benchmark
 
+# Runs PR code with a read-only token; pr-benchmark-report.yml posts the result from main.
 permissions:
   contents: read
-  pull-requests: write
 
 on:
   pull_request:
     types: [opened, reopened, synchronize]
-  issue_comment:
-    types: [created]
 
 jobs:
   benchmark:
-    if: |
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request != null &&
-       contains(github.event.comment.body, 'retrigger-benchmark'))
     runs-on: ubuntu-latest
     steps:
-      # Check out the PR head so comment-triggered runs benchmark the PR, not main.
       - uses: actions/checkout@v7
         with:
-          ref: refs/pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
-      - name: Resolve benchmarked commit
-        id: commit
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: ./.github/actions/setup-arnis-linux
         with:
           gui-deps: "false"
@@ -64,95 +53,21 @@ jobs:
           duration=$((end_time - start_time))
           echo "duration=$duration" >> $GITHUB_OUTPUT
 
-      - name: Format duration and generate summary
-        id: comment_body
+      - name: Save result
         env:
-          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+          DURATION: ${{ steps.end_time.outputs.duration }}
+          GEN_TIME: ${{ steps.benchmark.outputs.gen_time }}
+          PEAK_MEMORY: ${{ steps.benchmark.outputs.peak_memory }}
         run: |
-          duration=${{ steps.end_time.outputs.duration }}
-          minutes=$((duration / 60))
-          seconds=$((duration % 60))
-          peak_mem=${{ steps.benchmark.outputs.peak_memory }}
-          gen_time=${{ steps.benchmark.outputs.gen_time }}
+          mkdir -p result
+          printf 'pr=%s\nsha=%s\nduration=%s\ngen_time=%s\npeak_memory=%s\n' \
+            "$PR_NUMBER" "$COMMIT_SHA" "$DURATION" "$GEN_TIME" "$PEAK_MEMORY" > result/benchmark.txt
+          echo "Generation time: ${GEN_TIME:-?}s, peak memory: ${PEAK_MEMORY} MB, total: ${DURATION}s" >> "$GITHUB_STEP_SUMMARY"
 
-          baseline_time=48
-          diff=$((duration - baseline_time))
-          abs_diff=${diff#-}
-
-          # Use generation-only time for the verdict and reported delta when available,
-          # so the two stay consistent instead of mixing wall-clock and generation-only time.
-          if [ -n "$gen_time" ]; then
-            eval_diff=$((gen_time - baseline_time))
-            diff=$eval_diff
-            abs_diff=${diff#-}
-          else
-            eval_diff=$diff
-          fi
-          eval_abs_diff=${eval_diff#-}
-
-          if [ "$eval_diff" -le -5 ]; then
-            verdict="✅ This PR **improves generation time**."
-          elif [ "$eval_abs_diff" -le 4 ]; then
-            verdict="🟢 Generation time is unchanged."
-          elif [ "$eval_diff" -le 10 ]; then
-            verdict="⚠️ This PR **worsens generation time**."
-          else
-            verdict="🚨 This PR **drastically worsens generation time**."
-          fi
-
-          baseline_mem=1250
-          mem_diff=$((peak_mem - baseline_mem))
-          mem_abs_diff=${mem_diff#-}
-          mem_annotation=""
-          if [ "$mem_abs_diff" -gt 30 ]; then
-            mem_percent=$((mem_diff * 100 / baseline_mem))
-            mem_abs_percent=${mem_percent#-}
-            if [ "$mem_diff" -gt 0 ]; then
-              mem_annotation=" (↗ ${mem_abs_percent}% more)"
-            else
-              mem_annotation=" (↘ ${mem_abs_percent}% less)"
-            fi
-          fi
-
-          if [ "$mem_diff" -lt -100 ]; then
-            mem_verdict="✅ This PR **drastically reduces peak memory**."
-          elif [ "$mem_diff" -lt -30 ]; then
-            mem_verdict="🌱 This PR **reduces peak memory**."
-          elif [ "$mem_abs_diff" -le 30 ]; then
-            mem_verdict="🟢 Peak memory is unchanged."
-          elif [ "$mem_diff" -le 200 ]; then
-            mem_verdict="⚠️ This PR **increases peak memory**."
-          else
-            mem_verdict="🚨 This PR **drastically increases peak memory**."
-          fi
-
-          benchmark_time=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
-
-          {
-            echo "summary<<EOF"
-            echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**"
-            if [ -n "$gen_time" ]; then
-              echo "🏗️ Generation time: **${gen_time}s** (excl. data fetching)"
-            fi
-            echo "🧠 Peak memory usage: **${peak_mem} MB**${mem_annotation}"
-            echo ""
-            echo "📈 Compared against baseline: **${baseline_time}s** time, **${baseline_mem} MB** memory"
-            echo "🧮 Delta: **${diff}s** time, **${mem_diff} MB** memory"
-            echo "🔢 Commit: [\`${COMMIT_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${COMMIT_SHA})"
-            echo ""
-            echo "${verdict}"
-            echo "${mem_verdict}"
-            echo ""
-            echo "📅 **Last benchmark:** ${benchmark_time}"
-            echo ""
-            echo "_You can retrigger the benchmark by commenting \`retrigger-benchmark\`._"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Comment build time on PR
-        uses: thollander/actions-comment-pull-request@v3
+      - uses: actions/upload-artifact@v7
         with:
-          message: ${{ steps.comment_body.outputs.summary }}
-          comment-tag: benchmark-report
-        env:
-          GITHUB_TOKEN: ${{ secrets.BENCHMARK_TOKEN }}
+          name: benchmark-result
+          path: result/benchmark.txt
+          retention-days: 7

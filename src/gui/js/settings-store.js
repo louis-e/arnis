@@ -44,7 +44,10 @@ const SETTINGS = [
   { id: 'map-item-toggle', kind: 'checkbox', store: OWN },
   { id: 'custom-world-name-toggle', kind: 'checkbox', store: OWN },
   // Turning One World off writes its pinned values back, so a reset does it first.
-  { id: 'one-world-toggle', kind: 'checkbox', store: OWN, resetFirst: true },
+  { id: 'one-world-group', kind: 'segmented', store: OWN, valueAttr: 'data-one-world', resetFirst: true },
+  // The version list comes from Mojang after start-up, so the choice keeps a key of its own.
+  { id: 'live-version-select', kind: 'select', store: EXTERNAL },
+  { id: 'live-view-distance-select', kind: 'select', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
 
   // Gameplay
@@ -52,6 +55,7 @@ const SETTINGS = [
   { id: 'discoveries-toggle', kind: 'checkbox', store: OWN },
   { id: 'traffic-lights-toggle', kind: 'checkbox', store: OWN },
   { id: 'moving-cars-toggle', kind: 'checkbox', store: OWN },
+  { id: 'pedestrians-toggle', kind: 'checkbox', store: OWN },
   { id: 'zombie-outbreak-toggle', kind: 'checkbox', store: OWN },
   { id: 'disasters-toggle', kind: 'checkbox', store: OWN },
   { id: 'body-gravity-toggle', kind: 'checkbox', store: OWN },
@@ -74,6 +78,49 @@ const SETTINGS = [
   { id: 'dh-lod-toggle', kind: 'checkbox', store: OWN },
   { id: 'scale-value-slider', kind: 'number', store: OWN },
 
+  // Meld features. Off, none of the controls below is shown or sent.
+  { id: 'advanced-meld-features-toggle', kind: 'checkbox', store: OWN },
+  // Main page layout: auto follows the switch above; map-first or classic override it.
+  { id: 'layout-select', kind: 'select', store: OWN },
+  { id: 'meld-workers-select', kind: 'select', store: OWN },
+  { id: 'meld-snap-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-margin-input', kind: 'number', store: OWN },
+  { id: 'meld-piece-size-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-piece-order-select', kind: 'select', store: OWN },
+  { id: 'meld-skip-built-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-stitch-map-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-stretch-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-ram-budget-input', kind: 'text', store: OWN },
+  { id: 'meld-threads-input', kind: 'text', store: OWN },
+  { id: 'meld-seed-input', kind: 'text', store: OWN },
+  { id: 'meld-min-y-input', kind: 'text', store: OWN },
+  { id: 'meld-max-y-input', kind: 'text', store: OWN },
+  { id: 'meld-road-detail-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-buildings-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-surface-patches-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-props-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-rocks-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-bushes-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-rock-density-input', kind: 'number', store: OWN },
+  { id: 'meld-bush-density-input', kind: 'number', store: OWN },
+  { id: 'meld-tree-realm-select', kind: 'select', store: OWN },
+  { id: 'meld-tree-pack-dir-input', kind: 'text', store: OWN },
+  { id: 'meld-tree-pack-mode-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-cave-style-select', kind: 'select', store: OWN },
+  { id: 'meld-cave-ores-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-river-bed-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-water-detail-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-climate-mode-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-origin-input', kind: 'text', store: OWN },
+  { id: 'meld-world-border-toggle', kind: 'checkbox', store: OWN },
+  { id: 'meld-region-format-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-blinear-level-input', kind: 'number', store: OWN },
+  { id: 'meld-osm-source-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
+  { id: 'meld-archive-folder-input', kind: 'text', store: OWN },
+  { id: 'meld-pbf-url-input', kind: 'text', store: OWN },
+  { id: 'meld-overpass-input', kind: 'text', store: OWN },
+  { id: 'meld-offline-toggle', kind: 'checkbox', store: OWN },
+
   // Not persisted: picking a bbox force-resets the angle to 0 anyway.
   { id: 'rotation-angle-input', kind: 'number', store: NONE },
 
@@ -89,6 +136,7 @@ const SETTINGS = [
   { id: 'bedrock-save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'bedrockSavePath' },
   { id: 'luanti-save-path-input', kind: 'text', store: EXTERNAL, dynamicDefault: 'luantiSavePath' },
   { id: 'language-select', kind: 'select', store: EXTERNAL, dynamicDefault: 'language' },
+  { id: 'discord-status-toggle', kind: 'checkbox', store: OWN },
 
   // Consent record, not a preference. The user answered it on first run and the
   // HTML default is off, so a revert or reset could only withdraw consent, which
@@ -146,6 +194,13 @@ function readStored() {
 
   const values = parsed.values;
   if (!values || typeof values !== 'object' || Array.isArray(values)) return {};
+  // One World was a switch before it gained Live.
+  if ('one-world-toggle' in values) {
+    if (values['one-world-toggle'] === true && !('one-world-group' in values)) {
+      values['one-world-group'] = 'on';
+    }
+    delete values['one-world-toggle'];
+  }
   return values;
 }
 

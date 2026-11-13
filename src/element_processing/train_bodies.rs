@@ -3,6 +3,7 @@
 //! its body function when it comes into view; `trains.rs` decides which carriages make a
 //! train.
 
+use crate::element_processing::ship_bodies::Vessel;
 use std::fmt::Write;
 
 const GLASS: &str = "minecraft:tinted_glass";
@@ -29,36 +30,66 @@ pub enum Kind {
 /// One carriage. Cabs face +z when `front`, -z otherwise.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Coach {
-    TramCab { front: bool },
+    TramCab {
+        front: bool,
+    },
     TramMid,
     TramShort,
-    MetroCab { front: bool },
+    MetroCab {
+        front: bool,
+    },
     MetroMid,
-    SBahnCab { front: bool },
+    SBahnCab {
+        front: bool,
+    },
     SBahnMid,
-    RegioCab { front: bool },
+    RegioCab {
+        front: bool,
+    },
     RegioMid,
-    DeckCab { front: bool },
+    DeckCab {
+        front: bool,
+    },
     DeckMid,
     Loco,
-    IceCab { front: bool },
+    IceCab {
+        front: bool,
+    },
     IceMid,
     Container(u8),
     Tank(u8),
     Boxcar(u8),
+    /// A boat, `low` with its wheelhouse let down for low bridges.
+    Ship {
+        vessel: Vessel,
+        low: bool,
+    },
 }
 
 /// A train's colours.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Livery {
-    body: &'static str,
-    lower: &'static str,
-    stripe: &'static str,
-    door: &'static str,
-    roof: &'static str,
-    name: &'static str,
+    pub(crate) body: &'static str,
+    pub(crate) lower: &'static str,
+    pub(crate) stripe: &'static str,
+    pub(crate) door: &'static str,
+    pub(crate) roof: &'static str,
+    pub(crate) name: &'static str,
     /// Picks the colours of a freight train's wagons.
     seed: u8,
+}
+
+impl Livery {
+    pub(crate) const fn new(
+        name: &'static str,
+        body: &'static str,
+        lower: &'static str,
+        stripe: &'static str,
+        door: &'static str,
+        roof: &'static str,
+    ) -> Self {
+        livery(name, body, lower, stripe, door, roof)
+    }
 }
 
 const fn livery(
@@ -322,6 +353,107 @@ const BOXCARS: [&str; 4] = [
     "minecraft:brown_concrete",
 ];
 
+/// The door functions of carriages nobody rides in.
+pub const NO_DOORS: &str = "none";
+/// A place to get on every so many metres of carriage.
+const DOOR_SPACING: f32 = 5.5;
+/// The box that takes a click on the carriage at each door, in metres.
+const DOOR_BOX_WIDTH: f32 = 4.4;
+const DOOR_BOX_HEIGHT: f32 = 3.8;
+/// Height of a seated player's eyes over the track, in metres: in the window band.
+const RIDER_EYE: f64 = 2.12;
+/// How far over the block a player rides on their eyes are, in blocks at any scale.
+const RIDER_EYE_OVER_SEAT: f64 = 1.02;
+
+/// Where along a carriage people get on, in metres from its middle, how high their eyes
+/// are over the rail and the box that takes a click there. A click nearly anywhere on a
+/// carriage's side finds one. Freight wagons carry nobody.
+pub struct Doors {
+    pub spots: Vec<f32>,
+    eye: f64,
+    width: f32,
+    height: f32,
+    /// The seat is over the box rather than beside it, as on a boat's deck.
+    deck: bool,
+}
+
+pub fn doors(coach: Coach) -> Doors {
+    if let Coach::Ship { vessel, .. } = coach {
+        let (spots, eye) = vessel.seats_m();
+        let (_, beam) = vessel.size_m();
+        return Doors {
+            spots: spots.to_vec(),
+            eye,
+            width: (beam as f32).max(DOOR_BOX_WIDTH),
+            height: eye as f32 + 0.5,
+            deck: true,
+        };
+    }
+    let spots = if matches!(
+        coach,
+        Coach::Container(_) | Coach::Tank(_) | Coach::Boxcar(_)
+    ) {
+        Vec::new()
+    } else {
+        let len = length_m(coach) as f32;
+        let n = (len / DOOR_SPACING).ceil().max(1.0) as usize;
+        let spacing = len / n as f32;
+        (0..n)
+            .map(|i| -len / 2.0 + spacing * (i as f32 + 0.5))
+            .collect()
+    };
+    Doors {
+        spots,
+        eye: RIDER_EYE,
+        width: DOOR_BOX_WIDTH,
+        height: DOOR_BOX_HEIGHT,
+        deck: false,
+    }
+}
+
+/// The name of the functions that keep a carriage's doors with it, shared by carriages alike.
+pub fn door_key(coach: Coach) -> String {
+    match coach {
+        Coach::Ship { vessel, .. } => format!("w_{}", vessel.name()),
+        _ if doors(coach).spots.is_empty() => NO_DOORS.to_string(),
+        _ => format!("m{}", (length_m(coach) * 10.0).round() as u32),
+    }
+}
+
+/// The function that keeps a carriage's doors with it, run at the carriage's middle facing
+/// along it, and the one that makes them. Each door is a box to click and a seat to ride.
+pub fn door_functions(key: &str, doors: &Doors, size: f64) -> (String, String) {
+    let spots = &doors.spots;
+    if spots.is_empty() {
+        return (String::new(), String::new());
+    }
+    let k = size as f32;
+    let reach = spots.iter().fold(0f32, |a, d| a.max(d.abs())) * k + 12.0;
+    let seat = (doors.eye * size - RIDER_EYE_OVER_SEAT).max(0.0) as f32;
+    let deck = if doors.deck { ",\"arnis.tdeck\"" } else { "" };
+    let mut keep = format!(
+        "$execute unless entity @e[type=interaction,tag=arnis.ts$(c),distance=..{reach:.1}] run function arnis:trains/door_new/{key} {{c:$(c)}}\n\
+         $scoreboard players operation @e[tag=arnis.ts$(c),distance=..{reach:.1}] arnis.te = #now arnis.train\n"
+    );
+    let mut make = String::new();
+    for (i, d) in spots.iter().enumerate() {
+        let at = d * k;
+        let _ = writeln!(
+            keep,
+            "$tp @e[type=interaction,tag=arnis.ts$(c),tag=arnis.td{i},distance=..{reach:.1}] ^ ^ ^{at:.2}\n\
+             $tp @e[type=block_display,tag=arnis.ts$(c),tag=arnis.td{i},distance=..{reach:.1}] ^ ^{seat:.2} ^{at:.2}"
+        );
+        let _ = writeln!(
+            make,
+            "$summon interaction ^ ^ ^{at:.2} {{Tags:[\"arnis.tp\",\"arnis.ts$(c)\",\"arnis.td{i}\"{deck}],width:{:.2}f,height:{:.2}f}}\n\
+             $summon block_display ^ ^{seat:.2} ^{at:.2} {{Tags:[\"arnis.tp\",\"arnis.ts$(c)\",\"arnis.td{i}\",\"arnis.seat\"{deck}],teleport_duration:2}}",
+            doors.width * k,
+            doors.height * k,
+        );
+    }
+    (keep, make)
+}
+
 /// Carriage length over its body, in metres.
 pub fn length_m(coach: Coach) -> f64 {
     match coach {
@@ -338,6 +470,7 @@ pub fn length_m(coach: Coach) -> f64 {
         Coach::Container(_) => 18.4,
         Coach::Tank(_) => 15.0,
         Coach::Boxcar(_) => 16.5,
+        Coach::Ship { vessel, .. } => vessel.size_m().0,
     }
 }
 
@@ -454,6 +587,9 @@ pub fn key(coach: Coach, livery: Livery) -> String {
         Coach::Container(v) => format!("container_{}", wagon(v, livery.seed) % 100),
         Coach::Tank(v) => format!("tank_{}", wagon(v, livery.seed) % TANKS.len()),
         Coach::Boxcar(v) => format!("boxcar_{}", wagon(v, livery.seed) % BOXCARS.len()),
+        Coach::Ship { vessel, low } => {
+            format!("ship_{}{}", vessel.name(), if low { "_low" } else { "" })
+        }
     };
     match coach {
         Coach::Container(_) | Coach::Tank(_) | Coach::Boxcar(_) => c,
@@ -477,7 +613,7 @@ pub struct Part {
     pub glow: bool,
 }
 
-fn bx(block: &'static str, x: (f32, f32), y: (f32, f32), z: (f32, f32)) -> Part {
+pub(crate) fn bx(block: &'static str, x: (f32, f32), y: (f32, f32), z: (f32, f32)) -> Part {
     let (z0, z1) = (z.0.min(z.1), z.0.max(z.1));
     Part {
         block,
@@ -873,6 +1009,12 @@ fn wagon_frame(len: f32) -> Vec<Part> {
 
 /// A carriage's parts at 1:1.
 pub fn parts(coach: Coach, l: Livery) -> Vec<Part> {
+    let mut parts = built(coach, l);
+    crate::element_processing::ship_bodies::apart(&mut parts);
+    parts
+}
+
+fn built(coach: Coach, l: Livery) -> Vec<Part> {
     let len = length_m(coach) as f32;
     let half = len / 2.0;
     let cab_of = |front: bool| Some(if front { 1.0 } else { -1.0 });
@@ -1083,6 +1225,7 @@ pub fn parts(coach: Coach, l: Livery) -> Vec<Part> {
             ));
             out
         }
+        Coach::Ship { vessel, low } => vessel.parts(l, low),
     }
 }
 
@@ -1151,6 +1294,125 @@ mod tests {
         Kind::Intercity,
         Kind::Freight,
     ];
+
+    #[test]
+    fn no_two_parts_of_a_carriage_flicker_against_each_other_or_hide_one_another() {
+        use crate::element_processing::ship_bodies::{buried, shared_faces};
+        let sets: [(&[Coach], &[Livery]); 8] = [
+            (
+                &[
+                    Coach::TramCab { front: true },
+                    Coach::TramMid,
+                    Coach::TramShort,
+                ],
+                &TRAMS,
+            ),
+            (&[Coach::MetroCab { front: true }, Coach::MetroMid], &METROS),
+            (&[Coach::SBahnCab { front: true }, Coach::SBahnMid], &SBAHNS),
+            (
+                &[Coach::RegioCab { front: true }, Coach::RegioMid],
+                &REGIONALS,
+            ),
+            (&[Coach::DeckCab { front: true }, Coach::DeckMid], &DECKS),
+            (&[Coach::IceCab { front: true }, Coach::IceMid], &INTERCITY),
+            (&[Coach::Loco], &LOCOS),
+            (
+                &[Coach::Container(0), Coach::Tank(0), Coach::Boxcar(0)],
+                &LOCOS,
+            ),
+        ];
+        let mut found = Vec::new();
+        for (coaches, liveries) in sets {
+            for &coach in coaches {
+                for &l in liveries {
+                    let parts = parts(coach, l);
+                    for (i, a) in parts.iter().enumerate() {
+                        for b in &parts[i + 1..] {
+                            if !shared_faces(a, b).is_empty() {
+                                found.push(format!("{coach:?} {} / {}", a.block, b.block));
+                            }
+                        }
+                    }
+                    for b in buried(&parts) {
+                        found.push(format!("{coach:?} {b}"));
+                    }
+                }
+            }
+        }
+        found.sort();
+        found.dedup();
+        assert!(
+            found.is_empty(),
+            "{} flickering:\n{}",
+            found.len(),
+            found.join("\n")
+        );
+    }
+
+    #[test]
+    fn passengers_can_get_on_along_a_whole_carriage_but_not_on_a_wagon() {
+        assert!(doors(Coach::Container(0)).spots.is_empty());
+        assert_eq!(door_key(Coach::Tank(3)), NO_DOORS);
+        assert_eq!(doors(Coach::TramShort).spots.len(), 1);
+        for coach in [
+            Coach::MetroMid,
+            Coach::SBahnMid,
+            Coach::RegioMid,
+            Coach::DeckMid,
+            Coach::IceMid,
+            Coach::Loco,
+        ] {
+            let spots = doors(coach).spots;
+            let half = length_m(coach) as f32 / 2.0;
+            assert!(spots.iter().all(|d| d.abs() < half));
+            // Boxes side by side leave little gap to click into.
+            for pair in spots.windows(2) {
+                assert!(pair[1] - pair[0] <= DOOR_BOX_WIDTH + 1.2);
+            }
+        }
+    }
+
+    #[test]
+    fn a_seat_is_in_reach_of_its_door_at_every_scale() {
+        let board = include_str!(
+            "../../assets/minecraft/datapack_extras/data/arnis/function/trains/board.mcfunction"
+        );
+        let reach: f64 = board
+            .split("tag=arnis.seat,distance=..")
+            .nth(1)
+            .and_then(|r| r.split(',').next())
+            .and_then(|n| n.parse().ok())
+            .expect("board looks for a seat");
+        // Trains are drawn at up to three times their size.
+        for size in [0.4, 1.0, 2.0, 3.0] {
+            let seat = RIDER_EYE * size - RIDER_EYE_OVER_SEAT;
+            assert!(seat < reach, "a seat {seat:.2} up at size {size}");
+            // The next door's seat is further off than this one's.
+            let spacing = f64::from(DOOR_SPACING) * size * 0.5;
+            assert!(seat < spacing.hypot(seat), "size {size}");
+        }
+    }
+
+    #[test]
+    fn door_functions_give_each_door_a_box_and_a_seat_that_move_with_the_carriage() {
+        let doors = doors(Coach::MetroMid);
+        let spots = &doors.spots;
+        let (keep, make) = door_functions("m160", &doors, 1.0);
+        assert!(!make.contains("arnis.tdeck"));
+        assert_eq!(make.matches("summon interaction").count(), spots.len());
+        assert_eq!(make.matches("arnis.seat").count(), spots.len());
+        assert_eq!(keep.matches("$tp @e[type=interaction").count(), spots.len());
+        assert_eq!(
+            keep.matches("$tp @e[type=block_display").count(),
+            spots.len()
+        );
+        // A macro line must use a macro, or the function will not load.
+        for line in keep.lines().chain(make.lines()) {
+            assert!(line.starts_with('$') && line.contains("$(c)"), "{line}");
+        }
+        let (keep, make) = door_functions(NO_DOORS, &self::doors(Coach::Tank(0)), 1.0);
+        assert!(keep.is_empty() && make.is_empty());
+    }
 
     #[test]
     fn every_carriage_stays_within_its_length_and_the_loading_gauge() {

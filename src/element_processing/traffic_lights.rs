@@ -4,6 +4,7 @@
 
 use crate::block_definitions::{COBBLESTONE_WALL, IRON_BARS};
 use crate::bresenham::bresenham_line;
+use crate::element_processing::cars::drivable;
 use crate::element_processing::connected_blocks::{connected_iron_bars, four_connected_line};
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::road_markings::oneway_sign;
@@ -168,6 +169,137 @@ pub(crate) fn signal_upstream(nodes: &[ProcessedNode], i: usize, step: isize, re
     false
 }
 
+/// The junctions of the drivable roads, and the signals at or next to each.
+pub(crate) struct Junctions {
+    /// How many ways lead out of each node: three or more make a junction, two are just a
+    /// road that goes on, one is a dead end.
+    arms: FnvHashMap<u64, u32>,
+    /// Half width of the widest road through each node.
+    widest: FnvHashMap<u64, i32>,
+    signals: FnvHashMap<u64, Vec<u64>>,
+    upstream: f64,
+}
+
+impl Junctions {
+    /// From each drivable way and its half width.
+    pub(crate) fn build<'a>(
+        roads: impl Iterator<Item = (&'a ProcessedWay, i32)>,
+        scale: f64,
+    ) -> Self {
+        let roads: Vec<(&ProcessedWay, i32)> = roads.collect();
+        let mut junctions = Self {
+            arms: FnvHashMap::default(),
+            widest: FnvHashMap::default(),
+            signals: FnvHashMap::default(),
+            upstream: (UPSTREAM_M * scale).max(6.0),
+        };
+        for (way, half) in &roads {
+            let closed =
+                way.nodes.len() > 2 && way.nodes[0].id == way.nodes[way.nodes.len() - 1].id;
+            let nodes = if closed {
+                &way.nodes[1..]
+            } else {
+                &way.nodes[..]
+            };
+            for (k, n) in nodes.iter().enumerate() {
+                let end = !closed && (k == 0 || k == nodes.len() - 1);
+                *junctions.arms.entry(n.id).or_default() += if end { 1 } else { 2 };
+                let w = junctions.widest.entry(n.id).or_default();
+                *w = (*w).max(*half);
+            }
+        }
+        let mut signals: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+        for (way, _) in &roads {
+            for (i, n) in way.nodes.iter().enumerate() {
+                if !is_signal(&n.tags) {
+                    continue;
+                }
+                if junctions.is_junction(n.id) {
+                    signals.entry(n.id).or_default().push(n.id);
+                    continue;
+                }
+                for step in [-1, 1] {
+                    if let Some((j, d)) = junctions.nearest(&way.nodes, i, step) {
+                        if d <= junctions.reach(j) {
+                            signals.entry(j).or_default().push(n.id);
+                        }
+                    }
+                }
+            }
+        }
+        junctions.signals = signals;
+        junctions
+    }
+
+    pub(crate) fn arms(&self, id: u64) -> u32 {
+        self.arms.get(&id).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn is_junction(&self, id: u64) -> bool {
+        self.arms(id) >= 3
+    }
+
+    pub(crate) fn widest(&self, id: u64) -> i32 {
+        self.widest.get(&id).copied().unwrap_or(1)
+    }
+
+    /// How far from a junction's middle its approach signals are looked for.
+    fn reach(&self, junction: u64) -> f64 {
+        self.upstream + self.widest(junction) as f64 + 1.0
+    }
+
+    /// The first junction along the nodes from `i`, and how far along the road it is.
+    fn nearest(&self, nodes: &[ProcessedNode], i: usize, step: isize) -> Option<(u64, f64)> {
+        let mut at = &nodes[i];
+        let mut far = 0.0;
+        let mut j = i as isize + step;
+        while j >= 0 && (j as usize) < nodes.len() {
+            let n = &nodes[j as usize];
+            far += (n.x as f64 - at.x as f64).hypot(n.z as f64 - at.z as f64);
+            if self.is_junction(n.id) {
+                return Some((n.id, far));
+            }
+            at = n;
+            j += step;
+        }
+        None
+    }
+
+    /// Whether signal `i` on a two-way road is one that traffic arriving from `step` has
+    /// already left behind. A junction mapped with a signal on each approach has one on this
+    /// road just past the junction, for those coming the other way: a car crossing the
+    /// junction or turning in passes it. A signal with a tagged direction says for itself,
+    /// and one with no other signal at the junction is a crossing of its own.
+    pub(crate) fn passed(&self, nodes: &[ProcessedNode], i: usize, step: isize) -> bool {
+        let node = &nodes[i];
+        if self.is_junction(node.id) || node.tags.contains_key("traffic_signals:direction") {
+            return false;
+        }
+        let Some((junction, behind)) = self.nearest(nodes, i, step) else {
+            return false;
+        };
+        // A crosswalk just past the junction is the junction's own. Further along, people
+        // cross on their own green, whichever way cars came.
+        let reach = if is_crossing(&node.tags) {
+            self.widest(junction) as f64 + self.upstream / 2.0
+        } else {
+            self.reach(junction)
+        };
+        if behind > reach {
+            return false;
+        }
+        if self
+            .nearest(nodes, i, -step)
+            .is_some_and(|(_, ahead)| ahead <= behind)
+        {
+            return false;
+        }
+        self.signals
+            .get(&junction)
+            .is_some_and(|all| all.iter().any(|&s| s != node.id))
+    }
+}
+
 /// A signalised node and the road arms that meet at it.
 struct SignalNode {
     x: i32,
@@ -187,12 +319,30 @@ fn signal_nodes(elements: &[ProcessedElement], scale: f64) -> FnvHashMap<u64, Si
             _ => None,
         })
         .collect();
+    let junctions = Junctions::build(
+        elements.iter().filter_map(|e| match e {
+            ProcessedElement::Way(w) if w.nodes.len() >= 2 && drivable(&w.tags) => {
+                Some((w, highway_block_range(&w.tags["highway"], &w.tags, scale)))
+            }
+            _ => None,
+        }),
+        scale,
+    );
     let mut nodes: FnvHashMap<u64, SignalNode> = FnvHashMap::default();
     for way in &ways {
         if let Some(highway) = way.tags.get("highway").filter(|h| is_vehicular(h)) {
             let half = highway_block_range(highway, &way.tags, scale);
             let oneway = oneway_sign(highway, &way.tags);
-            add_arms(&mut nodes, way, half, oneway, Kind::Car, scale, |_| true);
+            add_arms(
+                &mut nodes,
+                way,
+                half,
+                oneway,
+                Kind::Car,
+                scale,
+                Some(&junctions),
+                |_| true,
+            );
         }
     }
     // The rest stand on bike paths, or are crossings over a bike path or a tram track.
@@ -209,9 +359,16 @@ fn signal_nodes(elements: &[ProcessedElement], scale: f64) -> FnvHashMap<u64, Si
             None => 1,
         };
         let oneway = highway.map_or(0, |h| oneway_sign(h, &way.tags));
-        add_arms(&mut off_road, way, half, oneway, Kind::Bike, scale, |n| {
-            !nodes.contains_key(&n.id) && if is_crossing(&n.tags) { crossed } else { bike }
-        });
+        add_arms(
+            &mut off_road,
+            way,
+            half,
+            oneway,
+            Kind::Bike,
+            scale,
+            None,
+            |n| !nodes.contains_key(&n.id) && if is_crossing(&n.tags) { crossed } else { bike },
+        );
     }
     for node in off_road.values_mut().filter(|n| n.crossing) {
         // Walkers get the heads at a crossing; bikes have their own signals mapped.
@@ -222,6 +379,7 @@ fn signal_nodes(elements: &[ProcessedElement], scale: f64) -> FnvHashMap<u64, Si
 }
 
 /// Adds the arms of this way at each of its signal nodes `wanted` accepts.
+#[allow(clippy::too_many_arguments)]
 fn add_arms(
     nodes: &mut FnvHashMap<u64, SignalNode>,
     way: &ProcessedWay,
@@ -229,6 +387,7 @@ fn add_arms(
     oneway: i8,
     kind: Kind,
     scale: f64,
+    junctions: Option<&Junctions>,
     wanted: impl Fn(&ProcessedNode) -> bool,
 ) {
     let upstream = (UPSTREAM_M * scale).max(6.0);
@@ -244,15 +403,17 @@ fn add_arms(
         let forward_ok = oneway >= 0 && along != Some("backward");
         let backward_ok = oneway <= 0 && along != Some("forward");
         // Traffic going forward arrives from the node before this one. Traffic that has
-        // just come through another signal is not held again.
+        // just come through another signal or across the junction is not held again.
+        let passed =
+            |step: isize| oneway == 0 && junctions.is_some_and(|j| j.passed(&way.nodes, i, step));
         let candidates = [
             (
                 arm_dir(&way.nodes, i, -1),
-                forward_ok && !signal_upstream(&way.nodes, i, -1, upstream),
+                forward_ok && !signal_upstream(&way.nodes, i, -1, upstream) && !passed(-1),
             ),
             (
                 arm_dir(&way.nodes, i, 1),
-                backward_ok && !signal_upstream(&way.nodes, i, 1, upstream),
+                backward_ok && !signal_upstream(&way.nodes, i, 1, upstream) && !passed(1),
             ),
         ];
         let entry = nodes.entry(node.id).or_insert_with(|| SignalNode {
@@ -888,6 +1049,52 @@ mod tests {
                 .sum::<usize>()
         };
         assert_eq!(count(&mapped_twice), count(&alone));
+    }
+
+    #[test]
+    fn signals_on_each_approach_get_heads_only_for_traffic_heading_into_the_junction() {
+        let signal = [("highway", "traffic_signals")];
+        let road = [("highway", "residential")];
+        let elements = vec![
+            way(
+                1,
+                vec![
+                    node(1, -40, 0, &[]),
+                    node(11, -8, 0, &signal),
+                    node(9, 0, 0, &[]),
+                    node(12, 8, 0, &signal),
+                    node(2, 40, 0, &[]),
+                ],
+                &road,
+            ),
+            way(
+                2,
+                vec![
+                    node(3, 0, -40, &[]),
+                    node(13, 0, -8, &signal),
+                    node(9, 0, 0, &[]),
+                    node(14, 0, 8, &signal),
+                    node(4, 0, 40, &[]),
+                ],
+                &road,
+            ),
+        ];
+        let paved = (-40..=40).flat_map(|t| (-2..=2).flat_map(move |w| [(t, w), (w, t)]));
+        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved));
+        let heads: Vec<(&Pole, &Head)> = index
+            .poles
+            .iter()
+            .flat_map(|p| p.heads.iter().map(move |h| (p, h)))
+            .collect();
+        assert_eq!(heads.len(), 4);
+        for (pole, head) in heads {
+            let out = pole.x as f64 * head.facing.0 + pole.z as f64 * head.facing.1 > 0.0;
+            assert!(
+                out,
+                "head at {},{} faces out of the junction",
+                pole.x, pole.z
+            );
+        }
     }
 
     #[test]

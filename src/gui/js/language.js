@@ -1,4 +1,27 @@
-const DEFAULT_LOCALE_PATH = `./locales/en.json`;
+// en.json is a git symlink to en-US.json, which a Windows checkout leaves as a plain text file
+// naming its target; a build from there must not read it.
+const DEFAULT_LOCALE_PATH = `./locales/en-US.json`;
+
+// Browser tags of languages Arnis files under another code.
+const LANGUAGE_ALIASES = { uk: 'ua' };
+
+// Chinese as written in Taiwan, Hong Kong and Macau, in the traditional script zh-CN is not.
+const TRADITIONAL_CHINESE = /^zh-(hant|tw|hk|mo)\b/i;
+
+/**
+ * Picks the offered language closest to a browser tag: the tag itself, its
+ * base language, or the same language in another region, as fr-FR for fr-CA.
+ * @param {string} tag - A browser language tag such as navigator.language
+ * @param {string[]} available - The offered language codes
+ * @returns {string} One of the offered codes, or 'en'
+ */
+export function matchLanguage(tag, available) {
+    const base = (tag || 'en').split('-')[0].toLowerCase();
+    const code = [tag, LANGUAGE_ALIASES[base] || base].find(c => available.includes(c));
+    if (code) return code;
+    if (TRADITIONAL_CHINESE.test(tag || '')) return 'en';
+    return available.find(c => c.split('-')[0] === base) || 'en';
+}
 
 /**
  * Checks if a JSON response is invalid or falls back to HTML
@@ -16,6 +39,7 @@ export function invalidJSON(response) {
  */
 export async function fetchLanguage(languageCode) {
 
+    if (languageCode === 'en') languageCode = 'en-US';
     let response = await fetch(`./locales/${languageCode}.json`);
 
     // Try with only first part of language code if not found

@@ -12,7 +12,7 @@
 //! sampled with a high surface height so the ice blotches are VISIBLE — the map shows where
 //! ice would go wherever the terrain is mountainous enough.
 
-use super::decoration::{BiomeAmounts, Decor, Zone};
+use super::decoration::{Decor, Zone};
 use crate::args::Args;
 use crate::coordinate_system::transformation::CoordTransformer;
 use image::{Rgba, RgbaImage};
@@ -56,11 +56,8 @@ pub fn render(args: &Args) -> Result<(), String> {
         xzbbox.min_z(),
         xzbbox.max_z(),
     );
-    let amounts = match args.cave_biomes.as_deref() {
-        Some(spec) => BiomeAmounts::parse(spec).map_err(|e| format!("--cave-biomes: {e}"))?,
-        None => BiomeAmounts::default(),
-    };
-    let decor = Decor::new(super::SEED, amounts);
+    let amounts = super::try_biome_amounts(args).map_err(|e| format!("--cave-biomes: {e}"))?;
+    let decor = Decor::new(super::seed(args), amounts);
 
     let span_x = (max_x - min_x + 1).max(1) as u32;
     let span_z = (max_z - min_z + 1).max(1) as u32;

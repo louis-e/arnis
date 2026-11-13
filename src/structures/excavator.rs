@@ -27,7 +27,7 @@ fn excavator() -> Option<&'static StructureSchematic> {
 
 /// Scatter excavators across a large site at random rotations; anchors sampled from the stable cell list, so placement is deterministic across tile seams.
 pub fn scatter_excavators(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Excavator) {
         return;
     }
     let n = cells.len();

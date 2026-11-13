@@ -2381,8 +2381,12 @@ mod tests {
         });
         let mut editor = test_editor(xzbbox);
         editor.set_ground(std::sync::Arc::new(ground.clone()));
-        let field =
-            std::sync::Arc::new(crate::water_depth::compute_big_water_field(&ground, xzbbox));
+        let field = std::sync::Arc::new(crate::water_depth::compute_big_water_field(
+            &ground,
+            xzbbox,
+            Default::default(),
+            1.0,
+        ));
         editor.set_water_field(std::sync::Arc::clone(&field));
         (editor, ground, field)
     }

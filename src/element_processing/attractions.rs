@@ -305,6 +305,12 @@ fn ride_colours(tags: &HashMap<String, String>, seed: u64) -> (Block, Block) {
     (main, accent)
 }
 
+/// Wheels this tall are observation wheels like the London Eye or the Singapore Flyer:
+/// white, with glass capsules outside the rim instead of gondolas hanging under it.
+const OBSERVATION_WHEEL_M: f64 = 90.0;
+/// How far outside the rim a capsule's centre rides.
+const CAPSULE_OUT: f64 = 4.0;
+
 const RAINBOW: [Block; 8] = [
     RED_CONCRETE,
     ORANGE_CONCRETE,
@@ -422,6 +428,7 @@ pub fn generate_ride(
             .and_then(concrete_for_colour),
         seed,
         height,
+        scale,
         footprints,
         road_mask,
     };
@@ -447,6 +454,7 @@ struct Placement<'a> {
     tagged: Option<Block>,
     seed: u64,
     height: Option<f64>,
+    scale: f64,
     footprints: &'a CoordinateBitmap,
     road_mask: &'a RoadMaskBitmap,
 }
@@ -769,12 +777,27 @@ fn star_flyer(editor: &mut WorldEditor, p: &Placement) {
 /// Ferris wheel in the plane of its outline's long axis.
 fn big_wheel(editor: &mut WorldEditor, p: &Placement) {
     let site = p.site;
-    let diameter = match (p.height, site.long > 0.0) {
-        (Some(h), _) => (h - 4.0).max(12.0),
-        (None, true) => site.long.max(12.0),
-        (None, false) => 30.0,
+    const SMALLEST: f64 = 12.0;
+    // Capsules outside the rim take this much of a mapped height: the London Eye
+    // stands 135 m tall and is 120 m across.
+    const CAPSULE_RING: f64 = 15.0;
+    let mapped = match (p.height, site.long > 0.0) {
+        (Some(h), _) => Some(h - 4.0),
+        (None, true) => Some(site.long),
+        (None, false) => None,
+    };
+    // Only a wheel mapped that tall, or that long without a height, and tall enough in
+    // blocks to hold its capsules; a guessed size says nothing.
+    let big = OBSERVATION_WHEEL_M * p.scale;
+    let observation = match p.height {
+        Some(h) => h >= big && h - CAPSULE_RING >= SMALLEST,
+        None => site.long >= big,
+    };
+    let diameter = match p.height {
+        Some(h) if observation => h - CAPSULE_RING,
+        _ => mapped.unwrap_or(30.0),
     }
-    .clamp(12.0, 150.0);
+    .clamp(SMALLEST, 150.0);
     let r = diameter / 2.0;
     let half_gap = if diameter >= 50.0 { 3.0 } else { 2.0 };
     let cabin_half = (half_gap - 1.0) as i32;
@@ -791,7 +814,13 @@ fn big_wheel(editor: &mut WorldEditor, p: &Placement) {
         .collect();
     let floor = p.level(editor, &pad, POLISHED_ANDESITE);
     let cabin_h = if diameter >= 50.0 { 4 } else { 3 };
-    let hub_y = floor as f64 + 3.0 + cabin_h as f64 + r;
+    // Gondolas hang under the rim; capsules ride outside it, their floor two
+    // blocks below their centre, and the lowest boards from the deck.
+    let hub_y = if observation {
+        floor as f64 + 4.5 + CAPSULE_OUT + r
+    } else {
+        floor as f64 + 3.0 + cabin_h as f64 + r
+    };
     let rim = p.tagged.unwrap_or(WHITE_CONCRETE);
     let at = |a: f64, b: f64, y: f64| -> (i32, i32, i32) {
         let (x, z) = f.world(a, b);
@@ -808,7 +837,8 @@ fn big_wheel(editor: &mut WorldEditor, p: &Placement) {
         }
     }
     // Spokes, gondolas and the ties that carry them.
-    let count = ((TAU * r) / 6.0).round().clamp(8.0, 48.0) as usize;
+    let spacing = if observation { 12.0 } else { 6.0 };
+    let count = ((TAU * r) / spacing).round().clamp(8.0, 48.0) as usize;
     let mut seed = (p.seed as i64).wrapping_mul(31);
     for k in 0..count {
         let t = TAU * (k as f64 + 0.25) / count as f64;
@@ -832,6 +862,10 @@ fn big_wheel(editor: &mut WorldEditor, p: &Placement) {
         for b in b0..=-b0 {
             let (x, y, z) = at(ca, b as f64, cy);
             editor.set_block_absolute(rim, x, y, z, None, None);
+        }
+        if observation {
+            capsule(editor, &f, t, r, hub_y, half_gap, cabin_h, rim);
+            continue;
         }
         let colour = RAINBOW[k % RAINBOW.len()];
         let roof = cy.floor() as i32 - 1;
@@ -886,6 +920,48 @@ fn big_wheel(editor: &mut WorldEditor, p: &Placement) {
     // Boarding deck under the lowest gondola.
     for (x, z, _, _) in f.cells(-2.5, 2.5, -half_gap - 1.5, half_gap + 1.5) {
         editor.set_block_absolute(SMOOTH_STONE_SLAB, x, floor + 1, z, None, None);
+    }
+}
+
+/// A glass capsule riding outside the rim at angle `t`, on brackets from both rims.
+#[allow(clippy::too_many_arguments)]
+fn capsule(
+    editor: &mut WorldEditor,
+    f: &Frame,
+    t: f64,
+    r: f64,
+    hub_y: f64,
+    half_gap: f64,
+    cabin_h: i32,
+    rim: Block,
+) {
+    let at = |a: f64, b: f64, y: f64| -> (i32, i32, i32) {
+        let (x, z) = f.world(a, b);
+        (x.floor() as i32, y.floor() as i32, z.floor() as i32)
+    };
+    let out = r + CAPSULE_OUT;
+    let (ca, cy) = (out * t.cos(), hub_y + out * t.sin());
+    for side in [-half_gap, half_gap] {
+        for d in [0.5, 1.0, 1.5] {
+            let (x, y, z) = at((r + d) * t.cos(), side, hub_y + (r + d) * t.sin());
+            editor.set_block_absolute(rim, x, y, z, None, None);
+        }
+    }
+    // A white frame round glass, two blocks out from its centre every way.
+    let floor_y = (cy - 2.0).floor() as i32;
+    let roof = floor_y + cabin_h;
+    for (x, z, a, b) in f.cells(ca - 2.5, ca + 2.5, -half_gap, half_gap) {
+        let (ea, eb) = ((a - ca).abs() > 1.5, b.abs() > half_gap - 1.0);
+        for y in floor_y..=roof {
+            let level = y == floor_y || y == roof;
+            let block = match (level, ea, eb) {
+                (true, false, false) if y == roof => GLASS,
+                (true, _, _) | (false, true, true) => WHITE_CONCRETE,
+                (false, false, false) => continue,
+                _ => GLASS,
+            };
+            editor.set_block_absolute(block, x, y, z, None, None);
+        }
     }
 }
 
@@ -1287,6 +1363,86 @@ mod tests {
         ])));
         assert!(claims(&tags(&[("attraction", "bumper_car")])));
         assert!(!claims(&tags(&[("attraction", "animal")])));
+    }
+
+    /// A wheel `height` blocks tall at `scale` on flat ground at Y 0: its blocks by
+    /// place along the wheel, height and kind.
+    fn wheel(height: f64, scale: f64) -> Vec<(i32, i32, Block)> {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+        let bbox = XZBBox::rect_from_min_max(-90, -12, 90, 12).unwrap();
+        let llbbox = LLBBox::new(51.50, -0.12, 51.51, -0.11).unwrap();
+        let mut editor =
+            WorldEditor::new(std::path::PathBuf::from("/dev/null/unused"), &bbox, llbbox);
+        let site = Site {
+            cx: 0.0,
+            cz: 0.0,
+            axis: (1.0, 0.0),
+            long: 0.0,
+            short: 0.0,
+            cells: Vec::new(),
+        };
+        let unmapped = CoordinateBitmap::new(&bbox);
+        let place = Placement {
+            site: &site,
+            own: &HashSet::new(),
+            colours: (RED_CONCRETE, WHITE_CONCRETE),
+            tagged: None,
+            seed: 7,
+            height: Some(height),
+            scale,
+            footprints: &unmapped,
+            road_mask: &unmapped,
+        };
+        big_wheel(&mut editor, &place);
+        let mut out = Vec::new();
+        for x in -90..=90 {
+            for z in -12..=12 {
+                for y in 0..=200 {
+                    match editor.get_block_absolute(x, y, z) {
+                        Some(b) if b != AIR => out.push((x, y, b)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn observation_wheels_carry_glass_capsules_outside_the_rim() {
+        // The London Eye is mapped 136.5 m tall; its ring is 120 m across.
+        let blocks = wheel(136.5, 1.0);
+        assert!(blocks.iter().all(|(_, _, b)| !RAINBOW.contains(b)));
+        let glass: Vec<_> = blocks.iter().filter(|(_, _, b)| *b == GLASS).collect();
+        assert!(!glass.is_empty());
+        // Every capsule lies wholly outside the rim, and none sinks under the deck.
+        let r = (136.5 - 15.0) / 2.0;
+        let hub_y = 4.5 + CAPSULE_OUT + r;
+        for &&(x, y, _) in &glass {
+            let d = ((x as f64 + 0.5).powi(2) + (y as f64 + 0.5 - hub_y).powi(2)).sqrt();
+            assert!(d > r + 0.5, "glass inside the rim at {x} {y}");
+            assert!(y >= 2, "glass under the deck at {x} {y}");
+        }
+        let top = blocks.iter().map(|&(_, y, _)| y).max().unwrap();
+        assert!((130..=140).contains(&top), "top at {top}");
+        // A funfair wheel keeps its coloured gondolas.
+        assert!(wheel(34.0, 1.0).iter().any(|(_, _, b)| RAINBOW.contains(b)));
+        // The cut is the mapped height, at any scale.
+        assert!(wheel(92.0, 1.0).iter().any(|(_, _, b)| *b == GLASS));
+        assert!(wheel(88.0, 1.0).iter().any(|(_, _, b)| RAINBOW.contains(b)));
+        assert!(wheel(96.0 * 0.5, 0.5).iter().any(|(_, _, b)| *b == GLASS));
+        // As does one shrunk with the world, however small, and the London Eye
+        // shrunk too far for its capsules to fit its height.
+        for (height, scale) in [(34.0 * 0.1, 0.1), (136.5 * 0.15, 0.15)] {
+            let blocks = wheel(height, scale);
+            assert!(blocks.iter().any(|(_, _, b)| RAINBOW.contains(b)));
+        }
+        // At half scale the London Eye keeps its capsules, within its height.
+        let blocks = wheel(136.5 * 0.5, 0.5);
+        assert!(blocks.iter().any(|(_, _, b)| *b == GLASS));
+        let top = blocks.iter().map(|&(_, y, _)| y).max().unwrap();
+        assert!(f64::from(top) <= 136.5 * 0.5, "top at {top}");
     }
 
     #[test]

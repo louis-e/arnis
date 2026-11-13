@@ -24,7 +24,7 @@ use crate::osm_parser::{
 
 /// How far from the ESA shore the classification may be corrected. One and a half ESA
 /// pixels, which is the mixed-pixel band that gets misread as water.
-const SHORE_BAND_M: f64 = 15.0;
+pub(crate) const SHORE_BAND_M: f64 = 15.0;
 const MIN_BAND_CELLS: i32 = 1;
 const MAX_BAND_CELLS: i32 = 64;
 /// How far past a pool's outline ESA water goes back to land: the coping and a block more.
@@ -511,16 +511,19 @@ fn is_building(tags: &HashMap<String, String>) -> bool {
         || tags.contains_key("building:part")
 }
 
-/// Half width of a structure that carries ground out over water, so anything stamped on
-/// it proves nothing about the shore.
-fn over_water_half_width(way: &ProcessedWay, scale: f64) -> Option<i32> {
-    let tags = &way.tags;
-    let structure = matches!(
+/// A structure OSM maps out over water to stand on: a pier, a wharf, a pontoon.
+pub(crate) fn is_over_water_structure(tags: &HashMap<String, String>) -> bool {
+    matches!(
         tags.get("man_made").map(String::as_str),
         Some("pier" | "breakwater" | "groyne" | "dolphin" | "quay")
-    ) || is_bridge_way(way)
-        || tags.get("floating").map(String::as_str) == Some("yes");
-    if !structure {
+    ) || tags.get("floating").map(String::as_str) == Some("yes")
+}
+
+/// Half width of a structure that carries ground out over water, so anything stamped on
+/// it proves nothing about the shore.
+pub(crate) fn over_water_half_width(way: &ProcessedWay, scale: f64) -> Option<i32> {
+    let tags = &way.tags;
+    if !(is_over_water_structure(tags) || is_bridge_way(way)) {
         return None;
     }
     let road = tags
@@ -646,11 +649,11 @@ mod tests {
         ];
         let elements = vec![way(2, ring, &[("natural", "water")])];
         run(&mut lc, &bbox, &elements);
-        for x in 30..34 {
-            assert_ne!(lc.grid[30][x], LC_WATER, "x={x} should be land");
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(34).skip(30) {
+            assert_ne!(cell, LC_WATER, "x={x} should be land");
         }
-        for x in 34..60 {
-            assert_eq!(lc.grid[30][x], LC_WATER, "x={x} should stay water");
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(60).skip(34) {
+            assert_eq!(cell, LC_WATER, "x={x} should stay water");
         }
     }
 
@@ -671,8 +674,8 @@ mod tests {
             &[("waterway", "stream")],
         )];
         run(&mut lc, &bbox, &elements);
-        for x in 20..40 {
-            assert_eq!(lc.grid[30][x], LC_WATER, "x={x} should stay water");
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(40).skip(20) {
+            assert_eq!(cell, LC_WATER, "x={x} should stay water");
         }
     }
 
@@ -695,11 +698,8 @@ mod tests {
         ];
         let elements = vec![way(4, ring, &[("natural", "water")])];
         run(&mut lc, &bbox, &elements);
-        for x in 40..55 {
-            assert_eq!(
-                lc.grid[30][x], LC_WATER,
-                "unmapped body at x={x} was trimmed"
-            );
+        for (x, &cell) in lc.grid[30].iter().enumerate().take(55).skip(40) {
+            assert_eq!(cell, LC_WATER, "unmapped body at x={x} was trimmed");
         }
     }
 
@@ -725,14 +725,11 @@ mod tests {
             &bbox,
             &[way(5, ring, &[("leisure", "swimming_pool")])],
         );
-        for x in 18..32 {
-            assert_eq!(lc.grid[22][x], LC_GRASSLAND, "x={x} still water");
+        for (x, &cell) in lc.grid[22].iter().enumerate().take(32).skip(18) {
+            assert_eq!(cell, LC_GRASSLAND, "x={x} still water");
         }
-        for z in 18..28 {
-            assert_eq!(
-                lc.grid[z][19], LC_GRASSLAND,
-                "coping cell z={z} still water"
-            );
+        for (z, row) in lc.grid.iter().enumerate().take(28).skip(18) {
+            assert_eq!(row[19], LC_GRASSLAND, "coping cell z={z} still water");
         }
     }
 

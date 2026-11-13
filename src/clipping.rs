@@ -38,6 +38,204 @@ pub fn mark_cut_ends(nodes: &mut [ProcessedNode], ends: [(i32, i32); 2], way_id:
     }
 }
 
+/// Invented id indices for outline cuts, clear of a rectangle's, which count the way's nodes.
+const OUTLINE_CUT_BASE: u64 = 9_000_000;
+
+/// How far a line traced along the outline may waver across it without leaving.
+const OUTLINE_SLACK: i32 = 2;
+
+/// Shortest run cut at both ends worth keeping, in blocks; a grazed corner leaves nowhere to go.
+const MIN_CUT_RUN: f64 = 12.0;
+
+/// The runs of a line inside a drawn outline, cut ends getting invented ids as at a rectangle's
+/// edge; `None` when nothing is cut. `cuts` numbers the cuts of this way across calls.
+pub fn cut_line_to_outline(
+    way_id: u64,
+    points: &[(u64, f64, f64)],
+    world: &XZBBox,
+    cuts: &mut u64,
+) -> Option<Vec<Vec<(u64, f64, f64)>>> {
+    world.outline()?;
+    let block = |x: f64, z: f64| (x.floor() as i32, z.floor() as i32);
+    let inside = |x: f64, z: f64| {
+        let (bx, bz) = block(x, z);
+        world.contains(&XZPoint::new(bx, bz))
+    };
+    let r = OUTLINE_SLACK;
+    // A column with the outline on two opposite sides is a gap between areas, not a waver.
+    let between = |bx: i32, bz: i32| {
+        let hit = |dx: i32, dz: i32| {
+            (1..=2 * r).any(|k| world.contains(&XZPoint::new(bx + dx * k, bz + dz * k)))
+        };
+        (hit(1, 0) && hit(-1, 0)) || (hit(0, 1) && hit(0, -1))
+    };
+    let near = |x: f64, z: f64| {
+        let (bx, bz) = block(x, z);
+        world.touches_rect(bx - r, bz - r, bx + r, bz + r) && !between(bx, bz)
+    };
+    let before = *cuts;
+    // Invented ids drop a way id's top bits, which mark lines of our own, as across squares.
+    let base = OUTLINE_CUT_BASE + (way_id >> 62) * 250_000;
+    let mut cut_at = |x: f64, z: f64| {
+        *cuts += 1;
+        (invented_node_id(way_id, base + *cuts), x, z)
+    };
+    let mut runs: Vec<Vec<(u64, f64, f64)>> = Vec::new();
+    let mut run: Vec<(u64, f64, f64)> = Vec::new();
+    let mut starts_cut = false;
+    let Some(&first) = points.first() else {
+        return Some(runs);
+    };
+    // A line starting just outside is cut where it enters, as one ending there is where it leaves.
+    let mut is_in = inside(first.1, first.2);
+    // Last point truly inside with the run length there, and the first sample out after it.
+    let mut last_in = (first.1, first.2, 1usize);
+    let mut after_in: Option<(f64, f64)> = None;
+    if is_in {
+        run.push(first);
+    }
+    let boundary = |(ax, az): (f64, f64), (bx, bz): (f64, f64)| {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..16 {
+            let mid = (lo + hi) / 2.0;
+            if inside(ax + (bx - ax) * mid, az + (bz - az) * mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        (ax + (bx - ax) * lo, az + (bz - az) * lo)
+    };
+    let mut close = |run: &mut Vec<(u64, f64, f64)>, starts_cut: bool, ends_cut: bool| {
+        let length: f64 = run
+            .windows(2)
+            .map(|w| (w[1].1 - w[0].1).hypot(w[1].2 - w[0].2))
+            .sum();
+        if run.len() >= 2 && !(starts_cut && ends_cut && length < MIN_CUT_RUN) {
+            runs.push(std::mem::take(run));
+        }
+        run.clear();
+    };
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let at = |t: f64| (a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t);
+        // Half a block apart, so no block the line crosses is stepped over.
+        let steps = ((b.1 - a.1).hypot(b.2 - a.2) * 2.0).ceil().max(1.0) as usize;
+        let mut t0 = 0.0;
+        for s in 1..=steps {
+            let t1 = s as f64 / steps as f64;
+            let (x, z) = at(t1);
+            if is_in {
+                if inside(x, z) {
+                    // The last sample is the node itself, recorded once it is in the run.
+                    if s < steps {
+                        last_in = (x, z, run.len());
+                    }
+                    after_in = None;
+                } else {
+                    let out = *after_in.get_or_insert((x, z));
+                    if !near(x, z) {
+                        let (lx, lz, len) = last_in;
+                        let (cx, cz) = boundary((lx, lz), out);
+                        run.truncate(len);
+                        run.push(cut_at(cx, cz));
+                        close(&mut run, starts_cut, true);
+                        is_in = false;
+                    }
+                }
+            } else if inside(x, z) {
+                let (cx, cz) = boundary((x, z), at(t0));
+                run.push(cut_at(cx, cz));
+                starts_cut = true;
+                last_in = (x, z, run.len());
+                after_in = None;
+                is_in = true;
+            }
+            t0 = t1;
+        }
+        if is_in {
+            run.push(b);
+            if inside(b.1, b.2) {
+                last_in = (b.1, b.2, run.len());
+                after_in = None;
+            }
+        }
+    }
+    if is_in {
+        match after_in {
+            // A line ending just outside ends on the boundary.
+            Some(out) => {
+                let (lx, lz, len) = last_in;
+                let (cx, cz) = boundary((lx, lz), out);
+                run.truncate(len);
+                run.push(cut_at(cx, cz));
+                close(&mut run, starts_cut, true);
+            }
+            None => close(&mut run, starts_cut, false),
+        }
+    }
+    if *cuts == before && runs.len() == 1 && runs[0].len() == points.len() {
+        return None;
+    }
+    Some(runs)
+}
+
+/// [`cut_line_to_outline`] for a way, cut ends as untagged nodes of their own.
+pub fn cut_way_to_outline(
+    way: &crate::osm_parser::ProcessedWay,
+    world: &XZBBox,
+) -> Option<Vec<crate::osm_parser::ProcessedWay>> {
+    let points: Vec<(u64, f64, f64)> = way
+        .nodes
+        .iter()
+        .map(|n| (n.id, n.x as f64 + 0.5, n.z as f64 + 0.5))
+        .collect();
+    let runs = cut_line_to_outline(way.id, &points, world, &mut 0)?;
+    let by_id: HashMap<u64, &ProcessedNode> = way.nodes.iter().map(|n| (n.id, n)).collect();
+    Some(
+        runs.into_iter()
+            .map(|run| crate::osm_parser::ProcessedWay {
+                id: way.id,
+                tags: way.tags.clone(),
+                nodes: run
+                    .into_iter()
+                    .map(|(id, x, z)| match by_id.get(&id) {
+                        Some(&n) if !is_invented_node_id(id) => n.clone(),
+                        _ => ProcessedNode {
+                            id,
+                            tags: HashMap::new(),
+                            x: x.floor() as i32,
+                            z: z.floor() as i32,
+                        },
+                    })
+                    .collect(),
+            })
+            .collect(),
+    )
+}
+
+/// Ways cut to a drawn outline in their own order; uncut ways pass through borrowed.
+pub fn cut_ways_to_outline<'a, T: Copy>(
+    ways: Vec<(&'a crate::osm_parser::ProcessedWay, T)>,
+    world: &XZBBox,
+) -> Vec<(std::borrow::Cow<'a, crate::osm_parser::ProcessedWay>, T)> {
+    use std::borrow::Cow;
+    if world.outline().is_none() {
+        return ways
+            .into_iter()
+            .map(|(w, t)| (Cow::Borrowed(w), t))
+            .collect();
+    }
+    let mut out = Vec::with_capacity(ways.len());
+    for (w, t) in ways {
+        match cut_way_to_outline(w, world) {
+            None => out.push((Cow::Borrowed(w), t)),
+            Some(pieces) => out.extend(pieces.into_iter().map(|p| (Cow::Owned(p), t))),
+        }
+    }
+    out
+}
+
 /// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
 /// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
 /// `clip_way_to_bbox` for an owned way: one lying wholly inside comes back as is, uncopied.
@@ -785,5 +983,169 @@ mod tests {
         // Deterministic, and distinct per corner of a way.
         assert_eq!(invented_node_id(42, 7), invented_node_id(42, 7));
         assert_ne!(invented_node_id(42, 7), invented_node_id(42, 8));
+    }
+
+    #[test]
+    fn a_line_is_cut_where_it_leaves_a_drawn_outline() {
+        // Two squares with a gap between them, as two areas merged into one world.
+        let world = XZBBox::rect_from_min_max(0, 0, 100, 20)
+            .unwrap()
+            .with_outline(vec![
+                vec![vec![(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]],
+                vec![vec![(70.0, 0.0), (100.0, 0.0), (100.0, 20.0), (70.0, 20.0)]],
+            ])
+            .unwrap();
+        let line = [(1, 5.5, 10.5), (2, 95.5, 10.5)];
+        let mut cuts = 0;
+        let runs = cut_line_to_outline(7, &line, &world, &mut cuts).unwrap();
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        assert_eq!(cuts, 2);
+        // Each run keeps its own node and ends inside, on a cut of its own.
+        assert_eq!(runs[0][0].0, 1);
+        assert_eq!(runs[1][1].0, 2);
+        let (a, b) = (runs[0][1], runs[1][0]);
+        assert!(is_invented_node_id(a.0) && is_invented_node_id(b.0) && a.0 != b.0);
+        assert!(world.contains(&XZPoint::new(a.1.floor() as i32, 10)));
+        assert!(world.contains(&XZPoint::new(b.1.floor() as i32, 10)));
+        assert!(
+            (a.1 - 31.0).abs() < 0.01 && (b.1 - 70.0).abs() < 0.01,
+            "{a:?} {b:?}"
+        );
+
+        // A second piece of the same way gets new ids, and a line of our own keeps apart.
+        let again = cut_line_to_outline(7, &line, &world, &mut cuts).unwrap();
+        assert!(again.iter().flatten().all(|p| p.0 != a.0 && p.0 != b.0));
+        let ours = cut_line_to_outline((1 << 62) | 7, &line, &world, &mut 0).unwrap();
+        let osm = cut_line_to_outline(7, &line, &world, &mut 0).unwrap();
+        let cut_ids = |runs: &Vec<Vec<(u64, f64, f64)>>| -> Vec<u64> {
+            runs.iter()
+                .flatten()
+                .map(|p| p.0)
+                .filter(|&id| is_invented_node_id(id))
+                .collect()
+        };
+        let (ours, osm) = (cut_ids(&ours), cut_ids(&osm));
+        assert_eq!(ours.len(), 2);
+        assert!(ours.iter().all(|id| !osm.contains(id)), "{ours:?} {osm:?}");
+
+        // Inside, outside, and off an outline.
+        let inside = [(1, 2.5, 2.5), (2, 25.5, 15.5)];
+        assert!(cut_line_to_outline(7, &inside, &world, &mut 0).is_none());
+        let outside = [(1, 40.5, 2.5), (2, 60.5, 15.5)];
+        assert_eq!(
+            cut_line_to_outline(7, &outside, &world, &mut 0),
+            Some(vec![])
+        );
+        let rect = XZBBox::rect_from_min_max(0, 0, 100, 20).unwrap();
+        assert!(cut_line_to_outline(7, &line, &rect, &mut 0).is_none());
+    }
+
+    #[test]
+    fn a_line_along_the_outline_is_not_cut_to_pieces() {
+        let world = XZBBox::rect_from_min_max(0, 0, 200, 200)
+            .unwrap()
+            .with_outline(vec![vec![vec![
+                (0.0, 0.0),
+                (100.0, 0.0),
+                (100.0, 200.0),
+                (0.0, 200.0),
+            ]]])
+            .unwrap();
+        // A road traced as the outline's east edge, wavering a block or two across it.
+        let road: Vec<(u64, f64, f64)> = (1..40)
+            .map(|k| {
+                let x = 100.5 + if k % 2 == 0 { 1.5 } else { -1.5 };
+                (k as u64 + 1, x, 5.5 + k as f64 * 4.5)
+            })
+            .collect();
+        assert!(cut_line_to_outline(3, &road, &world, &mut 0).is_none());
+
+        // A line that only grazes a corner leaves nothing to drive on.
+        let graze = [(1, 95.5, -8.5), (2, 108.5, 4.5)];
+        assert_eq!(cut_line_to_outline(3, &graze, &world, &mut 0), Some(vec![]));
+
+        // A stray node just outside before the line leaves is dropped for a cut on the boundary.
+        let out = [
+            (1, 50.5, 50.5),
+            (2, 99.5, 50.5),
+            (3, 101.5, 50.5),
+            (4, 160.5, 50.5),
+        ];
+        let runs = cut_line_to_outline(3, &out, &world, &mut 0).unwrap();
+        assert_eq!(runs.len(), 1);
+        let ids: Vec<u64> = runs[0].iter().map(|p| p.0).collect();
+        assert_eq!(&ids[..2], &[1, 2]);
+        let end = runs[0][2];
+        assert!(
+            is_invented_node_id(end.0) && end.1 > 99.5 && end.1 < 101.0,
+            "{end:?}"
+        );
+    }
+
+    #[test]
+    fn a_narrow_gap_cuts_and_a_line_starting_just_outside_starts_on_a_cut() {
+        // Two areas four columns apart, closer than a waver may stray.
+        let world = XZBBox::rect_from_min_max(0, 0, 60, 30)
+            .unwrap()
+            .with_outline(vec![
+                vec![vec![(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]],
+                vec![vec![(35.0, 0.0), (60.0, 0.0), (60.0, 20.0), (35.0, 20.0)]],
+            ])
+            .unwrap();
+        let line = [(1, 5.5, 10.5), (2, 55.5, 10.5)];
+        let runs = cut_line_to_outline(7, &line, &world, &mut 0).unwrap();
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        assert!(runs
+            .iter()
+            .flatten()
+            .all(|p| world.contains(&XZPoint::new(p.1.floor() as i32, p.2.floor() as i32))));
+
+        let start = [(1, 45.5, 21.5), (2, 45.5, 5.5)];
+        let runs = cut_line_to_outline(7, &start, &world, &mut 0).unwrap();
+        assert_eq!(runs.len(), 1);
+        let (a, b) = (runs[0][0], runs[0][1]);
+        assert!(
+            is_invented_node_id(a.0) && (a.2 - 21.0).abs() < 0.01,
+            "{a:?}"
+        );
+        assert_eq!(b.0, 2);
+    }
+
+    #[test]
+    fn ways_keep_their_order_and_pass_through_a_rectangle_untouched() {
+        use crate::osm_parser::ProcessedWay;
+        let node = |id, x, z| ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        let way = |id, nodes| ProcessedWay {
+            id,
+            nodes,
+            tags: HashMap::new(),
+        };
+        let across = way(1, vec![node(1, 5, 10), node(2, 95, 10)]);
+        let within = way(2, vec![node(3, 75, 5), node(4, 95, 15)]);
+        let rect = XZBBox::rect_from_min_max(0, 0, 100, 20).unwrap();
+        let same = cut_ways_to_outline(vec![(&across, 'a'), (&within, 'b')], &rect);
+        assert!(same
+            .iter()
+            .all(|(w, _)| matches!(w, std::borrow::Cow::Borrowed(_))));
+
+        let world = rect
+            .with_outline(vec![
+                vec![vec![(0.0, 0.0), (30.0, 0.0), (30.0, 20.0), (0.0, 20.0)]],
+                vec![vec![(70.0, 0.0), (100.0, 0.0), (100.0, 20.0), (70.0, 20.0)]],
+            ])
+            .unwrap();
+        let cut = cut_ways_to_outline(vec![(&across, 'a'), (&within, 'b')], &world);
+        let tags: Vec<char> = cut.iter().map(|(_, t)| *t).collect();
+        assert_eq!(tags, vec!['a', 'a', 'b']);
+        assert!(matches!(cut[2].0, std::borrow::Cow::Borrowed(_)));
+        assert!(cut.iter().all(|(w, _)| w
+            .nodes
+            .iter()
+            .all(|n| world.contains(&XZPoint::new(n.x, n.z)))));
     }
 }

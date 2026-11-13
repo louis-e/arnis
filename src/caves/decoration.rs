@@ -125,12 +125,31 @@ impl Default for BiomeAmounts {
 }
 
 impl BiomeAmounts {
+    /// Every theme at `f` of its default.
+    pub fn uniform(f: f64) -> Self {
+        BiomeAmounts {
+            lush: f,
+            dripstone: f,
+            deepdark: f,
+            mushroom: f,
+            ice: f,
+            amethyst: f,
+            volcanic: f,
+            coral: f,
+        }
+    }
+
     /// Parse `lush=150,deepdark=0,...` (percent 0..=200, clamped; omitted names stay 100).
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        BiomeAmounts::default().parse_onto(spec)
+    }
+
+    /// [`parse`](Self::parse) with omitted names keeping `self`'s amounts.
     ///
     /// Non-finite percents (`nan`, `inf`) are REJECTED rather than clamped: `clamp` passes
     /// NaN straight through, and a NaN amount would disable every threshold comparison.
-    pub fn parse(spec: &str) -> Result<Self, String> {
-        let mut a = BiomeAmounts::default();
+    pub fn parse_onto(self, spec: &str) -> Result<Self, String> {
+        let mut a = self;
         for part in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             let (name, val) = part
                 .split_once('=')

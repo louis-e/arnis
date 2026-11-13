@@ -8,17 +8,20 @@ use fastnbt::Value;
 use super::common::{world_max_y, ChunkToModify, SectionToModify};
 use super::WorldEditor;
 use crate::block_definitions::{
-    intern_props, Block, BlockWithProperties, AIR, ANDESITE, COARSE_DIRT, COBBLESTONE,
-    COBBLESTONE_SLAB, COBBLESTONE_STAIRS, COBBLESTONE_WALL, COBWEB, CRACKED_DEEPSLATE_BRICKS,
-    CRACKED_DEEPSLATE_TILES, CRACKED_NETHER_BRICKS, CRACKED_POLISHED_BLACKSTONE_BRICKS,
-    CRACKED_STONE_BRICKS, DEAD_BUSH, DEEPSLATE_BRICKS, DEEPSLATE_TILES, DIRT, DIRT_PATH, FARMLAND,
-    FIRE, GRASS, GRASS_BLOCK, GRAVEL, ICE, MOSSY_COBBLESTONE, MOSSY_COBBLESTONE_SLAB,
-    MOSSY_COBBLESTONE_STAIRS, MOSSY_COBBLESTONE_WALL, MOSSY_STONE_BRICKS, MOSSY_STONE_BRICK_SLAB,
-    MOSSY_STONE_BRICK_STAIRS, MOSSY_STONE_BRICK_WALL, MOSS_BLOCK, MOSS_CARPET, MUD, NETHERRACK,
-    NETHER_BRICK, PODZOL, POLISHED_ANDESITE, POLISHED_BLACKSTONE_BRICKS, SMOOTH_QUARTZ_SLAB,
-    SMOOTH_QUARTZ_STAIRS, SMOOTH_STONE, SNOWY_GRASS_BLOCK, SNOWY_PODZOL, SNOW_LAYERS, STONE,
-    STONE_BRICKS, STONE_BRICK_SLAB, STONE_BRICK_STAIRS, STONE_BRICK_WALL, TALL_GRASS_BOTTOM,
-    TALL_GRASS_TOP, VINES,
+    intern_props, Block, BlockWithProperties, AIR, ANDESITE, BIRCH_LEAVES, BLACK_CONCRETE, BRICK,
+    BROWN_TERRACOTTA, CALCITE, COARSE_DIRT, COBBLESTONE, COBBLESTONE_SLAB, COBBLESTONE_STAIRS,
+    COBBLESTONE_WALL, COBWEB, CRACKED_DEEPSLATE_BRICKS, CRACKED_DEEPSLATE_TILES,
+    CRACKED_NETHER_BRICKS, CRACKED_POLISHED_BLACKSTONE_BRICKS, CRACKED_STONE_BRICKS, DEAD_BUSH,
+    DEEPSLATE_BRICKS, DEEPSLATE_TILES, DIORITE, DIRT, DIRT_PATH, FARMLAND, FIRE, GRANITE, GRASS,
+    GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_TERRACOTTA, ICE, LIGHT_GRAY_CONCRETE,
+    MOSSY_COBBLESTONE, MOSSY_COBBLESTONE_SLAB, MOSSY_COBBLESTONE_STAIRS, MOSSY_COBBLESTONE_WALL,
+    MOSSY_STONE_BRICKS, MOSSY_STONE_BRICK_SLAB, MOSSY_STONE_BRICK_STAIRS, MOSSY_STONE_BRICK_WALL,
+    MOSS_BLOCK, MOSS_CARPET, MUD, NETHERRACK, NETHER_BRICK, OAK_LEAVES, OAK_LOG, OAK_PLANKS,
+    PODZOL, POLISHED_ANDESITE, POLISHED_BLACKSTONE_BRICKS, QUARTZ_BLOCK, RED_TERRACOTTA, SANDSTONE,
+    SMOOTH_QUARTZ, SMOOTH_QUARTZ_SLAB, SMOOTH_QUARTZ_STAIRS, SMOOTH_SANDSTONE, SMOOTH_STONE,
+    SNOWY_GRASS_BLOCK, SNOWY_PODZOL, SNOW_LAYERS, SPRUCE_PLANKS, STONE, STONE_BRICKS,
+    STONE_BRICK_SLAB, STONE_BRICK_STAIRS, STONE_BRICK_WALL, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    TERRACOTTA, TINTED_GLASS, TUFF, VINES, WHITE_CONCRETE, WHITE_TERRACOTTA,
 };
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill_cache::{CoordinateBitmap, SealedSurfaceBitmap};
@@ -26,7 +29,6 @@ use crate::ground::Ground;
 use crate::ground_generation::patch_noise;
 use crate::land_cover::{coord_hash, LC_WATER};
 
-const SALT_COLLAPSE: u32 = 0x5255_494E;
 const SALT_JAG: u32 = 0x4A41_4747;
 const SALT_HOLE: u32 = 0x484F_4C45;
 const SALT_CRACK: u32 = 0x4352_4B53;
@@ -37,19 +39,37 @@ const SALT_ICE: u32 = 0x4943_4521;
 const SALT_VINE: u32 = 0x5649_4E45;
 const SALT_MOSS: u32 = 0x4D4F_5353;
 const SALT_ROOF: u32 = 0x524F_4F46;
+const SALT_DECAY: u32 = 0x4445_4359;
+const SALT_BREAK: u32 = 0x4252_4B31;
+const SALT_FLOORS: u32 = 0x464C_5253;
+const SALT_ROOF_HOLE: u32 = 0x5248_4F4C;
+const SALT_GROWTH: u32 = 0x4752_4F57;
 
 /// Share of street-facing wall that vines climb.
-const VINE_SHARE: f64 = 0.35;
+const VINE_SHARE: f64 = 0.45;
+/// The highest a patch of vines climbs, in blocks.
+const VINE_REACH: f64 = 34.0;
 
 /// Share of slab and stair roofs, which snow cannot rest on, that turn white instead.
 const WHITE_ROOF_SHARE: f64 = 0.85;
 
-/// How far into the street a ruin throws its rubble, in blocks.
-const RUBBLE_REACH: i32 = 2;
+/// How far into the street a ruin's rubble spreads, in blocks.
+const RUBBLE_REACH: i32 = 3;
 /// One rubble pile in this many burns: netherrack with a fire on it that never goes out.
-const FIRE_ODDS: u64 = 100;
+/// Rare, since these ruins have stood empty for a long time.
+const FIRE_ODDS: u64 = 500;
 /// How high moss creeps up a ruin's walls.
-const MOSS_REACH: i32 = 6;
+const MOSS_REACH: i32 = 9;
+/// As far as a building's corner is looked for: past this it is one building no more.
+const CORNER_WALK: u32 = 512;
+/// From this height a building stays a landmark of the skyline, however far gone.
+const TOWER_HEIGHT: i32 = 40;
+/// The least of a tower's height left standing.
+const TOWER_SHARE: f64 = 0.6;
+/// One open-air cell in a ruin in this many has a tree growing in it.
+const RUIN_TREE_ODDS: u64 = 170;
+/// One chunk with a clear stretch of road in this many has a wrecked car on it.
+const WRECK_ODDS: u64 = 5;
 /// Lamps stand on short posts, so lights are looked for this far above the ground.
 const LAMP_REACH: i32 = 12;
 
@@ -341,6 +361,10 @@ impl WorldEditor<'_> {
         let Some(region) = self.world.regions.get_mut(&(rx, rz)) else {
             return;
         };
+        let tops = style
+            .footprints
+            .filter(|_| style.ruins)
+            .map(|f| RegionTops::build((rx << 9, rz << 9), region.chunks.iter(), f));
         for ((cx, cz), chunk) in region.chunks.iter_mut() {
             let base = (((rx << 5) + cx) << 4, ((rz << 5) + cz) << 4);
             let columns: Vec<(Column, i32)> = (0..16u8)
@@ -354,20 +378,29 @@ impl WorldEditor<'_> {
                 let in_building =
                     |col: &Column| style.footprints.is_some_and(|f| f.contains(col.x, col.z));
                 let mut fires = Vec::new();
+                let plans = style
+                    .footprints
+                    .zip(tops.as_ref())
+                    .map(|(f, tops)| plan_ruins(&columns, f, tops));
                 for &(col, ground_y) in &columns {
-                    if in_building(&col) {
-                        ruin_building(chunk, col, ground_y, &mut fires);
+                    let plan = plans
+                        .as_ref()
+                        .and_then(|p| p[usize::from(col.lz)][usize::from(col.lx)]);
+                    if let Some(plan) = plan.filter(|_| in_building(&col)) {
+                        ruin_building(chunk, col, ground_y, plan, &mut fires);
                     } else {
                         ruin_open_ground(chunk, col, ground_y, &terrain, style, &mut fires);
                     }
                 }
                 // Once every wall of the chunk has come down as far as it will.
-                if let Some(footprints) = style.footprints {
+                if let (Some(footprints), Some(plans)) = (style.footprints, &plans) {
                     for &(col, ground_y) in &columns {
                         if !in_building(&col) {
+                            drop_overhangs(chunk, col, ground_y, plans);
                             hang_vines(chunk, col, ground_y, footprints);
                         }
                     }
+                    wreck_a_car(chunk, base, &columns, &terrain, footprints);
                 }
                 // Last, so the clearance check sees every plant and vine of the chunk.
                 for spot in fires {
@@ -433,9 +466,12 @@ impl Column {
 
     /// Highest block of the column and its height.
     fn top(self, chunk: &ChunkToModify) -> Option<(i32, Block)> {
-        let mut sections: Vec<i8> = chunk.sections.keys().collect();
-        sections.sort_unstable_by(|a, b| b.cmp(a));
-        for sy in sections {
+        self.top_in(chunk, &sections_down(chunk))
+    }
+
+    /// The same, given the chunk's sections from the top down.
+    fn top_in(self, chunk: &ChunkToModify, sections: &[i8]) -> Option<(i32, Block)> {
+        for &sy in sections {
             let Some(section) = chunk.sections.get(sy) else {
                 continue;
             };
@@ -451,8 +487,287 @@ impl Column {
     }
 }
 
-/// Breaks a building column: part of it gone, the rest holed, weathered and dark.
-fn ruin_building(chunk: &mut ChunkToModify, col: Column, ground_y: i32, fires: &mut Vec<FireSpot>) {
+/// A chunk's sections, highest first.
+fn sections_down(chunk: &ChunkToModify) -> Vec<i8> {
+    let mut sections: Vec<i8> = chunk.sections.keys().collect();
+    sections.sort_unstable_by(|a, b| b.cmp(a));
+    sections
+}
+
+/// How far gone a building is. It is much the same all across one, so it still reads as a
+/// building, and differs from its neighbour's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Decay {
+    /// Roof and walls up, windows out, the odd hole in the roof.
+    Shell,
+    /// The roof fallen in, the walls still up.
+    Roofless,
+    /// Walls broken along a ragged line, upper floors fallen inside them.
+    Broken,
+    /// Stumps of wall around a mound of its own rubble.
+    Fallen,
+}
+
+impl Decay {
+    /// Share of a wall holed through.
+    fn holes(self) -> f64 {
+        match self {
+            Decay::Shell => 0.04,
+            Decay::Roofless => 0.07,
+            Decay::Broken | Decay::Fallen => 0.1,
+        }
+    }
+
+    /// Share of an upper floor fallen through.
+    fn floor_loss(self) -> f64 {
+        match self {
+            Decay::Shell => 0.12,
+            Decay::Roofless => 0.3,
+            Decay::Broken | Decay::Fallen => 0.55,
+        }
+    }
+
+    /// Share of the street beside it under its rubble.
+    fn rubble_share(self) -> f64 {
+        match self {
+            Decay::Shell => 0.04,
+            Decay::Roofless => 0.16,
+            Decay::Broken => 0.42,
+            Decay::Fallen => 0.6,
+        }
+    }
+}
+
+/// What the ruins do to one building column.
+#[derive(Clone, Copy, Debug)]
+struct RuinPlan {
+    decay: Decay,
+    /// A wall, with open air beside it, rather than the inside of the building.
+    wall: bool,
+    /// Where the walls nearby end and any pitched roof begins.
+    eave: i32,
+    /// The column's top before the ruins.
+    top: i32,
+}
+
+/// How far up or down the next column over a corner walk looks, so it follows a slanted
+/// edge to the end.
+const CORNER_SLIDE: [i32; 17] = [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5, -6, 6, -7, 7, -8, 8];
+
+/// One step of the walk to a building's corner: over to lower x by the nearest cell of the
+/// next column, or else down to lower z. None at the corner. The walk slides only along the
+/// building's own column, so it never jumps a street into the next one.
+fn corner_step(footprints: &CoordinateBitmap, x: i32, z: i32) -> Option<(i32, i32)> {
+    let inside = |dz: i32| {
+        let (lo, hi) = (z.min(z + dz), z.max(z + dz));
+        (lo..=hi).all(|t| footprints.contains(x, t))
+    };
+    CORNER_SLIDE
+        .iter()
+        .find(|&&dz| footprints.contains(x - 1, z + dz) && inside(dz))
+        .map(|&dz| (x - 1, z + dz))
+        .or_else(|| footprints.contains(x, z - 1).then_some((x, z - 1)))
+}
+
+/// The building's far corner, reached from (x, z) by stepping to lower x, or lower z where
+/// x can go no lower. It names the building for every column of it, square to the grid or
+/// not, so long as it has no notch the walk can end in.
+fn building_corner(footprints: &CoordinateBitmap, x: i32, z: i32) -> (i32, i32) {
+    let mut at = (x, z);
+    for _ in 0..CORNER_WALK {
+        match corner_step(footprints, at.0, at.1) {
+            Some(next) => at = next,
+            None => break,
+        }
+    }
+    at
+}
+
+/// The heights of a region's building columns before the ruins, so a building's walls and
+/// eaves read alike from each of its chunks.
+struct RegionTops {
+    min: (i32, i32),
+    tops: Vec<i16>,
+}
+
+const NO_TOP: i16 = i16::MIN;
+/// How far inside a building its eaves are looked for.
+const EAVE_REACH: i32 = 48;
+
+impl RegionTops {
+    fn build<'c>(
+        min: (i32, i32),
+        chunks: impl Iterator<Item = ((i32, i32), &'c ChunkToModify)>,
+        footprints: &CoordinateBitmap,
+    ) -> Self {
+        let mut tops = vec![NO_TOP; 512 * 512];
+        for ((cx, cz), chunk) in chunks {
+            let sections = sections_down(chunk);
+            for lz in 0..16u8 {
+                for lx in 0..16u8 {
+                    let (x, z) = (
+                        min.0 + cx * 16 + i32::from(lx),
+                        min.1 + cz * 16 + i32::from(lz),
+                    );
+                    if !footprints.contains(x, z) {
+                        continue;
+                    }
+                    if let Some((y, _)) = (Column { lx, lz, x, z }).top_in(chunk, &sections) {
+                        let at = ((z - min.1) * 512 + (x - min.0)) as usize;
+                        if let Some(slot) = tops.get_mut(at) {
+                            *slot = y.clamp(i32::from(NO_TOP) + 1, i32::from(i16::MAX)) as i16;
+                        }
+                    }
+                }
+            }
+        }
+        Self { min, tops }
+    }
+
+    fn get(&self, x: i32, z: i32) -> Option<i32> {
+        let (dx, dz) = (x - self.min.0, z - self.min.1);
+        if !(0..512).contains(&dx) || !(0..512).contains(&dz) {
+            return None;
+        }
+        let top = self.tops[(dz * 512 + dx) as usize];
+        (top != NO_TOP).then_some(i32::from(top))
+    }
+}
+
+/// Mostly the building's own, with a slow drift for terraces, whose footprints join up.
+fn decay_of(corner: (i32, i32), x: i32, z: i32) -> Decay {
+    let own = (coord_hash(corner.0, corner.1) >> 16) as f64 % 1000.0 / 1000.0;
+    let v = 0.75 * own + 0.25 * patch_noise(x, z, 40, SALT_DECAY);
+    match v {
+        v if v < 0.17 => Decay::Fallen,
+        v if v < 0.39 => Decay::Broken,
+        v if v < 0.72 => Decay::Roofless,
+        _ => Decay::Shell,
+    }
+}
+
+/// What the ruins do to each building column of a chunk, indexed by z then x. Read from
+/// the heights before any block moves, so no column's plan depends on the order they are
+/// broken in.
+fn plan_ruins(
+    columns: &[(Column, i32)],
+    footprints: &CoordinateBitmap,
+    tops: &RegionTops,
+) -> [[Option<RuinPlan>; 16]; 16] {
+    let mut plans = [[None; 16]; 16];
+    let Some(&(first, _)) = columns.first() else {
+        return plans;
+    };
+    let base = (first.x - i32::from(first.lx), first.z - i32::from(first.lz));
+    let is_wall = |x: i32, z: i32| {
+        footprints.contains(x, z)
+            && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dz)| !footprints.contains(x + dx, z + dz))
+    };
+    // Corners met on the way, so the chunk's columns share their walks.
+    let mut corners: [[Option<(i32, i32)>; 16]; 16] = [[None; 16]; 16];
+    let mut corner_of = |x: i32, z: i32| {
+        let mut path = Vec::new();
+        let mut at = (x, z);
+        let corner = loop {
+            let (lx, lz) = (at.0 - base.0, at.1 - base.1);
+            if !(0..16).contains(&lx) || !(0..16).contains(&lz) {
+                break building_corner(footprints, at.0, at.1);
+            }
+            if let Some(corner) = corners[lz as usize][lx as usize] {
+                break corner;
+            }
+            path.push((lx as usize, lz as usize));
+            match corner_step(footprints, at.0, at.1) {
+                Some(next) => at = next,
+                None => break at,
+            }
+        };
+        for (lx, lz) in path {
+            corners[lz][lx] = Some(corner);
+        }
+        corner
+    };
+    for &(col, _) in columns {
+        let (x, z) = (col.x, col.z);
+        if !footprints.contains(x, z) {
+            continue;
+        }
+        let Some(top) = tops.get(x, z) else {
+            continue;
+        };
+        let wall = is_wall(x, z);
+        // The lowest wall top in sight along the axes, inside this building.
+        let mut eave = top;
+        if !wall {
+            for (dx, dz) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                for i in 1..=EAVE_REACH {
+                    let (wx, wz) = (x + dx * i, z + dz * i);
+                    if !footprints.contains(wx, wz) {
+                        break;
+                    }
+                    if is_wall(wx, wz) {
+                        if let Some(y) = tops.get(wx, wz) {
+                            eave = eave.min(y);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        plans[usize::from(col.lz)][usize::from(col.lx)] = Some(RuinPlan {
+            decay: decay_of(corner_of(x, z), x, z),
+            wall,
+            eave,
+            top,
+        });
+    }
+    plans
+}
+
+/// How many blocks of a column of `height` stay up.
+fn standing_height(col: Column, height: i32, ground_y: i32, plan: RuinPlan) -> i32 {
+    let tower = height >= TOWER_HEIGHT;
+    let line = patch_noise(col.x, col.z, 11, SALT_BREAK) - 0.5;
+    let jag = (patch_noise(col.x, col.z, 5, SALT_JAG) - 0.5) * 4.0;
+    let of = |h: i32, share: f64| {
+        let share = if tower { share.max(TOWER_SHARE) } else { share };
+        f64::from(h) * share
+    };
+    let standing = if plan.wall {
+        match plan.decay {
+            Decay::Shell => f64::from(height),
+            Decay::Roofless => of(height, 0.96 + line * 0.08) + jag,
+            Decay::Broken => of(height, 0.62 + line * 0.5) + jag,
+            Decay::Fallen => of(height, 0.22 + line * 0.3) + jag,
+        }
+    } else {
+        // A pitched roof stands above the eaves, so that is as high as the floors go.
+        let eave = (plan.eave - ground_y).min(height);
+        let floors = patch_noise(col.x, col.z, 9, SALT_FLOORS);
+        match plan.decay {
+            Decay::Shell if patch_noise(col.x, col.z, 7, SALT_ROOF_HOLE) < 0.22 => {
+                f64::from(height - 1 - (col.hash(0) % 3) as i32)
+            }
+            Decay::Shell => f64::from(height),
+            Decay::Roofless => f64::from(eave - 1) - (col.hash(1) % 2) as f64,
+            Decay::Broken => of(eave, 0.2 + floors * 0.4),
+            Decay::Fallen => of(eave, 0.0),
+        }
+    };
+    (standing.round() as i32).clamp(1, height)
+}
+
+/// Breaks a building column: walls stand to a line that fits how far gone the building is,
+/// floors and roof fall inside them, and what fell lies where it landed.
+fn ruin_building(
+    chunk: &mut ChunkToModify,
+    col: Column,
+    ground_y: i32,
+    plan: RuinPlan,
+    fires: &mut Vec<FireSpot>,
+) {
     let Some((top, _)) = col.top(chunk) else {
         return;
     };
@@ -460,16 +775,11 @@ fn ruin_building(chunk: &mut ChunkToModify, col: Column, ground_y: i32, fires: &
     if height < 2 {
         return;
     }
-    // About a quarter of the ground stays under standing walls; elsewhere the building has
-    // come down to a tenth to nine tenths of its height, along a jagged break.
-    let standing = patch_noise(col.x, col.z, 26, SALT_COLLAPSE);
-    let share = if standing > 0.72 {
-        1.0
-    } else {
-        0.1 + standing / 0.72 * 0.8
-    };
-    let jag = (patch_noise(col.x, col.z, 5, SALT_JAG) - 0.5) * 4.0;
-    let cut = ground_y + ((f64::from(height) * share + jag).round() as i32).clamp(1, height);
+    let cut = ground_y + standing_height(col, height, ground_y, plan);
+    let material = (cut + 1..=top)
+        .chain((ground_y + 1..=cut).rev())
+        .find_map(|y| col.get(chunk, y).filter(|&b| kind(b) == Kind::Solid));
+    let mut fallen = top - cut;
     for y in cut + 1..=top {
         col.set(chunk, y, AIR);
     }
@@ -481,8 +791,26 @@ fn ruin_building(chunk: &mut ChunkToModify, col: Column, ground_y: i32, fires: &
         let (k, h) = (kind(block), col.hash(y));
         let roll = h % 100;
         // Holes run a few blocks across and up, on a plane skewed through the walls.
-        let hole = patch_noise(col.x + y * 3, col.z - y * 2, 4, SALT_HOLE) < 0.1;
-        if hole || k == Kind::Light || (k == Kind::Glass && (4..85).contains(&roll)) {
+        let hole = patch_noise(col.x + y * 3, col.z - y * 2, 4, SALT_HOLE) < plan.decay.holes();
+        // Floors fall through in patches, each floor in its own.
+        let floor_gone = !plan.wall
+            && y > ground_y + 1
+            && matches!(k, Kind::Solid | Kind::Shaped)
+            && col.get(chunk, y - 1).is_none()
+            && patch_noise(col.x, col.z, 6, SALT_FLOORS.wrapping_add(y as u32))
+                < plan.decay.floor_loss();
+        if floor_gone {
+            fallen += 1;
+            col.set(chunk, y, AIR);
+            // What stood on it comes down too.
+            if y < cut
+                && col
+                    .get(chunk, y + 1)
+                    .is_some_and(|b| kind(b) != Kind::Solid)
+            {
+                col.set(chunk, y + 1, AIR);
+            }
+        } else if hole || k == Kind::Light || (k == Kind::Glass && (4..85).contains(&roll)) {
             col.set(chunk, y, AIR);
         } else if k == Kind::Glass && roll < 4 {
             col.set(chunk, y, COBWEB);
@@ -493,15 +821,140 @@ fn ruin_building(chunk: &mut ChunkToModify, col: Column, ground_y: i32, fires: &
         }
     }
 
-    // The broken top carries what fell on it, and moss where it has lain long enough.
-    if cut < top
-        && cut < world_max_y()
-        && col.get(chunk, cut).is_some_and(|b| kind(b) == Kind::Solid)
-    {
-        match col.hash(cut + 1) % 6 {
-            0 | 1 => rubble_or_fire(chunk, col, cut + 1, col.hash(cut + 2), fires),
-            2 => col.set(chunk, cut + 1, MOSS_CARPET),
-            _ => {}
+    let open_top = fallen > 0;
+    if plan.wall {
+        // The broken top of a wall carries a little of what fell, and moss in time.
+        if open_top
+            && cut < world_max_y()
+            && col.get(chunk, cut).is_some_and(|b| kind(b) == Kind::Solid)
+        {
+            match col.hash(cut + 1) % 6 {
+                0 => col.set(chunk, cut + 1, rubble(col.hash(cut + 2))),
+                1 | 2 => col.set(chunk, cut + 1, MOSS_CARPET),
+                _ => {}
+            }
+        }
+        return;
+    }
+
+    let h = col.hash(cut + 3);
+    let lying = patch_noise(col.x, col.z, 7, SALT_RUBBLE);
+    let pile = match plan.decay {
+        Decay::Shell => 0,
+        Decay::Roofless => i32::from(lying < 0.25),
+        Decay::Broken if fallen >= 3 => (lying * 3.5) as i32,
+        Decay::Broken => 0,
+        Decay::Fallen => 1 + (lying * 4.0) as i32,
+    };
+    let floor = (ground_y + 1..=world_max_y())
+        .find(|&y| col.get(chunk, y).is_none())
+        .unwrap_or(world_max_y());
+    if pile > 0 {
+        pile_up(chunk, col, floor, pile, material, h, fires);
+    }
+    if plan.decay == Decay::Shell {
+        if open_top && col.hash(cut + 1).is_multiple_of(4) {
+            overgrow(chunk, col, cut, h);
+        }
+        return;
+    }
+    // Rain and light reach what lies under the open sky, so things grow on it.
+    let Some((surface, _)) = col.top(chunk) else {
+        return;
+    };
+    if patch_noise(col.x, col.z, 8, SALT_GROWTH) < 0.6 {
+        overgrow(chunk, col, surface, h);
+    }
+    if plan.decay != Decay::Roofless && (h >> 20).is_multiple_of(RUIN_TREE_ODDS) {
+        grow_tree(chunk, col, surface, h);
+    }
+}
+
+/// A heap `height` blocks tall from `y`, of what the building was made of and common rubble,
+/// its top broken into slabs here and there. It stops at anything in the way.
+fn pile_up(
+    chunk: &mut ChunkToModify,
+    col: Column,
+    y: i32,
+    height: i32,
+    material: Option<Block>,
+    h: u64,
+    fires: &mut Vec<FireSpot>,
+) {
+    for i in 0..height {
+        let at = y + i;
+        if at > world_max_y() || col.get(chunk, at).is_some() {
+            return;
+        }
+        let mix = h.wrapping_add(u64::from(i as u32).wrapping_mul(0x9E37_79B9));
+        if i == height - 1 {
+            if mix.is_multiple_of(3) {
+                col.set(chunk, at, COBBLESTONE_SLAB);
+            } else {
+                rubble_or_fire(chunk, col, at, mix, fires);
+            }
+        } else {
+            col.set(chunk, at, debris(material, mix));
+        }
+    }
+}
+
+/// A block of a heap: as often as not what the building was made of.
+fn debris(material: Option<Block>, h: u64) -> Block {
+    match material {
+        Some(block) if h % 5 < 2 => block,
+        _ => rubble(h >> 3),
+    }
+}
+
+/// Moss on the block at `y` and something growing on it.
+fn overgrow(chunk: &mut ChunkToModify, col: Column, y: i32, h: u64) {
+    if y >= world_max_y() {
+        return;
+    }
+    if col.get(chunk, y).is_some_and(|b| kind(b) == Kind::Solid) {
+        col.set(chunk, y, MOSS_BLOCK);
+        grow(chunk, col, y + 1, h >> 8, 55);
+    } else if col.get(chunk, y).is_some_and(|b| kind(b) == Kind::Shaped) && h.is_multiple_of(2) {
+        col.set(chunk, y + 1, MOSS_CARPET);
+    }
+}
+
+/// A small tree come up in the ruin, if it fits the chunk and the space over it is free.
+fn grow_tree(chunk: &mut ChunkToModify, col: Column, surface: i32, h: u64) {
+    if !(2..=13).contains(&col.lx) || !(2..=13).contains(&col.lz) {
+        return;
+    }
+    let trunk = 3 + ((h >> 4) % 3) as i32;
+    let crown = surface + trunk;
+    if crown + 2 > world_max_y() {
+        return;
+    }
+    let around = |dx: i32, dz: i32| Column {
+        lx: (i32::from(col.lx) + dx) as u8,
+        lz: (i32::from(col.lz) + dz) as u8,
+        x: col.x + dx,
+        z: col.z + dz,
+    };
+    // A wall in the crown's way means there is no room for it here.
+    for dz in -2..=2 {
+        for dx in -2..=2 {
+            if (surface + 1..=crown + 1).any(|y| around(dx, dz).get(chunk, y).is_some()) {
+                return;
+            }
+        }
+    }
+    for y in surface + 1..=crown {
+        col.set(chunk, y, OAK_LOG);
+    }
+    for dz in -2i32..=2 {
+        for dx in -2i32..=2 {
+            let reach = dx.abs() + dz.abs();
+            for (y, most) in [(crown - 1, 3), (crown, 3), (crown + 1, 1)] {
+                if reach <= most && !(dx == 0 && dz == 0 && y <= crown) {
+                    around(dx, dz).set(chunk, y, OAK_LEAVES);
+                }
+            }
         }
     }
 }
@@ -582,7 +1035,7 @@ fn hang_vines(
     if patch > VINE_SHARE {
         return;
     }
-    let height = 2 + ((VINE_SHARE - patch) / VINE_SHARE * 14.0) as i32;
+    let height = 2 + ((VINE_SHARE - patch) / VINE_SHARE * VINE_REACH) as i32;
     // The wall to the north, east, south and west, in the order of `VINES`.
     for (vine, (dx, dz)) in VINES.into_iter().zip([(0, -1), (1, 0), (0, 1), (-1, 0)]) {
         let (wx, wz) = (i32::from(col.lx) + dx, i32::from(col.lz) + dz);
@@ -634,13 +1087,16 @@ fn ruin_open_ground(
     }
     let h = col.hash(top);
 
-    let near_ruin = style.footprints.is_some_and(|f| {
-        (-RUBBLE_REACH..=RUBBLE_REACH)
-            .any(|dz| (-RUBBLE_REACH..=RUBBLE_REACH).any(|dx| f.contains(col.x + dx, col.z + dz)))
-    });
-    if near_ruin && patch_noise(col.x, col.z, 6, SALT_RUBBLE) < 0.45 && h.is_multiple_of(3) {
-        rubble_or_fire(chunk, col, top + 1, h >> 8, fires);
-        return;
+    if let Some(footprints) = style.footprints {
+        if let Some((d, wx, wz)) = nearest_footprint(footprints, col.x, col.z) {
+            let decay = decay_of(building_corner(footprints, wx, wz), wx, wz);
+            let height = heap_height(col, d, decay);
+            if height > 0 {
+                let material = wall_material(chunk, col, wx, wz, ground_y);
+                pile_up(chunk, col, top + 1, height, material, h >> 8, fires);
+                return;
+            }
+        }
     }
 
     if terrain.sealed(col.x, col.z) {
@@ -655,12 +1111,176 @@ fn ruin_open_ground(
             };
             col.set(chunk, top, ground);
             if matches!(ground, GRASS_BLOCK | MOSS_BLOCK) {
-                grow(chunk, col, top + 1, h >> 8, 70);
+                if (h >> 16).is_multiple_of(14) {
+                    col.set(chunk, top + 1, street_bush(h));
+                } else {
+                    grow(chunk, col, top + 1, h >> 8, 70);
+                }
             }
         }
     } else if block == GRASS_BLOCK {
         // Lawns gone wild.
         grow(chunk, col, top + 1, h >> 8, 30);
+    }
+}
+
+/// A bush come up through the paving.
+fn street_bush(h: u64) -> Block {
+    if (h >> 24).is_multiple_of(3) {
+        BIRCH_LEAVES
+    } else {
+        OAK_LEAVES
+    }
+}
+
+/// How far the nearest footprint cell is, up to `RUBBLE_REACH`, and where it is.
+fn nearest_footprint(footprints: &CoordinateBitmap, x: i32, z: i32) -> Option<(i32, i32, i32)> {
+    (1..=RUBBLE_REACH).find_map(|d| {
+        (-d..=d).find_map(|dz| {
+            (-d..=d)
+                .filter(|dx| dx.abs() == d || dz.abs() == d)
+                .find(|dx| footprints.contains(x + dx, z + dz))
+                .map(|dx| (d, x + dx, z + dz))
+        })
+    })
+}
+
+/// How tall a heap lies `d` blocks out from a building, 0 for none: in patches, highest
+/// against the wall, and with more of them the further gone the building is.
+fn heap_height(col: Column, d: i32, decay: Decay) -> i32 {
+    let share = decay.rubble_share();
+    let patch = patch_noise(col.x, col.z, 6, SALT_RUBBLE);
+    if patch >= share {
+        return 0;
+    }
+    let most = RUBBLE_REACH + 1 - d;
+    (1 + ((share - patch) / share * f64::from(most)) as i32).min(most)
+}
+
+/// What a wall at (wx, wz) is made of, if it is in this chunk.
+fn wall_material(
+    chunk: &ChunkToModify,
+    col: Column,
+    wx: i32,
+    wz: i32,
+    ground_y: i32,
+) -> Option<Block> {
+    let wall = in_chunk(col, wx - col.x, wz - col.z)?;
+    (ground_y + 1..=ground_y + 4)
+        .find_map(|y| wall.get(chunk, y).filter(|&b| kind(b) == Kind::Solid))
+}
+
+/// The column `dx`, `dz` from `col`, if the chunk holds it.
+fn in_chunk(col: Column, dx: i32, dz: i32) -> Option<Column> {
+    let (lx, lz) = (i32::from(col.lx) + dx, i32::from(col.lz) + dz);
+    ((0..16).contains(&lx) && (0..16).contains(&lz)).then_some(Column {
+        lx: lx as u8,
+        lz: lz as u8,
+        x: col.x + dx,
+        z: col.z + dz,
+    })
+}
+
+/// Eaves stick out past a building's footprint: where the wall they hung from has come
+/// down, they come down too. Only a thin overhang with nothing under it goes, so trees,
+/// posts and decks beside a ruin stay. Only walls inside this chunk are read.
+fn drop_overhangs(
+    chunk: &mut ChunkToModify,
+    col: Column,
+    ground_y: i32,
+    plans: &[[Option<RuinPlan>; 16]; 16],
+) {
+    let Some((top, _)) = col.top(chunk) else {
+        return;
+    };
+    let solid = |y: i32| {
+        col.get(chunk, y)
+            .is_some_and(|b| matches!(kind(b), Kind::Solid | Kind::Shaped))
+    };
+    if top <= ground_y + 2 || !solid(top) {
+        return;
+    }
+    let mut bottom = top;
+    while bottom > top - 1 && solid(bottom - 1) {
+        bottom -= 1;
+    }
+    if col.get(chunk, bottom - 1).is_some() || bottom <= ground_y + 2 {
+        return;
+    }
+    let hung_from_a_fallen_wall = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .into_iter()
+        .filter_map(|(dx, dz)| in_chunk(col, dx, dz))
+        .any(|wall| {
+            plans[usize::from(wall.lz)][usize::from(wall.lx)].is_some_and(|plan| {
+                let now = wall.top(chunk).map_or(ground_y, |(y, _)| y);
+                top <= plan.top + 1 && bottom > now
+            })
+        });
+    if hung_from_a_fallen_wall {
+        for y in bottom..=top {
+            col.set(chunk, y, AIR);
+        }
+    }
+}
+
+/// Now and then a car left to rust where it stopped, on a clear stretch of road.
+fn wreck_a_car(
+    chunk: &mut ChunkToModify,
+    base: (i32, i32),
+    columns: &[(Column, i32)],
+    terrain: &Terrain,
+    footprints: &CoordinateBitmap,
+) {
+    let h = coord_hash(base.0, base.1);
+    if !h.is_multiple_of(WRECK_ODDS) {
+        return;
+    }
+    let (lx, lz) = (4 + ((h >> 8) % 8) as i32, 4 + ((h >> 16) % 8) as i32);
+    let Some(&(centre, ground_y)) = columns
+        .iter()
+        .find(|(c, _)| i32::from(c.lx) == lx && i32::from(c.lz) == lz)
+    else {
+        return;
+    };
+    // Along the road: the way its surface runs further.
+    let run = |dx: i32, dz: i32| {
+        (1..=8)
+            .take_while(|&i| terrain.sealed(centre.x + dx * i, centre.z + dz * i))
+            .count()
+    };
+    let along_x = run(1, 0) + run(-1, 0) >= run(0, 1) + run(0, -1);
+    let (ax, az) = if along_x { (1, 0) } else { (0, 1) };
+    let cell = |along: i32, across: i32| {
+        in_chunk(centre, along * ax + across * az, along * az + across * ax)
+    };
+    let body: Vec<(Column, i32)> = (-2..=1)
+        .flat_map(|along| (0..=1).map(move |across| (along, across)))
+        .filter_map(|(along, across)| cell(along, across).map(|c| (c, along)))
+        .collect();
+    let clear = body.len() == 8
+        && body.iter().all(|&(c, _)| {
+            terrain.sealed(c.x, c.z)
+                && !footprints.contains(c.x, c.z)
+                && terrain.ground_y(c.x, c.z) == ground_y
+                && c.top(chunk)
+                    .is_some_and(|(y, b)| y == ground_y && kind(b) == Kind::Solid)
+        });
+    if !clear || ground_y + 3 > world_max_y() {
+        return;
+    }
+    let paint = [
+        BROWN_TERRACOTTA,
+        GRAY_TERRACOTTA,
+        RED_TERRACOTTA,
+        BLACK_CONCRETE,
+    ][(h >> 24) as usize % 4];
+    for &(c, along) in &body {
+        c.set(chunk, ground_y + 1, paint);
+        if along == -1 || along == 0 {
+            c.set(chunk, ground_y + 2, TINTED_GLASS);
+        } else if (h >> 28).is_multiple_of(2) {
+            c.set(chunk, ground_y + 2, MOSS_CARPET);
+        }
     }
 }
 
@@ -699,6 +1319,20 @@ fn weathered(block: Block, h: u64) -> Option<Block> {
         // Smooth stone facing breaks back down to rubble stone.
         STONE | SMOOTH_STONE | POLISHED_ANDESITE if roll < 12 => (COBBLESTONE, 12),
         STONE | SMOOTH_STONE | POLISHED_ANDESITE => (MOSSY_COBBLESTONE, 18),
+        // Pale render and stone goes dirty and rough.
+        WHITE_CONCRETE | SMOOTH_QUARTZ | QUARTZ_BLOCK if roll < 18 => (CALCITE, 18),
+        WHITE_CONCRETE | SMOOTH_QUARTZ | QUARTZ_BLOCK => (DIORITE, 30),
+        WHITE_TERRACOTTA => (CALCITE, 22),
+        // Concrete spalls down to its aggregate.
+        LIGHT_GRAY_CONCRETE if roll < 18 => (ANDESITE, 18),
+        LIGHT_GRAY_CONCRETE => (TUFF, 28),
+        GRAY_CONCRETE if roll < 16 => (TUFF, 16),
+        GRAY_CONCRETE => (COBBLESTONE, 24),
+        BRICK if roll < 14 => (GRANITE, 14),
+        BRICK => (COBBLESTONE, 22),
+        SMOOTH_SANDSTONE => (SANDSTONE, 40),
+        OAK_PLANKS => (SPRUCE_PLANKS, 25),
+        TERRACOTTA => (COARSE_DIRT, 12),
         _ => return None,
     };
     (roll < share).then_some(variant)
@@ -940,12 +1574,251 @@ mod tests {
                 },
             ));
         }
-        let mut chunk = chunk_with(&blocks);
-        ruin_building(&mut chunk, col, 0, &mut Vec::new());
-        assert_eq!(col.get(&chunk, 0), Some(STONE));
-        assert!((1..=30).all(|y| col.get(&chunk, y) != Some(GLASS) || col.hash(y) % 100 >= 85));
-        let top = col.top(&chunk).unwrap().0;
-        assert!((1..=30).contains(&top));
+        for decay in [Decay::Shell, Decay::Roofless, Decay::Broken, Decay::Fallen] {
+            for wall in [true, false] {
+                let mut chunk = chunk_with(&blocks);
+                let plan = RuinPlan {
+                    decay,
+                    wall,
+                    eave: 30,
+                    top: 30,
+                };
+                ruin_building(&mut chunk, col, 0, plan, &mut Vec::new());
+                assert_eq!(col.get(&chunk, 0), Some(STONE));
+                assert!(
+                    (1..=30).all(|y| col.get(&chunk, y) != Some(GLASS) || col.hash(y) % 100 >= 85)
+                );
+                let top = col.top(&chunk).unwrap().0;
+                assert!((1..=33).contains(&top), "{decay:?} {wall} {top}");
+            }
+        }
+    }
+
+    /// Stands a block of `size` by `size` at the origin of a chunk and maps its footprint.
+    fn square_building(
+        size: i32,
+        height: i32,
+    ) -> (ChunkToModify, Vec<(Column, i32)>, CoordinateBitmap) {
+        let bbox = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(-64, -64, 64, 64)
+            .unwrap();
+        let mut footprints = CoordinateBitmap::new(&bbox);
+        let mut chunk = ChunkToModify::default();
+        for x in 2..2 + size {
+            for z in 2..2 + size {
+                footprints.set(x, z);
+                let wall = x == 2 || z == 2 || x == 1 + size || z == 1 + size;
+                for y in 0..=height {
+                    if wall || y == height || y == 0 {
+                        chunk.set_block(x as u8, y, z as u8, STONE_BRICKS);
+                    }
+                }
+            }
+        }
+        let columns = (0..16u8)
+            .flat_map(|lz| (0..16u8).map(move |lx| (lx, lz)))
+            .map(|(lx, lz)| {
+                (
+                    Column {
+                        lx,
+                        lz,
+                        x: i32::from(lx),
+                        z: i32::from(lz),
+                    },
+                    0,
+                )
+            })
+            .collect();
+        (chunk, columns, footprints)
+    }
+
+    fn tops_of(chunk: &ChunkToModify, footprints: &CoordinateBitmap) -> RegionTops {
+        RegionTops::build((0, 0), std::iter::once(((0, 0), chunk)), footprints)
+    }
+
+    #[test]
+    fn a_building_askew_to_the_grid_has_one_corner() {
+        let bbox = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(-64, -64, 64, 64)
+            .unwrap();
+        let mut footprints = CoordinateBitmap::new(&bbox);
+        // A square turned 45 degrees: every cell on its lower left edge is a corner of its own
+        // to a walk that only steps straight.
+        let cells: Vec<(i32, i32)> = (-12i32..=12)
+            .flat_map(|x| (-12i32..=12).map(move |z| (x, z)))
+            .filter(|(x, z)| x.abs() + z.abs() <= 12)
+            .collect();
+        for &(x, z) in &cells {
+            footprints.set(x, z);
+        }
+        let corner = building_corner(&footprints, 0, 0);
+        for &(x, z) in &cells {
+            assert_eq!(building_corner(&footprints, x, z), corner, "from {x},{z}");
+        }
+    }
+
+    #[test]
+    fn a_corner_walk_keeps_to_its_own_side_of_a_street() {
+        let bbox = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(-64, -64, 64, 64)
+            .unwrap();
+        let mut footprints = CoordinateBitmap::new(&bbox);
+        // One building, and another across a five-block street off its corner.
+        for x in 10..=20 {
+            for z in 10..=20 {
+                footprints.set(x, z);
+            }
+        }
+        for x in 0..=9 {
+            for z in 0..=4 {
+                footprints.set(x, z);
+            }
+        }
+        for x in 10..=20 {
+            for z in 10..=20 {
+                assert_eq!(building_corner(&footprints, x, z), (10, 10), "from {x},{z}");
+            }
+        }
+        assert_eq!(building_corner(&footprints, 9, 4), (0, 0));
+    }
+
+    #[test]
+    fn a_building_has_one_corner_and_one_plan_all_across() {
+        let (chunk, columns, footprints) = square_building(10, 20);
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
+        assert!(plans[0][0].is_none());
+        for z in 2..12 {
+            for x in 2..12 {
+                assert_eq!(building_corner(&footprints, x, z), (2, 2));
+                let plan = plans[z as usize][x as usize].unwrap();
+                assert_eq!(plan.wall, x == 2 || z == 2 || x == 11 || z == 11);
+                assert_eq!(plan.eave, 20);
+            }
+        }
+    }
+
+    #[test]
+    fn a_ruin_keeps_its_walls_above_what_is_left_inside() {
+        let (mut chunk, columns, footprints) = square_building(10, 20);
+        let at = |x: u8, z: u8| {
+            columns
+                .iter()
+                .find(|(c, _)| c.lx == x && c.lz == z)
+                .unwrap()
+                .0
+        };
+        let plan = |wall| RuinPlan {
+            decay: Decay::Roofless,
+            wall,
+            eave: 20,
+            top: 20,
+        };
+        let (wall, inside) = (at(2, 6), at(6, 6));
+        ruin_building(&mut chunk, wall, 0, plan(true), &mut Vec::new());
+        ruin_building(&mut chunk, inside, 0, plan(false), &mut Vec::new());
+        let wall_top = wall.top(&chunk).unwrap().0;
+        assert!(wall_top >= 17, "the wall came down to {wall_top}");
+        // The roof slab over the inside has gone.
+        assert_eq!(inside.get(&chunk, 20), None);
+        let _ = footprints;
+    }
+
+    #[test]
+    fn towers_stay_on_the_skyline_however_far_gone() {
+        let col = Column {
+            lx: 3,
+            lz: 4,
+            x: 3,
+            z: 4,
+        };
+        let plan = RuinPlan {
+            decay: Decay::Fallen,
+            wall: true,
+            eave: 100,
+            top: 100,
+        };
+        assert!(standing_height(col, 100, 0, plan) >= 55);
+        assert!(standing_height(col, 20, 0, plan) <= 10);
+    }
+
+    #[test]
+    fn a_heap_lies_highest_against_the_wall() {
+        let col = Column {
+            lx: 3,
+            lz: 4,
+            x: 3,
+            z: 4,
+        };
+        for d in 1..=RUBBLE_REACH {
+            assert!(heap_height(col, d, Decay::Fallen) <= RUBBLE_REACH + 1 - d);
+        }
+        // A heap stops at what is in the way, and only its top is ever a slab.
+        let mut chunk = chunk_with(&[(0, STONE), (3, STONE_BRICKS)]);
+        pile_up(&mut chunk, col, 1, 4, None, 7, &mut Vec::new());
+        assert!(col.get(&chunk, 1).is_some());
+        assert!(col.get(&chunk, 2).is_some());
+        assert_eq!(col.get(&chunk, 3), Some(STONE_BRICKS));
+        assert_eq!(col.get(&chunk, 4), None);
+    }
+
+    #[test]
+    fn eaves_come_down_with_the_wall_under_them() {
+        let bbox = crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(-64, -64, 64, 64)
+            .unwrap();
+        let mut footprints = CoordinateBitmap::new(&bbox);
+        footprints.set(4, 4);
+        let at = |x: u8, z: u8| Column {
+            lx: x,
+            lz: z,
+            x: i32::from(x),
+            z: i32::from(z),
+        };
+        let (wall, eave) = (at(4, 4), at(3, 4));
+        let columns: Vec<(Column, i32)> = (0..16u8)
+            .flat_map(|lz| (0..16u8).map(move |lx| (at(lx, lz), 0)))
+            .collect();
+        let standing = |height: i32| {
+            let mut chunk = ChunkToModify::default();
+            for y in 0..=height {
+                wall.set(&mut chunk, y, STONE_BRICKS);
+            }
+            eave.set(&mut chunk, 0, STONE);
+            eave.set(&mut chunk, 12, STONE_BRICK_SLAB);
+            chunk
+        };
+        // The wall stood to 12 and has come down to 6: the slab hanging off it goes.
+        let mut chunk = standing(12);
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
+        for y in 7..=12 {
+            wall.set(&mut chunk, y, AIR);
+        }
+        drop_overhangs(&mut chunk, eave, 0, &plans);
+        assert_eq!(eave.get(&chunk, 12), None);
+        assert_eq!(eave.get(&chunk, 0), Some(STONE));
+
+        // Beside a wall still standing that high it stays.
+        let mut chunk = standing(12);
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
+        drop_overhangs(&mut chunk, eave, 0, &plans);
+        assert_eq!(eave.get(&chunk, 12), Some(STONE_BRICK_SLAB));
+
+        // A trunk standing on the ground beside a fallen wall is no overhang.
+        let mut chunk = standing(12);
+        for y in 1..=12 {
+            eave.set(&mut chunk, y, OAK_LOG);
+        }
+        let plans = plan_ruins(&columns, &footprints, &tops_of(&chunk, &footprints));
+        for y in 7..=12 {
+            wall.set(&mut chunk, y, AIR);
+        }
+        drop_overhangs(&mut chunk, eave, 0, &plans);
+        assert_eq!(eave.get(&chunk, 12), Some(OAK_LOG));
+    }
+
+    #[test]
+    fn modern_materials_weather_too_and_stay_full_blocks() {
+        for block in [WHITE_CONCRETE, LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, BRICK] {
+            let turned: Vec<Block> = (0..100u64).filter_map(|h| weathered(block, h)).collect();
+            assert!(!turned.is_empty() && turned.len() < 60, "{turned:?}");
+            assert!(turned.iter().all(|&b| kind(b) == Kind::Solid));
+        }
     }
 
     #[test]
@@ -1127,6 +2000,6 @@ mod tests {
             .filter(|&h| weathered(STONE_BRICKS, h).is_some())
             .count();
         assert_eq!(turned, 550);
-        assert_eq!(weathered(crate::block_definitions::BRICK, 0), None);
+        assert_eq!(weathered(OAK_LOG, 0), None);
     }
 }

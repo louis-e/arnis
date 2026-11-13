@@ -15,7 +15,7 @@
 use crate::coordinate_system::geographic::LLBBox;
 use reqwest::blocking::Client;
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
 use super::cache;
@@ -357,6 +357,14 @@ pub fn tile_count(bbox: &LLBBox, z: u8) -> u64 {
     u64::from(max_x - min_x + 1) * u64::from(max_y - min_y + 1)
 }
 
+/// Where an archive cached in `dir` keeps tile `z/x/y`.
+pub fn tile_cache_path(dir: &std::path::Path, z: u8, x: u32, y: u32) -> PathBuf {
+    dir.join("t")
+        .join(z.to_string())
+        .join(x.to_string())
+        .join(format!("{y}.bin"))
+}
+
 /// Web-Mercator tile containing a coordinate at the given zoom.
 pub fn lonlat_to_tile(lon: f64, lat: f64, z: u8) -> (u32, u32) {
     let n = f64::from(1u32 << z);
@@ -387,6 +395,8 @@ pub fn tile_y_to_lat(z: u8, tile_y: u32, fraction: f64) -> f64 {
 /// directories have been read so far.
 pub struct Archive {
     url: String,
+    /// What an offline miss is listed as.
+    what: &'static str,
     header: Header,
     root: Vec<Entry>,
     leaves: HashMap<(u64, u32), Vec<Entry>>,
@@ -412,6 +422,11 @@ impl Archive {
         cache_dir: Option<PathBuf>,
         allowed: &[u8],
     ) -> Result<Archive> {
+        let what = if allowed.contains(&TILE_TYPE_MVT) {
+            "Overture Maps tiles"
+        } else {
+            "OSM tile archive"
+        };
         let header_path = cache_dir.as_ref().map(|d| d.join("header.bin"));
         let root_path = cache_dir.as_ref().map(|d| d.join("root.bin"));
 
@@ -426,7 +441,7 @@ impl Archive {
                 (header_bytes, root_bytes)
             }
             None => {
-                let probe = fetch_range(client, url, 0, HEADER_PROBE_LEN)?;
+                let probe = fetch_range(client, url, what, 0, HEADER_PROBE_LEN)?;
                 let header = Header::parse_allowing(&probe, allowed)?;
                 let root_end = header
                     .root_offset
@@ -436,7 +451,7 @@ impl Archive {
                 let root_bytes = if root_end <= probe.len() as u64 {
                     probe[header.root_offset as usize..root_end as usize].to_vec()
                 } else {
-                    fetch_range(client, url, header.root_offset, header.root_length)?
+                    fetch_range(client, url, what, header.root_offset, header.root_length)?
                 };
                 let header_bytes = probe[..HEADER_LEN].to_vec();
 
@@ -456,6 +471,7 @@ impl Archive {
         )?)?;
         Ok(Archive {
             url: url.to_string(),
+            what,
             header,
             root,
             leaves: HashMap::new(),
@@ -566,12 +582,7 @@ impl Archive {
                 location.length
             ));
         }
-        let path = self.cache_dir.as_ref().map(|d| {
-            d.join("t")
-                .join(z.to_string())
-                .join(x.to_string())
-                .join(format!("{y}.bin"))
-        });
+        let path = self.cache_dir.as_ref().map(|d| tile_cache_path(d, z, x, y));
         let raw = self.read_cached(client, location.offset, u64::from(location.length), path)?;
         decompress(self.header.tile_compression, raw, MAX_TILE_BYTES)
     }
@@ -621,11 +632,23 @@ impl Archive {
                 }
             }
         }
-        let bytes = fetch_range(client, &self.url, offset, length)?;
+        let bytes = fetch_range(client, &self.url, self.what, offset, length)?;
         if let Some(path) = &path {
             cache::write_atomic(path, &bytes);
         }
         Ok(bytes)
+    }
+}
+
+/// An archive on this machine: a `file://` URL or a plain path. Read in place, so no
+/// network and no cache copy.
+pub fn local_path(url: &str) -> Option<PathBuf> {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return None;
+    }
+    match reqwest::Url::parse(url) {
+        Ok(u) if u.scheme() == "file" => u.to_file_path().ok(),
+        _ => Some(PathBuf::from(url)),
     }
 }
 
@@ -634,7 +657,13 @@ impl Archive {
 const RANGE_ATTEMPTS: u32 = 3;
 
 /// Fetch `[offset, offset + length)` over HTTP, retrying transient failures.
-fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<Vec<u8>> {
+fn fetch_range(
+    client: &Client,
+    url: &str,
+    what: &str,
+    offset: u64,
+    length: u64,
+) -> Result<Vec<u8>> {
     if length == 0 {
         return Ok(Vec::new());
     }
@@ -644,6 +673,17 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
     let end = offset
         .checked_add(length - 1)
         .ok_or_else(|| format!("range {offset}+{length} overflows the archive"))?;
+    if let Some(path) = local_path(url) {
+        // Short at end of file, like a 206 for a range past the end.
+        let mut file =
+            std::fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut bytes = Vec::new();
+        file.seek(SeekFrom::Start(offset))
+            .and_then(|_| file.take(length).read_to_end(&mut bytes))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        return Ok(bytes);
+    }
+    crate::net::ensure_online(what)?;
     let mut last_error = String::new();
 
     for attempt in 0..RANGE_ATTEMPTS {
@@ -695,6 +735,46 @@ fn fetch_range(client: &Client, url: &str, offset: u64, length: u64) -> Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_archives_are_paths_or_file_urls() {
+        assert_eq!(local_path("https://tiles.arnisproject.com/v1"), None);
+        assert_eq!(local_path("http://localhost:8080/v1"), None);
+        assert_eq!(local_path("tiles/out"), Some(PathBuf::from("tiles/out")));
+        let dir = std::env::temp_dir();
+        let url = reqwest::Url::from_directory_path(&dir).unwrap();
+        assert_eq!(
+            local_path(url.as_str()).map(|p| p.components().collect::<PathBuf>()),
+            Some(dir.components().collect::<PathBuf>())
+        );
+        // A Windows drive letter is not a URL scheme.
+        #[cfg(windows)]
+        assert_eq!(local_path("D:/a/b"), Some(PathBuf::from("D:/a/b")));
+    }
+
+    #[test]
+    fn a_local_range_is_read_from_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.pmtiles");
+        std::fs::write(&path, (0u8..100).collect::<Vec<_>>()).unwrap();
+        let client = Client::new();
+        let url = path.to_str().unwrap();
+        assert_eq!(
+            fetch_range(&client, url, "test", 10, 3).unwrap(),
+            vec![10, 11, 12]
+        );
+        // Past the end comes back short, as a 206 would.
+        assert_eq!(
+            fetch_range(&client, url, "test", 98, 16).unwrap(),
+            vec![98, 99]
+        );
+        let file_url = reqwest::Url::from_file_path(&path).unwrap();
+        assert_eq!(
+            fetch_range(&client, file_url.as_str(), "test", 0, 2).unwrap(),
+            vec![0, 1]
+        );
+        assert!(fetch_range(&client, &format!("{url}.missing"), "test", 0, 2).is_err());
+    }
 
     fn varint(mut v: u64) -> Vec<u8> {
         let mut out = Vec::new();

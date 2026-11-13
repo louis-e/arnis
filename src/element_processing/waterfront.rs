@@ -226,7 +226,7 @@ fn stations(lines: &[&ProcessedWay], spacing: f64) -> Vec<(f64, f64)> {
 }
 
 /// A column of `block` from the bed or terrain up to `top_y`.
-fn drive_pile(editor: &mut WorldEditor, x: i32, z: i32, top_y: i32, block: Block) {
+pub(crate) fn drive_pile(editor: &mut WorldEditor, x: i32, z: i32, top_y: i32, block: Block) {
     let ground = editor.get_ground_level(x, z);
     for y in (ground + 1)..=top_y {
         editor.set_block_absolute(block, x, y, z, None, None);

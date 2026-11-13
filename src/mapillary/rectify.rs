@@ -582,13 +582,13 @@ fn remap_bilinear(
         let (wx0, wx1) = (1.0 - ax, ax);
         let (wy0, wy1) = (1.0 - ay, ay);
         let px = out.get_pixel_mut((i % w) as u32, (i / w) as u32);
-        for c in 0..3 {
+        for (c, channel) in px.0.iter_mut().enumerate() {
             let v = fetch(sx, sy, c) * wy0 * wx0
                 + fetch(sx + 1, sy, c) * wy0 * wx1
                 + fetch(sx, sy + 1, c) * wy1 * wx0
                 + fetch(sx + 1, sy + 1, c) * wy1 * wx1;
             // OpenCV's fixed point cast rounds halves up and saturates.
-            px.0[c] = (v + 0.5).floor().clamp(0.0, 255.0) as u8;
+            *channel = (v + 0.5).floor().clamp(0.0, 255.0) as u8;
         }
     }
     out

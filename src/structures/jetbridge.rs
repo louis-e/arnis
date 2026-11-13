@@ -114,7 +114,7 @@ pub fn generate_jet_bridge(
     way: &ProcessedWay,
     building_footprints: &CoordinateBitmap,
 ) {
-    if !editor.place_schematics() || !claims(way) {
+    if !editor.place_prop(super::Prop::Jetbridge) || !claims(way) {
         return;
     }
     let Some(schem) = jetbridge() else {

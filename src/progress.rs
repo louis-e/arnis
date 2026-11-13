@@ -14,6 +14,37 @@ static PROGRESS_FLOOR: AtomicU32 = AtomicU32::new(0);
 // overlap, and the first one finishing must not unmute the rest.
 static SUPPRESS_COUNT: AtomicU32 = AtomicU32::new(0);
 
+thread_local! {
+    /// The status this thread last showed, for `while_waiting` to put back.
+    static LAST_STATUS: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// Shows `waiting_for` on the status line while `wait` runs, in place of the step this
+/// thread showed last, and puts that step back after. A thread that has shown nothing
+/// leaves the line to the others, as it would have nothing to put back.
+pub fn while_waiting<T>(waiting_for: &str, wait: impl FnOnce() -> T) -> T {
+    let before = LAST_STATUS.with(|s| s.borrow().clone());
+    if before.is_empty() {
+        return wait();
+    }
+    emit_gui_progress_update(MESSAGE_ONLY, waiting_for);
+    // Waiting is no step of this thread's for a later wait to put back.
+    LAST_STATUS.with(|s| s.borrow_mut().clone_from(&before));
+    let out = wait();
+    emit_gui_progress_update(MESSAGE_ONLY, &before);
+    out
+}
+
+fn remember_status(message: &str) {
+    if !message.is_empty() && !message.starts_with("Error!") && !message.starts_with("Done!") {
+        LAST_STATUS.with(|s| {
+            let mut s = s.borrow_mut();
+            s.clear();
+            s.push_str(message);
+        });
+    }
+}
+
 /// Mutes/unmutes progress emits; used by the 3D terrain preview fetches.
 pub fn set_progress_suppressed(suppressed: bool) {
     if suppressed {
@@ -33,9 +64,16 @@ pub fn set_progress_suppressed(suppressed: bool) {
 
 // Terminal messages always pass: a generation finishing or failing while a
 // preview fetch holds the mute must still reach the GUI, or the Generate
-// button stays locked forever (main.js re-enables it on "Error!"/"Done!").
+// button stays locked forever (main.js re-enables it on these four).
 fn emits_suppressed(progress: f64, message: &str) -> bool {
-    SUPPRESS_COUNT.load(Ordering::Relaxed) > 0 && progress < 100.0 && !message.starts_with("Error!")
+    SUPPRESS_COUNT.load(Ordering::Relaxed) > 0 && !ends_run(progress, message)
+}
+
+fn ends_run(progress: f64, message: &str) -> bool {
+    progress >= 100.0
+        || ["Error!", "Stopped.", "The retried cells are built"]
+            .iter()
+            .any(|end| message.starts_with(end))
 }
 
 /// Resets the monotonic progress floor at the start of a generation.
@@ -94,6 +132,9 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
     if emits_suppressed(progress, message) {
         return;
     }
+    remember_status(message);
+    crate::progress_json::progress(progress, message);
+    crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -114,6 +155,9 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
     if emits_suppressed(progress, message) {
         return;
     }
+    remember_status(message);
+    crate::progress_json::progress(progress, message);
+    crate::discord::progress(message);
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -126,14 +170,65 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
     }
 }
 
-pub fn emit_gui_error(message: &str) {
+/// A job's `piece` record (see `progress_json`), for the map in the window.
+pub fn emit_gui_piece(piece: &serde_json::Value) {
+    if let Some(window) = get_main_window() {
+        let payload = json!({ "progress": MESSAGE_ONLY, "message": "", "piece": piece });
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
+}
+
+/// A progress emit that also says where a download or bake is, for the bar in
+/// the OSM Data Source panel (`transfer` in the payload). Also sent on
+/// `--progress json` as a `transfer` record, so a child's reaches the window.
+pub fn emit_gui_transfer(progress: f64, message: &str, transfer: &crate::transfer::Transfer) {
+    if emits_suppressed(progress, message) {
+        return;
+    }
+    remember_status(message);
+    crate::progress_json::progress(progress, message);
+    crate::progress_json::record("transfer", json!(transfer));
+    if let Some(window) = get_main_window() {
+        let payload = json!({
+            "progress": clamp_progress(progress),
+            "message": message,
+            "transfer": transfer
+        });
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
+}
+
+/// The `progress-update` payload for an error: `message` is cut to fit the
+/// status bar, `detail` keeps the full text for the window to show.
+fn error_payload(message: &str) -> serde_json::Value {
     // Truncate by characters (not bytes) to avoid panicking when the GUI
     // status bar receives an error containing multi-byte UTF-8. e.g.
     // localized OS error messages like "Недостаточно системных ресурсов…"
     // where byte 35 lands inside a Cyrillic character.
     const MAX_CHARS: usize = 35;
     let truncated: String = message.chars().take(MAX_CHARS).collect();
-    emit_gui_progress_update(0.0, &format!("Error! {truncated}"));
+    json!({ "progress": 0.0, "message": format!("Error! {truncated}"), "detail": message })
+}
+
+pub fn emit_gui_error(message: &str) {
+    crate::progress_json::error(message);
+    let payload = error_payload(message);
+    let shown = payload["message"].as_str().unwrap_or_default();
+    if emits_suppressed(0.0, shown) {
+        return;
+    }
+    remember_status(shown);
+    crate::progress_json::progress(0.0, shown);
+    crate::discord::progress(shown);
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("progress-update", payload) {
+            eprintln!("Failed to emit progress event: {e}");
+        }
+    }
 }
 
 /// Emits the final in-game level name (including localized area suffix for Java,
@@ -161,5 +256,67 @@ pub fn emit_show_in_folder(path: &str) {
         if let Err(e) = window.emit("show-in-folder", path) {
             eprintln!("Failed to emit show-in-folder event: {}", e);
         }
+    }
+}
+
+/// Live mode's state, for the GUI.
+pub fn emit_live_status(status: &crate::live::Status) {
+    crate::discord::live(&status.phase);
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("live-status", status) {
+            eprintln!("Failed to emit live-status event: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn last_status() -> String {
+        LAST_STATUS.with(|s| s.borrow().clone())
+    }
+
+    #[test]
+    fn a_wait_puts_back_the_step_and_not_an_earlier_wait() {
+        // On a thread of its own, so it starts with nothing shown.
+        std::thread::spawn(|| {
+            while_waiting("Waiting for map data...", || ());
+            assert_eq!(last_status(), "");
+            emit_gui_progress_update(MESSAGE_ONLY, "Processing terrain...");
+            while_waiting("Waiting for map data...", || ());
+            while_waiting("Waiting for Overture buildings...", || ());
+            assert_eq!(last_status(), "Processing terrain...");
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// What ends a run (and frees Start in the window) passes a preview fetch's mute.
+    #[test]
+    fn the_end_of_a_run_is_never_muted() {
+        assert!(ends_run(100.0, "Done! World generation completed."));
+        assert!(ends_run(0.0, "Error! Failed"));
+        assert!(ends_run(
+            MESSAGE_ONLY,
+            "Stopped. Finished cells are kept; starting again resumes them."
+        ));
+        assert!(ends_run(
+            MESSAGE_ONLY,
+            "The retried cells are built; starting again builds the rest."
+        ));
+        assert!(!ends_run(40.0, "Generating area..."));
+    }
+
+    #[test]
+    fn error_payload_keeps_full_text() {
+        let full = "Недостаточно системных ресурсов для завершения операции. ".repeat(4)[..]
+            .chars()
+            .take(200)
+            .collect::<String>();
+        assert_eq!(full.chars().count(), 200);
+        let p = error_payload(&full);
+        assert!(p["message"].as_str().unwrap().chars().count() <= 42);
+        assert_eq!(p["detail"].as_str().unwrap(), full);
     }
 }

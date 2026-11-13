@@ -3,7 +3,10 @@
 //! the regions. Tables follow DH's `sqlScripts/`, rows its `FullDataSourceV2DTO`.
 
 mod encode;
+mod existing;
 mod lod;
+
+pub use existing::from_existing;
 
 pub(crate) use lod::RegionLod;
 
@@ -123,12 +126,23 @@ pub struct DhWriter {
     /// vanilla files; DH there reads this one.
     dimensions_path: PathBuf,
     staging: PathBuf,
+    /// The old database stays until this one is finished, as for a world not regenerated.
+    keep_old: bool,
     created_ms: i64,
     state: Mutex<State>,
 }
 
 impl DhWriter {
     pub fn create(world_dir: &Path) -> Result<Self, BoxError> {
+        Self::open(world_dir, false)
+    }
+
+    /// For LODs of an unchanged world: its old ones stay until the new ones are complete.
+    pub(crate) fn create_keeping_old(world_dir: &Path) -> Result<Self, BoxError> {
+        Self::open(world_dir, true)
+    }
+
+    fn open(world_dir: &Path, keep_old: bool) -> Result<Self, BoxError> {
         let dir = world_dir.join("data");
         fs::create_dir_all(&dir)?;
         let path = dir.join(DB_NAME);
@@ -137,8 +151,10 @@ impl DhWriter {
             .join(DB_NAME);
         let staging = dir.join(format!("{DB_NAME}.arnis-tmp"));
         // A regenerated world must not keep LODs of the terrain it replaced.
-        remove_database(&path)?;
-        remove_database(&dimensions_path)?;
+        if !keep_old {
+            remove_database(&path)?;
+            remove_database(&dimensions_path)?;
+        }
         remove_database(&staging)?;
 
         let conn = Connection::open(&staging)?;
@@ -163,6 +179,7 @@ impl DhWriter {
             path,
             dimensions_path,
             staging,
+            keep_old,
             created_ms,
             state: Mutex::new(State {
                 conn: Some(conn),
@@ -252,11 +269,18 @@ impl DhWriter {
             let _ = remove_database(&self.staging);
             return Err(e);
         }
+        if self.keep_old {
+            // SQLite would replay the old database's journal onto the new one.
+            remove_files(&self.path, &["-wal", "-shm", "-journal"])?;
+            remove_database(&self.dimensions_path)?;
+        }
         fs::rename(&self.staging, &self.path)?;
         Ok(Summary {
             sections: state.sections,
             bytes: state.bytes,
             dimensions_error: place_twin(&self.path, &self.dimensions_path).err(),
+            skipped_regions: 0,
+            skipped_chunks: 0,
         })
     }
 }
@@ -266,6 +290,9 @@ pub struct Summary {
     pub bytes: u64,
     /// Why the copy for Minecraft 26.1+ is missing, if it is.
     pub dimensions_error: Option<std::io::Error>,
+    /// Region files and chunks that could not be read, from a world on disk.
+    pub skipped_regions: u64,
+    pub skipped_chunks: u64,
 }
 
 /// A hard link costs no space and is what Minecraft's own 26.1 upgrade uses; a copy is
@@ -300,7 +327,11 @@ fn seal(conn: Connection) -> Result<(), BoxError> {
 
 /// Removes a database and the journal files SQLite may have left beside it.
 fn remove_database(path: &Path) -> std::io::Result<()> {
-    for suffix in ["", "-wal", "-shm", "-journal"] {
+    remove_files(path, &["", "-wal", "-shm", "-journal"])
+}
+
+fn remove_files(path: &Path, suffixes: &[&str]) -> std::io::Result<()> {
+    for suffix in suffixes {
         let mut file = path.as_os_str().to_owned();
         file.push(suffix);
         match fs::remove_file(&file) {

@@ -123,12 +123,30 @@ fn short_field(c: &HashMap<String, Value>, k: &str) -> Result<i32, String> {
     }
 }
 
+/// Most a schematic may unpack to, against gzip bombs; the largest bundled tree is 64 KB.
+const MAX_RAW_BYTES: u64 = 32 << 20;
+
 /// Load a gzipped Sponge `.schem` (format v2 or v3) and return its log/leaf voxels.
 pub fn load_schem(gz_bytes: &[u8]) -> Result<Schematic, String> {
+    let most = i32::from(i16::MAX);
+    load_schem_within(gz_bytes, most, most)
+}
+
+/// `load_schem` for a model at most `max_side` blocks wide and long and `max_height` tall,
+/// checked before its blocks are decoded.
+pub fn load_schem_within(
+    gz_bytes: &[u8],
+    max_side: i32,
+    max_height: i32,
+) -> Result<Schematic, String> {
     let mut raw = Vec::new();
     flate2::read::GzDecoder::new(gz_bytes)
+        .take(MAX_RAW_BYTES + 1)
         .read_to_end(&mut raw)
         .map_err(|e| format!("schem: gunzip failed: {e}"))?;
+    if raw.len() as u64 > MAX_RAW_BYTES {
+        return Err(format!("unpacks to over {} MB", MAX_RAW_BYTES >> 20));
+    }
     let root: Value = fastnbt::from_bytes(&raw).map_err(|e| format!("schem: nbt parse: {e}"))?;
     let root_c = as_compound(&root).ok_or("schem: root not a compound")?;
 
@@ -149,6 +167,9 @@ pub fn load_schem(gz_bytes: &[u8]) -> Result<Schematic, String> {
         .any(|&d| d > i32::from(i16::MAX))
     {
         return Err("schem: dimensions past the supported range".into());
+    }
+    if width.max(length) > max_side || height > max_height {
+        return Err(format!("over {max_side} blocks wide or {max_height} tall"));
     }
 
     // v3: Blocks { Palette, Data }; v2: root-level Palette + BlockData.
@@ -584,6 +605,25 @@ mod tests {
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         gz.write_all(&raw).unwrap();
         gz.finish().unwrap()
+    }
+
+    #[test]
+    fn oversized_models_are_refused_before_their_blocks() {
+        // The header alone decides: the block data is far too short for these sizes.
+        let wide = schem_bytes(200, 4, 10, &["minecraft:oak_log"], &[0]);
+        assert!(load_schem_within(&wide, 128, 256)
+            .err()
+            .unwrap()
+            .contains("128 blocks wide"));
+        let tall = schem_bytes(4, 300, 4, &["minecraft:oak_log"], &[0]);
+        assert!(load_schem_within(&tall, 128, 256).is_err());
+        let fits = schem_bytes(1, 2, 1, &["minecraft:oak_log"], &[0, 0]);
+        assert!(load_schem_within(&fits, 128, 256).is_ok());
+        // A bomb stops at the unpack cap.
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        std::io::Write::write_all(&mut gz, &vec![0u8; (MAX_RAW_BYTES + 1) as usize]).unwrap();
+        let err = load_schem(&gz.finish().unwrap()).err().unwrap();
+        assert!(err.contains("unpacks to over"), "{err}");
     }
 
     // Model files pad empty rows on top. The height is what the tree fills, so a

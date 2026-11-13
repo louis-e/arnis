@@ -1,0 +1,367 @@
+{
+  "empty_weight": 3,
+  "rolls_min": 3,
+  "rolls_max": 8,
+  "themes": [
+    {
+      "kind": "food",
+      "weight": 25,
+      "items": [
+        {
+          "id": "minecraft:bread",
+          "min": 2,
+          "max": 6,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:potato",
+          "min": 3,
+          "max": 9,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:carrot",
+          "min": 2,
+          "max": 7,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:wheat",
+          "min": 3,
+          "max": 9,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:apple",
+          "min": 2,
+          "max": 6,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:baked_potato",
+          "min": 2,
+          "max": 6,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:cooked_chicken",
+          "min": 1,
+          "max": 4,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:sweet_berries",
+          "min": 2,
+          "max": 7,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:beetroot",
+          "min": 2,
+          "max": 6,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:pumpkin_pie",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:mushroom_stew",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:golden_carrot",
+          "min": 1,
+          "max": 3,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:cake",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "kind": "mixed",
+      "weight": 20,
+      "items": [
+        {
+          "id": "minecraft:paper",
+          "min": 2,
+          "max": 7,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:bone",
+          "min": 2,
+          "max": 7,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:string",
+          "min": 2,
+          "max": 7,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:rotten_flesh",
+          "min": 2,
+          "max": 6,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:book",
+          "min": 1,
+          "max": 4,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:dead_bush",
+          "min": 1,
+          "max": 3,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:gunpowder",
+          "min": 1,
+          "max": 4,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:flower_pot",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:cobweb",
+          "min": 1,
+          "max": 3,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:name_tag",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:map",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        }
+      ]
+    },
+    {
+      "kind": "resources",
+      "weight": 18,
+      "items": [
+        {
+          "id": "minecraft:oak_planks",
+          "min": 4,
+          "max": 16,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:cobblestone",
+          "min": 6,
+          "max": 20,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:coal",
+          "min": 3,
+          "max": 9,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:clay_ball",
+          "min": 2,
+          "max": 7,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:glass_pane",
+          "min": 3,
+          "max": 9,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:torch",
+          "min": 2,
+          "max": 8,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:iron_ingot",
+          "min": 2,
+          "max": 6,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:candle",
+          "min": 1,
+          "max": 4,
+          "weight": 3
+        }
+      ]
+    },
+    {
+      "kind": "tools",
+      "weight": 15,
+      "items": [
+        {
+          "id": "minecraft:stick",
+          "min": 2,
+          "max": 7,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:bucket",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:fishing_rod",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:shears",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:flint_and_steel",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:compass",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:iron_pickaxe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:iron_axe",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:clock",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "kind": "valuables",
+      "weight": 12,
+      "items": [
+        {
+          "id": "minecraft:iron_nugget",
+          "min": 3,
+          "max": 8,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:gold_nugget",
+          "min": 2,
+          "max": 7,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:lapis_lazuli",
+          "min": 2,
+          "max": 6,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:emerald",
+          "min": 1,
+          "max": 4,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:gold_ingot",
+          "min": 1,
+          "max": 3,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:amethyst_shard",
+          "min": 1,
+          "max": 4,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:diamond",
+          "min": 1,
+          "max": 2,
+          "weight": 1
+        }
+      ]
+    },
+    {
+      "kind": "mixed",
+      "weight": 10,
+      "items": [
+        {
+          "id": "minecraft:arrow",
+          "min": 3,
+          "max": 12,
+          "weight": 9
+        },
+        {
+          "id": "minecraft:leather_boots",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:leather_chestplate",
+          "min": 1,
+          "max": 1,
+          "weight": 3
+        },
+        {
+          "id": "minecraft:shield",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:golden_apple",
+          "min": 1,
+          "max": 1,
+          "weight": 1
+        },
+        {
+          "id": "minecraft:ender_pearl",
+          "min": 1,
+          "max": 3,
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

@@ -2,7 +2,7 @@ export const licenseText = `
 <header class="credits-about">
 <img src="./images/logo.png" alt="Arnis" class="credits-logo">
 <p class="credits-made">Made with ♥️ in Munich by Louis Erbkamm</p>
-<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis/graphs/contributors" target="_blank" rel="noopener noreferrer">Github contributors page</a>. Logo made by nxfx21.</p>
+<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis/graphs/contributors" target="_blank" rel="noopener noreferrer">Github contributors page</a>.<br>Logo made by nxfx21. The Advanced features were ported from the Meld project by Teddy563.</p>
 </header>
 
 <p class="credits-warning"><b>Download Arnis only from the official source:</b> <a href="https://arnismc.com" target="_blank" rel="noopener noreferrer">https://arnismc.com</a> or <a href="https://github.com/louis-e/arnis" target="_blank" rel="noopener noreferrer">https://github.com/louis-e/arnis/</a>. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.</p>

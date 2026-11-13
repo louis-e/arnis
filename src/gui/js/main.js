@@ -1,5 +1,5 @@
 import { licenseText } from './license.js';
-import { fetchLanguage, invalidJSON } from './language.js';
+import { fetchLanguage, invalidJSON, matchLanguage } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
 import {
   initSettingsStore,
@@ -9,7 +9,16 @@ import {
   cancelSettingsResetConfirm,
   flushSettingsStore,
 } from './settings-store.js';
+import { initPreviews } from './preview-popover.js';
 import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
+import {
+  t as oneWorldText,
+  initMeldFeatures, refreshLayout, meldFlags, cellsKey, generationTarget, generationShapes, progressText, holdsNotice,
+  initRunControls, initCellMenu, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls,
+  initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing,
+  setPlanMask, hasPlanMask, refreshStretch,
+  initDataPanel, initProjects, resumeJob, placeForRun,
+} from './meld-features.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -17,7 +26,8 @@ if (window.__TAURI__) {
 } else {
   function dummyFunc() { }
   window.__TAURI__ = { event: { listen: dummyFunc } };
-  invoke = dummyFunc;
+  // A plain browser preview: callers chain .then on invoke.
+  invoke = async () => undefined;
 }
 
 const DEFAULT_LOCALE_PATH = `./locales/en.json`;
@@ -25,11 +35,23 @@ const DEFAULT_LOCALE_PATH = `./locales/en.json`;
 // Track current bbox selection info localization key for language changes
 let currentBboxSelectionKey = "select_area_prompt";
 let currentBboxSelectionColor = "#ffffff";
+let currentBboxSelectionVars = null;
+
+// "{n}"-style values of the current bbox line (area_pieces_info), kept for language changes.
+function fillBboxSelectionVars(element) {
+  for (const k in (currentBboxSelectionVars || {})) {
+    element.textContent = element.textContent.split('{' + k + '}').join(currentBboxSelectionVars[k]);
+  }
+}
 
 // Helper function to set bbox selection info text and track it for language changes
-async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color) {
+async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color, vars) {
+  // Only a size warning brings the Advanced link back (displayBboxSizeStatus).
+  const cta = document.getElementById('bbox-features-cta');
+  if (cta) cta.hidden = true;
   currentBboxSelectionKey = localizationKey;
   currentBboxSelectionColor = color;
+  currentBboxSelectionVars = vars || null;
   
   // Ensure localization is available
   let localization = window.localization;
@@ -38,11 +60,15 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
   }
   
   localizeElement(localization, { element: bboxSelectionElement }, localizationKey);
+  fillBboxSelectionVars(bboxSelectionElement);
   bboxSelectionElement.style.color = color;
+  // The map-first card says the pieces in its plan block; this line would repeat them.
+  bboxSelectionElement.classList.toggle('is-plan', localizationKey === 'area_pieces_info' || localizationKey === 'area_single_info');
 }
 
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
+  applyStoredLayout();
   registerMessageEvent();
   window.startGeneration = startGeneration;
   setupProgressListener();
@@ -55,11 +81,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   initCavesFillCoupling();
   initDisastersCoupling();
   initMobSpawningLockout();
+  initAdvancedRows();
   refreshHeightLimitRow();
   refreshGameplayRows();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  syncDiscordStatus();
+  initOfflineModeSync();
   // The store's restore fired the toggle's change event before the save path
   // and the world name were known; read the world once more with both in hand.
   refreshOneWorldState();
@@ -68,14 +97,26 @@ window.addEventListener("DOMContentLoaded", async () => {
   initClearCacheButton();
   initPrecomputeFacadesButton();
   initTooltips();
+  initPreviews();
   handleBboxInput();
   const localization = await getLocalization();
   await applyLocalization(localization);
   updateFormatToggleUI(selectedWorldFormat);
-  initFooter();
   initEasterEggs();
   checkForUpdates();
 });
+
+// The stored Main Page Layout, before the first await: the store restores it only later, and a
+// Map first page would show as Classic until then (meld-features.js keeps it from there).
+function applyStoredLayout() {
+  try {
+    const values = JSON.parse(localStorage.getItem('arnis-settings') || '{}').values || {};
+    // Auto is the default, so it is not stored; it shows the map first for a build in cells.
+    const mode = values['layout-select'] || 'auto';
+    const cells = values['advanced-meld-features-toggle'] === true && values['one-world-group'] === 'on' && !!values['meld-workers-select'];
+    document.body.classList.toggle('map-first', mode === 'map' || (mode === 'auto' && cells));
+  } catch (_) { /* the store's own restore sets it */ }
+}
 
 // Expose language functions to window for use by language-selector.js
 window.fetchLanguage = fetchLanguage;
@@ -96,9 +137,10 @@ async function getLocalization() {
     return await fetchLanguage(savedLanguage);
   }
 
-  // Otherwise use the browser's language
-  const lang = navigator.language;
-  return await fetchLanguage(lang);
+  // Otherwise the offered language closest to the browser's
+  const select = document.getElementById("language-select");
+  const offered = select ? Array.from(select.options).map(opt => opt.value) : [];
+  return await fetchLanguage(detectBrowserLanguage(offered));
 }
 
 /**
@@ -127,6 +169,9 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 async function applyLocalization(localization) {
   const localizationElements = {
     "#start-button > span[data-localize='start_generation']": "start_generation",
+    // Advanced features: the size warning's way out and the One World's Expand.
+    "#bbox-features-cta": "meld_use_pieces",
+    "#plan-expand-button": "plan_expand",
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
     "input[id='world-name-input']": "placeholder_world_name",
     // DEPRECATED: Ground level localization removed
@@ -147,8 +192,23 @@ async function applyLocalization(localization) {
   // several appear more than once (a section name is in the sidebar and on the
   // section itself), so they are localized in one pass rather than selector by
   // selector.
-  document.querySelectorAll("#settings-modal [data-localize], .dialog [data-localize]").forEach((element) => {
+  document.querySelectorAll("#settings-modal [data-localize], .dialog [data-localize], #run-controls [data-localize], #run-confirm [data-localize], #cells-confirm [data-localize]").forEach((element) => {
     localizeElement(localization, { element }, element.dataset.localize);
+  });
+
+  // Attributes: tooltips (English stays in data-tooltip as the fallback) and
+  // title / aria-label, anywhere on the page.
+  const loc = (key, fallback) => localization[key] ?? fallback;
+  document.querySelectorAll("[data-tooltip-key]").forEach((el) => {
+    const text = loc(el.dataset.tooltipKey, el.dataset.tooltip);
+    el.dataset.tooltip = text;
+    el.setAttribute("aria-label", text);
+  });
+  document.querySelectorAll("[data-localize-title]").forEach((el) => {
+    el.title = loc(el.dataset.localizeTitle, el.title);
+  });
+  document.querySelectorAll("[data-localize-aria-label]").forEach((el) => {
+    el.setAttribute("aria-label", loc(el.dataset.localizeAriaLabel, el.getAttribute("aria-label")));
   });
 
   // settings-store.js creates these buttons and owns their text.
@@ -158,12 +218,23 @@ async function applyLocalization(localization) {
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
   if (bboxSelectionInfo && currentBboxSelectionKey) {
     localizeElement(localization, { element: bboxSelectionInfo }, currentBboxSelectionKey);
+    fillBboxSelectionVars(bboxSelectionInfo);
     bboxSelectionInfo.style.color = currentBboxSelectionColor;
   }
 
   // Update error messages
   window.localization = localization;
   renderOneWorldStatus();
+  refreshStartButton();
+  // An open Projects list is built in the language it was drawn in.
+  redrawProjects();
+  window.dispatchEvent(new Event('arnis-localized'));
+  // The plan block is built in the language it was drawn in.
+  schedulePlan(true);
+  labelLiveViewDistances();
+  fillLiveVersions();
+  // liveStatus stays "stopped" after a session, which must not take over a normal run's line.
+  if (liveActive()) renderLiveProgress();
   // The map hint lives in the map iframe, which cannot see this assignment.
   document.querySelectorAll('iframe').forEach((frame) => {
     try {
@@ -180,6 +251,9 @@ async function applyLocalization(localization) {
   // The line above has just written the idle label over a button that may be
   // saying Cancel, so put the running state back.
   refreshPrecomputeButton();
+  // The pass wrote the footer's raw template ("{year}", "{version}") back; every
+  // pass fills it in, whoever started it.
+  initFooter();
 }
 
 // Function to initialize the footer with the current year and version
@@ -208,6 +282,8 @@ async function initFooter() {
       .replace("{year}", currentYear)
       .replace("{version}", version);
 
+    // The map-first page shows the version under the logo on hover.
+    document.getElementById("arnis-logo")?.closest("a")?.setAttribute("data-version", `v${version}`);
     // The About section of the settings page repeats the same line.
     const aboutVersion = document.getElementById("about-version");
     if (aboutVersion) aboutVersion.textContent = footerElement.textContent;
@@ -578,7 +654,8 @@ function getFacadeMode() {
 // back to Java restores it; only what the backend is asked for changes.
 function getEffectiveFacadeMode() {
   const mode = getFacadeMode();
-  if (mode !== 'blocks' && selectedWorldFormat !== 'java') return 'blocks';
+  // One World builds Mapillary facades as blocks.
+  if (mode !== 'blocks' && (selectedWorldFormat !== 'java' || isOneWorldEnabled())) return 'blocks';
   return mode;
 }
 
@@ -599,7 +676,8 @@ function getFacadeSource() {
 function getEffectiveFacadeSource() {
   const source = getFacadeSource();
   if (selectedCelestialBody !== 'earth') return 'off';
-  if (source === 'preset' && selectedWorldFormat !== 'java') return 'off';
+  // The presets are off in One World too.
+  if (source === 'preset' && (selectedWorldFormat !== 'java' || isOneWorldEnabled())) return 'off';
   return source;
 }
 
@@ -628,9 +706,12 @@ function refreshFacadeSourceRows() {
   // greyed like the row it sits in rather than left looking live.
   group.classList.toggle('segmented-disabled', !earth);
   const sourceRow = group.closest('.settings-row');
-  if (sourceRow) sourceRow.classList.toggle('settings-row-unavailable', !earth);
+  if (sourceRow) {
+    sourceRow.classList.toggle('settings-row-unavailable', !earth);
+    setRowReason(sourceRow, earth ? null : 'reason_earth');
+  }
   group.querySelectorAll('.segment').forEach((btn) => {
-    btn.disabled = !earth || (!java && btn.dataset.facadeSource === 'preset');
+    btn.disabled = !earth || ((!java || isOneWorldEnabled()) && btn.dataset.facadeSource === 'preset');
     btn.classList.toggle('active', btn.dataset.facadeSource === source);
   });
 
@@ -639,12 +720,13 @@ function refreshFacadeSourceRows() {
   // under Off only buried the rest of the page. A row that belongs to this
   // source but cannot act yet (no token, wrong format) is greyed instead, so
   // it is still there to explain itself.
-  const grey = (id, shown, live) => {
+  const grey = (id, shown, live, reason = null) => {
     const el = document.getElementById(id);
     const row = el && el.closest('.settings-row');
     if (row) {
       row.style.display = shown ? '' : 'none';
       row.classList.toggle('settings-row-unavailable', !live);
+      setRowReason(row, live ? null : reason);
     }
     if (el) {
       el.querySelectorAll('.segment, input, button').forEach((c) => {
@@ -656,13 +738,10 @@ function refreshFacadeSourceRows() {
   const mapillary = source === 'mapillary';
   const token = !!getMapillaryToken();
   grey('mapillary-token', mapillary, mapillary);
-  grey('facade-mode-group', mapillary, mapillary && token);
+  grey('facade-mode-group', mapillary, mapillary && token, 'reason_token');
   // Panel resolution, so it means nothing where no panels are hung.
-  grey('facade-detail-group', source !== 'off', source !== 'off' && java);
-  grey('precompute-facades-button', mapillary, mapillary && token);
-
-  const notice = document.getElementById('facade-java-only-notice');
-  if (notice) notice.style.display = java ? 'none' : '';
+  grey('facade-detail-group', source !== 'off', source !== 'off' && java, 'reason_java');
+  grey('precompute-facades-button', mapillary, mapillary && token, 'reason_token');
 }
 
 // The facade rows react to the world format (panels are Java only), the on/off
@@ -670,21 +749,17 @@ function refreshFacadeSourceRows() {
 // left looking live, and the Precompute button reads the same facts.
 function refreshFacadeRows() {
   const group = document.getElementById('facade-mode-group');
-  const notice = document.getElementById('facade-java-only-notice');
   if (!group) return;
 
   const java = selectedWorldFormat === 'java';
-  const earth = selectedCelestialBody === 'earth';
   const effective = getEffectiveFacadeMode();
+  // The source rows enable the whole group first; photo panels stay off where they cannot hang.
+  refreshFacadeSourceRows();
   group.querySelectorAll('.segment').forEach((btn) => {
     const panels = btn.dataset.facadeMode !== 'blocks';
-    btn.disabled = panels && !java;
+    if (panels && (!java || isOneWorldEnabled())) btn.disabled = true;
     btn.classList.toggle('active', btn.dataset.facadeMode === effective);
   });
-  // Off Earth nothing builds facades at all, so the format gate has nothing
-  // left to explain.
-  if (notice) notice.style.display = java || !earth ? 'none' : '';
-  refreshFacadeSourceRows();
   refreshPrecomputeButton();
 }
 
@@ -723,7 +798,10 @@ function setCelestialBody(body) {
 
   const markRow = (el) => {
     const row = el && el.closest('.settings-row');
-    if (row) row.classList.toggle('settings-row-unavailable', off);
+    if (row) {
+      row.classList.toggle('settings-row-unavailable', off);
+      setRowReason(row, off ? 'reason_earth' : null);
+    }
   };
 
   EARTH_ONLY_SETTINGS.forEach((id) => {
@@ -746,6 +824,7 @@ function setCelestialBody(body) {
   refreshHeightLimitRow();
   refreshGameplayRows();
   refreshWorldTypeRow();
+  refreshJavaOnlyRows();
   refreshFacadeRows();
   refreshOneWorldState();
 
@@ -765,6 +844,18 @@ function setCelestialBody(body) {
   refreshBboxSelectionInfo();
 }
 
+// The last search result used for a selection, and { name, path } of the run that builds a One
+// World's first land, taken when it starts.
+let searchedPlace = null;
+let runPlace = null;
+
+// That world is named after the search result once the run is done.
+async function rememberRunPlace() {
+  const run = runPlace;
+  runPlace = null;
+  if (run) await invoke('gui_set_place_name', { worldPath: run.path, placeName: run.name }).catch(() => {});
+}
+
 // Function to register the event listener for bbox updates from iframe
 function registerMessageEvent() {
   window.addEventListener('message', function (event) {
@@ -774,7 +865,22 @@ function registerMessageEvent() {
     // selection updates (typed ones carrying coordinates must not be).
     if (bboxText && !event.data.type) {
       console.log("Updated BBOX Coordinates:", bboxText);
-      displayBboxInfoText(bboxText);
+      displayBboxInfoText(bboxText, event.data.shapes);
+    }
+
+    // "Select this area" on a search result: the area and, in a One World, a ring of regions around it.
+    if (event.data && event.data.type === 'selectArea' && event.source === getMapFrame()?.contentWindow) {
+      selectWithRing(event.data.bounds, isOneWorldEnabled());
+    }
+
+    // The search result the selection came from: its name goes to the world a build makes.
+    if (event.data && event.data.type === 'searchPlace' && event.source === getMapFrame()?.contentWindow) {
+      searchedPlace = { name: String(event.data.name), lat: Number(event.data.lat), lon: Number(event.data.lon) };
+    }
+
+    // The outline the selection was made from (shape tool or "Use outline"), or null.
+    if (event.data && event.data.type === 'planMask' && event.source === getMapFrame()?.contentWindow) {
+      noteOutline(event.data.geojson);
     }
 
     // World toggled on the map toolbar
@@ -884,7 +990,7 @@ function resetEta() {
   const el = document.getElementById("progress-eta");
   if (el) {
     el.classList.remove("visible");
-    el.textContent = "";
+    setEtaText(el, "");
     el.removeAttribute("aria-label");
   }
 }
@@ -899,19 +1005,24 @@ function formatEtaDuration(sec) {
   return `${h}h ${m % 60}m`;
 }
 
+// The estimate's label is two stacked copies (white over the fill, dark over the track; styles.css).
+function setEtaText(el, text) {
+  for (const span of el.children) span.textContent = text;
+}
+
 function renderEta() {
   const el = document.getElementById("progress-eta");
   if (!el) return;
   // Show nothing until we actually have an estimate (no "…" placeholder).
   if (!eta || eta.shown == null) {
     el.classList.remove("visible");
-    el.textContent = "";
+    setEtaText(el, "");
     el.removeAttribute("aria-label");
     return;
   }
   // Floor at 1s so it never reads "0s" before Done.
   const value = formatEtaDuration(Math.max(1, eta.shown));
-  el.textContent = value; // duration only on the bar; no "~" prefix
+  setEtaText(el, value); // duration only on the bar; no "~" prefix
   // Screen-reader context (the visible pill is just the duration). Hardcoded
   // English to match the rest of the progress messages, which aren't localized.
   el.setAttribute("aria-label", `Time remaining: ${value}`);
@@ -1042,9 +1153,22 @@ function resetProgressUi(message) {
   if (info) {
     info.textContent = message;
     info.style.color = "#ececec";
+    info.classList.remove("is-notice");
   }
+  noticeSince = 0;
+  prefetchDone = false;
   resetEta();
 }
+
+// A finished Download now leaves "Done!" and a full bar, which say nothing about a new selection
+// or plan; they go once the plan underneath changes. An error stays until the next run.
+let prefetchDone = false;
+function clearPrefetchDone() {
+  if (prefetchDone && generationButtonEnabled) resetProgressUi("");
+}
+
+// When the status line last showed a fallback notice (0: none).
+let noticeSince = 0;
 
 // Function to set up the progress bar listener
 function setupProgressListener() {
@@ -1053,6 +1177,11 @@ function setupProgressListener() {
   const progressDetail = document.getElementById("progress-detail");
 
   window.__TAURI__.event.listen("progress-update", (event) => {
+    if (event.payload.piece) {
+      notePiece(event.payload.piece);
+      showRunControls(!generationButtonEnabled);
+      return;
+    }
     const { progress, message, streaming } = event.payload;
 
     if (progress != -1) {
@@ -1062,9 +1191,21 @@ function setupProgressListener() {
     }
 
     if (message != "") {
-      progressInfo.textContent = message;
+      const shown = progressText(event.payload);
+      // A fallback notice outlasts the stage lines that follow it.
+      if (!holdsNotice(shown, message, noticeSince, Date.now())) {
+        progressInfo.textContent = shown.text;
+        progressInfo.title = shown.title;
+        progressInfo.classList.toggle("is-notice", shown.notice);
+        noticeSince = shown.notice ? Date.now() : 0;
+      }
+      if (shown.log) window.arnisLog?.(shown.notice ? "warn" : "error", shown.log);
 
-      if (message.startsWith("Error!")) {
+      if (bakeRunning && generationButtonEnabled && /^(Error!|Done!)/.test(message)) {
+        // A bake's end is not a run's: no world name, facades or Discord prompt follow it.
+        progressInfo.style.color = message.startsWith("Done!") ? "#7bd864" : "#fa7878";
+        resetEta();
+      } else if (message.startsWith("Error!")) {
         progressInfo.style.color = "#fa7878";
         setGenerationButtonEnabled(true);
         window.arnisPreview3D?.setGenerationRunning(false);
@@ -1072,7 +1213,7 @@ function setupProgressListener() {
           // The world keeps its name; the status line carries the reason.
           setWorldNameLabel(oneWorldDisplayName());
           if (isOneWorldEnabled()) setOneWorldStatus(message.replace(/^Error!\s*/, ''), 'error');
-        } else {
+        } else if (!lastRunPrewarm) {
           setWorldNameLabel("");
         }
         resetEta();
@@ -1084,12 +1225,26 @@ function setupProgressListener() {
         // The world just grew by one area: reload its status and overlays.
         if (lastRunOneWorld) {
           oneWorldOverlayKey = null;
-          refreshOneWorldState();
+          refreshOneWorldState().then(rememberRunPlace);
         }
         // A generation just built facades into the same cache, so the preview
         // has something new to say.
-        window.arnisPreview3D?.refreshFacades();
-        noteGenerationDone();
+        if (lastRunPrewarm) {
+          prefetchDone = true;
+        } else {
+          window.arnisPreview3D?.refreshFacades();
+          noteGenerationDone();
+        }
+      } else if (message.startsWith("Stopped.") || message.startsWith("The retried cells are built")) {
+        // A job in pieces ends here when stopped or when only some pieces were asked for.
+        progressInfo.style.color = "#ececec";
+        setGenerationButtonEnabled(true);
+        window.arnisPreview3D?.setGenerationRunning(false);
+        resetEta();
+        if (lastRunOneWorld) {
+          oneWorldOverlayKey = null;
+          refreshOneWorldState();
+        }
       } else {
         progressInfo.style.color = "#ececec";
       }
@@ -1138,6 +1293,11 @@ function initEasterEggs() {
 
   // 5 rapid clicks on progress bar
   const progressBar = document.querySelector('.progress-bar-container');
+  // The estimate's two copies are clipped at the fill's edge: follow the fill's width (also while it animates).
+  const fill = document.getElementById('progress-bar');
+  if (fill && window.ResizeObserver) {
+    new ResizeObserver(() => progressBar.style.setProperty('--p', `${fill.offsetWidth}px`)).observe(fill);
+  }
   let clicks = [];
   progressBar.addEventListener('click', () => {
     const now = Date.now();
@@ -1152,11 +1312,7 @@ function initEasterEggs() {
 
 // Language implied by the browser, ignoring any stored preference.
 function detectBrowserLanguage(availableOptions) {
-  const currentLang = navigator.language || 'en';
-  if (availableOptions.includes(currentLang)) return currentLang;
-  const base = currentLang.split('-')[0];
-  if (availableOptions.includes(base)) return base;
-  return 'en';
+  return matchLanguage(navigator.language, availableOptions);
 }
 
 // Gives the settings store the save path defaults. Not awaited, since startup
@@ -1189,8 +1345,15 @@ function initSettings() {
   // Where focus goes back to once the page closes.
   let focusBeforeSettings = null;
 
+  let refreshProjects = null;
+  // Open and Expand follow the format, the body, Live and a run while the page is open; with
+  // Advanced features off the page is hidden and its list is never read.
+  const projectsShown = () => refreshProjects && document.getElementById('advanced-meld-features-toggle').checked;
+  redrawProjects = () => { if (projectsShown() && settingsModal.style.display === "flex") refreshProjects(); };
+
   // Open the settings page
   function openSettings() {
+    if (projectsShown()) refreshProjects();
     focusBeforeSettings = document.activeElement;
     settingsModal.style.display = "flex";
     syncSettingsLayout();
@@ -1275,14 +1438,153 @@ function initSettings() {
   refreshHeightDisplay();
 
   // Segmented controls whose click only moves the active segment
-  ["gamemode-group", "world-type-group", "mob-spawning-group", "signage-group"].forEach((id) => {
-    const group = document.getElementById(id);
+  document.querySelectorAll('#gamemode-group, #world-type-group, #mob-spawning-group, #signage-group, .segmented-control[id^="meld-"]').forEach((group) => {
     group.querySelectorAll(".segment").forEach((btn) => {
       btn.addEventListener("click", () => {
         group.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
       });
     });
+  });
+
+  initMeldFeatures({
+    buildsInCells: () => isOneWorldEnabled() && !isLiveMode() && !!document.getElementById('meld-workers-select')?.value,
+  });
+  initRunControls({
+    invoke,
+    post: (message) => getMapFrame()?.contentWindow?.postMessage(message, '*'),
+    // A retry was asked for on the map or with Retry: it starts without the hold.
+    start: () => startGeneration(true),
+    localize: (element, key) => localizeElement(window.localization, { element }, key),
+    // The flags that cut the job into pieces are part of it: --only-pieces numbers its pieces.
+    key: () => cellsKey(selectedBBox, isOneWorldEnabled() ? oneWorldFolderName() : ''),
+    map: () => getMapFrame()?.contentWindow,
+    // Remove and Rebuild in the cell menu work on the open One World, then read it again.
+    world: () => oneWorldInfo?.world_path || '',
+    refreshWorld: () => { oneWorldOverlayKey = null; refreshOneWorldState(); },
+    // Start refuses during a bake or a Mapillary precompute: a Rebuild must not remove cells then.
+    ready: () => !bakeRunning && !precomputeRunning,
+  });
+  initCellMenu();
+  document.getElementById("bbox-features-cta").addEventListener("click", useMeldPieces);
+  initJobPlan({
+    // A new plan, or none: the line under the buttons says how the selection is built, and
+    // the hold to start waits for the plan it starts.
+    changed: () => {
+      clearPrefetchDone();
+      refreshBboxSelectionInfo();
+      refreshStartButton();
+      const plan = planPieces();
+      document.getElementById('run-confirm-hold').disabled = !plan;
+      // The hold is the one question: it says what the replace dialog would have asked.
+      const overlap = document.getElementById('run-confirm-overlap');
+      overlap.hidden = !plan?.overlap;
+      overlap.textContent = plan?.overlap ? oneWorldText('plan_confirm_overlap', '{n} cells overlap land already built and will be rebuilt. Anything built there in Minecraft is replaced.', { n: plan.overlap }) : '';
+      if (!isPiecesJob()) document.getElementById('run-confirm').hidden = true;
+    },
+    // A job in pieces of a One World with a selection, as the run decides it: Live, Bedrock,
+    // the Moon and Mars build no pieces.
+    request: () => {
+      const bbox = selectedBBox && selectedBBox !== "0.000000 0.000000 0.000000 0.000000" ? selectedBBox : "";
+      if (!bbox || !isOneWorldEnabled() || isLiveMode() || !savePath || !document.getElementById('meld-workers-select').value) return null;
+      return { savePath, worldName: oneWorldFolderName(), bboxText: bbox, worldScale: readGenerationSettings(true).worldScale };
+    },
+    // A One World's selection against the latitude its blocks per metre were fixed at: the
+    // world's origin, else --origin, else the selection's centre (what the first area sets).
+    stretch: () => {
+      const [a, b, c, d] = (selectedBBox || '').split(/[\s,]+/).map(Number);
+      if (!isOneWorldEnabled() || !(a || c)) return null;
+      const world = oneWorldInfo && oneWorldInfo.exists ? oneWorldInfo : null;
+      const typed = parseFloat(document.getElementById('meld-origin-input').value);
+      const origin = world ? world.origin_lat : Number.isFinite(typed) ? typed : (a + c) / 2;
+      return { origin, knee: world ? world.knee_m : null, south: Math.min(a, c), north: Math.max(a, c), lon: (b + d) / 2 };
+    },
+  });
+  // The map offers "Select this area" on a country or region, the edge handles and the size
+  // readout only with Advanced features on; the readout counts regions at the world scale.
+  const meldToggle = document.getElementById('advanced-meld-features-toggle');
+  const pushMeldToMap = () => postToMap({ type: 'meldFeatures', on: meldToggle.checked, scale: readGenerationSettings(true).worldScale, snap: Boolean(document.querySelector('#meld-snap-group .segment.active:not([data-v="off"])')), mapFirst: document.body.classList.contains('map-first') });
+  document.addEventListener('change', pushMeldToMap);
+  // Advanced off: a finished One World's name is no longer the world under Start.
+  meldToggle.addEventListener('change', () => {
+    if (!meldToggle.checked && (lastRunOneWorld || oneWorldPicked)) setWorldNameLabel("");
+    // A world picked in Projects is the target only with the switch on: read the target again.
+    oneWorldOverlayKey = null;
+    refreshOneWorldState();
+  });
+  document.getElementById('meld-snap-group')?.addEventListener('click', () => setTimeout(pushMeldToMap));
+  getMapFrame()?.addEventListener('load', pushMeldToMap);
+  pushMeldToMap();
+  // A One World's built land, and a ring of regions around it to build next.
+  document.getElementById('plan-expand-button').addEventListener('click', () => {
+    if (!builtAreas.length) return;
+    const pick = (f, key) => f(...builtAreas.map((a) => a[key]));
+    selectWithRing([pick(Math.min, 'min_lat'), pick(Math.min, 'min_lon'), pick(Math.max, 'max_lat'), pick(Math.max, 'max_lon')], isOneWorldEnabled(), true);
+    askRunConfirm();
+  });
+  // Cancel (or Escape) closes the panel and gives the focus back to Start.
+  const cancelConfirm = () => {
+    document.getElementById('run-confirm').hidden = true;
+    document.getElementById('start-button').focus();
+  };
+  document.getElementById('run-confirm-cancel').addEventListener('click', cancelConfirm);
+  document.getElementById('run-confirm').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') cancelConfirm();
+  });
+  document.getElementById('run-confirm-docs').addEventListener('click', (e) => {
+    e.preventDefault();
+    openExternal(e.currentTarget.href);
+  });
+  holdToConfirm(document.getElementById('run-confirm-hold'), () => {
+    document.getElementById('run-confirm').hidden = true;
+    startGeneration(true);
+  });
+  refreshProjects = initProjects({
+    invoke,
+    savePath: () => savePath,
+    scale: () => readGenerationSettings(true).worldScale,
+    available: () => isOneWorldAvailable() && !liveActive(),
+    busy: () => !generationButtonEnabled || bakeRunning,
+    canRun: () => !isLiveMode(),
+    renamed: (from, to) => worldRenamed(from, to),
+    open: async (name, expand) => {
+      oneWorldName = name;
+      oneWorldPicked = true;
+      clearPrefetchDone();
+      if (oneWorldMode() === 'off') document.querySelector('#one-world-group .segment[data-one-world="on"]')?.click();
+      oneWorldOverlayKey = null;
+      oneWorldRefit = true; // Open on the world already shown refits the map too
+      await refreshOneWorldState();
+      oneWorldRefit = false;
+      closeSettings();
+      if (expand) document.getElementById('plan-expand-button').click();
+    },
+    // Resume and Rebuild: the job's settings and area go back in, and the same run starts. Resume
+    // asks with Start's hold; Rebuild was held already.
+    resume: (world, job, rebuild) => resumeJob(job, rebuild, {
+      current: () => selectedBBox,
+      start: () => startGeneration(rebuild),
+      noArea: () => setBboxSelectionInfo(document.getElementById('bbox-selection-info'), 'select_area_prompt', '#ffffff'),
+    }),
+  });
+  initDataPanel({
+    invoke,
+    baking: (on) => { bakeRunning = on; redrawProjects(); },
+    prefetch: () => startGeneration(true, true),
+    area: () => (selectedBBox && selectedBBox !== "0.000000 0.000000 0.000000 0.000000" ? selectedBBox : ""),
+    plan: () => {
+      const mode = document.getElementById("generation-mode-select").value;
+      return {
+        worldScale: parseFloat(document.getElementById("scale-value-slider").value),
+        terrainEnabled: mode === "geo-terrain" || mode === "terrain-only",
+        skipOsmObjects: mode === "terrain-only",
+        canopyHeightEnabled: document.getElementById("canopy-height-toggle").checked,
+        overtureEnabled: document.getElementById("overture-toggle").checked,
+        awsOnlyElevation: document.getElementById("aws-only-elevation-toggle").checked,
+        // A plan's flags: the next run's pending retry and skipped cells stay.
+        flags: meldFlags({ oneWorld: false, java: true, caves: false, extendHeight: false, lods: false, plan: true }),
+      };
+    },
   });
 
   // Blueprint greys out the traffic lights.
@@ -1361,6 +1663,7 @@ function initSettings() {
 
   // One World: a persistent world every area extends (Java only)
   initOneWorld();
+  initLive();
 
   // Save path setting
   initSavePathSetting();
@@ -1527,6 +1830,17 @@ function initSettings() {
     localStorage.setItem(telemetryKey, isEnabled ? 'true' : 'false');
     syncTelemetryConsent();
   });
+
+  // Discord status: sent on change and after restore; hidden in builds without a Discord app.
+  const discordToggle = document.getElementById("discord-status-toggle");
+  if (discordToggle) {
+    discordToggle.addEventListener("change", syncDiscordStatus);
+    Promise.resolve(invoke('gui_discord_available')).then((available) => {
+      if (available) return;
+      const row = discordToggle.closest('.settings-row');
+      if (row) row.style.display = 'none';
+    }).catch(() => {});
+  }
 
 
   /// License and Credits
@@ -1764,7 +2078,7 @@ function initLuantiExperimentalToggle() {
 }
 
 function setWorldFormat(format) {
-  if (!VALID_FORMATS.includes(format)) return;
+  if (!VALID_FORMATS.includes(format) || liveActive()) return;
   if (format === 'luanti' && (!isLuantiEnabled() || isOneWorldToggleOn())) return;
 
   selectedWorldFormat = format;
@@ -1790,7 +2104,10 @@ function refreshHeightLimitRow(format) {
   const toggle = document.getElementById('disable-height-limit-toggle');
   if (!toggle) return;
 
-  const available = heightLimitAvailable(format || selectedWorldFormat);
+  const current = format || selectedWorldFormat;
+  const reason = why([selectedCelestialBody === 'earth', 'reason_earth'], [current !== 'luanti', 'reason_java_bedrock'],
+    [!oneWorldPinned, 'reason_not_one_world']);
+  const available = !reason;
   toggle.disabled = !available;
 
   const row = toggle.closest('.settings-row');
@@ -1798,6 +2115,7 @@ function refreshHeightLimitRow(format) {
     // Cleared, not set to 1: an inline value would beat the class rule.
     row.style.opacity = '';
     row.classList.toggle('settings-row-unavailable', !available);
+    setRowReason(row, reason);
   }
 }
 
@@ -1806,15 +2124,15 @@ function refreshHeightLimitRow(format) {
 // A One World's areas sit at their real heights and a superflat off Earth is
 // grass, so the backend makes both void.
 function refreshWorldTypeRow(format) {
-  const available = (format || selectedWorldFormat) === 'java'
-    && selectedCelestialBody === 'earth' && !isOneWorldEnabled();
-  setSegmentedRowAvailable('world-type-group', available);
+  const reason = why([(format || selectedWorldFormat) === 'java', 'reason_java'],
+    [selectedCelestialBody === 'earth', 'reason_earth'], [!isOneWorldEnabled(), 'reason_not_one_world']);
+  setSegmentedRowAvailable('world-type-group', !reason, reason);
 }
 
 // Greyed the way the settings store reads it: every segment disabled, so the row is out of
-// the tab order and never shows as modified, and inert like a greyed toggle's row. The
-// active segment stays, so the choice comes back with the row.
-function setSegmentedRowAvailable(groupId, available) {
+// the tab order and never shows as modified, and inert like a greyed toggle's row (all but
+// its reason, when it has one). The active segment stays, so the choice comes back with the row.
+function setSegmentedRowAvailable(groupId, available, reason = null) {
   const group = document.getElementById(groupId);
   if (!group) return;
   group.classList.toggle('segmented-disabled', !available);
@@ -1822,7 +2140,8 @@ function setSegmentedRowAvailable(groupId, available) {
   const row = group.closest('.settings-row');
   if (row) {
     row.classList.toggle('settings-row-unavailable', !available);
-    row.toggleAttribute('inert', !available);
+    row.toggleAttribute('inert', !available && !reason);
+    setRowReason(row, available ? null : reason);
   }
 }
 
@@ -1831,6 +2150,7 @@ function setSegmentedRowAvailable(groupId, available) {
 // there are no roads or places, and gravity only differs there. Blueprint builds no
 // signal heads, so there are no lights to run.
 function refreshGameplayRows(format) {
+  setTimeout(refreshAdvancedRows, 0);
   // The effective state: a ticked One World is off on the Moon and Mars, and greyed out there.
   const current = format || selectedWorldFormat;
   const pack = current === 'java' && !isOneWorldEnabled();
@@ -1838,13 +2158,22 @@ function refreshGameplayRows(format) {
   const earth = selectedCelestialBody === 'earth';
   const mode = document.getElementById('generation-mode-select');
   const blueprint = !!mode && mode.value === 'blueprint';
-  setSettingsRowAvailable('pause-menu-toggle', pack);
-  setSettingsRowAvailable('zombie-outbreak-toggle', pack);
-  setSettingsRowAvailable('disasters-toggle', pack);
-  setSettingsRowAvailable('discoveries-toggle', pack && earth);
-  setSettingsRowAvailable('traffic-lights-toggle', pack && earth && !blueprint);
-  setSettingsRowAvailable('moving-cars-toggle', vehicles && earth);
-  setSettingsRowAvailable('body-gravity-toggle', pack && !earth);
+  const packWhy = [[current === 'java', 'reason_java'], [!isOneWorldEnabled(), 'reason_not_one_world']];
+  const gate = (id, ...more) => {
+    const reason = why(...packWhy, ...more);
+    setSettingsRowAvailable(id, !reason, reason);
+  };
+  gate('pause-menu-toggle');
+  gate('zombie-outbreak-toggle');
+  gate('disasters-toggle');
+  gate('discoveries-toggle', [earth, 'reason_earth']);
+  gate('traffic-lights-toggle', [earth, 'reason_earth'], [!blueprint, 'reason_blueprint']);
+  const carsWhy = why([current === 'java' || current === 'bedrock', 'reason_java_bedrock'],
+    [vehicles, 'reason_not_one_world'], [earth, 'reason_earth']);
+  setSettingsRowAvailable('moving-cars-toggle', !carsWhy, carsWhy);
+  gate('pedestrians-toggle', [earth, 'reason_earth']);
+  const gravityWhy = why([!earth, 'reason_moon_mars'], ...packWhy);
+  setSettingsRowAvailable('body-gravity-toggle', !gravityWhy, gravityWhy);
   // Last, as it reads whether the outbreak and the disasters are still available.
   refreshMobSpawningRow(current);
 }
@@ -1852,16 +2181,21 @@ function refreshGameplayRows(format) {
 // Mineclonia spawns by settings outside the world, nothing lives off Earth, and the Zombie
 // Outbreak and Disasters bring their own mobs on their own difficulty. The backend turns it
 // off in all of these too.
-function mobSpawningAvailable(format) {
+function mobSpawningReason(format) {
   const current = format || selectedWorldFormat;
-  return (current === 'java' || current === 'bedrock')
-    && selectedCelestialBody === 'earth'
-    && !gameplayToggle('zombie-outbreak-toggle')
-    && !gameplayToggle('disasters-toggle');
+  return why([current === 'java' || current === 'bedrock', 'reason_java_bedrock'],
+    [selectedCelestialBody === 'earth', 'reason_earth'],
+    [!gameplayToggle('zombie-outbreak-toggle'), 'reason_outbreak'], [!gameplayToggle('disasters-toggle'), 'reason_disasters'],
+    [!(isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists)), 'reason_world_set']);
+}
+
+function mobSpawningAvailable(format) {
+  return !mobSpawningReason(format);
 }
 
 function refreshMobSpawningRow(format) {
-  setSegmentedRowAvailable('mob-spawning-group', mobSpawningAvailable(format));
+  const reason = mobSpawningReason(format);
+  setSegmentedRowAvailable('mob-spawning-group', !reason, reason);
 }
 
 // Off wherever the row is greyed, so a stale choice is never sent.
@@ -1892,6 +2226,7 @@ function updateFormatToggleUI(format) {
   refreshHeightLimitRow(format);
   refreshGameplayRows(format);
   refreshWorldTypeRow(format);
+  refreshJavaOnlyRows(format);
 
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
@@ -1919,10 +2254,32 @@ function updateFormatToggleUI(format) {
   refreshWorldNameEditUI();
   // One World is Java-only too: its status and pins follow the format.
   refreshOneWorldState();
+  // The size warning's Advanced features link is Java-only.
+  refreshBboxSelectionInfo();
 }
 
 // Expose to window for onclick handlers
 window.setWorldFormat = setWorldFormat;
+
+// The backend shows nothing on Discord until it is told the toggle is on.
+function syncDiscordStatus() {
+  const toggle = document.getElementById("discord-status-toggle");
+  const enabled = !!(toggle && toggle.checked);
+  Promise.resolve(invoke('gui_set_discord_status', { enabled })).catch(() => {});
+}
+
+// The backend is told Offline Mode once the store has restored it, and on every change: while
+// it is on it leaves old cached tiles alone and sends no telemetry or update check. Off with
+// the Advanced switch, as the flag is.
+function initOfflineModeSync() {
+  const toggles = ['advanced-meld-features-toggle', 'meld-offline-toggle'].map((id) => document.getElementById(id));
+  const sync = () => {
+    const offline = toggles.every((t) => t && t.checked);
+    Promise.resolve(invoke('gui_set_offline_mode', { offline })).catch(() => {});
+  };
+  toggles.forEach((t) => t && t.addEventListener('change', sync));
+  sync();
+}
 
 // The backend only reports crashes and errors while it holds a consent of true,
 // so push the stored answer to it at startup and on every change.
@@ -2478,6 +2835,7 @@ function handleBboxInput() {
       customBBoxValid = false;
       bboxInputError = false;
       selectedBBox = mapSelectedBBox;
+      dropStalePieces(selectedBBox);
       
       // Clear the info text only if no map selection exists
       if (!mapSelectedBBox) {
@@ -2532,6 +2890,7 @@ function handleBboxInput() {
         customBBoxValid = true;
         bboxInputError = false;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
+        dropStalePieces(selectedBBox);
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
 
         // Reset rotation when bbox changes via manual input
@@ -2616,6 +2975,8 @@ const AREA_THRESHOLDS = {
 
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
+// Drawn areas as [lat, lng] rings, or null for a single rectangle (the plain bbox).
+let selectedShapes = null;
 let customBBoxValid = false;  // Tracks if custom input is valid
 let bboxInputError = false;  // The coordinate field holds input that did not validate
 
@@ -2627,15 +2988,54 @@ let bboxInputError = false;  // The coordinate field holds input that did not va
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   const t = AREA_THRESHOLDS[selectedCelestialBody] || AREA_THRESHOLDS.earth;
   selectedSize *= earthScaleFactor();
-  if (selectedSize > t.extreme) {
+  // Advanced features: built in pieces, the size is no longer a worry; say how instead.
+  const pieces = planPieces();
+  let warned = false;
+  if (planPending()) {
+    // The plan is being recomputed: neither warn nor offer pieces until it answers.
+    setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
+  } else if (pieces) {
+    // The plan under the button says how it is built; this line stays what it always was.
+    setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
+  } else if ((hasPlanMask() || outline) && !selectedShapes) {
+    // An outline only leaves pieces out: a build in one go (One World off too) builds the whole box.
+    setBboxSelectionInfo(bboxSelectionElement, "area_outline_needs_pieces", "#fecc44");
+    warned = true;
+  } else if (selectedSize > t.extreme) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extreme", "#ff4444");
+    warned = true;
   } else if (selectedSize > t.large) {
     setBboxSelectionInfo(bboxSelectionElement, "area_too_large", "#fa7878");
+    warned = true;
   } else if (selectedSize > t.extensive) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
+    warned = true;
+  } else if (selectedShapes && isOneWorldEnabled() && meldOn()) {
+    setBboxSelectionInfo(bboxSelectionElement, "shapes_one_world", "#fecc44");
   } else {
     setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   }
+  // The warning's way out (Advanced features off or no pieces yet): build it in cells, a One World
+  // so Java on Earth only.
+  document.getElementById("bbox-features-cta").hidden = !(warned && isOneWorldAvailable());
+}
+
+// Turns on Advanced features, One World and parallel pieces, and shows the Scale card.
+function useMeldPieces() {
+  window.openSettings();
+  const meld = document.getElementById("advanced-meld-features-toggle");
+  if (!meld.checked) {
+    meld.checked = true;
+    meld.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  if (oneWorldMode() !== "on") document.querySelector('#one-world-group .segment[data-one-world="on"]')?.click();
+  const workers = document.getElementById("meld-workers-select");
+  if (!workers.value) {
+    workers.value = "auto";
+    workers.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  // Once the page is up and the section is shown: the sidebar's own jump, so the entry lights up too.
+  setTimeout(() => document.querySelector('.settings-nav-item[data-target="settings-section-scale"]')?.click(), 80);
 }
 
 // Blocks, and so memory, grow with the square of the scale; Moon and Mars use a fixed one.
@@ -2656,8 +3056,55 @@ function refreshBboxSelectionInfo() {
   );
 }
 
+// The outline the map reports (Use outline, a drawn shape). Only a One World job in pieces reads
+// it, so the file is written for that alone; when the backend cannot write it the map drops it.
+let outline = null;
+let outlineWritten = false;
+let outlineFailed = false;
+async function noteOutline(geojson) {
+  outline = geojson;
+  // The map answers a dropped outline with null: that must not wipe the reason.
+  if (!geojson && outlineFailed) { outlineFailed = false; return; }
+  outlineWritten = Boolean(geojson) && isOneWorldEnabled();
+  const error = outlineWritten ? await setPlanMask(geojson) : (await setPlanMask(null), '');
+  if (error) {
+    outlineFailed = true;
+    postToMap({ type: 'planMask', geojson: null });
+    const info = document.getElementById('bbox-selection-info');
+    info.textContent = error;
+    info.style.color = "#fa7878";
+    return;
+  }
+  refreshBboxSelectionInfo();
+}
+
+function meldOn() {
+  return Boolean(document.getElementById('advanced-meld-features-toggle')?.checked);
+}
+
+// Drawn shapes are the outline a job in pieces keeps its pieces in (--plan-mask); written when
+// One World and Advanced features are on, cleared otherwise. Called on a new selection and when
+// either changes.
+let shapesWritten = false;
+const wantsShapesMask = () => isOneWorldEnabled() && meldOn();
+function writeShapesMask() {
+  shapesWritten = Boolean(selectedShapes) && wantsShapesMask();
+  if (shapesWritten) {
+    setPlanMask({
+      type: 'MultiPolygon',
+      coordinates: selectedShapes.map((ring) => [ring.concat([ring[0]]).map(([lat, lng]) => [lng, lat])])
+    });
+  } else {
+    setPlanMask(null);
+  }
+}
+
 // Function to handle incoming bbox data
-function displayBboxInfoText(bboxText) {
+function displayBboxInfoText(bboxText, shapes) {
+  clearPrefetchDone();
+  const hadShapes = Boolean(selectedShapes);
+  selectedShapes = Array.isArray(shapes) && shapes.length ? shapes : null;
+  if (selectedShapes || hadShapes) writeShapesMask();
   // Two producers, two separators: the map posts formatBounds output, which is
   // space separated, while manual coordinate entry synthesizes a comma
   // separated string. Splitting on " " alone turned the manual one into a
@@ -2676,6 +3123,12 @@ function displayBboxInfoText(bboxText) {
 
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
+  dropStalePieces(selectedBBox);
+  // Advanced features: a single run's preview belongs to that run's area; a new selection drops it
+  // (a One World keeps showing its own areas).
+  if (document.getElementById('advanced-meld-features-toggle').checked && currentWorldMapData && !lastRunOneWorld) {
+    notifyWorldChanged();
+  }
   customBBoxValid = false;
   bboxInputError = false;
 
@@ -2744,10 +3197,13 @@ function renderWorldNameLabel() {
   if (!label) return;
   const pending = pendingWorldName();
   const text = pending || worldLabelName;
+  // The world under Start can be renamed by clicking its name.
+  const renamable = !pending && !!text && !!renamableWorld();
   label.toggleAttribute('data-pending', !!pending);
+  label.toggleAttribute('data-renamable', renamable);
   label.title = pending
     ? (window.localization && window.localization.placeholder_world_name) || 'Name of the next world'
-    : '';
+    : renamable ? oneWorldText('world_rename_tip', 'Click to rename this world') : '';
   if (text) {
     label.removeAttribute('data-placeholder');
     label.textContent = text;
@@ -2766,6 +3222,74 @@ function renderWorldNameLabel() {
 function basenameFromPath(p) {
   if (!p) return "";
   return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+}
+
+/* Renaming the world on disk: click its name under Start, or the pencil in Projects */
+
+// Folder name of the world a click on the name would rename, or "": the One World shown, or the
+// Java world the last run made, once nothing is running and Advanced features are on.
+function renamableWorld() {
+  if (!savePath || document.body.classList.contains('meld-off') || selectedWorldFormat !== 'java' || !generationButtonEnabled || liveActive()) return "";
+  if (isOneWorldEnabled()) return oneWorldInfo && oneWorldInfo.exists && !oneWorldInfo.locked ? basenameFromPath(oneWorldInfo.world_path) : "";
+  // The rename goes by name in the saves folder: a world made in another one is not it.
+  return inSavesFolder(worldPath) ? basenameFromPath(worldPath) : "";
+}
+
+function inSavesFolder(path) {
+  const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  return Boolean(path) && norm(path).replace(/\/[^/]*$/, '') === norm(savePath);
+}
+
+// What the window remembers of a world's name once its folder has been renamed.
+function worldRenamed(from, to) {
+  if (inSavesFolder(worldPath) && basenameFromPath(worldPath) === from) worldPath = worldPath.replace(/[^\\/]+([\\/]*)$/, (_, tail) => to + tail);
+  // A One World keeps being the one under Start, now picked by its new name.
+  if (oneWorldName === from || (oneWorldInfo && basenameFromPath(oneWorldInfo.world_path) === from)) {
+    oneWorldName = to;
+    oneWorldPicked = true;
+    localStorage.setItem(ONE_WORLD_NAME_KEY, to);
+    localStorage.setItem('arnis-one-world-picked', '1');
+  }
+  if (worldLabelName === from) setWorldNameLabel(to);
+  oneWorldOverlayKey = null;
+  refreshOneWorldState();
+}
+
+// The name under Start becomes the editor; Enter renames, Escape leaves it.
+let renamingWorld = "";
+function startWorldRename(event) {
+  const from = renamableWorld();
+  if (!from || !worldLabelName) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const label = document.getElementById('world-name-label');
+  const input = document.getElementById('world-name-input');
+  if (!label || !input) return;
+  renamingWorld = from;
+  input.value = from;
+  label.style.display = 'none';
+  const editButton = document.getElementById('world-name-edit-button');
+  if (editButton) editButton.style.display = 'none';
+  input.style.display = '';
+  updateWorldNameLimitState();
+  input.focus();
+  input.select();
+}
+
+async function commitWorldRename(input) {
+  const from = renamingWorld;
+  const to = input.value.trim();
+  endWorldNameEdit();
+  if (!to || to === from) return;
+  try {
+    const folder = (await invoke('gui_rename_world', { savePath: savePath, oldName: from, newName: to })) || to;
+    worldRenamed(from, folder);
+  } catch (error) {
+    // The engine says why (a clash, a path character, a world in use).
+    const info = document.getElementById('progress-info');
+    info.textContent = String((error && error.message) || error);
+    info.style.color = "#fa7878";
+  }
 }
 
 /* Custom world name (Java only, opt-in via Settings > Custom World Name) */
@@ -2793,7 +3317,8 @@ function pendingWorldName() {
 function canEditCustomWorldName() {
   // While a generation is in flight the next world's name is already taken
   // from here, so an edit would only look like it applied to the running one.
-  return isCustomWorldNameFeatureEnabled() && generationButtonEnabled;
+  // A live session plays the world under this name.
+  return isCustomWorldNameFeatureEnabled() && generationButtonEnabled && !liveActive();
 }
 
 function updateWorldNamePreviewLabel() {
@@ -2812,7 +3337,9 @@ function refreshWorldNameEditUI() {
   const editButton = document.getElementById('world-name-edit-button');
   if (editButton) {
     editButton.style.display = canEditCustomWorldName() ? '' : 'none';
-    const title = isOneWorldEnabled() ? 'Choose the One World to extend or create' : 'Name the next world';
+    const title = isOneWorldEnabled()
+      ? oneWorldText('world_name_edit_one_world', 'Choose the One World to extend or create')
+      : oneWorldText('world_name_edit_title', 'Name the next world');
     editButton.title = title;
     editButton.setAttribute('aria-label', title);
   }
@@ -2865,6 +3392,10 @@ function commitWorldNameEdit() {
     endWorldNameEdit();
     return;
   }
+  if (renamingWorld) {
+    commitWorldRename(input);
+    return;
+  }
   const newName = input.value.trim();
 
   // One World: the name picks the world to extend or create. Nothing is renamed.
@@ -2893,6 +3424,7 @@ function endWorldNameEdit() {
   const label = document.getElementById('world-name-label');
   const input = document.getElementById('world-name-input');
   const editButton = document.getElementById('world-name-edit-button');
+  renamingWorld = "";
   if (!input || input.style.display === 'none') return;
   // Only when the input still holds focus: a teardown reached *from* the blur
   // handler must not arm this, or it would swallow the next real blur.
@@ -2913,6 +3445,10 @@ function initCustomWorldNameToggle() {
   // (both dispatch a real "change" event), as long as this listener is
   // attached before initSettingsStore() runs its restore().
   toggle.addEventListener('change', refreshWorldNameEditUI);
+
+  document.getElementById('world-name-label')?.addEventListener('click', (event) => {
+    if (document.getElementById('world-name-label').hasAttribute('data-renamable')) startWorldRename(event);
+  });
 
   if (editButton) {
     editButton.addEventListener('click', startWorldNameEdit);
@@ -2966,15 +3502,30 @@ let oneWorldPinned = false;
 let oneWorldOverlayKey = null;
 // Whether the running (or last) generation was a One World run.
 let lastRunOneWorld = false;
+// Whether it only filled the caches (Download now).
+let lastRunPrewarm = false;
 let oneWorldName = localStorage.getItem(ONE_WORLD_NAME_KEY) || '';
+// Set by Settings > Projects > Open: the name above is then used with or without Custom World Name.
+let oneWorldPicked = localStorage.getItem('arnis-one-world-picked') === '1';
+
+function refreshOneWorldRow() {
+  const reason = why([selectedWorldFormat === 'java', 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth'],
+    [!liveActive(), 'reason_live_running']);
+  setSegmentedRowAvailable('one-world-group', !reason, reason);
+}
 
 function isOneWorldAvailable() {
   return selectedWorldFormat === 'java' && selectedCelestialBody === 'earth';
 }
 
+// Off, On (areas join one world) or Live (that world played on a local server).
+function oneWorldMode() {
+  const btn = document.querySelector('#one-world-group .segment.active');
+  return btn ? btn.dataset.oneWorld : 'off';
+}
+
 function isOneWorldToggleOn() {
-  const toggle = document.getElementById('one-world-toggle');
-  return !!(toggle && toggle.checked);
+  return oneWorldMode() !== 'off';
 }
 
 // Luanti cannot hold a One World, so it is off while the toggle is.
@@ -2985,18 +3536,47 @@ function refreshLuantiAvailability() {
     luantiBtn.disabled = on;
     luantiBtn.title = on ? 'Luanti is not available in One World mode' : '';
   }
-  setSettingsRowAvailable('enable-luanti-toggle', !on);
+  setSettingsRowAvailable('enable-luanti-toggle', !on, 'reason_not_one_world');
   if (on && selectedWorldFormat === 'luanti') setWorldFormat('java');
 }
 
 function isOneWorldEnabled() {
-  const toggle = document.getElementById('one-world-toggle');
-  return !!(toggle && toggle.checked) && isOneWorldAvailable();
+  return isOneWorldToggleOn() && isOneWorldAvailable();
+}
+
+function isLiveMode() {
+  return oneWorldMode() === 'live' && isOneWorldAvailable();
+}
+
+// Says what the picked mode does.
+function refreshOneWorldDesc() {
+  const desc = document.getElementById('one-world-desc');
+  if (!desc) return;
+  const mode = oneWorldMode();
+  const texts = {
+    off: ['one_world_desc_off', 'Every area becomes a world of its own.'],
+    on: ['one_world_desc_on', 'Each area joins one growing world at its real position.'],
+    live: ['one_world_desc_live', 'One growing world that you play in Minecraft while Arnis generates the land around you.']
+  };
+  const [key, fallback] = texts[mode] || texts.off;
+  desc.dataset.localize = key;
+  desc.textContent = oneWorldText(key, fallback);
+}
+
+// A world keeps the game mode, time, mob spawning and map item of its first area, and a
+// live world gets no map item at all.
+function refreshWorldRulesRows() {
+  const fixed = isOneWorldEnabled() && !!(oneWorldInfo && oneWorldInfo.exists);
+  setSegmentedRowAvailable('gamemode-group', !fixed, 'reason_world_set');
+  setSettingsRowAvailable('world-time-slider', !fixed, 'reason_world_set');
+  const mapWhy = why([!fixed, 'reason_world_set'], [!isLiveMode(), 'reason_live']);
+  setSettingsRowAvailable('map-item-toggle', !mapWhy, mapWhy);
+  refreshMobSpawningRow();
 }
 
 // The name picks the world; it never renames one on disk.
 function oneWorldFolderName() {
-  if (isCustomWorldNameFeatureEnabled() && oneWorldName) return oneWorldName;
+  if (oneWorldName && (isCustomWorldNameFeatureEnabled() || (oneWorldPicked && !document.body.classList.contains('meld-off')))) return oneWorldName;
   return ONE_WORLD_DEFAULT_NAME;
 }
 
@@ -3007,17 +3587,15 @@ function oneWorldDisplayName() {
 
 function setOneWorldName(name) {
   oneWorldName = name;
+  oneWorldPicked = false;
+  localStorage.removeItem('arnis-one-world-picked');
   if (name) localStorage.setItem(ONE_WORLD_NAME_KEY, name);
   else localStorage.removeItem(ONE_WORLD_NAME_KEY);
 }
 
-function oneWorldText(key, fallback, vars) {
-  let text = (window.localization && window.localization[key]) || fallback;
-  for (const k in (vars || {})) text = text.split('{' + k + '}').join(vars[k]);
-  return text;
-}
-
 function setOneWorldStatus(text, tone) {
+  // Every read of the world ends here: the stretch view follows its origin.
+  refreshStretch();
   const el = document.getElementById('one-world-status');
   if (!el) return;
   el.style.display = text ? '' : 'none';
@@ -3038,12 +3616,22 @@ function renderOneWorldStatus() {
     setOneWorldStatus(oneWorldText('one_world_foreign', 'Folder "{name}" exists but is not a One World', { name }), 'error');
     return;
   }
-  if (!info.exists) {
+  if (!info.exists && !liveActive()) {
     setOneWorldStatus(oneWorldText('one_world_will_create', 'One World "{name}" will be created', { name }));
     return;
   }
-  let text = oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}', { name, count: info.area_count });
+  let text = oneWorldText('one_world_areas', 'One World "{name}" \u00b7 Areas: {count}', { name, count: info.area_count || 0 });
   let tone = '';
+  if (liveActive()) {
+    const players = (liveStatus.players || []).length;
+    text += ' \u00b7 ' + oneWorldText('live_players', 'Players: {count}', { count: players });
+    if (liveStatus.tiles_failed > 0) {
+      text += ' \u00b7 ' + oneWorldText('live_some_failed', 'some land could not be generated');
+      tone = 'warn';
+    }
+    setOneWorldStatus(text, tone);
+    return;
+  }
   if (info.locked) {
     text += ' \u00b7 ' + oneWorldText('one_world_locked', 'open in Minecraft');
     tone = 'warn';
@@ -3058,15 +3646,171 @@ function renderOneWorldStatus() {
   setOneWorldStatus(text, tone);
 }
 
-function setSettingsRowAvailable(inputId, available) {
+// Why a greyed row is greyed, said as what to do, in place of its description. Where that
+// is another setting on this page, the text is a link that shows it.
+const ROW_REASONS = {
+  reason_earth: ['Switch the map to Earth.'],
+  reason_moon_mars: ['Switch the map to the Moon or Mars.'],
+  reason_java: ['Switch the world format to Java.'],
+  reason_java_bedrock: ['Switch the world format to Java or Bedrock.'],
+  reason_one_world: ['Switch One World to On.', 'one-world-group'],
+  reason_not_one_world: ['Switch One World to Off.', 'one-world-group'],
+  reason_live: ['Switch One World from Live to On.', 'one-world-group'],
+  reason_live_running: ['Stop Live Mode first.'],
+  reason_world_set: ['Locked by this One World. Start a new one to change it.'],
+  reason_cells: ['Set Parallel cells to Auto.', 'meld-workers-select'],
+  reason_height: ['Turn on Extend build height.', 'disable-height-limit-toggle'],
+  reason_voxy: ['Turn off Pre-generate Voxy LOD.', 'voxy-lod-toggle'],
+  reason_dh: ['Turn off Pre-generate Distant Horizons LOD.', 'dh-lod-toggle'],
+  reason_blinear: ['Pick B_Linear as the Region Format.', 'meld-region-format-group'],
+  reason_rocks: ['Turn on Rocks.', 'meld-rocks-toggle'],
+  reason_bushes: ['Turn on Bushes.', 'meld-bushes-toggle'],
+  reason_caves: ['Turn on Caves.', 'caves-toggle'],
+  reason_tree_folder: ['Enter a Custom Tree Folder.', 'meld-tree-pack-dir-input'],
+  reason_archive: ['Pick Local Archive as the OSM Data Source.', 'meld-osm-source-group'],
+  reason_region_download: ['Pick Region Download as the OSM Data Source.', 'meld-osm-source-group'],
+  reason_blueprint: ['Pick a Generation Mode other than Blueprint.', 'generation-mode-select'],
+  reason_token: ['Enter a Mapillary Token.', 'mapillary-token'],
+  reason_outbreak: ['Turn off Zombie Outbreak.', 'zombie-outbreak-toggle'],
+  reason_disasters: ['Turn off Disasters.', 'disasters-toggle'],
+};
+
+// The key of the first check that fails, as [ok, key] pairs; null when all pass.
+const why = (...checks) => checks.find(([ok]) => !ok)?.[1] || null;
+
+// Scrolls to the setting a reason names, lights it up for a moment and moves focus there.
+function showSetting(id) {
+  const row = document.getElementById(id)?.closest('.settings-row');
+  if (!row) return;
+  const search = document.getElementById('settings-search');
+  if (search?.value && row.classList.contains('search-miss')) {
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+  }
+  if (row.offsetParent === null) return;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  row.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
+  clearTimeout(row.pointedTimer);
+  row.classList.remove('is-pointed');
+  void row.offsetWidth;
+  row.classList.add('is-pointed');
+  row.pointedTimer = setTimeout(() => row.classList.remove('is-pointed'), 1600);
+  const control = row.querySelector('input:not([type=hidden]):not(:disabled), select:not(.visually-hidden):not(:disabled), .segment.active:not(:disabled), button:not(.tooltip-icon):not(.setting-revert):not(.setting-reason):not(:disabled)');
+  control?.focus({ preventScroll: true });
+}
+
+// A greyed row with a reason keeps its name readable and only its controls locked, so the
+// reason can be a link. The callers leave such a row out of `inert`.
+function setRowReason(row, key) {
+  if (!row) return;
+  // While a Live session runs, One World is locked: the step before any change to it.
+  if (key && liveActive() && ROW_REASONS[key]?.[1] === 'one-world-group') key = 'reason_live_running';
+  if (key && !ROW_REASONS[key]) key = null;
+  let note = row.querySelector('.setting-reason');
+  row.classList.toggle('has-reason', !!key);
+  const locked = row.querySelectorAll(':scope > :not(.setting-label), .setting-label > :not(.setting-text):not(.setting-heading):not(.setting-reason), .setting-heading > .tooltip-icon, .setting-heading > .setting-revert');
+  locked.forEach((el) => { el.inert = !!key; });
+  if (!key) {
+    if (note) note.remove();
+    return;
+  }
+  row.removeAttribute('inert');
+  const [fallback, target] = ROW_REASONS[key];
+  if (!note || note.dataset.reason !== key) {
+    note?.remove();
+    note = document.createElement(target ? 'button' : 'span');
+    note.className = 'setting-reason';
+    note.dataset.reason = key;
+    if (target) {
+      note.type = 'button';
+      note.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showSetting(target);
+      });
+    }
+    (row.querySelector('.setting-text') || row.querySelector('.setting-label') || row).appendChild(note);
+  }
+  note.dataset.localize = key;
+  const text = oneWorldText(key, fallback);
+  if (note.textContent !== text) note.textContent = text;
+}
+
+function setSettingsRowAvailable(inputId, available, reason = null) {
   const input = document.getElementById(inputId);
   if (!input) return;
   input.disabled = !available;
   const row = input.closest('.settings-row');
   if (row) {
     row.classList.toggle('settings-row-unavailable', !available);
-    row.toggleAttribute('inert', !available);
+    row.toggleAttribute('inert', !available && !reason);
+    setRowReason(row, available ? null : reason);
   }
+}
+
+// Advanced settings that only work with another one grey out while it is off, as the gameplay rows do,
+// so no two settings contradict each other and nothing is set that a run would ignore.
+function refreshAdvancedRows() {
+  const val = (id) => document.getElementById(id)?.value || '';
+  const on = (id) => { const el = document.getElementById(id); return !!(el && el.checked && !el.disabled); };
+  const seg = (id) => document.querySelector(`#${id} .segment.active`)?.dataset.v || '';
+  // Live builds with standard settings, so nothing here applies while it is the mode.
+  const live = isLiveMode();
+  // In Live, a row that needs One World off says that, not the step to On.
+  const liveWhy = (ok, reason) => (live && (ok || reason !== 'reason_not_one_world') ? 'reason_live' : reason);
+  const row = (id, ok, reason = null) => setSettingsRowAvailable(id, ok && !live, liveWhy(ok, reason));
+  const group = (id, ok, reason = null) => {
+    row(id, ok, reason);
+    setSegmentedRowAvailable(id, ok && !live, liveWhy(ok, reason));
+  };
+  const java = selectedWorldFormat === 'java';
+  const earth = selectedCelestialBody === 'earth';
+  const oneWorld = isOneWorldEnabled();
+  const cells = oneWorld && !!val('meld-workers-select');
+  row('meld-rocks-toggle', earth, 'reason_earth');
+  row('meld-bushes-toggle', earth, 'reason_earth');
+  const owChecks = [[java, 'reason_java'], [earth, 'reason_earth'], [oneWorld, 'reason_one_world']];
+  row('meld-workers-select', oneWorld, why(...owChecks));
+  const cellsWhy = why(...owChecks, [cells, 'reason_cells']);
+  group('meld-piece-size-group', cells, cellsWhy);
+  group('meld-snap-group', cells, cellsWhy);
+  for (const id of ['meld-margin-input', 'meld-piece-order-select', 'meld-skip-built-toggle', 'meld-stitch-map-toggle']) row(id, cells, cellsWhy);
+  row('meld-origin-input', oneWorld, why(...owChecks));
+  row('meld-stretch-toggle', oneWorld, why(...owChecks));
+  const heightWhy = why([java, 'reason_java'], [!oneWorld, 'reason_not_one_world'], [earth, 'reason_earth'],
+    [on('disable-height-limit-toggle'), 'reason_height']);
+  row('meld-min-y-input', !heightWhy, heightWhy);
+  row('meld-max-y-input', !heightWhy, heightWhy);
+  row('meld-world-border-toggle', java, 'reason_java');
+  const formatChecks = [[java, 'reason_java'], [!oneWorld, 'reason_not_one_world'], [!on('voxy-lod-toggle'), 'reason_voxy'],
+    [!on('dh-lod-toggle'), 'reason_dh']];
+  const formatWhy = why(...formatChecks);
+  group('meld-region-format-group', !formatWhy, formatWhy);
+  const levelWhy = why(...formatChecks, [seg('meld-region-format-group') === 'blinear', 'reason_blinear']);
+  row('meld-blinear-level-input', !levelWhy, levelWhy);
+  const rockWhy = why([earth, 'reason_earth'], [on('meld-rocks-toggle'), 'reason_rocks']);
+  row('meld-rock-density-input', !rockWhy, rockWhy);
+  const bushWhy = why([earth, 'reason_earth'], [on('meld-bushes-toggle'), 'reason_bushes']);
+  row('meld-bush-density-input', !bushWhy, bushWhy);
+  group('meld-tree-pack-mode-group', !!val('meld-tree-pack-dir-input').trim(), 'reason_tree_folder');
+  row('meld-cave-style-select', on('caves-toggle'), 'reason_caves');
+  group('meld-cave-ores-group', on('caves-toggle'), 'reason_caves');
+  row('meld-archive-folder-input', seg('meld-osm-source-group') === 'archive', 'reason_archive');
+  row('meld-pbf-url-input', seg('meld-osm-source-group') === 'region', 'reason_region_download');
+  for (const id of ['meld-seed-input', 'meld-surface-patches-toggle', 'meld-buildings-toggle', 'meld-tree-realm-select',
+    'meld-tree-pack-dir-input', 'meld-overpass-input', 'meld-offline-toggle', 'meld-ram-budget-input', 'meld-threads-input']) row(id, true);
+  for (const id of ['meld-road-detail-group', 'meld-props-group', 'meld-river-bed-group', 'meld-water-detail-group',
+    'meld-climate-mode-group', 'meld-osm-source-group']) group(id, true);
+  // Auto's page follows One World and Parallel cells, which these same changes move.
+  refreshLayout();
+}
+
+function initAdvancedRows() {
+  const modal = document.getElementById('settings-modal');
+  if (!modal) return;
+  // Any change in Settings can be the one a row depends on; the check is cheap.
+  for (const ev of ['change', 'input', 'click']) modal.addEventListener(ev, () => setTimeout(refreshAdvancedRows, 0));
+  refreshAdvancedRows();
 }
 
 function readOneWorldRestore() {
@@ -3115,12 +3859,30 @@ function pinControl(id, value) {
   writeControl(el, value);
 }
 
+// Settings the backend builds into Java worlds only.
+function refreshJavaOnlyRows(format) {
+  const java = (format || selectedWorldFormat) === 'java';
+  if (!oneWorldPinned) {
+    setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
+    setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
+  }
+  const signWhy = why([java, 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth']);
+  setSegmentedRowAvailable('signage-group', !signWhy, signWhy);
+  refreshWorldNameRow(format);
+}
+
+function refreshWorldNameRow(format) {
+  const reason = why([(format || selectedWorldFormat) === 'java', 'reason_java'], [!liveActive(), 'reason_live_running']);
+  setSettingsRowAvailable('custom-world-name-toggle', !reason, reason);
+}
+
 function restoreNaturalRows() {
-  setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth');
+  const java = selectedWorldFormat === 'java';
+  setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth', 'reason_earth');
   setSettingsRowAvailable('height-multiplier-slider', true);
-  setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth');
-  setSettingsRowAvailable('voxy-lod-toggle', true);
-  setSettingsRowAvailable('dh-lod-toggle', true);
+  setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth', 'reason_earth');
+  setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
+  setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
   setSettingsRowAvailable('disable-height-limit-toggle', true);
   refreshHeightLimitRow();
 }
@@ -3132,10 +3894,11 @@ function applyOneWorldPins(info) {
   oneWorldPinned = true;
   const rotationInput = document.getElementById('rotation-angle-input');
   if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
-  setSettingsRowAvailable('rotation-angle-input', false);
-  setSettingsRowAvailable('voxy-lod-toggle', false);
-  setSettingsRowAvailable('dh-lod-toggle', false);
+  setSettingsRowAvailable('rotation-angle-input', false, 'reason_not_one_world');
+  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
+  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
   postToMap({ type: 'setRotationLocked', locked: true });
+  syncShapesRect();
 
   const exists = !!(info && info.exists);
   pinControl('scale-value-slider', exists && typeof info.scale === 'number' ? info.scale : null);
@@ -3144,13 +3907,13 @@ function applyOneWorldPins(info) {
   pinControl('disable-height-limit-toggle',
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
   restoreNaturalRows();
-  setSettingsRowAvailable('voxy-lod-toggle', false);
-  setSettingsRowAvailable('dh-lod-toggle', false);
-  setSettingsRowAvailable('disable-height-limit-toggle', false);
+  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
+  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
+  setSettingsRowAvailable('disable-height-limit-toggle', false, 'reason_not_one_world');
   if (exists) {
-    setSettingsRowAvailable('scale-value-slider', false);
-    setSettingsRowAvailable('height-multiplier-slider', false);
-    setSettingsRowAvailable('aws-only-elevation-toggle', false);
+    setSettingsRowAvailable('scale-value-slider', false, 'reason_world_set');
+    setSettingsRowAvailable('height-multiplier-slider', false, 'reason_world_set');
+    setSettingsRowAvailable('aws-only-elevation-toggle', false, 'reason_world_set');
   }
 }
 
@@ -3163,9 +3926,29 @@ function releaseOneWorldPins() {
   setSettingsRowAvailable('rotation-angle-input', true);
   restoreNaturalRows();
   postToMap({ type: 'setRotationLocked', locked: false });
+  postToMap({ type: 'setShapesMode', mode: '' });
+}
+
+// A One World takes rectangles only. With Advanced features it builds the rectangle around the
+// drawn shapes (the map outlines it), and in pieces the shapes are the plan mask.
+function syncShapesRect() {
+  const meld = meldOn();
+  const pieces = meld && document.getElementById('meld-workers-select').value;
+  if (oneWorldPinned) postToMap({ type: 'setShapesMode', mode: !meld ? 'locked' : pieces ? 'pieces' : 'rect' });
+  if (!outline && selectedShapes && wantsShapesMask() !== shapesWritten) writeShapesMask();
+  refreshBboxSelectionInfo();
+}
+document.addEventListener('change', syncShapesRect);
+
+// The areas of the One World on the map, which "Expand" rings.
+let builtAreas = [];
+function setBuiltAreas(areas) {
+  builtAreas = areas;
+  document.getElementById('plan-expand-button').hidden = !areas.length;
 }
 
 function clearOneWorldOverlays() {
+  setBuiltAreas([]);
   if (oneWorldOverlayKey === null) return;
   oneWorldOverlayKey = null;
   postToMap({ type: 'oneWorldOverlays', areas: [] });
@@ -3183,14 +3966,24 @@ async function fetchOneWorldInfo() {
 // Re-reads the world the next area joins. Call whenever something that picks
 // the world changes: toggle, name, save path, format, body, window focus.
 let oneWorldRefreshSeq = 0;
+let oneWorldRefit = false;
+let redrawProjects = () => {};
 async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
+  refreshLayout();
+  // An outline picked while One World was off is written once it is on.
+  if (outline && isOneWorldEnabled() !== outlineWritten) noteOutline(outline);
+  if (!outline && selectedShapes && wantsShapesMask() !== shapesWritten) writeShapesMask();
   refreshLuantiAvailability();
-  setSettingsRowAvailable('one-world-toggle', isOneWorldAvailable());
+  refreshOneWorldRow();
+  redrawProjects();
+  refreshLiveRows();
+  refreshStartButton();
   if (!isOneWorldEnabled()) {
     const wasOn = oneWorldInfo !== null;
     oneWorldInfo = null;
     releaseOneWorldPins();
+    refreshWorldRulesRows();
     setOneWorldStatus('');
     clearOneWorldOverlays();
     if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
@@ -3215,8 +4008,14 @@ async function refreshOneWorldState() {
     return;
   }
   if (seq !== oneWorldRefreshSeq) return;
+  if (oneWorldPicked && oneWorldFolderName() === oneWorldName && info && !info.exists) {
+    // The world picked in Projects is gone (deleted outside Arnis): back to the default name.
+    setOneWorldName('');
+    return refreshOneWorldState();
+  }
   oneWorldInfo = info;
   applyOneWorldPins(info);
+  refreshWorldRulesRows();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   renderOneWorldStatus();
 
@@ -3230,9 +4029,11 @@ async function refreshOneWorldState() {
     const overlays = await invoke('gui_get_one_world_overlays', { worldPath: info.world_path });
     if (seq !== oneWorldRefreshSeq) return;
     oneWorldOverlayKey = key;
+    setBuiltAreas((overlays && overlays.areas) || []);
     postToMap({
       type: 'oneWorldOverlays',
       world_path: info.world_path,
+      refit: oneWorldRefit,
       areas: (overlays && overlays.areas) || [],
       origin_lat: overlays ? overlays.origin_lat : 0,
       origin_lon: overlays ? overlays.origin_lon : 0,
@@ -3279,7 +4080,8 @@ function confirmOneWorldOverlap(count) {
 }
 
 // Checks the world right before a run. Returns false when the run must not start.
-async function prepareOneWorldRun() {
+// `held`: the hold to start already said what gets rebuilt, so no second question.
+async function prepareOneWorldRun(held = false) {
   if (!savePath) {
     renderOneWorldStatus();
     return false;
@@ -3301,7 +4103,7 @@ async function prepareOneWorldRun() {
       oneWorldText('one_world_locked', 'open in Minecraft'), 'error');
     return false;
   }
-  if (!info.exists) return true;
+  if (!info.exists || held) return true;
   let overlap = 0;
   try {
     overlap = await invoke('gui_one_world_overlap', {
@@ -3321,15 +4123,441 @@ function postToMap(message) {
   }
 }
 
-function initOneWorld() {
-  const toggle = document.getElementById('one-world-toggle');
-  if (!toggle) return;
-  // Also fires when the settings store restores the value.
-  toggle.addEventListener('change', refreshOneWorldState);
-  toggle.addEventListener('change', () => {
-    refreshGameplayRows();
-    refreshWorldTypeRow();
+// ---- Live mode: the One World on a local Minecraft server, generated around the players ----
+
+const LIVE_VERSION_KEY = 'arnis-live-version';
+const LIVE_VIEW_DISTANCES = [8, 12, 16, 24, 32];
+// Last state the backend reported, null before the first session.
+let liveStatus = null;
+// Versions to offer and whether the EULA is accepted, read once Live is picked.
+let liveInfo = null;
+let liveInfoLoading = null;
+// The saves folder and world liveInfo was read for.
+let liveInfoKey = '';
+// The selection and spawn marker the last session started from, per world.
+const LIVE_START_KEY = 'arnis-live-start';
+
+function liveActive() {
+  return !!liveStatus && ['starting', 'running', 'stopping'].includes(liveStatus.phase);
+}
+
+function liveHasSelection() {
+  return !!selectedBBox && selectedBBox !== "0.000000 0.000000 0.000000 0.000000";
+}
+
+function loadLiveInfo() {
+  if (liveInfoLoading) return liveInfoLoading;
+  const key = (savePath || '') + '|' + oneWorldFolderName();
+  liveInfoLoading = invoke('gui_live_info', { savePath: savePath || '', worldName: oneWorldFolderName() })
+    .then((info) => {
+      liveInfo = info;
+      liveInfoKey = key;
+      fillLiveVersions();
+      return info;
+    })
+    .catch((error) => {
+      console.error('Failed to read live mode info:', error);
+      return null;
+    })
+    .finally(() => { liveInfoLoading = null; });
+  return liveInfoLoading;
+}
+
+function fillLiveVersions() {
+  const select = document.getElementById('live-version-select');
+  if (!select || !liveInfo) return;
+  Array.from(select.options).filter((o) => o.value).forEach((o) => o.remove());
+  const auto = select.options[0];
+  if (auto) {
+    auto.textContent = oneWorldText('live_version_auto', 'Automatic') +
+      (liveInfo.default_version ? ` (${liveInfo.default_version})` : '');
+  }
+  const versions = liveInfo.versions || [];
+  for (const v of versions) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v === liveInfo.last_played
+      ? `${v} (${oneWorldText('live_last_played', 'last played')})`
+      : v;
+    select.appendChild(opt);
+  }
+  const saved = localStorage.getItem(LIVE_VERSION_KEY) || '';
+  select.value = versions.includes(saved) ? saved : '';
+}
+
+function labelLiveViewDistances() {
+  const select = document.getElementById('live-view-distance-select');
+  if (!select) return;
+  for (const opt of select.options) {
+    opt.textContent = oneWorldText('live_chunks', '{count} chunks', { count: opt.value });
+  }
+}
+
+// The version and view distance only mean something in Live, and stay put while it runs.
+function refreshLiveRows() {
+  const live = isLiveMode();
+  for (const id of ['live-version-row', 'live-view-distance-row']) {
+    const row = document.getElementById(id);
+    if (row) row.style.display = live ? '' : 'none';
+  }
+  document.getElementById('one-world-stack')?.classList.toggle('is-open', live);
+  setSettingsRowAvailable('live-version-select', !liveActive(), 'reason_live_running');
+  setSettingsRowAvailable('live-view-distance-select', !liveActive(), 'reason_live_running');
+  // The world the session plays is fixed until it ends.
+  setSettingsRowAvailable('save-path-input', !liveActive(), 'reason_live_running');
+  refreshWorldNameRow();
+  if (liveInfo && liveInfoKey !== (savePath || '') + '|' + oneWorldFolderName()) liveInfo = null;
+  if (live && !liveInfo) loadLiveInfo();
+}
+
+// In Live the main button starts and stops the session.
+function refreshStartButton() {
+  const button = document.getElementById('start-button');
+  const label = button && button.querySelector('span');
+  if (!label) return;
+  let key = 'start_generation';
+  let fallback = 'Start Generation';
+  let vars;
+  // A job in pieces an earlier run built part of says how much.
+  const plan = planPieces();
+  const stopping = liveActive() && liveStatus.phase === 'stopping';
+  if (stopping) {
+    key = 'live_stopping_button';
+    fallback = 'Stopping\u2026';
+  } else if (liveActive()) {
+    key = 'live_stop_button';
+    fallback = 'Stop Live Mode';
+  } else if (isLiveMode()) {
+    key = 'live_play';
+    fallback = 'Play Live';
+  } else if (plan && plan.done && plan.done < plan.n) {
+    key = 'plan_resume';
+    fallback = 'Resume ({n} of {m})';
+    vars = { n: plan.done, m: plan.n };
+  }
+  label.dataset.localize = key;
+  label.textContent = oneWorldText(key, fallback, vars);
+  const wrap = button.closest('.start-button-wrap');
+  if (wrap) {
+    wrap.classList.toggle('is-live', liveActive() && !stopping);
+    wrap.classList.toggle('is-stopping', stopping);
+  }
+}
+
+// The backend names each step; the words are the GUI's, in the user's language.
+function liveStageText(status) {
+  // The server stopped from the game is still saving.
+  if ((status.phase === 'stopping' && !['saving', 'stopping'].includes(status.stage)) ||
+    status.stage === 'stopped_in_game') {
+    return oneWorldText('live_stage_stopping', 'Stopping the server and saving the world');
+  }
+  switch (status.stage) {
+    case 'checking':
+      return oneWorldText('live_stage_checking', 'Checking the world');
+    case 'start_area':
+      return status.step
+        ? oneWorldText('live_stage_start_area', 'Generating the land around the start: {done} of {total}',
+          { done: status.step[0], total: status.step[1] })
+        : oneWorldText('live_stage_starting', 'Starting');
+    case 'server_starting':
+      return oneWorldText('live_stage_server', 'Starting the Minecraft {version} server', { version: status.version || '' });
+    case 'running':
+      if (status.teleport_pending) return oneWorldText('live_stage_teleport', 'Generating the place you picked');
+      if (status.teleport_failed) return oneWorldText('live_teleport_failed', 'The place you picked could not be generated');
+      return oneWorldText('live_ready', 'Ready. Join "Arnis Live" under Multiplayer.');
+    case 'saving':
+      return oneWorldText('live_stage_saving', 'Saving the world');
+    case 'stopping':
+      return oneWorldText('live_stage_stopping', 'Stopping the server and saving the world');
+    case 'stopped':
+      return oneWorldText('live_stage_stopped', 'Stopped. The world is saved.');
+    case 'failed':
+      return status.error || oneWorldText('live_stage_failed', 'Live mode stopped because of an error.');
+    default:
+      return oneWorldText('live_stage_starting', 'Starting');
+  }
+}
+
+function liveDownloadText(download) {
+  const percent = typeof download.progress === 'number' ? Math.round(download.progress * 100) : 0;
+  if (download.what === 'java') {
+    return oneWorldText('live_download_java', 'Downloading Java for the server: {percent}%', { percent });
+  }
+  return oneWorldText('live_download_server', 'Downloading the Minecraft {version} server: {percent}%',
+    { version: (liveStatus && liveStatus.version) || '', percent });
+}
+
+// A session reports in the progress line and bar, where a generation does.
+function renderLiveProgress() {
+  const status = liveStatus;
+  const info = document.getElementById('progress-info');
+  const bar = document.getElementById('progress-bar');
+  const detail = document.getElementById('progress-detail');
+  if (!status || !info || !bar || !detail) return;
+  let text = liveStageText(status);
+  let fraction = typeof status.progress === 'number' ? status.progress : null;
+  if (status.download && status.phase === 'starting') {
+    text = liveDownloadText(status.download);
+    fraction = typeof status.download.progress === 'number' ? status.download.progress : fraction;
+  }
+  const ready = status.stage === 'running' && !status.teleport_pending && !status.teleport_failed;
+  if (['running', 'stopped'].includes(status.phase) || status.stage === 'stopped') fraction = 1;
+  if (status.phase === 'failed') fraction = 0;
+  info.textContent = text;
+  info.style.color = status.phase === 'failed' ? '#fa7878'
+    : status.stage === 'running' && status.teleport_failed ? '#fecc44'
+      : ready ? '#7bd864' : '#ececec';
+  // The percentage stays beside the bar, as in a generation, so the bar keeps its width.
+  if (fraction !== null) {
+    bar.style.width = `${Math.round(fraction * 100)}%`;
+    detail.textContent = `${Math.round(fraction * 100)}%`;
+  }
+  resetEta();
+}
+
+// Resolves to true once the user accepted Mojang's EULA.
+function confirmLiveEula() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('live-modal');
+    const accept = document.getElementById('live-accept');
+    const cancel = document.getElementById('live-cancel');
+    const close = document.getElementById('live-close');
+    if (!modal || !accept || !cancel) {
+      resolve(false);
+      return;
+    }
+    const finish = (answer) => {
+      hideModal(modal);
+      accept.removeEventListener('click', onAccept);
+      cancel.removeEventListener('click', onCancel);
+      if (close) close.removeEventListener('click', onCancel);
+      document.removeEventListener('keydown', onKey);
+      resolve(answer);
+    };
+    const onAccept = () => finish(true);
+    const onCancel = () => finish(false);
+    const onKey = (event) => { if (event.key === 'Escape') finish(false); };
+    accept.addEventListener('click', onAccept);
+    cancel.addEventListener('click', onCancel);
+    if (close) close.addEventListener('click', onCancel);
+    document.addEventListener('keydown', onKey);
+    showModal(modal);
+    accept.focus();
   });
+}
+
+// What players read in the game, in the language set here.
+function liveGameMessages() {
+  return {
+    welcome: oneWorldText('live_game_welcome', 'Arnis keeps generating the land as you explore.'),
+    building: oneWorldText('live_game_building', 'Arnis is generating the land ahead'),
+    wall: oneWorldText('live_game_wall', 'Arnis is still generating this way'),
+    moved_back: oneWorldText('live_game_moved_back', 'That land is not ready yet'),
+    teleport_wait: oneWorldText('live_game_teleport_wait', 'Arnis is generating the place you picked. You will be moved there when it is ready.'),
+    teleport_failed: oneWorldText('live_game_teleport_failed', 'Arnis could not generate the place you picked.')
+  };
+}
+
+function showLiveRefusal(text) {
+  const info = document.getElementById('progress-info');
+  if (!info) return;
+  info.textContent = text;
+  info.style.color = '#fa7878';
+}
+
+async function startLive() {
+  if (liveActive()) return;
+  if (!savePath) {
+    showLiveRefusal(oneWorldText('one_world_no_save_path', 'Set the Minecraft saves folder in Settings first'));
+    return;
+  }
+  // A lock is left to the backend: it may be a server an earlier Arnis left running.
+  const world = oneWorldInfo;
+  if (world && world.foreign) {
+    renderOneWorldStatus();
+    return;
+  }
+  if (!liveHasSelection() && !(world && world.exists)) {
+    setBboxSelectionInfo(document.getElementById('bbox-selection-info'), "select_location_first", "#fa7878");
+    return;
+  }
+  let acceptEula = false;
+  let accepted = false;
+  try {
+    accepted = await invoke('gui_live_eula_accepted');
+  } catch (_) { /* asked below */ }
+  if (!accepted) {
+    if (!(await confirmLiveEula())) return;
+    acceptEula = true;
+  }
+  if (liveActive() || !isLiveMode()) return;
+
+  const settings = readGenerationSettings(true);
+  let spawnPoint = null;
+  const mapFrame = document.querySelector('.map-container');
+  if (liveHasSelection() && mapFrame && mapFrame.contentWindow && mapFrame.contentWindow.getSpawnPointCoords) {
+    const coords = mapFrame.contentWindow.getSpawnPointCoords();
+    if (coords) spawnPoint = [coords.lat, normalizeLongitude(coords.lng)];
+  }
+  // A selection starts play once; played again unchanged, players go on where they left.
+  const startKey = [oneWorldFolderName(), savePath, selectedBBox, JSON.stringify(spawnPoint)].join('|');
+  const useSelection = liveHasSelection() &&
+    !(world && world.exists && localStorage.getItem(LIVE_START_KEY) === startKey);
+  const versionSelect = document.getElementById('live-version-select');
+  const viewSelect = document.getElementById('live-view-distance-select');
+  const options = {
+    savePath: savePath,
+    worldName: oneWorldFolderName(),
+    version: (versionSelect && versionSelect.value) || null,
+    viewDistance: parseInt(viewSelect && viewSelect.value, 10) || 12,
+    acceptEula: acceptEula,
+    bboxText: useSelection ? selectedBBox : null,
+    spawnPoint: useSelection ? spawnPoint : null,
+    worldScale: settings.worldScale,
+    heightMultiplier: settings.heightMultiplier,
+    generationMode: settings.generationMode,
+    winterEnabled: settings.winterEnabled,
+    postApocalypticEnabled: settings.postApocalypticEnabled,
+    interiorEnabled: settings.interiorEnabled,
+    fillgroundEnabled: settings.fillgroundEnabled,
+    cavesEnabled: settings.cavesEnabled,
+    legacyTreesEnabled: settings.legacyTreesEnabled,
+    maxTreeSize: settings.maxTreeSize,
+    fieldPreset: settings.fieldPreset,
+    canopyHeightEnabled: settings.canopyHeightEnabled,
+    overtureEnabled: settings.overtureEnabled,
+    use3dEnabled: settings.use3dEnabled,
+    awsOnlyElevation: settings.awsOnlyElevation,
+    bakeLightingEnabled: settings.bakeLightingEnabled,
+    signage: settings.signage,
+    mapillaryToken: settings.mapillaryToken,
+    facadesEnabled: settings.facadesEnabled,
+    facadeMode: settings.facadeMode,
+    gamemode: settings.gamemode,
+    worldTime: settings.worldTime,
+    mobSpawning: settings.mobSpawning,
+    messages: liveGameMessages()
+  };
+  liveStatus = { phase: 'starting', stage: 'starting' };
+  const bar = document.getElementById('progress-bar');
+  if (bar) bar.style.width = '0%';
+  const detail = document.getElementById('progress-detail');
+  if (detail) detail.textContent = '0%';
+  onLiveStatus();
+  setWorldNameLabel(oneWorldFolderName());
+  try {
+    await invoke('gui_live_start', { options: options });
+    if (liveInfo) liveInfo.eula_accepted = true;
+    if (useSelection) localStorage.setItem(LIVE_START_KEY, startKey);
+  } catch (error) {
+    liveStatus = { phase: 'failed', stage: 'failed', error: String(error) };
+    onLiveStatus();
+  }
+}
+
+async function stopLive() {
+  if (!liveActive() || liveStatus.phase === 'stopping') return;
+  liveStatus.phase = 'stopping';
+  onLiveStatus();
+  try {
+    await invoke('gui_live_stop');
+  } catch (error) {
+    console.error('Failed to stop live mode:', error);
+  }
+}
+
+// Everything that shows the session, after each report.
+function onLiveStatus() {
+  renderLiveProgress();
+  refreshStartButton();
+  if (!isWorldNameEditing()) refreshWorldNameEditUI();
+  refreshLiveRows();
+  refreshOneWorldRow();
+  redrawProjects();
+  const bedrockBtn = document.getElementById('format-bedrock');
+  if (bedrockBtn) bedrockBtn.disabled = liveActive();
+  renderOneWorldStatus();
+  postToMap({
+    type: 'livePlayers',
+    active: liveActive(),
+    canTeleport: !!liveStatus && liveStatus.stage === 'running',
+    players: (liveStatus && liveStatus.players) || []
+  });
+}
+
+function initLive() {
+  document.getElementById('live-eula-link')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    openExternal((liveInfo && liveInfo.eula_url) || 'https://aka.ms/MinecraftEULA');
+  });
+  const modal = document.getElementById('live-modal');
+  if (modal) closeOnBackdrop(modal, () => document.getElementById('live-cancel')?.click());
+  document.getElementById('live-version-select')?.addEventListener('change', (event) => {
+    if (event.target.value) localStorage.setItem(LIVE_VERSION_KEY, event.target.value);
+    else localStorage.removeItem(LIVE_VERSION_KEY);
+  });
+  labelLiveViewDistances();
+  // "Teleport here" in the map's right-click menu.
+  window.addEventListener('message', (event) => {
+    const mapFrame = document.querySelector('.map-container');
+    if (!mapFrame || event.source !== mapFrame.contentWindow) return;
+    if (!event.data || event.data.type !== 'liveTeleport' || !liveActive()) return;
+    invoke('gui_live_teleport', { lat: event.data.lat, lng: normalizeLongitude(event.data.lng) })
+      .catch((error) => console.error('Teleport failed:', error));
+  });
+  // The map shows new areas as they come in, a batch at a time.
+  let overlayTiles = 0;
+  let overlayAt = 0;
+  window.__TAURI__.event.listen('live-status', (event) => {
+    const wasActive = liveActive();
+    const wasPhase = liveStatus && liveStatus.phase;
+    liveStatus = event.payload;
+    // A session may have saved the world with a newer version.
+    if (wasActive && !liveActive()) liveInfo = null;
+    onLiveStatus();
+    const done = liveStatus.tiles_done || 0;
+    const now = Date.now();
+    // The world unlocks when a session ends and exists once it runs, so it is read again.
+    if (wasActive !== liveActive() || (liveStatus.phase === 'running' && wasPhase !== 'running')) {
+      overlayTiles = 0;
+      overlayAt = now;
+      oneWorldOverlayKey = null;
+      refreshOneWorldState();
+    } else if (done - overlayTiles >= 8 && now - overlayAt > 15000) {
+      overlayTiles = done;
+      overlayAt = now;
+      oneWorldOverlayKey = null;
+      refreshOneWorldState();
+    }
+  });
+  invoke('gui_live_status').then((status) => {
+    if (status) {
+      liveStatus = status;
+      onLiveStatus();
+    }
+  }).catch(() => {});
+  refreshLiveRows();
+  refreshStartButton();
+}
+
+function initOneWorld() {
+  const group = document.getElementById('one-world-group');
+  if (!group) return;
+  // The settings store restores the value by clicking too.
+  group.querySelectorAll('.segment').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled || btn.classList.contains('active') || liveActive()) return;
+      group.querySelectorAll('.segment').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      refreshOneWorldDesc();
+      refreshOneWorldState();
+      refreshGameplayRows();
+      refreshWorldTypeRow();
+      refreshWorldRulesRows();
+      refreshFacadeRows();
+    });
+  });
+  refreshOneWorldDesc();
   const mode = document.getElementById('generation-mode-select');
   if (mode) mode.addEventListener('change', renderOneWorldStatus);
   const nameToggle = document.getElementById('custom-world-name-toggle');
@@ -3370,12 +4598,17 @@ function handleWorldSelectionError(errorCode) {
 }
 
 let generationButtonEnabled = true;
+// A Download & Bake is under way (Data Sources): Start waits for it.
+let bakeRunning = false;
 
 // Central setter so every place that toggles generation state also
 // refreshes the world-name pencil (hidden/blocked while a generation, or a
 // rename, is in flight - see canEditCustomWorldName()).
 function setGenerationButtonEnabled(enabled) {
   generationButtonEnabled = enabled;
+  if (!enabled) document.getElementById('run-confirm').hidden = true;
+  showRunControls(!enabled);
+  redrawProjects();
   refreshWorldNameEditUI();
   // The two jobs exclude each other in the backend, so the other one greys out.
   refreshPrecomputeButton();
@@ -3386,8 +4619,114 @@ function setGenerationButtonEnabled(enabled) {
  * Validates required inputs and sends generation parameters to the backend
  * @returns {Promise<void>}
  */
-async function startGeneration() {
+// The generation settings as the backend commands name them. A One World that exists
+// fixes its scale, height and ground level, and sends those instead.
+function readGenerationSettings(oneWorld) {
+  const segment = (group, key, fallback) => {
+    const btn = document.querySelector(`#${group} .segment.active`);
+    return btn ? btn.dataset[key] : fallback;
+  };
+  const checked = (id) => document.getElementById(id).checked;
+  const heightLimitToggle = document.getElementById("disable-height-limit-toggle");
+  // Disabled means unsupported for this body or format, so never send a stale tick.
+  let disableHeightLimit = !heightLimitToggle.disabled && heightLimitToggle.checked;
+  let scale = parseFloat(document.getElementById("scale-value-slider").value);
+  let heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
+  if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
+    if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
+    if (typeof oneWorldInfo.height_multiplier === 'number') heightMultiplier = oneWorldInfo.height_multiplier;
+    if (typeof oneWorldInfo.disable_height_limit === 'boolean') disableHeightLimit = oneWorldInfo.disable_height_limit;
+  } else if (oneWorld) {
+    disableHeightLimit = true;
+  }
+  // The ground level input is gone from the UI; a world the CLI made may sit on another level.
+  let groundLevel = -62;
+  if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
+    groundLevel = oneWorldInfo.ground_level;
+  }
+  // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
+  const clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
+  const worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
+  return {
+    worldScale: scale,
+    heightMultiplier: heightMultiplier,
+    groundLevel: groundLevel,
+    generationMode: document.getElementById("generation-mode-select").value,
+    winterEnabled: checked("winter-toggle"),
+    postApocalypticEnabled: checked("post-apocalyptic-toggle"),
+    interiorEnabled: checked("interior-toggle"),
+    fillgroundEnabled: checked("fillground-toggle"),
+    cavesEnabled: checked("caves-toggle"),
+    legacyTreesEnabled: checked("legacy-trees-toggle"),
+    maxTreeSize: segment("max-tree-size-group", "maxTreeSize", "giant"),
+    fieldPreset: segment("field-preset-group", "fieldPreset", "patchwork"),
+    canopyHeightEnabled: checked("canopy-height-toggle"),
+    overtureEnabled: checked("overture-toggle"),
+    use3dEnabled: checked("use-3d-toggle"),
+    disableHeightLimit: disableHeightLimit,
+    awsOnlyElevation: checked("aws-only-elevation-toggle"),
+    bakeLightingEnabled: checked("bake-lighting-toggle"),
+    voxyLodEnabled: checked("voxy-lod-toggle"),
+    dhLodEnabled: checked("dh-lod-toggle"),
+    gamemode: segment("gamemode-group", "gamemode", "creative"),
+    worldTime: worldTime,
+    worldType: segment("world-type-group", "worldType", "void"),
+    mobSpawning: getMobSpawning(),
+    mapItem: checked("map-item-toggle"),
+    signage: segment("signage-group", "signage", "basic"),
+    mapillaryToken: getMapillaryToken(),
+    facadesEnabled: getFacadesEnabled(),
+    facadeMode: getEffectiveFacadeMode(),
+    buildingFacadesEnabled: getBuildingFacadesEnabled(),
+    facadeDetail: getFacadeDetail()
+  };
+}
+
+// A job in pieces runs for long and takes most of the machine: Start (and Expand) first show
+// its plan and the warnings, and only a held button starts it.
+function askRunConfirm() {
+  const box = document.getElementById('run-confirm');
+  box.hidden = false;
+  box.scrollIntoView({ block: 'nearest' });
+  document.getElementById('run-confirm-hold').focus();
+}
+
+// Calls `done` once the button has been held for HOLD_MS (pointer, or Space/Enter); letting go
+// earlier cancels (arnisHold, piece-style.js). The fill is CSS (.run-hold.is-holding), timed to the same HOLD_MS.
+const HOLD_MS = 1500;
+function holdToConfirm(button, done) {
+  globalThis.arnisHold(button, done, HOLD_MS);
+}
+
+// `confirmed`: the hold (or a retry) already said yes to a job in pieces.
+// `prewarm`: Download Plan's "Download now", a run that only fills the caches.
+// Returns whether a run started.
+async function startGeneration(confirmed = false, prewarm = false) {
+  // In Live the button starts and stops the session instead; a prewarm is never a Live session.
+  if (!prewarm && liveActive()) {
+    stopLive();
+    return;
+  }
   if (generationButtonEnabled === false) {
+    return;
+  }
+  // The backend refuses a run during a bake only after a new world was made for it.
+  if (bakeRunning) {
+    const info = document.getElementById('progress-info');
+    if (info) {
+      info.textContent = oneWorldText('meld_baking', 'Baking: the progress is on the main bar.');
+      info.style.color = "#fecc44";
+    }
+    return;
+  }
+  // One World and Live keep their areas as rectangles of whole chunks; Advanced features build
+  // the rectangle around the shapes.
+  if (selectedShapes && (isLiveMode() || isOneWorldEnabled()) && !meldOn()) {
+    setBboxSelectionInfo(document.getElementById('bbox-selection-info'), "shapes_rectangles_only", "#fa7878");
+    return;
+  }
+  if (!prewarm && isLiveMode()) {
+    startLive();
     return;
   }
   // The backend refuses this too, but only after gui_create_world has already
@@ -3401,6 +4740,13 @@ async function startGeneration() {
     }
     return;
   }
+  const cells = isPiecesJob();
+  if (confirmed !== true && cells) {
+    askRunConfirm();
+    return;
+  }
+  // The hold names the cells built again; a start that is no job in cells gets main's question.
+  const held = confirmed === true && cells && !planPieces()?.single;
   // Claim the guard before the first await. gui_create_world and gui_start_generation are
   // both awaited round-trips, so leaving the claim until after them lets a second click
   // through and starts a parallel run against the same process-global world floor.
@@ -3416,19 +4762,24 @@ async function startGeneration() {
 
     // Past every synchronous refusal, so from here the click is a real start.
     resetProgressUi(STARTING_MESSAGE);
+    if (!prewarm) clearPieces();
 
     const oneWorld = isOneWorldEnabled();
     const oneWorldBBox = selectedBBox;
     // The overlap dialog leaves the page live, so the body, format or area may have changed under it.
-    if (oneWorld && (!(await prepareOneWorldRun()) || !isOneWorldEnabled() || selectedBBox !== oneWorldBBox)) {
+    if (oneWorld && (!(await prepareOneWorldRun(held || prewarm)) || !isOneWorldEnabled() || selectedBBox !== oneWorldBBox)) {
       const info = document.getElementById('progress-info');
       if (info && info.textContent === STARTING_MESSAGE) info.textContent = "";
       return;
     }
     lastRunOneWorld = oneWorld;
+    lastRunPrewarm = prewarm;
+    const place = oneWorld && !prewarm && document.getElementById('advanced-meld-features-toggle').checked
+      ? placeForRun(searchedPlace, selectedBBox) : '';
+    runPlace = place && oneWorldInfo && !oneWorldInfo.area_count ? { name: place, path: oneWorldInfo.world_path } : null;
 
     // Auto-create world for Java format (a One World is resolved by the backend)
-    if (selectedWorldFormat === 'java' && !oneWorld) {
+    if (selectedWorldFormat === 'java' && !oneWorld && !prewarm) {
       if (!savePath) {
         console.warn("Cannot create world: save path not set");
         return;
@@ -3451,7 +4802,7 @@ async function startGeneration() {
 
     // Clear any existing world preview since we're generating a new one.
     // A One World keeps its areas on the map; the new one joins them at the end.
-    if (!oneWorld) notifyWorldChanged();
+    if (!oneWorld && !prewarm) notifyWorldChanged();
     if (oneWorld) setWorldNameLabel(oneWorldFolderName());
 
     // Get the map iframe reference
@@ -3462,52 +4813,12 @@ async function startGeneration() {
       const coords = mapFrame.contentWindow.getSpawnPointCoords();
       // Convert object format to tuple format if coordinates exist
       if (coords) {
-        spawnPoint = [coords.lat, coords.lng];
+        // The map repeats sideways, and the selection is brought back into range too.
+        spawnPoint = [coords.lat, normalizeLongitude(coords.lng)];
       }
     }
 
-    // Get generation mode from dropdown, named as the CLI's --mode
-    var generationMode = document.getElementById("generation-mode-select").value;
-    var winter = document.getElementById("winter-toggle").checked;
-    var postApocalyptic = document.getElementById("post-apocalyptic-toggle").checked;
-
-    var interior = document.getElementById("interior-toggle").checked;
-    var fill_ground = document.getElementById("fillground-toggle").checked;
-    var caves = document.getElementById("caves-toggle").checked;
-    var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
-    var canopy_height = document.getElementById("canopy-height-toggle").checked;
-    var maxTreeSizeBtn = document.querySelector("#max-tree-size-group .segment.active");
-    var maxTreeSize = maxTreeSizeBtn ? maxTreeSizeBtn.dataset.maxTreeSize : "giant";
-    var fieldPresetBtn = document.querySelector("#field-preset-group .segment.active");
-    var fieldPreset = fieldPresetBtn ? fieldPresetBtn.dataset.fieldPreset : "patchwork";
-    var overture = document.getElementById("overture-toggle").checked;
-    var use_3d = document.getElementById("use-3d-toggle").checked;
-    var heightLimitToggle = document.getElementById("disable-height-limit-toggle");
-    // Disabled means unsupported for this body or format, so never send a stale tick.
-    var disable_height_limit = !heightLimitToggle.disabled && heightLimitToggle.checked;
-    var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
-    var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
-    var voxy_lod = document.getElementById("voxy-lod-toggle").checked;
-    var dh_lod = document.getElementById("dh-lod-toggle").checked;
-    var scale = parseFloat(document.getElementById("scale-value-slider").value);
-    var heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
-    if (oneWorld && oneWorldInfo && oneWorldInfo.exists) {
-      if (typeof oneWorldInfo.scale === 'number') scale = oneWorldInfo.scale;
-      if (typeof oneWorldInfo.height_multiplier === 'number') heightMultiplier = oneWorldInfo.height_multiplier;
-      if (typeof oneWorldInfo.disable_height_limit === 'boolean') disable_height_limit = oneWorldInfo.disable_height_limit;
-    } else if (oneWorld) {
-      disable_height_limit = true;
-    }
-    // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
-    // DEPRECATED: Ground level input removed from UI
-    var ground_level = -62;
-
-    // Validate ground_level
-    ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
-    // A world the CLI made may sit on another level, and the backend refuses any but its own.
-    if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
-      ground_level = oneWorldInfo.ground_level;
-    }
+    const settings = readGenerationSettings(oneWorld);
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
@@ -3515,73 +4826,45 @@ async function startGeneration() {
     // Get rotation angle
     var rotationAngle = oneWorld ? 0 : (parseFloat(document.getElementById("rotation-angle-input").value) || 0);
 
-    var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
-    var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
-    var worldTypeBtn = document.querySelector("#world-type-group .segment.active");
-    var worldType = worldTypeBtn ? worldTypeBtn.dataset.worldType : "void";
-    var mapItem = document.getElementById("map-item-toggle").checked;
-    var signageBtn = document.querySelector("#signage-group .segment.active");
-    var signage = signageBtn ? signageBtn.dataset.signage : "basic";
-    // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
-    var clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
-    var worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
+    const flags = meldFlags({
+      oneWorld: oneWorld,
+      java: getEffectiveWorldFormat() === "java",
+      caves: settings.cavesEnabled,
+      extendHeight: settings.disableHeightLimit && !oneWorld && getEffectiveWorldFormat() === "java",
+      lods: settings.voxyLodEnabled || settings.dhLodEnabled,
+      prewarm
+    });
+    // Held or retried as a job in cells: it runs as one, or not at all.
+    if (cells && !prewarm && !flags.some((f) => f.startsWith('--one-world-workers='))) return;
 
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
+        ...settings,
         bboxText: selectedBBox,
-        selectedWorld: oneWorld ? savePath : worldPath,
+        ...generationTarget({ prewarm, oneWorld, savePath, worldPath }),
         bedrockSavePath: bedrockSavePath,
         luantiSavePath: luantiSavePath,
-        worldScale: scale,
-        heightMultiplier: heightMultiplier,
-        groundLevel: ground_level,
-        generationMode: generationMode,
-        winterEnabled: winter,
-        postApocalypticEnabled: postApocalyptic,
-        interiorEnabled: interior,
-        fillgroundEnabled: fill_ground,
-        cavesEnabled: caves,
-        legacyTreesEnabled: legacy_trees,
-        maxTreeSize: maxTreeSize,
-        fieldPreset: fieldPreset,
-        canopyHeightEnabled: canopy_height,
-        overtureEnabled: overture,
-        use3dEnabled: use_3d,
-        disableHeightLimit: disable_height_limit,
-        awsOnlyElevation: aws_only_elevation,
-        bakeLightingEnabled: bake_lighting,
-        voxyLodEnabled: voxy_lod,
-        dhLodEnabled: dh_lod,
-        isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
         rotationAngle: rotationAngle,
-        gamemode: gamemode,
-        worldTime: worldTime,
-        worldType: worldType,
-        mobSpawning: getMobSpawning(),
-        mapItem: mapItem,
-        signage: signage,
-        mapillaryToken: getMapillaryToken(),
-        facadesEnabled: getFacadesEnabled(),
-        facadeMode: getEffectiveFacadeMode(),
-        buildingFacadesEnabled: getBuildingFacadesEnabled(),
-        facadeDetail: getFacadeDetail(),
         celestialBodyName: selectedCelestialBody,
         pauseMenu: gameplayToggle('pause-menu-toggle'),
         discoveries: gameplayToggle('discoveries-toggle'),
         trafficLights: gameplayToggle('traffic-lights-toggle'),
         movingVehicles: gameplayToggle('moving-cars-toggle'),
+        pedestrians: gameplayToggle('pedestrians-toggle'),
         zombieOutbreak: gameplayToggle('zombie-outbreak-toggle'),
         disasters: gameplayToggle('disasters-toggle'),
         bodyGravity: gameplayToggle('body-gravity-toggle'),
         oneWorld: oneWorld,
-        oneWorldName: oneWorld ? oneWorldFolderName() : ""
+        oneWorldName: oneWorld ? oneWorldFolderName() : "",
+        flags: [...flags, ...(prewarm ? ["--prewarm"] : [])],
+        selectionShapes: generationShapes({ oneWorld, shapes: selectedShapes })
     });
 
     console.log("Generation process started.");
-    setEtaSignageExpected(signage !== "none" && getEffectiveWorldFormat() === "java");
+    setEtaSignageExpected(settings.signage !== "none" && getEffectiveWorldFormat() === "java");
     resetEta();
     started = true;
     window.arnisPreview3D?.setGenerationRunning(true);
@@ -3601,6 +4884,7 @@ async function startGeneration() {
     }
     refreshPrecomputeButton();
   }
+  return started;
 }
 
 // World preview overlay state
@@ -3637,6 +4921,7 @@ async function showWorldPreviewButton() {
  */
 function notifyWorldChanged() {
   currentWorldMapData = null;
+  resetPieces();
   const mapFrame = document.querySelector('.map-container');
   if (mapFrame && mapFrame.contentWindow) {
     mapFrame.contentWindow.postMessage({

@@ -68,6 +68,7 @@ use decoration::{BiomeAmounts, Decor};
 use density::CaveGen;
 use rayon::prelude::*;
 use shape::{CaveShape, Rect};
+use std::sync::atomic::{AtomicI32, Ordering};
 // FnvHashSet, not std HashSet: std seeds its hasher randomly PER PROCESS, so
 // iterating one yields a different order every run. These sets are iterated to apply
 // world edits (despeckle, prune, decoration), and where those edits interact the write
@@ -76,10 +77,17 @@ use shape::{CaveShape, Rect};
 // every time.
 use fnv::FnvHashSet as HashSet;
 
-/// World seed for every cave pass. Fixed, so the same area always gets the same caves.
+/// Built-in seed for every cave pass, used unless `--cave-seed` is given. Fixed, so the same
+/// area always gets the same caves.
 const SEED: i64 = 0xCA7E_CA7E;
 /// Vanilla's world floor; every depth constant in the cave passes is written against it.
 pub(crate) const VANILLA_FLOOR: i32 = -64;
+/// The theme amounts of More Vanilla and More Mix: every theme at this share of its default.
+/// Measured by the `style_shares_match` test: More Vanilla is about 30% themed, All Mix (every
+/// theme at its default) about 77%, More Mix about 89%. More Mix stays under the 200% top of
+/// `--cave-biomes`.
+const MORE_VANILLA: f64 = 0.18;
+const MORE_MIX: f64 = 1.8;
 /// Carve only this many blocks below the column's surface (the roof seal — keeps caves from breaching
 /// the surface / exposing grass).
 const TOP_GATE: i32 = 6;
@@ -104,10 +112,73 @@ const CAVE_HOST: &[Block] = &[
     DIORITE,
 ];
 
-/// How far this world's bedrock plane sits above vanilla's.
+/// `--cave-datum-y`, or `i32::MIN` for none. Set from args at the start of every carve.
+static DATUM_Y: AtomicI32 = AtomicI32::new(i32::MIN);
+
+fn set_datum_y(y: Option<i32>) {
+    DATUM_Y.store(y.unwrap_or(i32::MIN), Ordering::Relaxed);
+}
+
+/// The datum every piece of a job shares when the user gave none, or `i32::MIN`.
+static PIECE_DATUM_Y: AtomicI32 = AtomicI32::new(i32::MIN);
+
+/// Pins this run's carve to `y` as `--cave-datum-y` would; `None` outside a piece of a job.
+pub fn set_piece_datum(y: Option<i32>) {
+    PIECE_DATUM_Y.store(y.unwrap_or(i32::MIN), Ordering::Relaxed);
+}
+
+fn piece_datum() -> Option<i32> {
+    Some(PIECE_DATUM_Y.load(Ordering::Relaxed)).filter(|&y| y != i32::MIN)
+}
+
+/// The datum of the job whose pieces' leases are in `job_dir`: the first piece to ask records
+/// its own floor there, and every later one, run after it or beside it, reads that.
+pub fn share_piece_datum(job_dir: &std::path::Path, own: i32) -> i32 {
+    let path = job_dir.join("cave_datum_y");
+    let read = || {
+        std::fs::read_to_string(&path)
+            .ok()?
+            .trim()
+            .parse::<i32>()
+            .ok()
+    };
+    if let Some(y) = read() {
+        return y;
+    }
+    // Linked into place whole, so a piece never reads a half-written value.
+    let tmp = job_dir.join(format!("cave_datum_y.{}", std::process::id()));
+    let linked =
+        std::fs::write(&tmp, own.to_string()).and_then(|()| std::fs::hard_link(&tmp, &path));
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => own,
+        Err(e) => read().unwrap_or_else(|| {
+            eprintln!("Warning: the job's cave datum could not be shared ({e}); caves may not meet at this piece's edges");
+            own
+        }),
+    }
+}
+
+/// Where vanilla's floor sits for the cave passes: `--cave-datum-y` when given, so separate
+/// runs share one depth frame, else this world's bedrock plane.
+#[inline]
+pub(crate) fn datum_y() -> i32 {
+    match DATUM_Y.load(Ordering::Relaxed) {
+        i32::MIN => terrain_floor_y(),
+        y => y,
+    }
+}
+
+/// Whether `--cave-datum-y` pins the datum for this carve.
+#[inline]
+pub(crate) fn datum_pinned() -> bool {
+    DATUM_Y.load(Ordering::Relaxed) != i32::MIN
+}
+
+/// How far the cave datum sits above vanilla's floor.
 #[inline]
 pub(crate) fn y_shift() -> i32 {
-    terrain_floor_y() - VANILLA_FLOOR
+    datum_y() - VANILLA_FLOOR
 }
 
 /// A vanilla Y, translated into this world.
@@ -116,30 +187,78 @@ pub(crate) fn vy(y: i32) -> i32 {
     y + y_shift()
 }
 
-/// The `--cave-biomes` amounts for this run. `validate_args` has already rejected a bad list,
-/// so a parse failure here can only come from a caller that skipped it.
-fn biome_amounts(args: &Args) -> BiomeAmounts {
-    match args.cave_biomes.as_deref().map(BiomeAmounts::parse) {
-        Some(Ok(amounts)) => amounts,
-        Some(Err(e)) => {
-            eprintln!("Warning: --cave-biomes ignored ({e}); using defaults");
-            BiomeAmounts::default()
+/// This run's cave seed: `--cave-seed` (its bits, so every u64 is a distinct layout), else the
+/// built-in one. Independent of any world `--seed`.
+pub(crate) fn seed(args: &Args) -> i64 {
+    args.cave_seed.map_or(SEED, |s| s as i64)
+}
+
+/// `--cave-style`: how much of the underground the themed cave biomes take. A style is one
+/// amount for every theme, so every style runs through the same zone picker as `--cave-biomes`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum CaveStyle {
+    /// Plain vanilla caves, no themed biomes.
+    Vanilla,
+    /// About 70% plain caves, 30% themed.
+    MoreVanilla,
+    /// Every theme at its default amount, about 77% themed.
+    #[default]
+    AllMix,
+    /// Every theme past its default, about 89% themed.
+    MoreMix,
+}
+
+impl CaveStyle {
+    /// Every theme's amount (1.0 = its default).
+    pub fn amount(self) -> f64 {
+        match self {
+            CaveStyle::Vanilla => 0.0,
+            CaveStyle::MoreVanilla => MORE_VANILLA,
+            CaveStyle::AllMix => 1.0,
+            CaveStyle::MoreMix => MORE_MIX,
         }
-        None => BiomeAmounts::default(),
     }
+}
+
+/// `--cave-ores`: the vanilla ore table as is, or with more veins of every metal and gem ore.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum CaveOres {
+    #[default]
+    Normal,
+    /// Twice the veins of every metal and gem ore, at vanilla's heights and vein sizes.
+    More,
+}
+
+/// The `--cave-style` amounts with `--cave-biomes` over them, or why the list is bad.
+pub(crate) fn try_biome_amounts(args: &Args) -> Result<BiomeAmounts, String> {
+    let style = BiomeAmounts::uniform(args.cave_style.unwrap_or_default().amount());
+    match args.cave_biomes.as_deref() {
+        Some(spec) => style.parse_onto(spec),
+        None => Ok(style),
+    }
+}
+
+/// [`try_biome_amounts`] for the carve. `validate_args` has already rejected a bad list, so a
+/// failure here can only come from a caller that skipped it.
+pub(crate) fn biome_amounts(args: &Args) -> BiomeAmounts {
+    try_biome_amounts(args).unwrap_or_else(|e| {
+        eprintln!("Warning: --cave-biomes ignored ({e}); using the style's amounts");
+        BiomeAmounts::uniform(args.cave_style.unwrap_or_default().amount())
+    })
 }
 
 /// Carve caves into the solid fillground across the whole bbox.
 pub fn carve(
     editor: &mut WorldEditor,
     args: &Args,
+    world: &XZBBox,
     xzbbox: &XZBBox,
     keep_out: &dyn Fn(i32, i32) -> bool,
 ) {
     carve_region(
         editor,
         args,
-        xzbbox,
+        world,
         xzbbox.min_x(),
         xzbbox.max_x(),
         xzbbox.min_z(),
@@ -164,10 +283,11 @@ pub fn carve_region(
     max_z: i32,
     keep_out: &dyn Fn(i32, i32) -> bool,
 ) {
+    set_datum_y(args.cave_datum_y.or(piece_datum()));
     // The ore variants and the lava rims match the host rock, so the deepslate line goes first.
     deepslate::apply_region(editor, min_x, max_x, min_z, max_z);
 
-    let seed = SEED;
+    let seed = seed(args);
     let floor = terrain_floor_y();
     let gen = CaveGen::new(seed);
     let decor = Decor::new(seed, biome_amounts(args));
@@ -180,11 +300,19 @@ pub fn carve_region(
         min_z,
         max_z,
     };
-    let world = Rect {
-        min_x: world.min_x(),
-        max_x: world.max_x(),
-        min_z: world.min_z(),
-        max_z: world.max_z(),
+    // Pools, rivers and geodes stop at the run's bbox, unless --cave-datum-y says this run is
+    // one of several that must line up: then they are planned past it, so a feature crossing
+    // into a neighbouring area or piece is the same feature on both sides and each writes its
+    // part.
+    let world = if args.cave_datum_y.is_some() {
+        Rect::EVERYWHERE
+    } else {
+        Rect {
+            min_x: world.min_x(),
+            max_x: world.max_x(),
+            min_z: world.min_z(),
+            max_z: world.max_z(),
+        }
     };
     let shape = CaveShape::new(&gen, seed, world, region, |x, z| {
         editor.get_ground_level(x, z)
@@ -422,7 +550,8 @@ pub fn carve_region(
 
     // 5) ORES — vanilla blob ores (+ stone variants), placed into the now-clean rock so
     //    discard-on-air-exposure leaves clean cave walls. deepslate variant matches host rock.
-    ores::place_ores(editor, seed, min_x, max_x, min_z, max_z);
+    let more_ores = args.cave_ores == Some(CaveOres::More);
+    ores::place_ores(editor, seed, more_ores, min_x, max_x, min_z, max_z);
 
     // 6) DECORATION — the biome themes (lush moss + cave-vines, dripstone, sculk, mushroom, ice,
     //    amethyst, volcanic, coral reefs in pools), glow lichen on all surfaces, and rare amethyst
@@ -628,6 +757,119 @@ fn lerp(t: f64, a: f64, b: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Share of the sampled cave volume that a style gives a theme, upper and deep bands averaged.
+    fn themed_share(style: CaveStyle) -> f64 {
+        let decor = Decor::new(SEED, BiomeAmounts::uniform(style.amount()));
+        let (mut themed, mut total) = (0u32, 0u32);
+        for y in [-20, -48] {
+            for ix in 0..96 {
+                for iz in 0..96 {
+                    let (x, z) = (ix * 40 - 1920, iz * 40 - 1920);
+                    let hit = decor.zone(x, y, z, 200) != decoration::Zone::Normal
+                        || decor.coral_zone(x, z);
+                    themed += u32::from(hit);
+                    total += 1;
+                }
+            }
+        }
+        f64::from(themed) * 100.0 / f64::from(total)
+    }
+
+    /// The styles keep the themed shares their amounts were measured at.
+    #[test]
+    fn style_shares_match() {
+        for (style, want) in [
+            (CaveStyle::Vanilla, 0.0),
+            (CaveStyle::MoreVanilla, 29.5),
+            (CaveStyle::AllMix, 77.0),
+            (CaveStyle::MoreMix, 88.6),
+        ] {
+            let got = themed_share(style);
+            assert!(
+                (got - want).abs() <= 3.0,
+                "{style:?}: {got:.1}% themed, want {want}"
+            );
+        }
+    }
+
+    /// `--caves` alone is v3.4.0's caves: default amounts, the built-in seed, floor datum.
+    #[test]
+    fn no_flags_is_v340_caves() {
+        use clap::Parser;
+        let args = Args::parse_from(["arnis", "--output-dir", ".", "--bbox", "1,2,3,4", "--caves"]);
+        assert_eq!(biome_amounts(&args), BiomeAmounts::default());
+        assert_eq!(seed(&args), SEED);
+        assert!(args.cave_ores.is_none() && args.cave_datum_y.is_none());
+        let own = Args::parse_from([
+            "arnis",
+            "--output-dir",
+            ".",
+            "--bbox",
+            "1,2,3,4",
+            "--caves",
+            "--cave-seed",
+            "7",
+        ]);
+        assert_eq!(seed(&own), 7);
+        // A --cave-biomes value replaces the style's amount for its theme only.
+        let mixed = Args::parse_from([
+            "arnis",
+            "--bbox",
+            "1,2,3,4",
+            "--caves",
+            "--cave-style",
+            "vanilla",
+            "--cave-biomes",
+            "lush=150",
+        ]);
+        assert_eq!(
+            biome_amounts(&mixed),
+            BiomeAmounts {
+                lush: 1.5,
+                ..BiomeAmounts::uniform(0.0)
+            }
+        );
+    }
+
+    #[test]
+    fn a_jobs_pieces_share_the_first_floor_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(share_piece_datum(dir.path(), -960), -960);
+        assert_eq!(share_piece_datum(dir.path(), -848), -960);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(names.len(), 1, "no temporary file is left behind");
+    }
+
+    /// Two runs whose bedrock planes differ carve the same field once `--cave-datum-y` pins it.
+    #[test]
+    fn a_pinned_datum_ignores_the_floor() {
+        use crate::world_editor::{set_terrain_floor_y, DEFAULT_MIN_Y};
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        set_terrain_floor_y(-64);
+        set_datum_y(Some(-64));
+        let low = CaveGen::new(SEED);
+        set_terrain_floor_y(16);
+        let floor = terrain_floor_y();
+        let high = CaveGen::new(SEED);
+        let pinned = datum_y();
+        set_datum_y(None);
+        let unpinned = datum_y();
+        set_terrain_floor_y(DEFAULT_MIN_Y + 2);
+        assert_eq!(pinned, -64);
+        assert!(
+            unpinned == floor && floor > -64,
+            "unpinned, the datum is the floor"
+        );
+        for (x, y, z) in [(3, -40, 9), (40, 0, -17), (-75, 60, 33)] {
+            assert_eq!(
+                low.combined_density(x, y, z),
+                high.combined_density(x, y, z)
+            );
+        }
+    }
 
     /// The cave passes iterate these sets and apply world edits in whatever order they
     /// come out, so the iteration order IS part of the world. std's HashSet seeds its

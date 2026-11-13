@@ -495,7 +495,12 @@ pub fn fetch_elevation_data(
         source_pixels,
     } = raw;
     let (bbox_height_m, bbox_width_m) = geo_distance(bbox.min(), bbox.max());
-    let m_per_cell = (bbox_width_m / grid_width as f64 + bbox_height_m / grid_height as f64) * 0.5;
+    // A One World area smooths with the metres per cell of its frame, not of its own
+    // bbox, so both sides of a seam use the same sigma.
+    let m_per_cell = seam.filter(|s| s.pad > 0).map_or_else(
+        || (bbox_width_m / grid_width as f64 + bbox_height_m / grid_height as f64) * 0.5,
+        |_| 1.0 / scale,
+    );
     // Both passes target Earth DSM defects and actively damage altimetry: the outlier
     // gate is calibrated on Earth's elevation range, and a lunar mare is flat to within
     // metres so a real central peak reads as an anomaly to the MAD filter. PDS gaps are
@@ -764,7 +769,11 @@ fn fetch_raw_with_fallback(
     let last = chain.len() - 1;
     for (i, provider) in chain.iter().enumerate() {
         let name = provider.name();
-        match provider.fetch_raw(bbox, grid_width, grid_height) {
+        let fetched = provider.fetch_raw(bbox, grid_width, grid_height);
+        if fetched.is_err() {
+            crate::net::note_uncached(&format!("elevation ({name})"));
+        }
+        match fetched {
             Ok(raw) => {
                 if i < last {
                     let nan_ratio = compute_nan_ratio(&raw.heights_meters);

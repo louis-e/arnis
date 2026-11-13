@@ -9,6 +9,7 @@
 //! - `java` - Java Edition Anvil format saving
 //! - `bedrock` - Bedrock Edition .mcworld format saving
 
+pub(crate) mod blinear;
 pub(crate) mod common;
 pub(crate) mod java;
 mod luanti;
@@ -44,8 +45,6 @@ use fastnbt::{IntArray, Value};
 use fnv::{FnvHashMap, FnvHashSet};
 use serde::Serialize;
 use std::collections::{hash_map::Entry, HashMap};
-use std::fs::File;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -240,6 +239,9 @@ pub struct WorldEditor<'a> {
     /// The block each way's rails lie in, by way and column, shared with the tile editors
     /// so the trains can ride them; None when there are no trains.
     rail_heights: Option<RailHeights>,
+    /// Columns the ships and the walkers need read before their region is written out.
+    water_probe: Option<Arc<crate::water_probe::WaterProbe>>,
+    walk_probe: Option<Arc<crate::water_probe::WalkProbe>>,
     /// Regions already streamed to disk and evicted; writes to them are dropped
     /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
     flushed_regions: FnvHashSet<(i32, i32)>,
@@ -270,13 +272,15 @@ pub struct WorldEditor<'a> {
     /// Java: leave every chunk outside the area unwritten for the void generator,
     /// instead of filling it with the flat ground plane.
     void_world: bool,
+    /// Java: `Some(zstd level)` writes B_Linear regions instead of Anvil.
+    blinear_level: Option<i32>,
     /// Pre-generated voxy LOD cache, fed as regions are saved/flushed. Java only.
     voxy: Option<Arc<crate::voxy::VoxyWriter>>,
     /// Pre-generated Distant Horizons LOD database, fed the same way. Java only.
     dh: Option<Arc<crate::distant_horizons::DhWriter>>,
-    /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
-    /// Driven by the same toggle as external 3D models (`args.use_3d`).
-    place_schematics: bool,
+    /// The bundled schematic prop families (cars, boats, cranes, ...) to place.
+    /// Set from `Args::props`.
+    props: crate::structures::PropSet,
     /// Map preview accumulator, fed as regions are saved/flushed.
     preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
     game_mode: crate::args::GameMode,
@@ -306,6 +310,8 @@ pub struct WorldEditor<'a> {
     tree_slots: FnvHashSet<(i32, i32)>,
     /// Set for a One World run: merge into the world's existing regions.
     merge_into_existing: Option<crate::world_utils::WorldLayout>,
+    /// A piece of a job builds past its own area and writes only inside these block bounds.
+    write_bounds: Option<XZBBox>,
     metadata_extent: Option<(XZBBox, LLBBox)>,
 }
 
@@ -336,6 +342,8 @@ impl<'a> WorldEditor<'a> {
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
             rail_heights: None,
+            water_probe: None,
+            walk_probe: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -350,7 +358,8 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
-            place_schematics: true,
+            blinear_level: None,
+            props: crate::structures::PropSet::ALL,
             preview: None,
             voxy: None,
             dh: None,
@@ -368,6 +377,7 @@ impl<'a> WorldEditor<'a> {
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
+            write_bounds: None,
             metadata_extent: None,
         }
     }
@@ -404,6 +414,8 @@ impl<'a> WorldEditor<'a> {
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
             rail_heights: None,
+            water_probe: None,
+            walk_probe: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -418,7 +430,8 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             void_world: false,
-            place_schematics: true,
+            blinear_level: None,
+            props: crate::structures::PropSet::ALL,
             preview: None,
             voxy: None,
             dh: None,
@@ -436,6 +449,7 @@ impl<'a> WorldEditor<'a> {
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
+            write_bounds: None,
             metadata_extent: None,
         }
     }
@@ -472,6 +486,8 @@ impl<'a> WorldEditor<'a> {
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
             rail_heights: None,
+            water_probe: None,
+            walk_probe: None,
             flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
@@ -486,7 +502,8 @@ impl<'a> WorldEditor<'a> {
             luanti_game: game,
             bake_lighting: false,
             void_world: false,
-            place_schematics: true,
+            blinear_level: None,
+            props: crate::structures::PropSet::ALL,
             preview: None,
             voxy: None,
             dh: None,
@@ -504,12 +521,22 @@ impl<'a> WorldEditor<'a> {
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
             merge_into_existing: None,
+            write_bounds: None,
             metadata_extent: None,
         }
     }
 
     pub fn set_merge_into_existing(&mut self, layout: crate::world_utils::WorldLayout) {
         self.merge_into_existing = Some(layout);
+    }
+
+    pub fn set_write_bounds(&mut self, bounds: XZBBox) {
+        self.write_bounds = Some(bounds);
+    }
+
+    /// The block bounds whose chunks this editor writes.
+    pub(crate) fn write_bounds(&self) -> &XZBBox {
+        self.write_bounds.as_ref().unwrap_or(self.xzbbox)
     }
 
     pub fn set_metadata_extent(&mut self, xzbbox: XZBBox, llbbox: LLBBox) {
@@ -519,10 +546,10 @@ impl<'a> WorldEditor<'a> {
     pub(crate) fn region_write_mode(&self) -> java::RegionWriteMode {
         match self.merge_into_existing {
             Some(layout) => java::RegionWriteMode::Merge {
-                min_x: self.xzbbox.min_x(),
-                min_z: self.xzbbox.min_z(),
-                max_x: self.xzbbox.max_x(),
-                max_z: self.xzbbox.max_z(),
+                min_x: self.write_bounds().min_x(),
+                min_z: self.write_bounds().min_z(),
+                max_x: self.write_bounds().max_x(),
+                max_z: self.write_bounds().max_z(),
                 layout,
             },
             None => java::RegionWriteMode::Fresh,
@@ -616,6 +643,27 @@ impl<'a> WorldEditor<'a> {
         let ground = self.ground.as_deref()?;
         let coord = self.ground_point(x, z);
         crate::water_depth::lc_carved_bed(ground, field, coord, x, z, ground.level(coord))
+    }
+
+    /// Lowest water the opt-in beds can put next to (x, z), or None.
+    pub fn lowest_water_beside(&self, x: i32, z: i32) -> Option<i32> {
+        self.water_field.as_deref()?.lowest_water_beside(
+            self.ground.as_deref()?,
+            (self.ground_origin_x, self.ground_origin_z),
+            x,
+            z,
+        )
+    }
+
+    /// True where water surfaced at `water_y` stands two blocks or more over a neighbour.
+    pub fn water_stands_over_neighbour(&self, x: i32, z: i32, water_y: i32) -> bool {
+        self.ground.as_deref().is_some_and(|ground| {
+            [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .into_iter()
+                .any(|(dx, dz)| {
+                    ground.water_level(self.ground_point(x + dx, z + dz)) <= water_y - 2
+                })
+        })
     }
 
     /// The lowest `carved_bed` within `r` of (x, z): the bed a bore that wide has to clear.
@@ -817,6 +865,11 @@ impl<'a> WorldEditor<'a> {
     /// Enables baking per-chunk lighting into Java chunks.
     pub fn set_bake_lighting(&mut self, enabled: bool) {
         self.bake_lighting = enabled;
+    }
+
+    /// Java: write `r.X.Z.b_linear` at this zstd level instead of Anvil `.mca`.
+    pub fn set_blinear_level(&mut self, level: Option<i32>) {
+        self.blinear_level = level;
     }
 
     /// Java: write only the chunks the area touches and leave the rest to a void generator.
@@ -1276,14 +1329,14 @@ impl<'a> WorldEditor<'a> {
         out
     }
 
-    /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
-    pub fn set_place_schematics(&mut self, enabled: bool) {
-        self.place_schematics = enabled;
+    /// Choose which bundled schematic props (cars, boats, cranes, ...) are placed.
+    pub fn set_props(&mut self, props: crate::structures::PropSet) {
+        self.props = props;
     }
 
-    /// True if bundled schematic props should be placed (see `set_place_schematics`).
-    pub fn place_schematics(&self) -> bool {
-        self.place_schematics
+    /// True if this family of bundled schematic props should be placed.
+    pub fn place_prop(&self, prop: crate::structures::Prop) -> bool {
+        self.props.has(prop)
     }
 
     /// Returns the current world format
@@ -1343,6 +1396,7 @@ impl<'a> WorldEditor<'a> {
             self.region_write_mode(),
             (self.ground_origin_x, self.ground_origin_z),
         )
+        .with_blinear(self.blinear_level)
     }
 
     /// Evict one region (stream-to-disk): hand it to the background `worker` for
@@ -1358,6 +1412,9 @@ impl<'a> WorldEditor<'a> {
     ) -> Result<bool, String> {
         if self.format != WorldFormat::JavaAnvil {
             return Ok(false);
+        }
+        if self.world.regions.contains_key(&(rx, rz)) {
+            self.probe_region(rx, rz);
         }
         let Some(region) = self.world.regions.remove(&(rx, rz)) else {
             return Ok(false);
@@ -1395,17 +1452,31 @@ impl<'a> WorldEditor<'a> {
         self.get_ground_level(x, z) + y_offset
     }
 
+    /// The area's bbox, or in a piece of a job the whole job's.
+    fn anchor_bbox(&self) -> &LLBBox {
+        self.ground
+            .as_ref()
+            .and_then(|g| g.anchor())
+            .unwrap_or(&self.llbbox)
+    }
+
     /// Latitude/longitude the area's regional styles are taken at: the bbox centre.
     pub fn geo_anchor(&self) -> (f64, f64) {
+        let b = self.anchor_bbox();
         (
-            (self.llbbox.min().lat() + self.llbbox.max().lat()) / 2.0,
-            (self.llbbox.min().lng() + self.llbbox.max().lng()) / 2.0,
+            (b.min().lat() + b.max().lat()) / 2.0,
+            (b.min().lng() + b.max().lng()) / 2.0,
         )
+    }
+
+    /// Climate under a block when `--climate-mode per-position` reads it per block.
+    pub fn local_climate(&self, x: i32, z: i32) -> Option<crate::climate::Climate> {
+        self.ground.as_ref()?.local_climate(self.ground_point(x, z))
     }
 
     /// Köppen climate class of the generated area, taken at the bbox centre.
     pub fn climate(&self) -> crate::climate::Climate {
-        crate::climate::Climate::classify(&self.llbbox)
+        crate::climate::Climate::classify(self.anchor_bbox())
     }
 
     /// Get the effective ground level at a world coordinate.
@@ -1503,6 +1574,84 @@ impl<'a> WorldEditor<'a> {
     /// Shares the record of where rails were laid (across the main and tile editors).
     pub fn set_rail_heights(&mut self, heights: RailHeights) {
         self.rail_heights = Some(heights);
+    }
+
+    /// Has the columns the ships need read as each region is finished.
+    pub fn set_water_probe(&mut self, probe: Arc<crate::water_probe::WaterProbe>) {
+        self.water_probe = Some(probe);
+    }
+
+    /// Has the columns the walkers need read as each region is finished.
+    pub fn set_walk_probe(&mut self, probe: Arc<crate::water_probe::WalkProbe>) {
+        self.walk_probe = Some(probe);
+    }
+
+    /// Reads the probes' columns in region (rx, rz) while it is still in memory.
+    fn probe_region(&self, rx: i32, rz: i32) {
+        use crate::water_probe::{footing, walk_spot, water_column, water_span, Sample, Spot};
+        if let Some(probe) = &self.water_probe {
+            probe.read_region(rx, rz, |x, z, _| {
+                let spot = |y: i32| match self.world.get_block(x, y, z) {
+                    None => Spot::Open,
+                    Some(b) if b == WATER => Spot::Water,
+                    Some(b) if b == AIR || b == LILY_PAD => Spot::Open,
+                    Some(_) => Spot::Solid,
+                };
+                // Nothing but air over the highest block, so the search starts there.
+                let level = self.get_water_level(x, z);
+                let (low, high) = water_span(level);
+                self.world
+                    .highest_block_between(x, z, low, high)
+                    .map_or(Sample::default(), |top| water_column(spot, level, top))
+            });
+        }
+        if let Some(probe) = &self.walk_probe {
+            // Round a post too, for the walkers who step round it.
+            probe.read_region_round(
+                rx,
+                rz,
+                |x, z, level| {
+                    let spot = |y: i32| match self.world.get_block(x, y, z) {
+                        None => Spot::Open,
+                        Some(b) if b == WATER => Spot::Water,
+                        Some(b) => b.try_name().map_or(Spot::Open, |name| {
+                            // A slab is a bottom one unless its state says otherwise.
+                            let upper = |v: &Value| match v {
+                                Value::Compound(m) => {
+                                    matches!(m.get("type"), Some(Value::String(t)) if t != "bottom")
+                                }
+                                _ => false,
+                            };
+                            walk_spot(name, || match self.world.get_properties(x, y, z) {
+                                Some(p) => !upper(&p),
+                                None => !b.properties().is_some_and(|p| upper(&p)),
+                            })
+                        }),
+                    };
+                    footing(spot, level)
+                },
+                |f| f.post(),
+            );
+        }
+    }
+
+    /// Reads the probes' columns in every region still in memory, the ones never streamed out.
+    pub fn probe_resident(&self) {
+        let regions: Vec<(i32, i32)> = self
+            .water_probe
+            .iter()
+            .flat_map(|p| p.regions().collect::<Vec<_>>())
+            .chain(
+                self.walk_probe
+                    .iter()
+                    .flat_map(|p| p.regions().collect::<Vec<_>>()),
+            )
+            .collect();
+        for (rx, rz) in regions {
+            if self.world.regions.contains_key(&(rx, rz)) {
+                self.probe_region(rx, rz);
+            }
+        }
     }
 
     /// Records that `way` laid a rail in the block at `y` of column (x, z).
@@ -2568,6 +2717,19 @@ impl<'a> WorldEditor<'a> {
         self.world.set_block_if_absent(x, absolute_y, z, block)
     }
 
+    /// A flat world's filler plane in a column the drawn outline leaves out of the rectangle.
+    pub fn set_filler_outside_outline(&mut self, x: i32, z: i32) {
+        let p = XZPoint::new(x, z);
+        if !self.xzbbox.bounding_rect().contains(&p)
+            || self.xzbbox.contains(&p)
+            || self.is_region_flushed(x, z)
+        {
+            return;
+        }
+        self.world
+            .set_block_if_absent(x, common::base_chunk_y(), z, common::base_chunk_block());
+    }
+
     /// Returns true if a non-AIR block exists at the given absolute coordinates.
     #[inline]
     pub fn block_exists_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
@@ -2672,6 +2834,7 @@ impl<'a> WorldEditor<'a> {
             }
         );
 
+        self.probe_resident();
         // Compact sections before saving: collapses uniform mixed sections back to
         // Uniform and repacks any overflowed direct sections that fit a palette again.
         self.world.compact_sections();
@@ -2829,14 +2992,6 @@ impl<'a> WorldEditor<'a> {
     pub(crate) fn save_metadata(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let metadata_path = self.world_dir.join("metadata.json");
 
-        let mut file = File::create(&metadata_path).map_err(|e| {
-            format!(
-                "Failed to create metadata file at {}: {}",
-                metadata_path.display(),
-                e
-            )
-        })?;
-
         let (xzbbox, llbbox) = match &self.metadata_extent {
             Some((xz, ll)) => (xz.clone(), *ll),
             None => (self.xzbbox.clone(), self.llbbox),
@@ -2859,8 +3014,9 @@ impl<'a> WorldEditor<'a> {
         let contents = serde_json::to_string(&metadata)
             .map_err(|e| format!("Failed to serialize metadata to JSON: {}", e))?;
 
-        write!(&mut file, "{}", contents)
-            .map_err(|e| format!("Failed to write metadata to file: {}", e))?;
+        // Atomic, since the pieces of a job write it side by side.
+        crate::world_utils::replace_file_atomically(&metadata_path, contents.as_bytes())
+            .map_err(|e| format!("Failed to write metadata to file: {e}"))?;
 
         Ok(())
     }
@@ -3399,6 +3555,45 @@ mod eviction_guard_tests {
         assert!(!editor.block_exists_absolute(41, 1, 10));
         assert!(editor.block_exists_absolute(42, 1, 10), "halo wood passes");
         assert!(editor.block_exists_absolute(43, 1, 10), "halo leaves pass");
+    }
+
+    #[test]
+    fn a_drawn_outline_keeps_every_write_inside_it() {
+        // The south-west triangle of a 64x64 square, as a tile editor sees it too.
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63)
+            .unwrap()
+            .with_outline(vec![vec![vec![(0.0, 0.0), (0.0, 63.0), (63.0, 63.0)]]])
+            .unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        // The filler height is a process global other tests move.
+        let _g = FLOOR_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        for bbox in [xzbbox.clone(), xzbbox.crop(0, 0, 40, 63).unwrap()] {
+            let mut editor = WorldEditor::new(std::env::temp_dir(), &bbox, llbbox);
+            let (inside, outside) = ((5, 50), (30, 5));
+            for (x, z) in [inside, outside] {
+                editor.set_block_absolute(STONE, x, 1, z, None, None);
+                editor.set_block_if_absent_absolute(STONE, x, 2, z);
+                editor.fill_column_absolute(STONE, x, z, 3, 5, false);
+                editor.fill_column_with_absolute(x, z, 6, 7, |_| STONE);
+            }
+            for y in 1..=7 {
+                assert!(editor.block_exists_absolute(inside.0, y, inside.1), "y {y}");
+                assert!(
+                    !editor.block_exists_absolute(outside.0, y, outside.1),
+                    "y {y}"
+                );
+            }
+            // The flat filler goes only where the outline leaves a column out.
+            editor.set_filler_outside_outline(inside.0, inside.1);
+            editor.set_filler_outside_outline(outside.0, outside.1);
+            editor.set_filler_outside_outline(70, 5);
+            let y = base_chunk_y();
+            assert!(!editor.block_exists_absolute(70, y, 5));
+            assert!(editor.block_exists_absolute(outside.0, y, outside.1));
+            if !(1..=7).contains(&y) {
+                assert!(!editor.block_exists_absolute(inside.0, y, inside.1));
+            }
+        }
     }
 
     #[test]

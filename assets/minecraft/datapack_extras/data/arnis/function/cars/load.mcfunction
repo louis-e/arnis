@@ -8,4 +8,3 @@ scoreboard players set #45 arnis 45
 scoreboard players set #1000 arnis 1000
 function arnis:cars/network
 execute store result score #segs arnis.car run data get storage arnis:cars seg
-execute unless score #pending arnis.car matches 0.. run scoreboard players set #pending arnis.car 0
