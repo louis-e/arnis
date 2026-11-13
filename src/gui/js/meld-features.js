@@ -1406,7 +1406,7 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     box.className = 'projects-thumb is-empty';
     const path = w.world_path || `${savePath()}/${w.name}`;
     const key = `${path}|${w.modified_ms || 0}`;
-    const show = (url) => {
+    const fill = (url) => {
       if (!url) return;
       const img = document.createElement('img');
       img.alt = '';
@@ -1420,9 +1420,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
         try { url = w.preview === false ? null : await invoke('gui_world_thumbnail', { worldPath: path }); } catch (_) { /* a world without an image */ }
         thumbs.set(key, url || null);
       }
-      show(thumbs.get(key));
+      fill(thumbs.get(key));
     };
-    if (thumbs.has(key)) show(thumbs.get(key));
+    if (thumbs.has(key)) fill(thumbs.get(key));
     else if (seen) { loaders.set(box, load); seen.observe(box); } else load();
     return box;
   };
@@ -1517,13 +1517,22 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     return input;
   }
 
-  // New One World: a name card heads the list until it is used or cancelled, refreshes included.
-  // The engine checks the name; the world itself is made by the first Start.
+  // New One World: a name card heads the list, refreshes included, until used or cancelled.
   const newButton = el('projects-new');
   let draft = null;
   let draftInput = null;
   let shown = [];
-  const show = () => list.replaceChildren(...(draft ? [draft] : []), ...shown);
+  const show = () => {
+    // The card stays put while the rows under it change: moving it would take its focus.
+    if (!draft || list.firstElementChild !== draft) return list.replaceChildren(...(draft ? [draft] : []), ...shown);
+    while (draft.nextElementSibling) draft.nextElementSibling.remove();
+    draft.after(...shown);
+  };
+  const errorLine = (s) => {
+    const e = text('projects-error', s);
+    e.setAttribute('role', 'alert');
+    return e;
+  };
   const newOff = () => !savePath() || !available() || busy();
   const closeDraft = () => {
     if (!draft) return;
@@ -1541,7 +1550,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     input.value = '';
     input.placeholder = t('projects_new_placeholder', 'Name of the new One World');
     input.setAttribute('aria-label', t('projects_new', 'New One World'));
-    const err = text('projects-error', '');
+    const err = errorLine('');
+    err.id = 'projects-new-error';
+    input.setAttribute('aria-describedby', err.id);
     const make = button('projects_new_create', 'Create', false, () => submit());
     const dismiss = () => { closeDraft(); newButton?.focus?.(); };
     const cancel = button('one_world_confirm_cancel', 'Cancel', false, dismiss);
@@ -1587,9 +1598,13 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
     draftInput?.focus?.();
   });
 
+  // Only the latest listing is drawn: a Delete or rename refreshes from two places.
+  let listing = 0;
   async function refresh() {
+    const seq = ++listing;
     let worlds = [];
     try { worlds = savePath() ? (await invoke('gui_list_one_worlds', { savePath: savePath() })) || [] : []; } catch (e) { console.error(e); }
+    if (seq !== listing) return;
     // The cards drawn before go: their pending thumbnails with them.
     seen?.disconnect();
     loaders.clear();
@@ -1665,11 +1680,12 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
           await invoke('gui_trash_one_world', { savePath: savePath(), worldName: w.name });
         } catch (e) {
           del.disabled = false;
-          row.append(text('projects-error', String((e && e.message) || e)));
+          row.append(errorLine(String((e && e.message) || e)));
           return;
         }
         if (trashed) trashed(w.name);
         await refresh();
+        newButton?.focus?.();
       }, 1500);
       acts.push(del);
       const actions = document.createElement('div');

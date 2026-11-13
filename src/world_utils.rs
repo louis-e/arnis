@@ -1333,8 +1333,7 @@ pub fn rename_world(save: &Path, old: &str, new: &str) -> Result<String, String>
     Ok(new.to_string())
 }
 
-/// Hands the One World folder `name` in `save` to `remove` (the window moves it to the system
-/// trash). Refused for anything but a One World, and while Minecraft or a run holds it.
+/// Hands the One World `name` in `save` to `remove`; refused for other folders and while held.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn remove_one_world(
     save: &Path,
@@ -1348,15 +1347,20 @@ pub fn remove_one_world(
     {
         return Err(format!("{name} is not a One World in this folder."));
     }
-    // Released before the move: Windows cannot move a folder with a file open in it.
-    drop(SessionLock::acquire(&world).map_err(|_| {
+    let lock = SessionLock::acquire(&world).map_err(|_| {
         "The world is in use; close it in Minecraft or wait for the run.".to_string()
-    })?);
-    remove(&world)
+    })?;
+    // Held through the move so no run starts in it; on Windows an open file would pin the folder.
+    if cfg!(windows) {
+        drop(lock);
+        return remove(&world);
+    }
+    let moved = remove(&world);
+    drop(lock);
+    moved
 }
 
-/// The folder a new One World typed as `raw` gets in `save`. Refused when the name would not
-/// land on disk as typed, or a world or folder already has it.
+/// The folder for a new One World typed as `raw`: it must land on disk as typed and be free.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn new_world_name(save: &Path, raw: &str) -> Result<String, String> {
     let name = raw.trim();

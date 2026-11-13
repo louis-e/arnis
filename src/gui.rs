@@ -1556,8 +1556,7 @@ fn gui_new_one_world_name(save_path: String, name: String) -> Result<String, Str
     crate::world_utils::new_world_name(Path::new(save_path.trim()), &name)
 }
 
-/// Moves a One World in the saves folder to the system trash (the Recycle Bin on Windows),
-/// where it can still be restored; refused while Live, Minecraft or a run has it.
+/// Moves a One World to the system trash, where it can be restored; refused while it is in use.
 #[tauri::command(async)]
 fn gui_trash_one_world(save_path: String, world_name: String) -> Result<(), String> {
     let save = PathBuf::from(save_path.trim());
@@ -1566,8 +1565,7 @@ fn gui_trash_one_world(save_path: String, world_name: String) -> Result<(), Stri
     }
     crate::world_utils::remove_one_world(&save, &world_name, |world| {
         let world = world.to_path_buf();
-        // A thread of its own: on Windows the trash crate sets up COM for its thread and panics
-        // when a pooled thread already has it set up another way.
+        // Own thread: on Windows the trash crate panics if a pooled thread set up COM otherwise.
         std::thread::spawn(move || trash_world(&world))
             .join()
             .unwrap_or_else(|_| Err("Could not move the world to the trash.".to_string()))
