@@ -34,7 +34,7 @@
   "license_and_credits": "라이선스 및 크레딧",
   "placeholder_bbox": "형식: lat,lng,lat,lng",
   "placeholder_floodfill": "초",
-  "placeholder_ground": "지면 높이",
+  "placeholder_ground": "지면 레벨",
   "language": "언어",
   "map_theme": "지도 테마",
   "custom_map_source": "사용자 지정 지도 소스",
