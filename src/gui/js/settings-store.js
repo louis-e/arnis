@@ -523,7 +523,8 @@ function injectRevertButtons(localization) {
       revert(entry);
     });
 
-    slot.appendChild(button);
+    // Before a "New!" badge: WebKit kept the heading's sibling-based padding stale when one went.
+    slot.insertBefore(button, slot.querySelector(':scope > .new-badge'));
   }
 }
 

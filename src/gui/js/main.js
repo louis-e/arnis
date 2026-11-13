@@ -11,6 +11,7 @@ import {
 } from './settings-store.js';
 import { initPreviews } from './preview-popover.js';
 import { initSettingsLayout, syncSettingsLayout } from './settings-layout.js';
+import { initNewBadges } from './new-badges.js';
 import {
   t as oneWorldText,
   initMeldFeatures, refreshLayout, meldFlags, cellsKey, generationTarget, generationShapes, progressText, holdsNotice,
@@ -87,6 +88,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
   initSettingsStore({ resetWorldFormat: () => setWorldFormat('java') });
+  initNewBadges();
   syncDiscordStatus();
   initOfflineModeSync();
   // The store's restore fired the toggle's change event before the save path
@@ -209,6 +211,9 @@ async function applyLocalization(localization) {
   });
   document.querySelectorAll("[data-localize-aria-label]").forEach((el) => {
     el.setAttribute("aria-label", loc(el.dataset.localizeAriaLabel, el.getAttribute("aria-label")));
+  });
+  document.querySelectorAll("[data-localize-alt]").forEach((el) => {
+    el.alt = loc(el.dataset.localizeAlt, el.alt);
   });
 
   // settings-store.js creates these buttons and owns their text.
