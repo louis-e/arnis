@@ -3,12 +3,13 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 
-const node = () => ({ children: [], listeners: {}, setAttribute() {}, addEventListener(e, f) { this.listeners[e] = f; }, append(...c) { this.children.push(...c); }, replaceChildren(...c) { this.children = c; } });
+const node = () => ({ children: [], listeners: {}, attrs: {}, className: '', classList: { add() {}, remove() {} }, closest: () => null, getAttribute(k) { return this.attrs[k] ?? null; }, setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; }, addEventListener(e, f) { this.listeners[e] = f; }, append(...c) { c.forEach((k) => { k.parent = this; }); this.children.push(...c); }, remove() { this.parent.children = this.parent.children.filter((k) => k !== this); }, replaceChildren(...c) { this.children = c; }, querySelector(sel) { return this.children.find((c) => sel === `.${c.className}`) || null; } });
 const nodes = new Map();
 globalThis.document = { createElement: node, getElementById: (id) => (nodes.has(id) ? nodes.get(id) : (nodes.set(id, node()), nodes.get(id))) };
 const store = new Map();
 globalThis.localStorage = { setItem: (k, v) => store.set(k, v), getItem: (k) => store.get(k) ?? null };
 globalThis.window = {};
+await import('../../src/gui/js/piece-style.js');
 const { initProjects } = await import('../../src/gui/js/meld-features.js');
 
 const worlds = [
@@ -21,23 +22,54 @@ const refresh = initProjects({ invoke: async () => worlds, savePath: () => 's', 
 await refresh();
 const rows = document.getElementById('projects-list').children;
 const flat = (r) => r.children.flatMap((c) => (c.className === 'projects-actions' ? c.children : [c])); // the buttons sit in one box
+const btn = (r, label) => flat(r).find((c) => c.textContent === label);
 assert.strictEqual(rows.length, 3, 'three entries, three rows');
 const cells = (r) => r.children.map((c) => c.textContent);
 assert.ok(cells(rows[0]).includes('Areas: 3'));
 assert.ok(cells(rows[1]).includes('Scale 1:2'));
 assert.ok(rows[1].children.some((c) => c.className.includes('is-warn')), 'a different scale is flagged');
-assert.ok(cells(rows[2]).includes('In use') && flat(rows[2]).at(-1).disabled, 'a locked world cannot be opened');
+assert.ok(cells(rows[2]).includes('In use') && btn(rows[2], 'Open').disabled && btn(rows[2], 'Delete').disabled, 'a locked world cannot be opened or deleted');
 
-await flat(rows[1]).at(-2).listeners.click();
+await btn(rows[1], 'Open').listeners.click();
 assert.strictEqual(store.get('arnis-one-world-name'), 'Paris');
 assert.deepStrictEqual(opened.at(-1), ['Paris', false]);
-await flat(rows[0]).at(-1).listeners.click();
+await btn(rows[0], 'Expand').listeners.click();
 assert.deepStrictEqual(opened.at(-1), ['Arnis One World', true], 'Expand opens then expands');
 
 let ok = false;
 const off = initProjects({ invoke: async () => worlds, savePath: () => 's', scale: () => 1, open: async () => {}, available: () => ok });
 await off();
-assert.ok(flat(document.getElementById('projects-list').children[0]).at(-1).disabled, 'no One World here: Open is disabled');
+const first = document.getElementById('projects-list').children[0];
+assert.ok(btn(first, 'Expand').disabled, 'no One World here: Open is disabled');
+assert.ok(!btn(first, 'Delete').disabled, 'a world can still be deleted');
+
+// Delete: two presses (arm, confirm) move the world to the trash; a refusal shows in its row.
+const asked = [];
+const gone = [];
+let refuse = 'The world is in use; close it in Minecraft or wait for the run.';
+const del = initProjects({
+  invoke: async (cmd, args) => {
+    if (cmd !== 'gui_trash_one_world') return worlds;
+    asked.push(args);
+    if (refuse) throw refuse;
+  },
+  savePath: () => 's', scale: () => 1, open: async () => {}, trashed: (n) => gone.push(n),
+});
+await del();
+const paris = () => document.getElementById('projects-list').children[1];
+const press = async () => { await btn(paris(), 'Delete').listeners.click({ detail: 0 }); await new Promise((r) => setTimeout(r, 0)); };
+await press();
+assert.strictEqual(asked.length, 0, 'one press only arms it');
+await press();
+assert.deepStrictEqual(asked, [{ savePath: 's', worldName: 'Paris' }]);
+assert.deepStrictEqual(gone, [], 'refused: the window keeps the world');
+assert.ok(paris().children.some((c) => c.className === 'projects-error' && c.textContent === refuse), 'the reason shows');
+assert.ok(!btn(paris(), 'Delete').disabled, 'and it can be tried again');
+refuse = null;
+await press();
+await press();
+assert.deepStrictEqual(gone, ['Paris'], 'moved: the window forgets it');
+assert.strictEqual(asked.length, 2);
 
 worlds.length = 0;
 await refresh();

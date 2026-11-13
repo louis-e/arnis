@@ -800,6 +800,8 @@
   "projects_resume": "متابعة",
   "projects_rebuild": "إعادة البناء",
   "projects_rename": "إعادة التسمية",
+  "projects_delete": "حذف",
+  "projects_delete_tip": "اضغط مطولًا لنقل هذا العالم إلى سلة المهملات. يمكن استعادته من هناك.",
   "world_rename_tip": "انقر لإعادة تسمية هذا العالم",
   "map_tool_cells": "تحديد الخلايا",
   "map_tool_cells_desc": "انقر على خلية أو اسحب مربعًا. Shift أو Ctrl للإضافة. النقر بالزر الأيمن للإجراءات. Esc لإلغاء التحديد.",

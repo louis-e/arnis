@@ -800,6 +800,8 @@
   "projects_resume": "Wznów",
   "projects_rebuild": "Zbuduj ponownie",
   "projects_rename": "Zmień nazwę",
+  "projects_delete": "Usuń",
+  "projects_delete_tip": "Przytrzymaj, aby przenieść ten świat do kosza. Można go stamtąd przywrócić.",
   "world_rename_tip": "Kliknij, aby zmienić nazwę tego świata",
   "map_tool_cells": "Zaznacz komórki",
   "map_tool_cells_desc": "Kliknij komórkę lub przeciągnij ramkę. Shift lub Ctrl dodaje. Prawy przycisk pokazuje działania. Esc czyści zaznaczenie.",

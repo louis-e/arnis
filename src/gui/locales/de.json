@@ -800,6 +800,8 @@
   "projects_resume": "Fortsetzen",
   "projects_rebuild": "Neu bauen",
   "projects_rename": "Umbenennen",
+  "projects_delete": "Löschen",
+  "projects_delete_tip": "Gedrückt halten, um die Welt in den Papierkorb zu verschieben. Dort lässt sie sich wiederherstellen.",
   "world_rename_tip": "Zum Umbenennen dieser Welt klicken",
   "map_tool_cells": "Zellen auswählen",
   "map_tool_cells_desc": "Zelle anklicken oder Rahmen aufziehen. Umschalt oder Strg fügt hinzu. Rechtsklick für Aktionen. Esc hebt die Auswahl auf.",

@@ -800,6 +800,8 @@
   "projects_resume": "Reanudar",
   "projects_rebuild": "Reconstruir",
   "projects_rename": "Cambiar nombre",
+  "projects_delete": "Eliminar",
+  "projects_delete_tip": "Mantén pulsado para mover este mundo a la papelera. Desde allí se puede restaurar.",
   "world_rename_tip": "Haz clic para renombrar este mundo",
   "map_tool_cells": "Seleccionar celdas",
   "map_tool_cells_desc": "Haz clic en una celda o arrastra un recuadro. Mayús o Ctrl añade. Clic derecho para acciones. Esc borra la selección.",

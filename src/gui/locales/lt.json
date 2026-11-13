@@ -800,6 +800,8 @@
   "projects_resume": "Tęsti",
   "projects_rebuild": "Perkurti",
   "projects_rename": "Pervardyti",
+  "projects_delete": "Ištrinti",
+  "projects_delete_tip": "Palaikykite, kad perkeltumėte šį pasaulį į šiukšlinę. Iš ten jį galima atkurti.",
   "world_rename_tip": "Spustelėk, kad pervardytum šį pasaulį",
   "map_tool_cells": "Pasirinkti langelius",
   "map_tool_cells_desc": "Spustelėkite langelį arba nutempkite rėmelį. Shift arba Ctrl prideda. Dešinysis pelės mygtukas rodo veiksmus. Esc išvalo pasirinkimą.",

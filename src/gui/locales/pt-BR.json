@@ -800,6 +800,8 @@
   "projects_resume": "Retomar",
   "projects_rebuild": "Reconstruir",
   "projects_rename": "Renomear",
+  "projects_delete": "Excluir",
+  "projects_delete_tip": "Segure para mover este mundo para a lixeira. Ele pode ser restaurado de lá.",
   "world_rename_tip": "Clique para renomear este mundo",
   "map_tool_cells": "Selecionar células",
   "map_tool_cells_desc": "Clique em uma célula ou arraste uma caixa. Shift ou Ctrl adiciona. Botão direito para ações. Esc limpa a seleção.",

@@ -1552,6 +1552,7 @@ function initSettings() {
     busy: () => !generationButtonEnabled || bakeRunning,
     canRun: () => !isLiveMode(),
     renamed: (from, to) => worldRenamed(from, to),
+    trashed: (name) => worldTrashed(name),
     open: async (name, expand) => {
       oneWorldName = name;
       oneWorldPicked = true;
@@ -3256,6 +3257,15 @@ function worldRenamed(from, to) {
     localStorage.setItem('arnis-one-world-picked', '1');
   }
   if (worldLabelName === from) setWorldNameLabel(to);
+  oneWorldOverlayKey = null;
+  refreshOneWorldState();
+}
+
+// A One World moved to the trash from Projects: nothing in the window points at it any more.
+function worldTrashed(name) {
+  if (inSavesFolder(worldPath) && basenameFromPath(worldPath) === name) worldPath = "";
+  if (oneWorldName === name) setOneWorldName('');
+  if (worldLabelName === name) setWorldNameLabel("");
   oneWorldOverlayKey = null;
   refreshOneWorldState();
 }

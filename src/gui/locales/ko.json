@@ -800,6 +800,8 @@
   "projects_resume": "이어서 하기",
   "projects_rebuild": "다시 빌드",
   "projects_rename": "이름 바꾸기",
+  "projects_delete": "삭제",
+  "projects_delete_tip": "길게 눌러 이 월드를 휴지통으로 옮깁니다. 휴지통에서 복원할 수 있습니다.",
   "world_rename_tip": "클릭하여 이 월드 이름 바꾸기",
   "map_tool_cells": "셀 선택",
   "map_tool_cells_desc": "셀을 클릭하거나 상자를 드래그하세요. Shift 또는 Ctrl로 추가합니다. 우클릭으로 작업을 엽니다. Esc로 선택을 해제합니다.",

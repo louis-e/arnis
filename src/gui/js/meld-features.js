@@ -1366,7 +1366,7 @@ export async function resumeJob(job, rebuild, { select = selectBounds, current, 
 // job data from the engine) only Open and Expand are offered.
 // `busy()`: a run is under way, so no world is picked, renamed or run. `canRun()`: Resume and
 // Rebuild can start a run here (not in Live).
-export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null }) {
+export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null }) {
   const list = el('projects-list');
   let view = readView();
   const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
@@ -1584,6 +1584,24 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       acts.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
       acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
       if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position.'); });
+      // Held like Rebuild; the world goes to the system trash, where it can still be restored.
+      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy()), () => {});
+      del.classList.add('projects-hold', 'projects-delete');
+      del.title = t('projects_delete_tip', 'Hold to move this world to the trash. It can be restored from there.');
+      globalThis.arnisHold(del, async () => {
+        del.disabled = true;
+        row.querySelector('.projects-error')?.remove();
+        try {
+          await invoke('gui_trash_one_world', { savePath: savePath(), worldName: w.name });
+        } catch (e) {
+          del.disabled = false;
+          row.append(text('projects-error', String((e && e.message) || e)));
+          return;
+        }
+        if (trashed) trashed(w.name);
+        await refresh();
+      }, 1500);
+      acts.push(del);
       const actions = document.createElement('div');
       actions.className = 'projects-actions';
       actions.append(...acts);

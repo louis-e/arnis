@@ -800,6 +800,8 @@
   "projects_resume": "Reprendre",
   "projects_rebuild": "Reconstruire",
   "projects_rename": "Renommer",
+  "projects_delete": "Supprimer",
+  "projects_delete_tip": "Maintenez pour placer ce monde dans la corbeille. Il peut y être restauré.",
   "world_rename_tip": "Cliquez pour renommer ce monde",
   "map_tool_cells": "Sélectionner des cellules",
   "map_tool_cells_desc": "Cliquez sur une cellule ou tracez un cadre. Maj ou Ctrl ajoute. Clic droit pour les actions. Échap efface la sélection.",

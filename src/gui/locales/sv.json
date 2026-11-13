@@ -800,6 +800,8 @@
   "projects_resume": "Återuppta",
   "projects_rebuild": "Bygg om",
   "projects_rename": "Byt namn",
+  "projects_delete": "Ta bort",
+  "projects_delete_tip": "Håll in för att flytta världen till papperskorgen. Den kan återställas därifrån.",
   "world_rename_tip": "Klicka för att byta namn på världen",
   "map_tool_cells": "Välj celler",
   "map_tool_cells_desc": "Klicka på en cell eller dra en ruta. Skift eller Ctrl lägger till. Högerklicka för åtgärder. Esc rensar markeringen.",

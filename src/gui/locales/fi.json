@@ -800,6 +800,8 @@
   "projects_resume": "Jatka",
   "projects_rebuild": "Rakenna uudelleen",
   "projects_rename": "Nimeä uudelleen",
+  "projects_delete": "Poista",
+  "projects_delete_tip": "Pidä painettuna siirtääksesi maailman roskakoriin. Sieltä sen voi palauttaa.",
   "world_rename_tip": "Napsauta nimeämään tämä maailma uudelleen",
   "map_tool_cells": "Valitse ruutuja",
   "map_tool_cells_desc": "Napsauta ruutua tai vedä laatikko. Vaihto tai Ctrl lisää. Hiiren oikea painike avaa toiminnot. Esc tyhjentää valinnan.",

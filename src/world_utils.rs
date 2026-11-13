@@ -1333,6 +1333,28 @@ pub fn rename_world(save: &Path, old: &str, new: &str) -> Result<String, String>
     Ok(new.to_string())
 }
 
+/// Hands the One World folder `name` in `save` to `remove` (the window moves it to the system
+/// trash). Refused for anything but a One World, and while Minecraft or a run holds it.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn remove_one_world(
+    save: &Path,
+    name: &str,
+    remove: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let world = save.join(name);
+    if bad_world_name(name).is_some()
+        || !world.join("level.dat").is_file()
+        || !crate::one_world::Manifest::path_in(&world).is_file()
+    {
+        return Err(format!("{name} is not a One World in this folder."));
+    }
+    // Released before the move: Windows cannot move a folder with a file open in it.
+    drop(SessionLock::acquire(&world).map_err(|_| {
+        "The world is in use; close it in Minecraft or wait for the run.".to_string()
+    })?);
+    remove(&world)
+}
+
 /// `Data.LevelName` of a world's `level.dat`.
 pub(crate) fn level_name(world: &Path) -> Option<String> {
     let Ok(Value::Compound(root)) = read_gzip_nbt(&world.join("level.dat")) else {
@@ -1599,6 +1621,37 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_one_world_that_is_not_in_use_is_removed() {
+        let save = tempfile::tempdir().unwrap();
+        let make = |name: &str, one_world: bool| {
+            let world = save.path().join(name);
+            fs::create_dir_all(&world).unwrap();
+            fs::write(world.join("level.dat"), b"x").unwrap();
+            if one_world {
+                fs::write(crate::one_world::Manifest::path_in(&world), b"{}").unwrap();
+            }
+            world
+        };
+        let paris = make("Paris", true);
+        make("Plain", false);
+        let mut removed = Vec::new();
+        let mut remove = |name: &str| {
+            remove_one_world(save.path(), name, |w| {
+                removed.push(w.to_path_buf());
+                Ok(())
+            })
+        };
+        for refused in ["Plain", "Missing", "..", "../Paris", "Paris/", ""] {
+            assert!(remove(refused).is_err(), "{refused:?} must be refused");
+        }
+        let held = SessionLock::acquire(&paris).unwrap();
+        assert!(remove("Paris").unwrap_err().contains("in use"));
+        drop(held);
+        remove("Paris").unwrap();
+        assert_eq!(removed, [paris]);
+    }
 
     /// A rename moves the folder and the LevelName together, and refuses a clash, path
     /// characters, reserved names and a world in use.

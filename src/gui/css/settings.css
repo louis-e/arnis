@@ -1499,6 +1499,15 @@ body.meld-off .meld-only {
   background-size: 50% 100%;
 }
 
+.settings-page .projects-row .settings-action-button.projects-delete {
+  background-image: linear-gradient(rgba(250, 120, 120, 0.35), rgba(250, 120, 120, 0.35));
+}
+
+.settings-page .projects-row .settings-action-button.projects-delete:not(:disabled):hover {
+  border-color: #fa7878;
+  color: #fa7878;
+}
+
 .settings-page .projects-empty {
   opacity: 0.75;
 }

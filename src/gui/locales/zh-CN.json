@@ -800,6 +800,8 @@
   "projects_resume": "继续",
   "projects_rebuild": "重建",
   "projects_rename": "重命名",
+  "projects_delete": "删除",
+  "projects_delete_tip": "长按将此世界移到回收站，可从那里恢复。",
   "world_rename_tip": "点击重命名此世界",
   "map_tool_cells": "选择单元格",
   "map_tool_cells_desc": "点击单元格或拖出方框。Shift 或 Ctrl 可追加。右键打开操作。Esc 取消选择。",
