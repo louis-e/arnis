@@ -1,6 +1,8 @@
 // The "Advanced features" switch (Settings > Advanced) and the flags it sends. Off, every
 // control marked meld-only is hidden and generation gets no flags, so it runs as stock.
 
+import { languageTag } from './language.js';
+
 const el = (id) => document.getElementById(id);
 const value = (id) => (el(id) ? el(id).value.trim() : '');
 const choice = (id) => {
@@ -32,7 +34,7 @@ export const tp = (key, fallback, n, lang) => {
   let cat = n === 1 ? 'one' : 'other';
   try {
     lang ||= globalThis.localStorage?.getItem('arnis-language') || globalThis.navigator?.language || 'en';
-    cat = new Intl.PluralRules(lang).select(n);
+    cat = new Intl.PluralRules(languageTag(lang)).select(n);
   } catch {}
   const L = window.localization || {};
   const k = [`${key}_${cat}`, `${key}_other`, key].find((x) => L[x]);

@@ -1,5 +1,5 @@
 import { licenseText } from './license.js';
-import { fetchLanguage, invalidJSON, matchLanguage } from './language.js';
+import { fetchLanguage, invalidJSON, languageTag, matchLanguage } from './language.js';
 import { renderMarkdown, pickAssetForPlatform } from './update.js';
 import {
   initSettingsStore,
@@ -468,9 +468,7 @@ function renderReleaseMeta(metaEl, info, rel) {
 // The interface language as a locale for dates and numbers, rather than the
 // system one.
 function interfaceLocale() {
-  const lang = localStorage.getItem("arnis-language") || navigator.language;
-  // Arnis files Ukrainian under "ua"; the language tag is "uk".
-  return lang === "ua" ? "uk" : lang;
+  return languageTag(localStorage.getItem("arnis-language") || navigator.language);
 }
 
 function formatReleaseDate(iso) {

@@ -5,6 +5,9 @@ const DEFAULT_LOCALE_PATH = `./locales/en-US.json`;
 // Browser tags of languages Arnis files under another code.
 const LANGUAGE_ALIASES = { uk: 'ua' };
 
+// The language tag of an Arnis language code, for Intl: Ukrainian is filed as "ua", its tag is "uk".
+export const languageTag = (code) => (code === 'ua' ? 'uk' : code);
+
 // Chinese as written in Taiwan, Hong Kong and Macau, in the traditional script zh-CN is not.
 const TRADITIONAL_CHINESE = /^zh-(hant|tw|hk|mo)\b/i;
 
