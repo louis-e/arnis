@@ -57,6 +57,10 @@ pub const STOPPED: &str = "Stopped.";
 pub const PARTIAL: &str =
     "The chosen pieces are built; the others wait for the next run of this job.";
 
+/// Opens the status line a resumed job sends when its settings differ from the ones it was
+/// started with, followed by the changed options' names; the window picks it out by this.
+pub const SETTINGS_CHANGED: &str = "Settings changed since this job started:";
+
 /// One writer at a time to the manifest, which pieces finish into side by side.
 static MANIFEST: Mutex<()> = Mutex::new(());
 
@@ -413,12 +417,19 @@ impl Job {
                         .collect()
                 });
                 let changed = changed_options(&started, options);
-                if !changed.is_empty() {
+                if let Some(notice) = settings_changed_notice(&changed) {
                     eprintln!(
                         "Warning: this job was started with other settings ({}); the pieces \
                          still to build use the new ones.",
                         changed.join(", ")
                     );
+                    // The window has no stderr. A prewarm builds nothing, so it has no news.
+                    if reserve {
+                        crate::progress::emit_gui_progress_update(
+                            crate::progress::MESSAGE_ONLY,
+                            &notice,
+                        );
+                    }
                 }
                 (a, slots)
             }
@@ -1515,6 +1526,11 @@ const PINNED: &[&str] = &[
     "--projection",
 ];
 
+/// The status line for a resume that `changed` these options; none when nothing changed.
+fn settings_changed_notice(changed: &[String]) -> Option<String> {
+    (!changed.is_empty()).then(|| format!("{SETTINGS_CHANGED} {}", changed.join(", ")))
+}
+
 /// The names of the options `a` and `b` disagree on, other than pinned ones and the spawn.
 fn changed_options(a: &[String], b: &[String]) -> Vec<String> {
     let only = |x: &[String], y: &[String]| -> Vec<String> {
@@ -2304,6 +2320,14 @@ second
             "26.1",
         ]);
         assert!(changed_options(&first, &pinned).is_empty());
+        assert_eq!(settings_changed_notice(&[]), None);
+        // The window sends its switches as `--name=value`: the notice names the changed ones.
+        let was = opts(&["--winter=false", "--river-bed=off", "--interior=true"]);
+        let now = opts(&["--winter=true", "--river-bed=v1", "--interior=true"]);
+        assert_eq!(
+            settings_changed_notice(&changed_options(&was, &now)).unwrap(),
+            "Settings changed since this job started: --river-bed, --winter"
+        );
         // Kept with a new job, read back on a resume.
         let proj = crate::projection::WebMercatorProjection::new(44.4465, 26.099, 1.0);
         let req = LLBBox::new(44.4375, 26.0865, 44.4555, 26.1115).unwrap();
