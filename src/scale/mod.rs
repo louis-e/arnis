@@ -1208,7 +1208,11 @@ pub fn run_with(
             .map_err(|e| format!("The area was written but could not be recorded: {e}"))?;
             // The head piece made the world's map item, the one `--stitch-map` repaints.
             if head == Some(i) && args.map_item {
-                if let Err(e) = one_world::record_map_item(world_dir, job.first_map_id(unit)) {
+                let recorded = job
+                    .kept_map_id(i)
+                    .ok_or_else(|| "the piece's lease has no map id".to_string())
+                    .and_then(|id| one_world::record_map_item(world_dir, id));
+                if let Err(e) = recorded {
                     eprintln!("Warning: Failed to record the world map item: {e}");
                 }
             }
