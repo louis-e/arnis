@@ -59,6 +59,19 @@ use crate::telemetry::{send_log, LogLevel};
 /// The block each way's rails lie in, by (way, x, z).
 pub type RailHeights = Arc<Mutex<FnvHashMap<(u64, i32, i32), i32>>>;
 
+/// Prints a failed save, shows it in the window and returns the message.
+fn save_failed(err: &(dyn std::error::Error + Send + Sync), what: &str) -> String {
+    let user_msg = if is_disk_full_error(err) {
+        "Not enough disk space available.".to_string()
+    } else {
+        format!("Failed to save {what}: {err}")
+    };
+    eprintln!("{user_msg}");
+    #[cfg(feature = "gui")]
+    emit_gui_error(&user_msg);
+    user_msg
+}
+
 /// Walks the error chain to determine whether a save failure was caused by
 /// insufficient disk space.
 ///
@@ -2888,15 +2901,7 @@ impl<'a> WorldEditor<'a> {
         match self.format {
             WorldFormat::JavaAnvil => {
                 if let Err(e) = self.save_java() {
-                    let user_msg = if is_disk_full_error(e.as_ref()) {
-                        "Not enough disk space available.".to_string()
-                    } else {
-                        format!("Failed to save world: {}", e)
-                    };
-                    eprintln!("{}", user_msg);
-                    #[cfg(feature = "gui")]
-                    emit_gui_error(&user_msg);
-                    return Err(user_msg.into());
+                    return Err(save_failed(e.as_ref(), "world").into());
                 }
                 self.finish_voxy();
                 self.finish_dh();
@@ -2915,11 +2920,7 @@ impl<'a> WorldEditor<'a> {
                     self.game_mode,
                     self.world_time,
                 ) {
-                    let user_msg = format!("Failed to save Luanti world: {}", e);
-                    eprintln!("{}", user_msg);
-                    #[cfg(feature = "gui")]
-                    emit_gui_error(&user_msg);
-                    return Err(user_msg.into());
+                    return Err(save_failed(e.as_ref(), "Luanti world").into());
                 }
             }
             WorldFormat::HytaleWorld => {
@@ -2936,15 +2937,7 @@ impl<'a> WorldEditor<'a> {
                     self.game_mode,
                     self.world_time,
                 ) {
-                    let user_msg = if is_disk_full_error(e.as_ref()) {
-                        "Not enough disk space available.".to_string()
-                    } else {
-                        format!("Failed to save Hytale world: {}", e)
-                    };
-                    eprintln!("{}", user_msg);
-                    #[cfg(feature = "gui")]
-                    emit_gui_error(&user_msg);
-                    return Err(user_msg.into());
+                    return Err(save_failed(e.as_ref(), "Hytale world").into());
                 }
             }
         }

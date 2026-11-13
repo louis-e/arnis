@@ -1,13 +1,11 @@
-//! Hytale world output: a save folder whose `universe/worlds/default/chunks` holds
-//! `HytaleIndexedStorage` region files of zstd-compressed BSON chunks, laid out as the
-//! 0.5 server writes them. Lighting is left for the server to compute on load.
+//! Hytale saves: zstd BSON chunks in `HytaleIndexedStorage` regions, lit by the server on load.
 
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::hytale_block_map::{to_hytale, HytaleCell, EMPTY};
 use crate::progress::emit_gui_progress_update;
-use crate::world_editor::common::{ChunkToModify, SectionToModify, WorldToModify};
+use crate::world_editor::common::{BlockStorage, ChunkToModify, SectionToModify, WorldToModify};
 use base64::Engine as _;
 use colored::Colorize;
 use fnv::FnvHashMap;
@@ -60,13 +58,8 @@ pub fn save_hytale_world(
     let chunks_dir = world_folder.join("chunks");
     fs::create_dir_all(&chunks_dir)?;
 
-    let (sx, sy, sz) = match spawn_point {
-        Some((x, z)) => super::luanti::find_spawn_y_at_column(world, x, z, ground_level),
-        None => {
-            let (cx, cz) = xzbbox.center_spawn();
-            super::luanti::find_safe_spawn(world, cx, cz, ground_level)
-        }
-    };
+    let (x, z) = spawn_point.unwrap_or_else(|| xzbbox.center_spawn());
+    let (sx, sy, sz) = find_spawn(world, x, z, ground_level);
     let name = level_name.unwrap_or("Arnis World");
     write_server_config(world_dir, game_mode)?;
     write_world_config(
@@ -194,8 +187,7 @@ fn biome_tint(biome: &str) -> u32 {
     }
 }
 
-/// A section's palette in insertion order, "Empty" (or rotation 0) first. Counts are kept as
-/// cells are set (each cell once); key 0 holds every cell left unset.
+/// A section palette in insertion order; key 0 ("Empty", rotation 0) counts every unset cell.
 struct Palette<K> {
     keys: Vec<K>,
     counts: Vec<u32>,
@@ -291,8 +283,7 @@ fn write_utf(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
 }
 
-/// One 32x32x32 Hytale section gathered from the up to eight Arnis sections it covers.
-/// Most are air, so the cells are only allocated once one is set.
+/// A 32³ Hytale section from up to eight Arnis sections; cells allocate on the first set.
 #[derive(Default)]
 struct Section {
     cells: Option<Box<Cells>>,
@@ -347,8 +338,7 @@ impl Section {
                     .write(&c.rotations, |o, &k| o.push(k), &mut out);
             }
         }
-        // Light: none stored, and change counters one ahead of it, so it counts as stale
-        // and the server lights the section when it loads.
+        // No light stored and change counters ahead of it, so the server relights on load.
         out.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
         out.extend_from_slice(&stale.to_be_bytes());
         out.extend_from_slice(&stale.to_be_bytes());
@@ -471,6 +461,14 @@ fn chunk_bson(world: &WorldToModify, cx: i32, cz: i32, tints: &Tints) -> Vec<u8>
 /// Copies one Arnis section (YZX, 16 per side) into the Hytale section at an offset.
 fn fill(section: &mut Section, from: &SectionToModify, ox: usize, oy: usize, oz: usize) {
     let air = crate::block_definitions::AIR;
+    let at = |i: usize| ((oy + (i >> 8)) << 10) | ((oz + ((i >> 4) & 15)) << 5) | (ox + (i & 15));
+    if let (BlockStorage::Uniform(block), true) = (&from.storage, from.properties.is_empty()) {
+        let cell = to_hytale(*block, None);
+        if *block != air && !(cell.is_empty() && cell.fluid.is_none()) {
+            (0..4096).for_each(|i| section.set(at(i), cell));
+        }
+        return;
+    }
     for i in 0..4096 {
         let block = from.get_block_at_index(i);
         let props = if from.properties.is_empty() {
@@ -485,9 +483,45 @@ fn fill(section: &mut Section, from: &SectionToModify, ox: usize, oy: usize, oz:
         if cell.is_empty() && cell.fluid.is_none() {
             continue;
         }
-        let (x, z, y) = (i & 15, (i >> 4) & 15, i >> 8);
-        section.set(((oy + y) << 10) | ((oz + z) << 5) | (ox + x), cell);
+        section.set(at(i), cell);
     }
+}
+
+/// The column nearest (x, z), within 40 blocks, whose top is solid ground as Hytale sees it.
+fn find_spawn(world: &WorldToModify, x: i32, z: i32, ground_level: i32) -> (i32, i32, i32) {
+    for radius in 0i32..=40 {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx.abs() != radius && dz.abs() != radius {
+                    continue;
+                }
+                if let Some(y) = spawn_y(world, x + dx, z + dz) {
+                    return (x + dx, y, z + dz);
+                }
+            }
+        }
+    }
+    (x, ground_level + 3, z)
+}
+
+/// Feet Y on the column's top cell, unless that is fluid, a tree or a cactus.
+fn spawn_y(world: &WorldToModify, x: i32, z: i32) -> Option<i32> {
+    for y in (-Y_OFFSET..=HYTALE_MAX_Y - 2).rev() {
+        let Some(block) = world.get_block(x, y, z) else {
+            continue;
+        };
+        let cell = to_hytale(block, world.get_properties(x, y, z).as_deref());
+        if cell.is_empty() && cell.fluid.is_none() {
+            continue;
+        }
+        let name = cell.block;
+        let unsafe_top = cell.fluid.is_some()
+            || name.starts_with("Plant_Leaves")
+            || name.starts_with("Plant_Cactus")
+            || name.ends_with("_Trunk");
+        return (!unsafe_top).then_some(y + 1);
+    }
+    None
 }
 
 /// `BlockChunk`: no pending physics, the heightmap and the tint map.
@@ -511,8 +545,7 @@ fn column_palette<T: Copy + Ord>(values: &[T]) -> Vec<T> {
     keys
 }
 
-/// `ShortBytePalette`/`IntBytePalette`: little-endian keys, then a 10-bit index per column
-/// packed least significant bit first.
+/// `ShortBytePalette`/`IntBytePalette`: LE keys, then a 10-bit LSB-first index per column.
 fn write_column_palette<T: Copy + Ord>(
     out: &mut Vec<u8>,
     values: &[T],
@@ -554,27 +587,31 @@ type Blob = (usize, usize, Vec<u8>);
 
 /// Writes a region file: header, the 1024-slot index, then each blob in 4 KiB segments.
 fn write_region(path: &Path, blobs: Vec<Blob>) -> SaveResult<()> {
+    let header = 32 + BLOBS_PER_REGION * 4;
+    let segments = |data: &[u8]| (8 + data.len()).div_ceil(SEGMENT_SIZE);
     let mut index = vec![0u32; BLOBS_PER_REGION];
-    let mut body = Vec::new();
-    let mut next_segment = 1u32;
-    for (slot, raw_len, data) in &blobs {
-        index[*slot] = next_segment;
-        body.extend_from_slice(&(*raw_len as u32).to_be_bytes());
-        body.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        body.extend_from_slice(data);
-        let padded = body.len().div_ceil(SEGMENT_SIZE) * SEGMENT_SIZE;
-        body.resize(padded, 0);
-        next_segment = (body.len() / SEGMENT_SIZE) as u32 + 1;
+    let mut next_segment = 1;
+    for (slot, _, data) in &blobs {
+        index[*slot] = next_segment as u32;
+        next_segment += segments(data);
     }
-    let mut out = Vec::with_capacity(32 + BLOBS_PER_REGION * 4 + body.len());
+    let mut out = Vec::with_capacity(header + (next_segment - 1) * SEGMENT_SIZE);
     out.extend_from_slice(b"HytaleIndexedStorage");
-    out.extend_from_slice(&1u32.to_be_bytes());
-    out.extend_from_slice(&(BLOBS_PER_REGION as u32).to_be_bytes());
-    out.extend_from_slice(&(SEGMENT_SIZE as u32).to_be_bytes());
-    for i in index {
-        out.extend_from_slice(&i.to_be_bytes());
+    for word in [1, BLOBS_PER_REGION as u32, SEGMENT_SIZE as u32]
+        .into_iter()
+        .chain(index)
+    {
+        out.extend_from_slice(&word.to_be_bytes());
     }
-    out.extend_from_slice(&body);
+    for (_, raw_len, data) in &blobs {
+        out.extend_from_slice(&(*raw_len as u32).to_be_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(data);
+        out.resize(
+            header + (out.len() - header).div_ceil(SEGMENT_SIZE) * SEGMENT_SIZE,
+            0,
+        );
+    }
     fs::write(path, out)?;
     Ok(())
 }

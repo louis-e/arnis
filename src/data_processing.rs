@@ -1614,8 +1614,7 @@ pub fn generate_world_with_options(
 
     // Tile editors take the world's format, so what they write that depends on it (a
     // banner's block entity) matches the output. Luanti keeps the sequential path: its
-    // editor carries a game and a ground level that the tile editors are not given. Hytale
-    // needs neither until it saves, from the main editor.
+    // editor carries a game and a ground level that the tile editors are not given.
     // A piece of a job takes the path the whole job would, or its blocks differ from a single run's.
     let wants_tiles = one_world
         .and_then(|run| run.unit.as_ref())

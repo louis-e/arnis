@@ -1,7 +1,4 @@
-//! Arnis blocks (Minecraft names) to Hytale block types.
-//!
-//! Hytale names come from the game's block list as uNmINeD ships it; materials are picked by
-//! map color. Rotations are Hytale's index `yaw + 4 * pitch + 16 * roll`, each a quarter turn.
+//! Arnis blocks to Hytale block types, named as uNmINeD's list has them, picked by map color.
 
 use crate::block_definitions::Block;
 use fastnbt::Value;
@@ -467,7 +464,7 @@ fn prop<'a>(props: Option<&'a Value>, key: &str) -> Option<&'a str> {
     }
 }
 
-/// Hytale yaw for a Minecraft facing: yaw 0 points north and turns through west.
+/// Hytale yaw (rotation index `yaw + 4 * pitch + 16 * roll`): 0 points north, 1 west.
 fn yaw(props: Option<&Value>) -> u8 {
     match prop(props, "facing") {
         Some("west") => 1,
@@ -908,8 +905,7 @@ mod tests {
         assert_eq!(to_hytale(RED_SAND, None).block, "Soil_Sand_Red");
     }
 
-    /// Prints every name the map can produce, to check against the game's block list:
-    /// `cargo test hytale_names -- --ignored --nocapture`.
+    /// Every producible name: `cargo test hytale_names -- --ignored --nocapture`.
     #[test]
     #[ignore]
     fn hytale_names() {

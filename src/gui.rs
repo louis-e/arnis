@@ -2288,7 +2288,7 @@ fn window_flag_args(
         return Err("Retrying pieces only applies to a job built in pieces.".to_string());
     }
     if extra.min_y.is_some() || extra.max_y.is_some() {
-        if !(is_new_world || extra.prewarm) || extra.bedrock || extra.sandbox() {
+        if !(is_new_world || extra.prewarm) || !extra.java() {
             return Err("Lowest and highest Y only apply to a new Java world.".to_string());
         }
         extra.disable_height_limit = true;

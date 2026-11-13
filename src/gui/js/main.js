@@ -2091,6 +2091,11 @@ function initExperimentalFormatToggle(format) {
     const on = toggle.checked;
     localStorage.setItem(`arnis-${format}-enabled`, on ? 'true' : 'false');
     apply(on);
+    // Turning Hytale off (a settings reset does) is no pick of another format: Advanced stays off.
+    if (!on && format === 'hytale' && advancedHeldForHytale()) {
+      holdAdvancedForHytale(false);
+      syncOfflineMode();
+    }
     if (!on && selectedWorldFormat === format) {
       setWorldFormat('java');
     }
@@ -2281,14 +2286,28 @@ function updateFormatToggleUI(format) {
   refreshBboxSelectionInfo();
 }
 
-// Advanced features build for Java (cells, One World) and are untested on Hytale, so picking
-// Hytale turns them off and greys the switch until another format is picked.
+// Advanced features are built for Java: Hytale turns them off, another format back on.
+const ADVANCED_HELD_KEY = 'arnis-advanced-before-hytale';
+const advancedHeldForHytale = () => localStorage.getItem(ADVANCED_HELD_KEY) === 'true';
+
+function holdAdvancedForHytale(held) {
+  if (held) localStorage.setItem(ADVANCED_HELD_KEY, 'true');
+  else localStorage.removeItem(ADVANCED_HELD_KEY);
+}
+
 function refreshAdvancedFeaturesForFormat(format) {
   const toggle = document.getElementById('advanced-meld-features-toggle');
   if (!toggle) return;
   const hytale = format === 'hytale';
-  if (hytale) setChecked(toggle, false);
+  if (hytale && toggle.checked) {
+    holdAdvancedForHytale(true);
+    setChecked(toggle, false);
+  }
   setSettingsRowAvailable('advanced-meld-features-toggle', !hytale, 'reason_not_hytale');
+  if (!hytale && advancedHeldForHytale()) {
+    holdAdvancedForHytale(false);
+    setChecked(toggle, true);
+  }
 }
 
 // Expose to window for onclick handlers
@@ -2302,16 +2321,21 @@ function syncDiscordStatus() {
 }
 
 // The backend is told Offline Mode once the store has restored it, and on every change: while
-// it is on it leaves old cached tiles alone and sends no telemetry or update check. Off with
-// the Advanced switch, as the flag is.
+// it is on it leaves old cached tiles alone and sends no telemetry or update check.
 function initOfflineModeSync() {
-  const toggles = ['advanced-meld-features-toggle', 'meld-offline-toggle'].map((id) => document.getElementById(id));
-  const sync = () => {
-    const offline = toggles.every((t) => t && t.checked);
-    Promise.resolve(invoke('gui_set_offline_mode', { offline })).catch(() => {});
-  };
-  toggles.forEach((t) => t && t.addEventListener('change', sync));
-  sync();
+  ['advanced-meld-features-toggle', 'meld-offline-toggle'].forEach((id) =>
+    document.getElementById(id)?.addEventListener('change', syncOfflineMode));
+  syncOfflineMode();
+}
+
+function syncOfflineMode() {
+  Promise.resolve(invoke('gui_set_offline_mode', { offline: offlineModeOn() })).catch(() => {});
+}
+
+// Off with the Advanced switch, as the flag is, but not while Hytale holds that switch off.
+function offlineModeOn() {
+  const on = (id) => !!document.getElementById(id)?.checked;
+  return on('meld-offline-toggle') && (on('advanced-meld-features-toggle') || advancedHeldForHytale());
 }
 
 // The backend only reports crashes and errors while it holds a consent of true,
@@ -4693,8 +4717,9 @@ function readGenerationSettings(oneWorld) {
     return btn ? btn.dataset[key] : fallback;
   };
   const checked = (id) => document.getElementById(id).checked;
+  // Disabled means unsupported for this format or mode, so never send a stale tick.
+  const live = (id) => checked(id) && !document.getElementById(id).disabled;
   const heightLimitToggle = document.getElementById("disable-height-limit-toggle");
-  // Disabled means unsupported for this body or format, so never send a stale tick.
   let disableHeightLimit = !heightLimitToggle.disabled && heightLimitToggle.checked;
   let scale = parseFloat(document.getElementById("scale-value-slider").value);
   let heightMultiplier = parseFloat(document.getElementById("height-multiplier-slider").value) || 1;
@@ -4731,9 +4756,9 @@ function readGenerationSettings(oneWorld) {
     use3dEnabled: checked("use-3d-toggle"),
     disableHeightLimit: disableHeightLimit,
     awsOnlyElevation: checked("aws-only-elevation-toggle"),
-    bakeLightingEnabled: checked("bake-lighting-toggle"),
-    voxyLodEnabled: checked("voxy-lod-toggle"),
-    dhLodEnabled: checked("dh-lod-toggle"),
+    bakeLightingEnabled: live("bake-lighting-toggle"),
+    voxyLodEnabled: live("voxy-lod-toggle"),
+    dhLodEnabled: live("dh-lod-toggle"),
     gamemode: segment("gamemode-group", "gamemode", "creative"),
     worldTime: worldTime,
     worldType: segment("world-type-group", "worldType", "void"),
@@ -4900,6 +4925,8 @@ async function startGeneration(confirmed = false, prewarm = false) {
       lods: settings.voxyLodEnabled || settings.dhLodEnabled,
       prewarm
     });
+    // meldFlags skips the Advanced settings Hytale holds off, but Offline Mode still applies.
+    if (!document.getElementById('advanced-meld-features-toggle').checked && offlineModeOn()) flags.push('--offline');
     // Held or retried as a job in cells: it runs as one, or not at all.
     if (cells && !prewarm && !flags.some((f) => f.startsWith('--one-world-workers='))) return;
 

@@ -1728,7 +1728,7 @@ pub(crate) fn extended_min_y_for(args: &Args) -> i32 {
 
 /// `extended_min_y_for` with the extended height on or off.
 pub(crate) fn world_min_y(args: &Args, extended: bool) -> i32 {
-    if extended && !args.bedrock && !args.sandbox() {
+    if extended && args.java() {
         java_tall_range(args).0
     } else {
         crate::world_editor::DEFAULT_MIN_Y

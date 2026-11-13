@@ -932,6 +932,10 @@ impl Args {
     pub fn sandbox(&self) -> bool {
         self.luanti || self.hytale
     }
+
+    pub fn java(&self) -> bool {
+        !self.bedrock && !self.sandbox()
+    }
 }
 
 /// Live tiles build with the stock settings only, so `--live` refuses every flag that would
@@ -1753,7 +1757,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (args.moving_vehicles, "--moving-vehicles"),
         (args.pedestrians, "--pedestrians"),
     ];
-    if args.bedrock || args.sandbox() {
+    if !args.java() {
         // Bedrock runs the vehicles from an add-on of its own.
         let java_only = |flag: &str| args.sandbox() || flag != "--moving-vehicles";
         if let Some((_, flag)) = extras.iter().find(|(on, flag)| *on && java_only(flag)) {
@@ -1787,7 +1791,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     }
 
     if args.one_world {
-        if args.bedrock || args.sandbox() {
+        if !args.java() {
             return Err("--one-world is available for Java Edition worlds only.".to_string());
         }
         if !args.body.is_earth() {
@@ -1856,7 +1860,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     // other world format can show them. Said here rather than dropped silently
     // at the wall, and checked for the fetch too, not only for a facade folder.
     if args.mapillary_facades_wanted()
-        && (args.bedrock || args.sandbox())
+        && !args.java()
         && args.mapillary_facade_mode.places_displays()
     {
         return Err(
@@ -1880,7 +1884,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     // The preset facades hang on the same item display entities, so they are
     // refused here for the same reason and in the same words. Said out loud
     // rather than dropped at the wall.
-    if args.building_facades && (args.bedrock || args.sandbox()) {
+    if args.building_facades && !args.java() {
         return Err(
             "--building-facades needs a Java world (item display entities, 1.21.4+). \
              Leave it off and the buildings are generated with their usual block walls."

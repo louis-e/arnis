@@ -188,7 +188,7 @@ fn non_ground_blocks() -> [crate::block_definitions::Block; 12] {
 
 /// Spirals outward from (center_x, center_z) looking for a column where
 /// there is solid ground (not trees/leaves) with air above.
-pub(super) fn find_safe_spawn(
+fn find_safe_spawn(
     world: &WorldToModify,
     center_x: i32,
     center_z: i32,
@@ -234,7 +234,7 @@ pub(super) fn find_safe_spawn(
 /// Single-column spawn-Y lookup used when an explicit spawn (x, z) is given.
 /// Scans a wide vertical range so columns below ground_level (e.g. ocean) still resolve.
 /// Requires 2 blocks of air clearance above to avoid spawning embedded in a wall/roof.
-pub(super) fn find_spawn_y_at_column(
+fn find_spawn_y_at_column(
     world: &WorldToModify,
     x: i32,
     z: i32,

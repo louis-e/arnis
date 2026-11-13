@@ -101,23 +101,22 @@ pub fn get_luanti_worlds_directory() -> PathBuf {
     })
 }
 
-/// Hytale's singleplayer saves folder: `Hytale/UserData/Saves` under the OS data
-/// directory (%APPDATA%, ~/Library/Application Support, ~/.local/share), or the Flatpak
-/// launcher's when only that one exists. Falls back to Desktop/Arnis Hytale Worlds.
+/// Hytale's `UserData/Saves` (native, then Flatpak) once the game has run, else Desktop/Arnis Hytale Worlds.
 pub fn get_hytale_saves_directory() -> PathBuf {
-    let saves = |base: PathBuf| base.join("Hytale").join("UserData").join("Saves");
-    let native = dirs::data_dir().map(saves);
-    let flatpak = dirs::home_dir()
-        .map(|h| saves(h.join(".var/app/com.hypixel.HytaleLauncher/data")))
-        .filter(|p| p.is_dir());
-    match (native, flatpak) {
-        (Some(n), Some(f)) if !n.is_dir() => f,
-        (Some(n), _) => n,
-        (None, Some(f)) => f,
-        (None, None) => dirs::desktop_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Arnis Hytale Worlds"),
-    }
+    let native = dirs::data_dir().map(|d| d.join("Hytale"));
+    let flatpak =
+        dirs::home_dir().map(|h| h.join(".var/app/com.hypixel.HytaleLauncher/data/Hytale"));
+    [native, flatpak]
+        .into_iter()
+        .flatten()
+        .map(|game| game.join("UserData"))
+        .find(|user_data| user_data.is_dir())
+        .map(|user_data| user_data.join("Saves"))
+        .unwrap_or_else(|| {
+            dirs::desktop_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("Arnis Hytale Worlds")
+        })
 }
 
 /// The first free "Arnis {game} World N" folder in `base_dir`, for Luanti and Hytale.
