@@ -24,7 +24,9 @@ pub const DEFAULT_WORLD_NAME: &str = "Arnis One World";
 /// region template chunks outside their areas and are repaired once.
 /// 3: new worlds have the extended build height and a whole-Earth elevation
 /// mapping, which older builds would not apply.
-pub const MANIFEST_VERSION: u32 = 3;
+/// 4: the world keeps a seed, cave settings, a world border or jobs built in pieces,
+/// which version 3 builds drop when they save. Worlds without them are still written as 3.
+pub const MANIFEST_VERSION: u32 = 4;
 
 /// Geometry kept past the area edge, so an element straddling a seam is
 /// built whole on both sides.
@@ -325,9 +327,28 @@ impl Manifest {
         Ok(())
     }
 
+    /// Version 4 only for a world holding what a version 3 build would drop when it saves.
+    fn written_version(&self) -> u32 {
+        let needs_4 = self.seed.is_some()
+            || self.cave_seed.is_some()
+            || self.cave_datum_y.is_some()
+            || self.world_border
+            || !self.jobs.is_empty()
+            || self.areas.iter().any(|a| a.piece.is_some());
+        if needs_4 {
+            self.version.max(4)
+        } else {
+            self.version.min(3)
+        }
+    }
+
     pub fn save(&self, world_dir: &Path) -> Result<(), String> {
         let path = Self::path_in(world_dir);
-        let text = serde_json::to_string_pretty(self)
+        let written = Manifest {
+            version: self.written_version(),
+            ..self.clone()
+        };
+        let text = serde_json::to_string_pretty(&written)
             .map_err(|e| format!("Failed to serialize the One World manifest: {e}"))?;
         crate::world_utils::replace_file_atomically(&path, text.as_bytes())
             .map_err(|e| format!("Failed to write {}: {e}", path.display()))
@@ -1707,7 +1728,8 @@ mod tests {
         drop(prepare(&world, &req, &mut args).unwrap());
         assert!(args.disable_height_limit);
         let manifest = Manifest::load(&world).unwrap().unwrap();
-        assert_eq!(manifest.version, MANIFEST_VERSION);
+        // Nothing a version 3 build would drop: 3.3 and 3.4 still open it.
+        assert_eq!(manifest.version, 3);
         assert!(manifest.disable_height_limit);
         let e = manifest.elevation.unwrap();
         assert_eq!(e.y_for_metres(-430.0), -2014.0);
@@ -1795,6 +1817,24 @@ mod tests {
         let mut args = args_for(MUNICH, &["--world-type", "flat"]);
         drop(prepare(&world, &req, &mut args).unwrap());
         assert_eq!(args.world_type, crate::args::WorldType::Void);
+    }
+
+    #[test]
+    fn only_a_world_with_what_older_builds_drop_is_written_as_version_4() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        drop(prepare(&world, &req, &mut args_for(MUNICH, &[])).unwrap());
+        let mut manifest = Manifest::load(&world).unwrap().unwrap();
+        assert_eq!(manifest.version, 3);
+        manifest.seed = Some(7);
+        manifest.save(&world).unwrap();
+        assert_eq!(Manifest::load(&world).unwrap().unwrap().version, 4);
+        let mut manifest = Manifest::load(&world).unwrap().unwrap();
+        manifest.seed = None;
+        manifest.world_border = true;
+        manifest.save(&world).unwrap();
+        assert_eq!(Manifest::load(&world).unwrap().unwrap().version, 4);
     }
 
     #[test]
