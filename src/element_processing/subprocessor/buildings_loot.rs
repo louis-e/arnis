@@ -93,9 +93,10 @@ impl LootTable {
                         item.id
                     ));
                 }
-                if item.min < 0 || item.min > item.max || item.max > 64 {
+                // Minecraft drops a stack of 0, so a slot with that count would load empty.
+                if item.min < 1 || item.min > item.max || item.max > 64 {
                     return Err(format!(
-                        "theme {ti} item {ii}: count must satisfy 0 <= min <= max <= 64"
+                        "theme {ti} item {ii}: count must satisfy 1 <= min <= max <= 64"
                     ));
                 }
             }
@@ -299,6 +300,9 @@ mod tests {
         t.themes[0].items[0].min = 7;
         t.themes[0].items[0].max = 3;
         assert!(t.validate().is_err());
+        let mut t = base.clone();
+        t.themes[0].items[0].min = 0;
+        assert!(t.validate().unwrap_err().contains("1 <= min"));
         let mut t = base.clone();
         t.themes[0].items[0].id = "bread".to_string();
         assert!(t.validate().is_err());
