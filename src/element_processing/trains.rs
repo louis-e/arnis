@@ -9,13 +9,14 @@
 //! Distances are in blocks here and in thousandths of a block in the pack; a step is the
 //! two ticks between moves.
 
-use crate::bedrock_addon::{self, Fleet, Lamp};
+use crate::bedrock_addon::{self, Fleet};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::datapack::macro_coord;
 use crate::element_processing::ship_bodies::Vessel;
 use crate::element_processing::train_bodies::{self, Coach, Livery};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::vehicle_models::Look;
 use fnv::FnvHashMap;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
@@ -408,7 +409,7 @@ impl TrainNetwork {
         let mut out = Vec::new();
         let mut network = String::from("data modify storage arnis:trains tmp set value []\n");
         let mut all = String::new();
-        let mut bodies: FnvHashMap<String, Vec<train_bodies::Part>> = FnvHashMap::default();
+        let mut bodies: FnvHashMap<String, Look> = FnvHashMap::default();
         let mut doors: BTreeMap<String, train_bodies::Doors> = BTreeMap::new();
         doors.insert(
             train_bodies::NO_DOORS.to_string(),
@@ -458,9 +459,10 @@ impl TrainNetwork {
                 for (c, (&coach, &offset)) in
                     service.coaches.iter().zip(&service.offsets).enumerate()
                 {
-                    let parts = train_bodies::parts(coach, livery);
                     let key = train_bodies::key(coach, livery);
-                    bodies.entry(key.clone()).or_insert(parts);
+                    bodies
+                        .entry(key.clone())
+                        .or_insert_with(|| train_bodies::look(coach, livery));
                     let door_key = train_bodies::door_key(coach);
                     doors
                         .entry(door_key.clone())
@@ -503,14 +505,31 @@ impl TrainNetwork {
         let mut keys: Vec<&String> = bodies.keys().collect();
         keys.sort();
         for key in keys {
-            for (prefix, bare) in [("", false), ("ov121/", true)] {
-                out.push((
-                    format!("{prefix}data/arnis/function/trains/body/{key}.mcfunction"),
-                    train_bodies::summon_function(&bodies[key], self.size, bare),
-                ));
-            }
+            out.push((
+                format!("data/arnis/function/trains/body/{key}.mcfunction"),
+                train_bodies::summon_function(&bodies[key], self.size),
+            ));
         }
         out
+    }
+
+    /// Every look the trains of this network are drawn with, for the resource pack.
+    pub fn java_looks(&self) -> Vec<Look> {
+        let mut looks: Vec<Look> = self
+            .services
+            .iter()
+            .flat_map(|service| {
+                service.trains.iter().flat_map(|&(_, livery)| {
+                    service
+                        .coaches
+                        .iter()
+                        .map(move |&coach| train_bodies::look(coach, livery))
+                })
+            })
+            .collect();
+        looks.sort();
+        looks.dedup();
+        looks
     }
 
     /// What the Bedrock script runs the trains by, the same routes and timetables the pack
@@ -527,7 +546,6 @@ impl TrainNetwork {
         let mut bodies: Vec<bedrock_addon::Body> = Vec::new();
         let mut body_of: FnvHashMap<String, usize> = FnvHashMap::default();
         let mut carriage = 0usize;
-        let size = self.size as f32;
         for service in &self.services {
             let route = &self.routes[service.route];
             let Some(ys) = heights(route, &rail_y) else {
@@ -571,16 +589,8 @@ impl TrainNetwork {
                                 bodies.push(bedrock_addon::Body {
                                     name,
                                     fleet: Fleet::Train,
-                                    shapes: train_bodies::parts(coach, livery)
-                                        .into_iter()
-                                        .map(|p| bedrock_addon::Shape {
-                                            block: p.block,
-                                            size: p.size.map(|v| v * size),
-                                            corner: p.corner.map(|v| v * size),
-                                            tilt: p.tilt,
-                                            lamp: if p.glow { Lamp::On } else { Lamp::Off },
-                                        })
-                                        .collect(),
+                                    look: train_bodies::look(coach, livery),
+                                    size: self.size,
                                 });
                                 bodies.len() - 1
                             });
@@ -2235,9 +2245,8 @@ mod tests {
                 .name
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'));
-            for s in &body.shapes {
-                assert!(crate::bedrock_addon::palette_has(s.block), "{}", s.block);
-            }
+            // Its model is built; this panics on one that is not.
+            let _ = crate::vehicle_models::model(body.look.model);
         }
         // No rails laid, nothing to run.
         let (none, _) = net.bedrock_data(|_, _, _| None);

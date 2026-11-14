@@ -114,7 +114,7 @@ assert.ok(!p.badges[0].gone);
 const html = fs.readFileSync(new URL('../../src/gui/index.html', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../../src/gui/css/settings.css', import.meta.url), 'utf8');
 const store_js = fs.readFileSync(new URL('../../src/gui/js/settings-store.js', import.meta.url), 'utf8');
-for (const key of ['live', 'pedestrians', 'advanced']) assert.match(html, new RegExp(`class="new-badge"[^>]*data-new="${key}" data-new-when="`));
+for (const key of ['live', 'pedestrians', 'advanced', 'traffic_lights', 'moving_vehicles']) assert.match(html, new RegExp(`class="new-badge"[^>]*data-new="${key}" data-new-when="`));
 assert.match(css, /\.settings-row\.has-new-badge:not\(\.is-modified\) \.setting-heading > \.setting-revert \{\s*display: none;/);
 assert.match(store_js, /slot\.insertBefore\(button, slot\.querySelector\(':scope > \.new-badge'\)\)/, 'the revert button goes before a badge');
 console.log('new-badges ok');

@@ -437,8 +437,9 @@ pub struct Args {
     /// Cars that drive the streets at the speed limit, queue behind each other, turn at
     /// junctions and, with --traffic-lights, stop at red; and trains, S-Bahns, metros and
     /// trams that run the mapped tracks and stop at their stations. On Java, right-click a
-    /// car or train to get in, or click one as a spectator to follow it. Java 1.21.4+ or Bedrock
-    /// 1.21.120+; Bedrock has no traffic lights to stop at.
+    /// car or train to get in, or click one as a spectator to follow it, and parked cars are
+    /// the same models as the moving ones. Java 1.21.6+ or Bedrock 1.21.120+; Bedrock has no
+    /// traffic lights to stop at.
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
 

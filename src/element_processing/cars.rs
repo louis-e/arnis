@@ -8,16 +8,19 @@
 //! Speeds are in thousandths of a block per step, a step being the two ticks between
 //! moves, so 1000 is 36 km/h on a 1:1 world.
 
-use crate::bedrock_addon::{self, Body, Fleet, Lamp, Shape};
+use crate::bedrock_addon::{self, Body, Fleet};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::datapack::macro_coord;
 use crate::element_processing::highways::{highway_block_range, highway_default_lanes};
-use crate::element_processing::road_markings::{is_roundabout, oneway_sign};
+use crate::element_processing::road_markings::{
+    is_roundabout, oneway_sign, RoadMarkingIndex, StopLine,
+};
 use crate::element_processing::traffic_lights::{
-    group_of, is_signal, is_vehicular, signal_upstream, Junctions, UPSTREAM_M,
+    group_of, is_signal, is_vehicular, signal_upstream, Junctions, SignalIndex, UPSTREAM_M,
 };
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::vehicle_models::{self, Look};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
@@ -38,8 +41,14 @@ const SPOT_CELL: f64 = 64.0;
 const LANES_PER_LINE: usize = 256;
 /// Spot cells the pack stores per command.
 const SPOT_CELLS_PER_LINE: usize = 256;
-/// How far back from a mid-road signal the car stops.
-const STOP_BACK: f64 = 1.5;
+/// How far back from a mid-road signal the front of a car stops, where no line is painted.
+const STOP_BACK: f64 = 0.5;
+/// How far short of a painted stop line the front of a car stops: half the line's own row
+/// and a little room.
+const LINE_GAP: f64 = 1.0;
+/// Furthest a signal's stop line is painted ahead of it, back from the junction behind its
+/// crossings, in metres.
+const LINE_REACH: f64 = 40.0;
 /// Speed across a junction, and over the last stretch of a lane into one.
 const JUNCTION_KMH: f64 = 25.0;
 const LANE_END_KMH: f64 = 32.0;
@@ -81,11 +90,20 @@ const LONG_EXTRA: f64 = 2.7;
 const CLOSE_AHEAD: (f64, f64) = (0.7, 0.65);
 /// The same for a bus or truck, from there on to where its longer look ahead starts.
 const LONG_CLOSE_AHEAD: (f64, f64) = (2.7, 1.4);
+/// Into a junction only with room to wait past it: this much, in metres, between the car and
+/// the junction behind it, and between it and the queue ahead.
+const GATE_SPARE: f64 = 0.5;
 /// Cars whose middles are this close stand on one spot, and the newer one waits, unless the
 /// older one is right behind it and so waits itself.
 const STACKED: f64 = 1.2;
 /// Cars heading within this many degrees of one are in its lane or turning into it.
 const SAME_WAY_DEG: f64 = 67.5;
+/// Inside a junction, a car this close to one's own heading, ahead where look stops for it,
+/// is on the same way through: one to queue behind, not a conflict to pass after a while.
+const SAME_PATH_DEG: f64 = 30.0;
+/// Slices of a turn a car's own heading is taken in for that, so the range is within half a
+/// slice of its own heading.
+const PATH_SLICES: usize = 16;
 /// Where crossing traffic right in front is looked for: how far ahead and how far round.
 const CROSSING_AT: (f64, f64) = (3.0, 1.7);
 /// How far over the block a player rides on their eyes are, at any scale.
@@ -109,12 +127,15 @@ const GIVE_WAY_STEPS: i32 = 30;
 /// A driver's pace, in thousandths of the lane speed, both ends included.
 const PACE: (i32, i32) = (880, 1120);
 /// How often each kind of car turns up.
-const KINDS: [(Kind, u32); 6] = [
-    (Kind::Sedan, 52),
-    (Kind::Hatchback, 24),
-    (Kind::Van, 10),
-    (Kind::Pickup, 6),
-    (Kind::Truck, 5),
+const KINDS: [(Kind, u32); 9] = [
+    (Kind::Sedan, 30),
+    (Kind::Hatchback, 20),
+    (Kind::Suv, 16),
+    (Kind::Estate, 10),
+    (Kind::City, 6),
+    (Kind::Van, 8),
+    (Kind::Pickup, 4),
+    (Kind::Truck, 3),
     (Kind::Bus, 3),
 ];
 
@@ -250,6 +271,74 @@ impl Path {
         (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
     }
 
+    /// The distance along the path nearest to `p`, how far off to its right `p` is, and how
+    /// far off at all.
+    fn project(&self, p: (f64, f64)) -> Option<(f64, f64, f64)> {
+        let mut best: Option<(f64, f64, f64)> = None;
+        for (k, w) in self.points.windows(2).enumerate() {
+            let (a, b) = (w[0], w[1]);
+            let len = (b.0 - a.0).hypot(b.1 - a.1);
+            if len <= 1e-9 {
+                continue;
+            }
+            let (ux, uz) = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+            let t = ((p.0 - a.0) * ux + (p.1 - a.1) * uz).clamp(0.0, len);
+            let (qx, qz) = (a.0 + ux * t, a.1 + uz * t);
+            let off = (p.0 - qx).hypot(p.1 - qz);
+            if best.is_none_or(|(_, _, o)| off < o) {
+                // Right of the way along, as Minecraft's x east and z south have it.
+                let right = (p.0 - qx) * -uz + (p.1 - qz) * ux;
+                best = Some((self.at[k] + t, right, off));
+            }
+        }
+        // Off either end, `p` is beside some other stretch of road.
+        best.filter(|&(s, _, _)| s > 0.0 && s < self.length())
+    }
+
+    /// Where along the path the painted stop line for a signal at `node` lies: the nearest
+    /// one short of it, past `from` where the lane starts, across this lane, its middle at
+    /// most `off` aside.
+    fn painted_line(
+        &self,
+        lines: &[StopLine],
+        (from, node): (f64, f64),
+        reach: f64,
+        off: f64,
+    ) -> Option<f64> {
+        // Only lines near the signal are worth measuring along the whole path.
+        let (nx, nz) = self.point_at(node);
+        lines
+            .iter()
+            .filter(|line| {
+                (line.x as f64 + 0.5 - nx).hypot(line.z as f64 + 0.5 - nz) <= reach + off + 1.0
+            })
+            .filter_map(|line| {
+                let (cx, cz) = (line.x as f64 + 0.5, line.z as f64 + 0.5);
+                let (s, right, aside) = self.project((cx, cz))?;
+                if aside > off || !((node - reach).max(from)..=node + 1.0).contains(&s) {
+                    return None;
+                }
+                // Across this lane: the line's way runs along it here.
+                let (ax, az) = self.point_at(s - 0.5);
+                let (bx, bz) = self.point_at(s + 0.5);
+                let along = unit(bx - ax, bz - az)?;
+                let (dx, dz) = (line.dir.0 as f64, line.dir.1 as f64);
+                if (along.0 * dx + along.1 * dz).abs() < 0.7 {
+                    return None;
+                }
+                // On this lane's half of the road: the line's middle is right of the lane
+                // when the lane is on its left, and the way's right is the lane's way's right
+                // when they run alike.
+                let lane_side = if along.0 * dx + along.1 * dz > 0.0 {
+                    -right.signum()
+                } else {
+                    right.signum()
+                };
+                (line.side == 0 || lane_side == f64::from(line.side)).then_some(s)
+            })
+            .max_by(|a, b| a.total_cmp(b))
+    }
+
     /// How far the path turns at point `k`, in degrees.
     fn bend(&self, k: usize) -> f64 {
         if k == 0 || k + 1 >= self.points.len() {
@@ -373,9 +462,73 @@ struct Waypoint {
     z: f64,
     /// Signal group whose green this stop line waits for: 1 east-west, 2 north-south.
     stop: Option<u8>,
+    /// Which cars the stop holds.
+    holds: Holds,
     /// Speed cap while driving towards this point, for a bend or a junction.
     cap: Option<i32>,
 }
+
+/// Which cars a stop holds. A stop line has a point for cars and one further back for
+/// buses and trucks, each where the longest of them stands with its front at the line, as a
+/// car stops with its middle on the point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Holds {
+    All,
+    Cars,
+    Long,
+}
+
+impl Holds {
+    /// From a car's middle to its front, in metres at 1:1, for the longest the point holds.
+    fn reach(self) -> f64 {
+        KINDS
+            .iter()
+            .filter(|(kind, _)| self.holds(kind.is_long()))
+            .map(|(kind, _)| kind.size_m().0 / 2.0)
+            .fold(0.0, f64::max)
+    }
+
+    fn from_long(long: bool) -> Holds {
+        if long {
+            Holds::Long
+        } else {
+            Holds::Cars
+        }
+    }
+
+    fn holds(self, long: bool) -> bool {
+        match self {
+            Holds::All => true,
+            Holds::Cars => !long,
+            Holds::Long => long,
+        }
+    }
+
+    /// How the pack tells them apart: `k:1b` cars only, `k:2b` buses and trucks only.
+    fn code(self) -> Option<i8> {
+        match self {
+            Holds::All => None,
+            Holds::Cars => Some(1),
+            Holds::Long => Some(2),
+        }
+    }
+
+    fn field(self) -> String {
+        self.code().map_or(String::new(), |k| format!(",k:{k}b"))
+    }
+
+    /// Two stops on one spot hold whoever either does.
+    fn and(self, other: Holds) -> Holds {
+        if self == other {
+            self
+        } else {
+            Holds::All
+        }
+    }
+}
+
+/// A stop's signal group and who it holds.
+type Stop = Option<(u8, Holds)>;
 
 /// A lane a car may turn into from the end of another.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -415,6 +568,10 @@ impl Segment {
 enum Kind {
     Sedan,
     Hatchback,
+    Estate,
+    Suv,
+    /// A small city car.
+    City,
     Van,
     Pickup,
     Truck,
@@ -585,11 +742,40 @@ const BUS_COLOURS: [(&str, u32); 4] = [
 
 impl CarNetwork {
     /// `surface_y` is the height of a way's road surface block at a column.
+    #[cfg(test)]
     pub fn build(
         elements: &[ProcessedElement],
         scale: f64,
         drives_on_left: bool,
         stop_at_signals: bool,
+        world: &XZBBox,
+        surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
+        built: impl Fn(i32, i32) -> bool,
+    ) -> Self {
+        Self::build_with_heads(
+            elements,
+            scale,
+            drives_on_left,
+            stop_at_signals,
+            None,
+            None,
+            world,
+            surface_y,
+            built,
+        )
+    }
+
+    /// As `build`, holding cars only at signals whose `heads` show them a light: where the
+    /// heads were planned off the road or merged with another, there is nothing to stop for.
+    /// Cars stop short of the stop lines `painted` lays down where it has one for a signal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_with_heads(
+        elements: &[ProcessedElement],
+        scale: f64,
+        drives_on_left: bool,
+        stop_at_signals: bool,
+        heads: Option<&SignalIndex>,
+        painted: Option<&RoadMarkingIndex>,
         world: &XZBBox,
         surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
         built: impl Fn(i32, i32) -> bool,
@@ -616,6 +802,18 @@ impl CarNetwork {
             .iter()
             .map(|(w, (half, oneway))| (w.as_ref(), *half, *oneway))
             .collect();
+        // Blocks per metre the cars are built at.
+        let size = scale.clamp(0.4, 3.0);
+        // Every stop line painted across the roads, found by where it lies: an approach split
+        // into more than one way has its line on whichever the paint fell on.
+        let lines: Vec<StopLine> = painted.map_or_else(Vec::new, |p| {
+            let mut ids: Vec<u64> = roads.iter().map(|&(w, _, _)| w.id).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            ids.iter()
+                .flat_map(|&id| p.stop_lines(id).to_vec())
+                .collect()
+        });
         let junctions = Junctions::build(roads.iter().map(|&(w, half, _)| (w, half)), scale);
         let arms = |id: u64| junctions.arms(id);
         let junction = |id: u64| junctions.is_junction(id);
@@ -715,7 +913,7 @@ impl CarNetwork {
                 }
 
                 // (distance along, stop group, cap) for every point the lane must have.
-                let mut marks: Vec<(f64, Option<u8>, Option<i32>)> = vec![
+                let mut marks: Vec<(f64, Stop, Option<i32>)> = vec![
                     (
                         from,
                         None,
@@ -777,22 +975,46 @@ impl CarNetwork {
                             node.z as f64 - lane.nodes[k - 1].z as f64,
                         )
                         .unwrap_or((1.0, 0.0));
+                        // A driver stops only for a light they can see.
+                        let at = (node.x as f64 + 0.5, node.z as f64 + 0.5);
+                        if heads.is_some_and(|h| !h.shows(at, (-dir.0, -dir.1), scale)) {
+                            continue;
+                        }
                         let group = if group_of(dir) == 'a' { 1 } else { 2 };
-                        let s = if k == lane.nodes.len() - 1 {
+                        // Where the front of a car stops, and so where its middle does: short
+                        // of the line painted for the signal, else just short of the signal.
+                        let painted = path.painted_line(
+                            &lines,
+                            (from, path.at[k]),
+                            LINE_REACH * scale.max(0.5),
+                            // The line's middle is on the centreline, this lane within the road.
+                            piece.half as f64 + 1.0,
+                        );
+                        let front = if let Some(line) = painted {
+                            line - LINE_GAP * scale.max(0.5)
+                        } else if k == lane.nodes.len() - 1 {
                             to
                         } else {
                             path.at[k] - STOP_BACK * scale.max(0.5)
                         };
-                        marks.push((s.clamp(from, to), Some(group), None));
+                        for holds in [Holds::Cars, Holds::Long] {
+                            let s = front - holds.reach() * size;
+                            marks.push((s.clamp(from, to), Some((group, holds)), None));
+                        }
                     }
                 }
                 marks.sort_by(|a, b| a.0.total_cmp(&b.0));
                 // One point per spot, keeping the stop and the lowest cap any of its marks had.
-                let mut merged: Vec<(f64, Option<u8>, Option<i32>)> = Vec::new();
+                // Stops for two signal groups keep a point each, however close.
+                let mut merged: Vec<(f64, Stop, Option<i32>)> = Vec::new();
                 for (s, stop, cap) in marks {
+                    let apart = matches!((merged.last().and_then(|l| l.1), stop), (Some((a, _)), Some((b, _))) if a != b);
                     match merged.last_mut() {
-                        Some(last) if s - last.0 < 0.5 => {
-                            last.1 = last.1.or(stop);
+                        Some(last) if s - last.0 < 0.5 && !apart => {
+                            last.1 = match (last.1, stop) {
+                                (Some((g, a)), Some((_, b))) => Some((g, a.and(b))),
+                                (a, b) => a.or(b),
+                            };
                             last.2 = lower(last.2, cap);
                         }
                         _ => merged.push((s, stop, cap)),
@@ -803,7 +1025,7 @@ impl CarNetwork {
                     let (x, z) = path.point_at(s);
                     (surface_y(piece.way, x.floor() as i32, z.floor() as i32) + 1) as f64
                 };
-                let mut stations: Vec<(f64, Option<u8>, Option<i32>)> = Vec::new();
+                let mut stations: Vec<(f64, Stop, Option<i32>)> = Vec::new();
                 for &(s, stop, cap) in &merged {
                     if let Some(&(prev, _, _)) = stations.last() {
                         refine(prev, s, &y_at, 0, &mut stations);
@@ -820,7 +1042,8 @@ impl CarNetwork {
                                 x: (x * 10.0).round() / 10.0,
                                 y: y_at(s),
                                 z: (z * 10.0).round() / 10.0,
-                                stop,
+                                stop: stop.map(|(g, _)| g),
+                                holds: stop.map_or(Holds::All, |(_, h)| h),
                                 cap,
                             },
                             s,
@@ -845,7 +1068,6 @@ impl CarNetwork {
             })
             .collect();
 
-        let size = scale.clamp(0.4, 3.0);
         segments
             .iter_mut()
             .for_each(|s| tidy(s, U_TURN_RADIUS_M * size));
@@ -900,7 +1122,7 @@ impl CarNetwork {
             .map(|&(kind, _)| {
                 let list: Vec<String> = respawn_colours(kind.colours())
                     .iter()
-                    .map(|c| format!("\"{c}\""))
+                    .map(|c| format!("\"{}\"", colour_name(c)))
                     .collect();
                 format!("{}:[{}]", kind.name(), list.join(","))
             })
@@ -930,7 +1152,7 @@ impl CarNetwork {
                         macro_coord(p.z)
                     );
                     if let Some(g) = p.stop {
-                        let _ = write!(out, ",g:{g}b");
+                        let _ = write!(out, ",g:{g}b{}", p.holds.field());
                     }
                     if let Some(m) = p.cap {
                         let _ = write!(out, ",m:{m}");
@@ -941,7 +1163,11 @@ impl CarNetwork {
                     .next
                     .iter()
                     .map(|t| {
-                        let crossing = if t.crossing { ",j:1b" } else { "" };
+                        let crossing = if t.crossing {
+                            format!(",j:1b{}", self.gate(t))
+                        } else {
+                            String::new()
+                        };
                         format!("{{s:{},i:{}{crossing}}}", t.lane, t.entry)
                     })
                     .collect();
@@ -1065,6 +1291,174 @@ impl CarNetwork {
             dispatch,
         ));
 
+        // In a junction, a car close ahead (look's #ahead 3) standing at a red line is a
+        // queue reaching back from the road out, not a conflict to wait out and pass.
+        let mut conflict = String::from(
+            "# A car close ahead inside a junction. One standing at a red line, or in the lane past\n\
+             # the junction, has filled the road out of it: wait behind it as in any queue. So is\n\
+             # one on the same way through. Anyone else is a conflict, waited out for a while only,\n\
+             # since cars can block each other in a circle there. The spots are look's.\n",
+        );
+        let held = |own: &str, at: f64, r: f64, tag: &str| {
+            format!(
+                "execute if entity @s[{own}] rotated as @s positioned ^ ^ ^{} if entity @e[type=marker,{tag},distance=..{}] run return run scoreboard players set #t arnis.car 0\n",
+                d(at),
+                d(r)
+            )
+        };
+        for (own, extra) in [
+            ("tag=!arnis.car.long", 0.0),
+            ("tag=arnis.car.long", LONG_EXTRA),
+        ] {
+            let close = if extra > 0.0 {
+                LONG_CLOSE_AHEAD
+            } else {
+                CLOSE_AHEAD
+            };
+            conflict.push_str(&held(own, close.0, close.1, "tag=arnis.car.held"));
+            for &(at, r, _) in LOOK.iter().filter(|&&(_, _, c)| c == 3) {
+                conflict.push_str(&held(own, at + extra, r, "tag=arnis.car.held"));
+                conflict.push_str(&held(
+                    own,
+                    at + extra + LONG_EXTRA,
+                    r,
+                    "tag=arnis.car.held,tag=arnis.car.long",
+                ));
+            }
+        }
+        // On the same way through, by heading: a queue too. Only from where look's own spots
+        // start, beyond the spot two cars share, so two never wait for each other. The car's
+        // own heading, in sixteenths of a turn, picks the range of headings that count.
+        let _ = write!(
+            conflict,
+            "# Ahead on the same way through the junction, by heading: a queue as well. Which way\n\
+             # this car points, in sixteenths of a turn, picks who counts.\n\
+             execute store result score #p arnis.car run data get entity @s Rotation[0] 10\n\
+             scoreboard players add #p arnis.car {half}\n\
+             scoreboard players set #div arnis.car {slice}\n\
+             scoreboard players operation #p arnis.car /= #div arnis.car\n\
+             scoreboard players set #div arnis.car {PATH_SLICES}\n\
+             scoreboard players operation #p arnis.car %= #div arnis.car\n",
+            half = ((180.0 + 180.0 / PATH_SLICES as f64) * 10.0).round() as i32,
+            slice = (3600.0 / PATH_SLICES as f64).round() as i32,
+        );
+        let wrap = |a: f64| (a + 180.0).rem_euclid(360.0) - 180.0;
+        for b in 0..PATH_SLICES {
+            let centre = b as f64 * 360.0 / PATH_SLICES as f64 - 180.0;
+            let range = format!(
+                "{:.1}..{:.1}",
+                wrap(centre - SAME_PATH_DEG),
+                wrap(centre + SAME_PATH_DEG)
+            );
+            // Anyone standing in the lane past the junction, rather than crossing it, heading
+            // much the way this car goes: the end of a queue there, as at a red line.
+            let lane_way = format!(
+                "{:.1}..{:.1}",
+                wrap(centre - SAME_WAY_DEG),
+                wrap(centre + SAME_WAY_DEG)
+            );
+            let mut path = String::from(
+                "# Ahead on the same way through the junction, or standing in the lane past it: wait\n\
+                 # behind it. Else a conflict.\n",
+            );
+            for (own, extra) in [
+                ("tag=!arnis.car.long", 0.0),
+                ("tag=arnis.car.long", LONG_EXTRA),
+            ] {
+                for &(at, r, _) in LOOK.iter().filter(|&&(_, _, c)| c == 3) {
+                    for (more, long) in [(0.0, ""), (LONG_EXTRA, ",tag=arnis.car.long")] {
+                        for (who, range) in [
+                            ("tag=arnis.car", &range),
+                            ("tag=arnis.car.still,tag=!arnis.car.cross", &lane_way),
+                        ] {
+                            let _ = writeln!(
+                                path,
+                                "execute if entity @s[{own}] rotated as @s positioned ^ ^ ^{} if entity @e[type=marker,{who}{long},distance=..{},y_rotation={range}] run return run scoreboard players set #t arnis.car 0",
+                                d(at + extra + more),
+                                d(r)
+                            );
+                        }
+                    }
+                }
+            }
+            path.push_str("scoreboard players set #jam arnis.car 1\n");
+            out.push((
+                format!("data/arnis/function/cars/path/p{b}.mcfunction"),
+                path,
+            ));
+            let _ = writeln!(
+                conflict,
+                "execute if score #p arnis.car matches {b} run return run function arnis:cars/path/p{b}"
+            );
+        }
+        out.push((
+            "data/arnis/function/cars/conflict.mcfunction".to_string(),
+            conflict,
+        ));
+
+        // About to cross a junction: room past it for the whole car, short of any car
+        // standing there? First the cars standing about the lane out and heading its way are
+        // marked, this one left out, then spots along the lane: as far on as this car's length
+        // and the half of the one standing reach, and back over where it joins the lane as far
+        // as the two halves.
+        let round = LOOK[0].1;
+        let mut gate = String::from(
+            "# Room past the junction ahead for this whole car, short of anyone standing there?\n\
+             # Looked for along the lane out of it, from where this car joins it, among the cars\n\
+             # gate_at marked.\n",
+        );
+        let mut furthest: f64 = 0.0;
+        for own in [false, true] {
+            for held_long in [false, true] {
+                let tag = if held_long {
+                    "tag=arnis.car.way,tag=arnis.car.long"
+                } else {
+                    "tag=arnis.car.way"
+                };
+                let who = if own {
+                    "tag=arnis.car.long"
+                } else {
+                    "tag=!arnis.car.long"
+                };
+                let (own, held) = (Holds::from_long(own), Holds::from_long(held_long));
+                let on = 2.0 * own.reach() + held.reach() + GATE_SPARE;
+                let back = own.reach() + held.reach();
+                // Back over where it joins only partway along the lane: at its start, behind is
+                // the junction itself.
+                for (reach, sign, only) in
+                    [(on, "", ""), (back, "-", "if data entity @s data{gb:1b} ")]
+                {
+                    let mut at = round;
+                    while at - round < reach {
+                        let _ = writeln!(
+                            gate,
+                            "execute {only}if entity @s[{who}] positioned ^ ^ ^{sign}{} if entity @e[type=marker,{tag},distance=..{}] run return run function arnis:cars/gated",
+                            d(at),
+                            d(round)
+                        );
+                        furthest = furthest.max(at + round);
+                        at += 2.0 * round;
+                    }
+                }
+            }
+        }
+        out.push((
+            "data/arnis/function/cars/gate_queue.mcfunction".to_string(),
+            gate,
+        ));
+        out.push((
+            "data/arnis/function/cars/gate_at.mcfunction".to_string(),
+            format!(
+                "# The cars standing about the lane out of the junction and heading its way, this one\n\
+                 # left out: those gate_queue looks for.\n\
+                 $execute positioned $(x) $(y) $(z) as @e[type=marker,tag=arnis.car.still,distance=..{reach},y_rotation=$(gy)] run tag @s add arnis.car.way\n\
+                 tag @s remove arnis.car.way\n\
+                 $execute positioned $(x) $(y) $(z) rotated $(gr) 0 run function arnis:cars/gate_queue\n\
+                 $execute positioned $(x) $(y) $(z) run tag @e[type=marker,tag=arnis.car.way,distance=..{reach}] remove arnis.car.way\n",
+                reach = d(furthest),
+            ),
+        ));
+
         let mut clear = format!(
             "# Crossing traffic right in front, or anyone ahead inside a junction: give way, but\n\
              # not for ever, since cars can block each other in a circle there. Which goes first\n\
@@ -1126,52 +1520,93 @@ impl CarNetwork {
         out
     }
 
-    /// The functions that build a respawned car's body: the block displays of each kind,
-    /// as (path in the pack, text). 26.3 reads a display's block as a bare id, so it gets
-    /// its own copies in the `ov121` overlay.
+    /// The functions that build a respawned car's body, as (path in the pack, text): the
+    /// box a player clicks to get in, the model and, on a display of its own so the pack
+    /// can turn them up, the brake lights. The colour comes in as its name, `red`.
     pub fn body_functions(&self) -> Vec<(String, String)> {
         let k = self.size as f32;
-        let mut out = Vec::new();
-        for (kind, _) in KINDS {
-            let name = kind.name();
-            for (prefix, bare) in [("", false), ("ov121/", true)] {
+        KINDS
+            .iter()
+            .map(|&(kind, _)| {
+                let name = kind.name();
+                let model = kind.model();
                 let (width, height) = kind.hitbox();
-                let mut text = format!(
-                    "$summon interaction $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.k_{name}\"],width:{:.2}f,height:{:.2}f}}\n",
+                let item = vehicle_models::item_model_named(model, "$(colour)");
+                let text = format!(
+                    "$summon interaction $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.k_{name}\"],width:{:.2}f,height:{:.2}f}}\n\
+                     $summon item_display $(x) $(y) $(z) {{Tags:[\"arnis.car.part\"],teleport_duration:2,view_range:{VIEW_RANGE}f,{}}}\n\
+                     $summon item_display $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.car.tail\"],teleport_duration:2,view_range:{VIEW_RANGE}f,{}}}\n",
                     width * k,
                     height * k,
+                    vehicle_models::display_snbt(model, &item, self.size, false, ""),
+                    vehicle_models::display_snbt(
+                        model,
+                        &vehicle_models::brake_item_model(model),
+                        self.size,
+                        false,
+                        ",brightness:{sky:7,block:7}",
+                    ),
                 );
-                for p in parts(kind, "$(colour)") {
-                    let block = if bare {
-                        format!("\"{}\"", p.block)
-                    } else {
-                        format!("{{Name:\"{}\"}}", p.block)
-                    };
-                    let v3 = |v: [f32; 3]| {
-                        format!("[{:.3}f,{:.3}f,{:.3}f]", v[0] * k, v[1] * k, v[2] * k)
-                    };
-                    let (tags, glow) = match p.light {
-                        Light::Head => ("\"arnis.car.part\"", ",brightness:{sky:15,block:15}"),
-                        Light::Tail => (
-                            "\"arnis.car.part\",\"arnis.car.tail\"",
-                            ",brightness:{sky:7,block:7}",
-                        ),
-                        Light::None => ("\"arnis.car.part\"", ""),
-                    };
-                    let _ = writeln!(
-                        text,
-                        "$summon block_display $(x) $(y) $(z) {{Tags:[{tags}],teleport_duration:2,view_range:{VIEW_RANGE}f,block_state:{block},transformation:{{left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f],translation:{},scale:{}}}{glow}}}",
-                        v3(p.corner),
-                        v3(p.size),
-                    );
-                }
-                out.push((
-                    format!("{prefix}data/arnis/function/cars/body/{name}.mcfunction"),
-                    text,
-                ));
+                (format!("data/arnis/function/cars/body/{name}.mcfunction"), text)
+            })
+            .collect()
+    }
+
+    /// What a car about to cross a junction into `t` checks first, so that it is not left
+    /// standing in the junction: which way the lane runs on from where it is joined, to look
+    /// for a queue there (`gr`), and the group of a stop too close past the junction for
+    /// cars (`gc`) or buses and trucks (`gl`) to wait at clear of it.
+    fn gate(&self, t: &Turn) -> String {
+        let lane = &self.segments[t.lane];
+        let mut out = String::new();
+        let Some(entry) = lane.points.get(t.entry) else {
+            return out;
+        };
+        // Which way the lane runs there: on to its next point, or in from the one before
+        // where the car joins it at its end.
+        let on = lane.points[t.entry..]
+            .iter()
+            .find_map(|q| unit(q.x - entry.x, q.z - entry.z))
+            .or_else(|| {
+                lane.points[..t.entry]
+                    .iter()
+                    .rev()
+                    .find_map(|q| unit(entry.x - q.x, entry.z - q.z))
+            });
+        if let Some((dx, dz)) = on {
+            // Plus nought, so a lane due south is 0, not -0.
+            let yaw = (-dx).atan2(dz).to_degrees() + 0.0;
+            let wrap = |a: f64| (a + 180.0).rem_euclid(360.0) - 180.0;
+            let _ = write!(
+                out,
+                ",gr:{yaw:.1}f,gy:\"{:.1}..{:.1}\"",
+                wrap(yaw - SAME_WAY_DEG),
+                wrap(yaw + SAME_WAY_DEG)
+            );
+            if t.entry > 0 {
+                out.push_str(",gb:1b");
+            }
+        }
+        for (field, long) in [("gc", false), ("gl", true)] {
+            let room = (Holds::from_long(long).reach() + GATE_SPARE) * self.size;
+            let first = lane.points[t.entry..]
+                .iter()
+                .zip(&lane.arcs[t.entry..])
+                .take_while(|&(_, &s)| s - lane.arcs[t.entry] < room)
+                .find_map(|(p, _)| p.stop.filter(|_| p.holds.holds(long)));
+            if let Some(g) = first {
+                let _ = write!(out, ",{field}:{g}b");
             }
         }
         out
+    }
+
+    /// Every look a car can have, for the resource pack.
+    pub fn java_looks(&self) -> Vec<Look> {
+        all_bodies()
+            .into_iter()
+            .map(|(kind, colour)| kind.look(colour))
+            .collect()
     }
 
     /// The function that picks a new car's kind, each as often as its weight.
@@ -1324,28 +1759,15 @@ impl CarNetwork {
         })
     }
 
-    /// Every body a car can have on Bedrock, at the size the cars are built at.
+    /// Every body a car can have on Bedrock.
     pub fn bedrock_bodies(&self) -> Vec<Body> {
-        let k = self.size as f32;
         all_bodies()
             .into_iter()
             .map(|(kind, colour)| Body {
                 name: body_name(kind, colour),
                 fleet: Fleet::Car,
-                shapes: parts(kind, colour)
-                    .into_iter()
-                    .map(|p| Shape {
-                        block: p.block,
-                        size: p.size.map(|v| v * k),
-                        corner: p.corner.map(|v| v * k),
-                        tilt: 0.0,
-                        lamp: match p.light {
-                            Light::None => Lamp::Off,
-                            Light::Head => Lamp::On,
-                            Light::Tail => Lamp::Brake,
-                        },
-                    })
-                    .collect(),
+                look: kind.look(colour),
+                size: self.size,
             })
             .collect()
     }
@@ -1379,6 +1801,9 @@ impl CarNetwork {
             ]);
             if let Some(g) = t.stop {
                 data.insert("g".to_string(), Value::Byte(g as i8));
+                if let Some(k) = t.holds.code() {
+                    data.insert("k".to_string(), Value::Byte(k));
+                }
             }
             if let Some(m) = t.cap {
                 data.insert("m".to_string(), Value::Int(m));
@@ -1411,13 +1836,34 @@ impl CarNetwork {
                 ("Rotation".to_string(), rotation.clone()),
             ]);
             editor.add_entity_exact("minecraft:interaction", x, y, z, seed + 31, hitbox);
-            for (k, mut nbt) in body(car.kind, car.colour, self.size)
-                .into_iter()
-                .enumerate()
-            {
+            let look = car.kind.look(car.colour);
+            let shown = [
+                (vehicle_models::item_model(&look), None),
+                (
+                    vehicle_models::brake_item_model(look.model),
+                    Some(Value::String("arnis.car.tail".to_string())),
+                ),
+            ];
+            for (k, (item, tag)) in shown.into_iter().enumerate() {
+                let mut nbt = vehicle_models::display_nbt(look.model, &item, self.size, false);
+                let mut tags = vec![Value::String("arnis.car.part".to_string())];
+                tags.extend(tag.clone());
+                nbt.insert("Tags".to_string(), Value::List(tags));
+                // Steps come every second tick; the client glides between them.
+                nbt.insert("teleport_duration".to_string(), Value::Int(2));
+                nbt.insert("view_range".to_string(), Value::Float(VIEW_RANGE));
+                if tag.is_some() {
+                    nbt.insert(
+                        "brightness".to_string(),
+                        Value::Compound(HashMap::from([
+                            ("sky".to_string(), Value::Int(7)),
+                            ("block".to_string(), Value::Int(7)),
+                        ])),
+                    );
+                }
                 nbt.insert("Rotation".to_string(), rotation.clone());
                 editor.add_entity_exact(
-                    "minecraft:block_display",
+                    "minecraft:item_display",
                     x,
                     y,
                     z,
@@ -1442,6 +1888,9 @@ impl Kind {
         match self {
             Kind::Sedan => "sedan",
             Kind::Hatchback => "hatchback",
+            Kind::Estate => "estate",
+            Kind::Suv => "suv",
+            Kind::City => "city",
             Kind::Van => "van",
             Kind::Pickup => "pickup",
             Kind::Truck => "truck",
@@ -1452,7 +1901,7 @@ impl Kind {
     /// The colours this kind comes in, weighted.
     fn colours(self) -> &'static [(&'static str, u32)] {
         match self {
-            Kind::Sedan | Kind::Hatchback => &CAR_COLOURS,
+            Kind::Sedan | Kind::Hatchback | Kind::Estate | Kind::Suv | Kind::City => &CAR_COLOURS,
             Kind::Van => &VAN_COLOURS,
             Kind::Pickup => &PICKUP_COLOURS,
             Kind::Truck => &TRUCK_COLOURS,
@@ -1471,6 +1920,9 @@ impl Kind {
         match self {
             Kind::Sedan => (0.4, 1.15),
             Kind::Hatchback => (0.1, 1.2),
+            Kind::Estate => (0.3, 1.15),
+            Kind::Suv => (0.25, 1.35),
+            Kind::City => (0.05, 1.2),
             Kind::Van => (1.25, 1.42),
             Kind::Pickup => (0.95, 1.28),
             Kind::Truck => (2.7, 1.95),
@@ -1484,11 +1936,50 @@ impl Kind {
         match self {
             Kind::Sedan => (2.4, 1.45),
             Kind::Hatchback => (2.4, 1.5),
+            Kind::Estate => (2.4, 1.5),
+            Kind::Suv => (2.5, 1.7),
+            Kind::City => (2.4, 1.5),
             Kind::Van => (2.6, 1.8),
             Kind::Pickup => (2.6, 1.6),
             Kind::Truck => (3.0, 2.7),
             Kind::Bus => (3.0, 2.6),
         }
+    }
+
+    /// Length and width at 1:1, mirrors left out: what the kind's model is built to, what
+    /// a stop line's points are placed by and the tests of queues and look-aheads go by.
+    fn size_m(self) -> (f64, f64) {
+        match self {
+            Kind::Sedan => (4.6, 1.82),
+            Kind::Hatchback => (4.0, 1.76),
+            Kind::Estate => (4.7, 1.8),
+            Kind::Suv => (4.5, 1.86),
+            Kind::City => (3.6, 1.65),
+            Kind::Van => (4.9, 1.95),
+            Kind::Pickup => (5.3, 1.95),
+            Kind::Truck => (7.6, 2.4),
+            Kind::Bus => (10.0, 2.5),
+        }
+    }
+
+    /// The vehicle model this kind is drawn with (`assets/vehicles`).
+    fn model(self) -> &'static str {
+        match self {
+            Kind::Sedan => "car_sedan",
+            Kind::Hatchback => "car_hatchback",
+            Kind::Estate => "car_estate",
+            Kind::Suv => "car_suv",
+            Kind::City => "car_city",
+            Kind::Van => "car_van",
+            Kind::Pickup => "car_pickup",
+            Kind::Truck => "car_truck",
+            Kind::Bus => "car_bus",
+        }
+    }
+
+    /// How a car of this kind in `colour` looks.
+    fn look(self, colour: &'static str) -> Look {
+        Look::plain(self.model(), colour_name(colour), colour)
     }
 }
 
@@ -1498,6 +1989,36 @@ fn all_bodies() -> Vec<(Kind, &'static str)> {
         .iter()
         .flat_map(|&(kind, _)| kind.colours().iter().map(move |(c, _)| (kind, *c)))
         .collect()
+}
+
+/// Whether a kind parks on lots, decks and at pumps: lorries and buses have depots.
+fn parks(kind: Kind) -> bool {
+    !kind.is_long()
+}
+
+/// Every look a parked car can have, for the resource pack.
+pub fn parked_looks() -> Vec<Look> {
+    all_bodies()
+        .into_iter()
+        .filter(|&(kind, _)| parks(kind))
+        .map(|(kind, colour)| kind.look(colour))
+        .collect()
+}
+
+/// The car parked where the hash `h` falls, each kind and colour as often as on the road,
+/// at 1:1 and no taller than `headroom` blocks; `None` if none fits.
+pub fn parked_look(h: u64, headroom: f64) -> Option<Look> {
+    let fits: Vec<(Kind, u32)> = KINDS
+        .iter()
+        .copied()
+        .filter(|&(kind, _)| parks(kind))
+        .filter(|&(kind, _)| vehicle_models::model(kind.model()).top_m() <= headroom)
+        .collect();
+    if fits.is_empty() {
+        return None;
+    }
+    let kind = pick(&fits, h);
+    Some(kind.look(pick(kind.colours(), h >> 24)))
 }
 
 /// `red` for red concrete.
@@ -1514,12 +2035,12 @@ fn body_name(kind: Kind, colour: &str) -> String {
 
 /// Splits a stretch until no waypoint is more than `MAX_SPAN` from the next and the
 /// ground in between is within a block of the straight line, so cars keep to the road.
-pub(crate) fn refine(
+fn refine(
     a: f64,
     b: f64,
     y_at: &impl Fn(f64) -> f64,
     depth: u32,
-    out: &mut Vec<(f64, Option<u8>, Option<i32>)>,
+    out: &mut Vec<(f64, Stop, Option<i32>)>,
 ) {
     if depth >= 6 || b - a < 3.0 {
         return;
@@ -2000,13 +2521,14 @@ fn bend_into(
             y: p.y + (q.y - p.y) * t,
             z: p.z + (q.z - p.z) * t,
             stop: None,
+            holds: Holds::All,
             cap: q.cap,
         };
         (
             start,
             unit(q.x - p.x, q.z - p.z).unwrap_or(h),
             Some((k, at)),
-            // A stop line on the part cut off moves to where the turn starts.
+            // A stop line on the part cut off moves to where the turn starts, for everyone.
             seg.points[k..].iter().find_map(|p| p.stop),
         )
     } else {
@@ -2066,6 +2588,7 @@ fn bend_into(
             y: a.y + (meet.1 - a.y) * t,
             z: (z * 10.0).round() / 10.0,
             stop: None,
+            holds: Holds::All,
             cap,
         };
         added.push((p, along));
@@ -2264,295 +2787,9 @@ fn spots(segments: &[Segment], scale: f64) -> BTreeMap<(i32, i32), Vec<(usize, u
 /// Display entities are drawn out to 64 blocks times this, and sent out to 160 blocks.
 const VIEW_RANGE: f32 = 3.0;
 
-/// One block of a vehicle: its block, size and lowest corner in the vehicle's frame, and
-/// how it is lit.
-struct Part {
-    block: &'static str,
-    size: [f32; 3],
-    corner: [f32; 3],
-    light: Light,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Light {
-    None,
-    Head,
-    /// Dim while driving; the pack turns it up while the car brakes or stands.
-    Tail,
-}
-
-const fn part(block: &'static str, size: [f32; 3], corner: [f32; 3], light: Light) -> Part {
-    Part {
-        block,
-        size,
-        corner,
-        light,
-    }
-}
-
-/// A vehicle's parts at 1:1, +z ahead and the ground at 0.
-fn parts(kind: Kind, colour: &'static str) -> Vec<Part> {
-    // (length, width, axle from each end, wheel size, light height)
-    let (l, w, axle, wheel, lights) = match kind {
-        Kind::Sedan => (4.6, 1.82, 0.95, 0.64, 0.66),
-        Kind::Hatchback => (4.0, 1.76, 0.75, 0.62, 0.68),
-        Kind::Van => (4.9, 1.95, 0.85, 0.68, 0.75),
-        Kind::Pickup => (5.3, 1.95, 1.0, 0.74, 0.78),
-        Kind::Truck => (7.6, 2.4, 1.25, 0.95, 0.8),
-        Kind::Bus => (10.0, 2.5, 2.2, 0.98, 0.8),
-    };
-    let wheels = |z: f32| {
-        part(
-            "minecraft:black_concrete",
-            [w + 0.08, wheel, wheel],
-            [-(w + 0.08) / 2.0, 0.0, z - wheel / 2.0],
-            Light::None,
-        )
-    };
-    let lamp = |block, z: f32, light| {
-        part(
-            block,
-            [w - 0.3, 0.13, 0.04],
-            [-(w - 0.3) / 2.0, lights, z],
-            light,
-        )
-    };
-    let plate = |z: f32| {
-        part(
-            "minecraft:white_concrete",
-            [0.52, 0.11, 0.02],
-            [-0.26, lights - 0.2, z],
-            Light::None,
-        )
-    };
-    let mut out = vec![
-        wheels(l / 2.0 - axle),
-        wheels(-l / 2.0 + axle),
-        lamp("minecraft:white_concrete", l / 2.0, Light::Head),
-        lamp("minecraft:red_concrete", -l / 2.0 - 0.04, Light::Tail),
-        plate(l / 2.0),
-        plate(-l / 2.0 - 0.02),
-    ];
-    match kind {
-        Kind::Sedan => out.extend([
-            part(
-                colour,
-                [w, 0.72, l],
-                [-w / 2.0, 0.22, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w - 0.2, 0.52, 2.3],
-                [-(w - 0.2) / 2.0, 0.94, -1.3],
-                Light::None,
-            ),
-            part(
-                colour,
-                [w - 0.18, 0.07, 2.0],
-                [-(w - 0.18) / 2.0, 1.43, -1.15],
-                Light::None,
-            ),
-        ]),
-        Kind::Hatchback => out.extend([
-            part(
-                colour,
-                [w, 0.72, l],
-                [-w / 2.0, 0.22, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w - 0.18, 0.56, 2.3],
-                [-(w - 0.18) / 2.0, 0.94, -1.78],
-                Light::None,
-            ),
-            part(
-                colour,
-                [w - 0.16, 0.07, 2.1],
-                [-(w - 0.16) / 2.0, 1.47, -1.72],
-                Light::None,
-            ),
-        ]),
-        // A tall box, glazed at the front where the cab is.
-        Kind::Van => out.extend([
-            part(colour, [w, 1.5, l], [-w / 2.0, 0.3, -l / 2.0], Light::None),
-            part(
-                "minecraft:tinted_glass",
-                [w + 0.04, 0.55, 1.0],
-                [-(w + 0.04) / 2.0, 1.15, l / 2.0 - 0.98],
-                Light::None,
-            ),
-        ]),
-        // A cab up front and an open bed behind it.
-        Kind::Pickup => out.extend([
-            part(
-                colour,
-                [w, 0.62, l],
-                [-w / 2.0, 0.36, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w - 0.2, 0.56, 2.1],
-                [-(w - 0.2) / 2.0, 0.98, -0.4],
-                Light::None,
-            ),
-            part(
-                colour,
-                [w - 0.18, 0.07, 1.9],
-                [-(w - 0.18) / 2.0, 1.54, -0.3],
-                Light::None,
-            ),
-        ]),
-        // A coloured cab and a plain box behind it.
-        Kind::Truck => out.extend([
-            part(
-                colour,
-                [w, 1.95, 1.95],
-                [-w / 2.0, 0.55, l / 2.0 - 1.95],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w + 0.04, 0.62, 0.95],
-                [-(w + 0.04) / 2.0, 1.65, l / 2.0 - 0.93],
-                Light::None,
-            ),
-            part(
-                "minecraft:light_gray_concrete",
-                [w + 0.06, 2.4, 5.5],
-                [-(w + 0.06) / 2.0, 0.85, -l / 2.0],
-                Light::None,
-            ),
-        ]),
-        // One long box with a band of windows round it.
-        Kind::Bus => out.extend([
-            part(
-                colour,
-                [w, 2.55, l],
-                [-w / 2.0, 0.35, -l / 2.0],
-                Light::None,
-            ),
-            part(
-                "minecraft:tinted_glass",
-                [w + 0.04, 0.95, l - 0.28],
-                [-(w + 0.04) / 2.0, 1.5, -l / 2.0 + 0.3],
-                Light::None,
-            ),
-        ]),
-    }
-    // Windows and bumpers stand a hair proud of the body, so the two never flicker.
-    let mut boxes: Vec<crate::element_processing::train_bodies::Part> = out
-        .iter()
-        .map(|p| crate::element_processing::train_bodies::Part {
-            block: p.block,
-            size: p.size,
-            corner: p.corner,
-            tilt: 0.0,
-            glow: false,
-        })
-        .collect();
-    crate::element_processing::ship_bodies::apart(&mut boxes);
-    for (p, b) in out.iter_mut().zip(boxes) {
-        (p.size, p.corner) = (b.size, b.corner);
-    }
-    out
-}
-
-/// The block displays of one vehicle at `size` blocks per metre.
-fn body(kind: Kind, colour: &'static str, size: f64) -> Vec<HashMap<String, Value>> {
-    let k = size as f32;
-    let floats = |v: [f32; 4]| Value::List(v.iter().map(|f| Value::Float(*f)).collect());
-    let vec3 = |v: [f32; 3]| Value::List(v.iter().map(|f| Value::Float(*f * k)).collect());
-    let glow = |level: i32| {
-        Value::Compound(HashMap::from([
-            ("sky".to_string(), Value::Int(level)),
-            ("block".to_string(), Value::Int(level)),
-        ]))
-    };
-    parts(kind, colour)
-        .into_iter()
-        .map(|p| {
-            let mut tags = vec![Value::String("arnis.car.part".to_string())];
-            if p.light == Light::Tail {
-                tags.push(Value::String("arnis.car.tail".to_string()));
-            }
-            let mut nbt = HashMap::from([
-                (
-                    "block_state".to_string(),
-                    Value::Compound(HashMap::from([(
-                        "Name".to_string(),
-                        Value::String(p.block.to_string()),
-                    )])),
-                ),
-                (
-                    "transformation".to_string(),
-                    Value::Compound(HashMap::from([
-                        ("left_rotation".to_string(), floats([0.0, 0.0, 0.0, 1.0])),
-                        ("right_rotation".to_string(), floats([0.0, 0.0, 0.0, 1.0])),
-                        ("translation".to_string(), vec3(p.corner)),
-                        ("scale".to_string(), vec3(p.size)),
-                    ])),
-                ),
-                ("Tags".to_string(), Value::List(tags)),
-                // Steps come every second tick; the client glides between them.
-                ("teleport_duration".to_string(), Value::Int(2)),
-                ("view_range".to_string(), Value::Float(VIEW_RANGE)),
-            ]);
-            match p.light {
-                Light::Head => {
-                    nbt.insert("brightness".to_string(), glow(15));
-                }
-                Light::Tail => {
-                    nbt.insert("brightness".to_string(), glow(7));
-                }
-                Light::None => {}
-            }
-            nbt
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn no_two_parts_of_a_car_flicker_against_each_other_or_hide_one_another() {
-        use crate::element_processing::train_bodies::Part as Box;
-        let mut found = Vec::new();
-        for kind in [
-            Kind::Sedan,
-            Kind::Hatchback,
-            Kind::Van,
-            Kind::Pickup,
-            Kind::Truck,
-            Kind::Bus,
-        ] {
-            let parts: Vec<Box> = parts(kind, "minecraft:red_concrete")
-                .iter()
-                .map(|p| Box {
-                    block: p.block,
-                    size: p.size,
-                    corner: p.corner,
-                    tilt: 0.0,
-                    glow: false,
-                })
-                .collect();
-            for (i, a) in parts.iter().enumerate() {
-                for b in &parts[i + 1..] {
-                    for f in crate::element_processing::ship_bodies::shared_faces(a, b) {
-                        found.push(format!("{kind:?} {} / {} {f:?}", a.block, b.block));
-                    }
-                }
-            }
-            for b in crate::element_processing::ship_bodies::buried(&parts) {
-                found.push(format!("{kind:?} {b}"));
-            }
-        }
-        assert!(found.is_empty(), "{}", found.join("\n"));
-    }
 
     fn node(id: u64, x: i32, z: i32, tags: &[(&str, &str)]) -> ProcessedNode {
         ProcessedNode {
@@ -2830,19 +3067,7 @@ mod tests {
 
     /// A kind's body: its length and width, in blocks at 1:1.
     fn footprint(kind: Kind) -> (f64, f64) {
-        let parts = parts(kind, "minecraft:white_concrete");
-        let extent = |axis: usize| {
-            let lo = parts
-                .iter()
-                .map(|p| p.corner[axis])
-                .fold(f32::MAX, f32::min);
-            let hi = parts
-                .iter()
-                .map(|p| p.corner[axis] + p.size[axis])
-                .fold(f32::MIN, f32::max);
-            f64::from(hi - lo)
-        };
-        (extent(2), extent(0))
+        kind.size_m()
     }
 
     /// What a driver makes of the car ahead `gap` blocks off, middle to middle, as the
@@ -3343,19 +3568,337 @@ mod tests {
     #[test]
     fn lanes_into_a_signal_end_on_a_stop_line_for_their_group() {
         let net = CarNetwork::build(&crossroads(true), 1.0, false, true, &world(), flat, open);
-        let ends: Vec<&Waypoint> = net
+        let into: Vec<&Segment> = net
             .segments
             .iter()
-            .filter_map(|s| s.points.last().filter(|p| p.stop.is_some()))
+            .filter(|s| s.points.iter().any(|p| p.stop.is_some()))
             .collect();
-        assert_eq!(ends.len(), 4);
-        assert_eq!(ends.iter().filter(|p| p.stop == Some(1)).count(), 2);
+        assert_eq!(into.len(), 4);
+        let mut groups = Vec::new();
+        for seg in into {
+            // The lane ends at the junction, where the front of every car stops: cars on one
+            // point, buses and trucks on one further back, each by the longest of its kind.
+            let end = seg.points.last().unwrap();
+            for holds in [Holds::Cars, Holds::Long] {
+                let p = seg
+                    .points
+                    .iter()
+                    .find(|p| p.stop.is_some() && p.holds == holds)
+                    .unwrap();
+                let front = (end.x - p.x).hypot(end.z - p.z);
+                assert!((front - holds.reach()).abs() < 0.15, "{holds:?}: {front}");
+                groups.push(p.stop);
+            }
+        }
+        assert_eq!(groups.iter().filter(|&&g| g == Some(1)).count(), 4);
+        assert_eq!(Holds::Cars.reach(), Kind::Pickup.size_m().0 / 2.0);
+        assert_eq!(Holds::Long.reach(), Kind::Bus.size_m().0 / 2.0);
         let free = CarNetwork::build(&crossroads(true), 1.0, false, false, &world(), flat, open);
         assert!(free
             .segments
             .iter()
             .flat_map(|s| &s.points)
             .all(|p| p.stop.is_none()));
+    }
+
+    /// A car stops only for a light it can see. Where the planner found no kerb to stand
+    /// a head on (here: paving all round), the signal holds nobody; with kerbs, every
+    /// approach gets its head and its stop line.
+    #[test]
+    fn cars_stop_only_where_a_head_faces_them() {
+        let elements = crossroads(true);
+        let mask = |paved: &dyn Fn(i32, i32) -> bool| {
+            let bbox = XZBBox::rect_from_min_max(-120, -120, 120, 120).unwrap();
+            let mut mask = crate::floodfill_cache::RoadMaskBitmap::new(&bbox);
+            for x in -120..=120 {
+                for z in -120..=120 {
+                    if paved(x, z) {
+                        mask.set(x, z);
+                    }
+                }
+            }
+            mask
+        };
+        let stops = |paved: &dyn Fn(i32, i32) -> bool| {
+            let heads = SignalIndex::build(&elements, 1.0, false, &mask(paved));
+            let net = CarNetwork::build_with_heads(
+                &elements,
+                1.0,
+                false,
+                true,
+                Some(&heads),
+                None,
+                &world(),
+                flat,
+                open,
+            );
+            net.segments
+                .iter()
+                .flat_map(|s| &s.points)
+                .filter(|p| p.stop.is_some())
+                .count()
+        };
+        assert_eq!(stops(&|_, _| true), 0);
+        let half = highway_block_range("residential", &HashMap::new(), 1.0);
+        // A point for cars and one for buses and trucks on each approach.
+        assert_eq!(stops(&|x, z| x.abs() <= half || z.abs() <= half), 8);
+    }
+
+    /// Every car stands with its front just short of the line painted for the signal, not
+    /// over it: the line lies back from the junction, behind the crossing road.
+    #[test]
+    fn cars_stop_short_of_the_painted_stop_line() {
+        for mid_road in [false, true] {
+            let mut elements = crossroads(!mid_road);
+            for e in &mut elements {
+                if let ProcessedElement::Way(w) = e {
+                    // Roads with lane lines, which get stop lines too.
+                    w.tags
+                        .insert("highway".to_string(), "secondary".to_string());
+                    // Or a signalised crossing on the way in from the south.
+                    if mid_road && w.id == 2 {
+                        let crossing = [("highway", "crossing"), ("crossing", "traffic_signals")];
+                        w.nodes.insert(2, node(90, 0, 40, &crossing));
+                    }
+                }
+            }
+            let painted =
+                RoadMarkingIndex::build(&elements, 1.0, crate::decals::region::SignRegion::Europe);
+            let lines: Vec<StopLine> = [1, 2]
+                .iter()
+                .flat_map(|&id| painted.stop_lines(id).to_vec())
+                .collect();
+            assert!(!lines.is_empty());
+            let net = CarNetwork::build_with_heads(
+                &elements,
+                1.0,
+                false,
+                true,
+                None,
+                Some(&painted),
+                &world(),
+                flat,
+                open,
+            );
+            let mut checked = 0;
+            for seg in &net.segments {
+                for (k, p) in seg.points.iter().enumerate() {
+                    if p.stop.is_none() || p.holds == Holds::All {
+                        continue;
+                    }
+                    let q = seg.points[(k + 1).min(seg.points.len() - 1)];
+                    let Some((ux, uz)) = unit(q.x - p.x, q.z - p.z) else {
+                        continue;
+                    };
+                    let front = (p.x + ux * p.holds.reach(), p.z + uz * p.holds.reach());
+                    // The line across this lane ahead: its cell within a lane's width aside.
+                    let ahead = lines
+                        .iter()
+                        .filter_map(|l| {
+                            let (dx, dz) = (l.x as f64 + 0.5 - front.0, l.z as f64 + 0.5 - front.1);
+                            let side = (dx * -uz + dz * ux).abs();
+                            (side < 4.0).then_some(dx * ux + dz * uz)
+                        })
+                        .filter(|&d| d > -3.0)
+                        .min_by(|a, b| a.total_cmp(b));
+                    let d = ahead.unwrap_or_else(|| panic!("no line ahead of {p:?}"));
+                    // Front to the middle of the line's row: its half row and a little room.
+                    assert!(
+                        (d - LINE_GAP).abs() < 0.3,
+                        "mid-road {mid_road}: front {d:.2} short of the line, {:?}",
+                        p.holds
+                    );
+                    checked += 1;
+                }
+            }
+            assert!(checked >= 4, "{checked}");
+        }
+    }
+
+    /// A stop line counts only across this lane, between its start and the signal: not one
+    /// on the far side of the road, further along the way past the lane's end, or before it.
+    #[test]
+    fn a_stop_line_is_taken_only_where_it_crosses_this_lane() {
+        // A lane heading south down x = 3, right of a way along x = 0.
+        let path = Path::new(vec![(3.0, 0.0), (3.0, 50.0)]);
+        let line = |z: i32, side: i8| StopLine {
+            x: -1,
+            z,
+            dir: (0.0, 1.0),
+            side,
+        };
+        let find = |lines: &[StopLine]| path.painted_line(lines, (5.0, 40.0), 40.0, 4.0);
+        // On the lane's half of the road: facing south, east is the way's left.
+        assert_eq!(find(&[line(30, -1)]), Some(30.5));
+        assert_eq!(find(&[line(30, 1)]), None);
+        assert_eq!(find(&[line(30, 0)]), Some(30.5));
+        // The nearest short of the signal wins; past it, before the lane, or off it, none.
+        assert_eq!(find(&[line(20, -1), line(30, -1)]), Some(30.5));
+        assert_eq!(find(&[line(45, -1)]), None);
+        assert_eq!(find(&[line(2, -1)]), None);
+        assert_eq!(find(&[line(70, -1)]), None);
+        assert_eq!(
+            find(&[StopLine {
+                x: 20,
+                ..line(30, -1)
+            }]),
+            None
+        );
+        // A line across the road the other way is a crossing road's.
+        assert_eq!(
+            find(&[StopLine {
+                dir: (1.0, 0.0),
+                ..line(30, -1)
+            }]),
+            None
+        );
+    }
+
+    /// One lane across a junction into another: a car about to cross checks which way the
+    /// lane out runs, and whether a stop on it is too close past the junction to wait at.
+    fn gate_for(stop_at: f64) -> String {
+        let net = gate_net(stop_at);
+        net.gate(&net.segments[0].next[0])
+    }
+
+    fn gate_net(stop_at: f64) -> CarNetwork {
+        let at = |z: f64, stop: Option<(u8, Holds)>| Waypoint {
+            x: 0.5,
+            y: 65.0,
+            z,
+            stop: stop.map(|(g, _)| g),
+            holds: stop.map_or(Holds::All, |(_, h)| h),
+            cap: None,
+        };
+        let lane = |points: Vec<Waypoint>, next: Vec<Turn>| Segment {
+            way: 1,
+            arcs: points.iter().map(|p| p.z).collect(),
+            points,
+            next,
+            into_junction: false,
+            turns_back: false,
+            stub: false,
+            speed: 500,
+            density: 0.0,
+        };
+        CarNetwork {
+            segments: vec![
+                lane(
+                    vec![at(-30.0, None), at(-10.0, None)],
+                    vec![Turn {
+                        lane: 1,
+                        entry: 0,
+                        crossing: true,
+                    }],
+                ),
+                lane(
+                    {
+                        // As the lanes are built: a stop short of the lane's start is on it.
+                        let mut points = vec![at(0.0, None)];
+                        for holds in [Holds::Long, Holds::Cars] {
+                            let z = (stop_at - holds.reach()).max(0.0);
+                            let p = points.last_mut().unwrap();
+                            if z - p.z < 0.5 {
+                                p.holds = if p.stop.is_some() {
+                                    p.holds.and(holds)
+                                } else {
+                                    holds
+                                };
+                                p.stop = Some(2);
+                            } else {
+                                points.push(at(z, Some((2, holds))));
+                            }
+                        }
+                        points.push(at(40.0, None));
+                        points
+                    },
+                    Vec::new(),
+                ),
+            ],
+            cars: Vec::new(),
+            by_way: FnvHashMap::default(),
+            spots: BTreeMap::new(),
+            size: 1.0,
+            scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn a_car_crosses_a_junction_only_with_room_to_wait_past_it() {
+        // The lane out runs south, which is no turn at all.
+        // The cars standing there that count head within a quarter turn or so of it.
+        let way = ",gr:0.0f,gy:\"-67.5..67.5\"";
+        // Far enough on, the light past the junction is no reason to wait.
+        assert_eq!(gate_for(30.0), way);
+        // Room for a car to stand clear of the junction, but not a bus.
+        assert_eq!(gate_for(7.0), format!("{way},gl:2b"));
+        // Room for neither.
+        assert_eq!(gate_for(3.5), format!("{way},gc:2b,gl:2b"));
+        // The queue: as far on as a bus and half the longest that can stand there reach.
+        let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
+        let gate = net
+            .look_functions(false)
+            .into_iter()
+            .find(|(p, _)| p.ends_with("cars/gate_queue.mcfunction"))
+            .unwrap()
+            .1;
+        let spots = |who: &str, tag: &str, back: bool| {
+            gate.lines()
+                .filter(|l| {
+                    l.contains(who)
+                        && l.contains(&format!("{tag},distance"))
+                        && l.contains("^ ^ ^-") == back
+                })
+                .count()
+        };
+        let reach = |own: Holds, held: Holds| 2.0 * own.reach() + held.reach() + GATE_SPARE;
+        let covered = |n: usize| 2.0 * LOOK[0].1 * n as f64;
+        let (long, car) = (Holds::Long, Holds::Cars);
+        let n = spots("@s[tag=arnis.car.long]", "tag=arnis.car.long", false);
+        assert!(covered(n) >= reach(long, long) && covered(n - 1) < reach(long, long));
+        let n = spots("@s[tag=!arnis.car.long]", "tag=arnis.car.way", false);
+        assert!(covered(n) >= reach(car, car));
+        // Behind where it joins, as far as the two halves reach.
+        let n = spots("@s[tag=arnis.car.long]", "tag=arnis.car.long", true);
+        assert!(covered(n) >= long.reach() * 2.0);
+        let n = spots("@s[tag=!arnis.car.long]", "tag=arnis.car.way", true);
+        assert!(covered(n) >= car.reach() * 2.0);
+        // Joined at its last point, the lane runs the way it comes in, and the car looks back
+        // over where it joins too, as it does only where it joins partway along.
+        let mut net = gate_net(30.0);
+        net.segments[0].next[0].entry = net.segments[1].points.len() - 1;
+        assert_eq!(net.gate(&net.segments[0].next[0]), format!("{way},gb:1b"));
+        assert!(gate
+            .lines()
+            .filter(|l| l.contains("^ ^ ^-"))
+            .all(|l| l.starts_with("execute if data entity @s data{gb:1b} ")));
+        assert!(gate.lines().skip(3).all(|l| l.starts_with("execute ")
+            && l.ends_with("run return run function arnis:cars/gated")));
+        // The cars it looks for are marked first, as far out as its furthest spot, and never
+        // the car itself.
+        let at = net
+            .look_functions(false)
+            .into_iter()
+            .find(|(p, _)| p.ends_with("cars/gate_at.mcfunction"))
+            .unwrap()
+            .1;
+        let furthest = 2.0 * long.reach() + long.reach() + GATE_SPARE + 2.0 * LOOK[0].1;
+        assert!(at.contains(
+            "y_rotation=$(gy)] run tag @s add arnis.car.way\ntag @s remove arnis.car.way\n"
+        ));
+        let marked: f64 = at
+            .split("distance=..")
+            .nth(1)
+            .unwrap()
+            .split(',')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            marked >= furthest - 2.0 * LOOK[0].1 && marked <= furthest + 0.01,
+            "{marked}"
+        );
     }
 
     #[test]
@@ -3482,6 +4025,7 @@ mod tests {
             y: 65.0,
             z: 0.5,
             stop: None,
+            holds: Holds::All,
             cap: None,
         };
         let n: usize = 100_000;
@@ -3551,50 +4095,105 @@ mod tests {
             assert!((880..=1120).contains(&car.pace));
         }
         for (kind, _) in KINDS {
-            let tails = parts(kind, "minecraft:red_concrete")
-                .iter()
-                .filter(|p| p.light == Light::Tail)
-                .count();
-            assert_eq!(tails, 1);
+            assert!(vehicle_models::model(kind.model()).has_brake(), "{kind:?}");
         }
     }
 
     #[test]
-    fn respawned_bodies_match_the_placed_ones_in_both_block_formats() {
+    fn a_respawned_body_is_its_click_box_its_model_and_its_brake_lights() {
         let net = CarNetwork::build(&crossroads(false), 1.0, false, false, &world(), flat, open);
         let bodies = net.body_functions();
-        assert_eq!(bodies.len(), KINDS.len() * 2);
-        let sedan = |prefix: &str| {
-            &bodies
-                .iter()
-                .find(|(p, _)| {
-                    p == &format!("{prefix}data/arnis/function/cars/body/sedan.mcfunction")
-                })
-                .unwrap()
-                .1
-        };
-        // Every part, and the box that can be clicked.
-        assert_eq!(sedan("").lines().count(), parts(Kind::Sedan, "x").len() + 1);
-        assert!(sedan("").starts_with("$summon interaction $(x) $(y) $(z) {Tags:[\"arnis.car.part\",\"arnis.k_sedan\"],width:2.40f,height:1.45f}"));
-        assert!(sedan("").contains("block_state:{Name:\"$(colour)\"}"));
-        assert!(sedan("ov121/").contains("block_state:\"$(colour)\""));
-        assert!(sedan("").contains("\"arnis.car.tail\"],teleport_duration:2,view_range:3f"));
+        assert_eq!(bodies.len(), KINDS.len());
+        let sedan = &bodies
+            .iter()
+            .find(|(p, _)| p == "data/arnis/function/cars/body/sedan.mcfunction")
+            .unwrap()
+            .1;
+        let lines: Vec<&str> = sedan.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("$summon interaction $(x) $(y) $(z) {Tags:[\"arnis.car.part\",\"arnis.k_sedan\"],width:2.40f,height:1.45f}"));
+        assert!(lines[1].starts_with("$summon item_display $(x) $(y) $(z) {Tags:[\"arnis.car.part\"],teleport_duration:2,view_range:3f,"));
+        assert!(lines[1].contains("\"minecraft:item_model\":\"arnis:vehicle/car_sedan_$(colour)\""));
+        assert!(lines[2].contains("\"arnis.car.tail\"],teleport_duration:2,view_range:3f"));
+        assert!(lines[2].contains("\"minecraft:item_model\":\"arnis:vehicle/car_sedan_brake\""));
+        assert!(lines[2].ends_with(",brightness:{sky:7,block:7}}"));
+        for line in &lines {
+            assert_eq!(
+                line.matches('{').count(),
+                line.matches('}').count(),
+                "{line}"
+            );
+        }
         assert!(net
             .storage_function()
-            .contains("colours set value {sedan:[\"minecraft:white_concrete\""));
+            .contains("colours set value {sedan:[\"white\""));
+        // The pack has a model for every colour a car is respawned in.
+        let looks: Vec<String> = net.java_looks().iter().map(|l| l.name()).collect();
+        for (kind, _) in KINDS {
+            for colour in respawn_colours(kind.colours()) {
+                let name = format!("{}_{}", kind.model(), colour_name(colour));
+                assert!(looks.contains(&name), "{name}");
+            }
+        }
     }
 
     #[test]
     fn the_look_functions_scale_with_the_cars() {
         let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat, open);
         let looks = net.look_functions(false);
-        assert_eq!(looks.len(), 19);
+        // Look's eight, the dispatch, conflict and its sixteen ways through, the gate's two,
+        // clear and ease.
+        assert_eq!(looks.len(), 2 * 8 + 1 + 1 + PATH_SLICES + 2 + 2);
         let h0 = &looks
             .iter()
             .find(|(p, _)| p.ends_with("h0.mcfunction"))
             .unwrap()
             .1;
         assert!(h0.contains("^ ^ ^6.00"), "{h0}");
+        // The queue check in a junction looks where look does, at the same scale.
+        let conflict = &looks
+            .iter()
+            .find(|(p, _)| p.ends_with("cars/conflict.mcfunction"))
+            .unwrap()
+            .1;
+        assert!(
+            conflict.contains("^ ^ ^6.00") && conflict.contains("^ ^ ^12.00"),
+            "{conflict}"
+        );
+        // Every slice of a turn has its own way through, which ends in the conflict.
+        assert!(conflict.ends_with(&format!(
+            "matches {} run return run function arnis:cars/path/p{}\n",
+            PATH_SLICES - 1,
+            PATH_SLICES - 1
+        )));
+        // On the same way through by heading, a queue: the first slice points north, and
+        // its range wraps round the half turn.
+        let p0 = &looks
+            .iter()
+            .find(|(p, _)| p.ends_with("cars/path/p0.mcfunction"))
+            .unwrap()
+            .1;
+        assert!(
+            p0.contains("execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^6.00 if entity @e[type=marker,tag=arnis.car,distance=..3.40,y_rotation=150.0..-150.0]"),
+            "{p0}"
+        );
+        assert!(p0.ends_with("scoreboard players set #jam arnis.car 1\n"));
+        // Anyone standing in the lane past the junction heading much this car's way is a
+        // queue too, from look's spots on.
+        assert!(
+            p0.contains("execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^6.00 if entity @e[type=marker,tag=arnis.car.still,tag=!arnis.car.cross,distance=..3.40,y_rotation=112.5..-112.5]"),
+            "{p0}"
+        );
+        // A heading of -349 degrees is 11, in the slice round 0, which points south.
+        let slice = |yaw: f64| {
+            let p = (yaw * 10.0).floor() as i32 + 1913;
+            p.div_euclid(225).rem_euclid(PATH_SLICES as i32)
+        };
+        assert!(conflict.contains("scoreboard players add #p arnis.car 1913\n"));
+        assert!(conflict.contains("scoreboard players set #div arnis.car 225\n"));
+        assert_eq!(slice(-349.0), 8);
+        assert_eq!(slice(-180.0), 0);
+        assert_eq!(slice(179.0), 0);
         // Bucket 0 points north, so its range wraps round the half turn.
         assert!(h0.contains("y_rotation=112.5..-112.5"), "{h0}");
     }
@@ -3608,11 +4207,38 @@ mod tests {
             text.starts_with("execute store result score #r arnis.car run random value 0..99\n")
         );
         assert!(text.contains(
-            "matches 0..51 run data modify storage arnis:cars spawn merge value {kind:\"sedan\",long:0b}"
+            "matches 0..29 run data modify storage arnis:cars spawn merge value {kind:\"sedan\",long:0b}"
         ));
         assert!(text.contains(
             "matches 97..99 run data modify storage arnis:cars spawn merge value {kind:\"bus\",long:1b}"
         ));
+    }
+
+    /// Parked cars are the cars of the road, lorries and buses left out, as often as they
+    /// drive, and under a deck only those that fit.
+    #[test]
+    fn parked_cars_are_road_cars_that_fit_their_space() {
+        let mut seen = HashMap::new();
+        for h in 0..20_000u64 {
+            let h = h.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let look = parked_look(h, f64::MAX).unwrap();
+            assert!(
+                !matches!(look.model, "car_truck" | "car_bus"),
+                "{}",
+                look.model
+            );
+            *seen.entry(look.model).or_insert(0u32) += 1;
+            let low = parked_look(h, 1.6).unwrap();
+            assert!(
+                vehicle_models::model(low.model).top_m() <= 1.6,
+                "{}",
+                low.model
+            );
+            assert!(parked_looks().contains(&look));
+        }
+        assert_eq!(seen.len(), 7);
+        assert!(seen["car_sedan"] > seen["car_city"]);
+        assert!(parked_look(1, 1.0).is_none());
     }
 
     #[test]
@@ -3622,10 +4248,14 @@ mod tests {
         for (kind, _) in KINDS {
             let (width, height) = kind.hitbox();
             assert!(width >= 2.4 && height >= 1.4, "{kind:?}");
-            let body = body(kind, "minecraft:white_concrete", net.size);
-            assert!(body
-                .iter()
-                .all(|nbt| nbt["view_range"] == Value::Float(VIEW_RANGE)));
+        }
+        for (path, text) in net.body_functions() {
+            for line in text.lines().filter(|l| l.contains("item_display")) {
+                assert!(
+                    line.contains(&format!("view_range:{VIEW_RANGE}f")),
+                    "{path}"
+                );
+            }
         }
         const { assert!(VIEW_RANGE * 64.0 >= 160.0) };
     }
@@ -4345,32 +4975,30 @@ mod tests {
     }
 
     #[test]
-    fn every_bedrock_car_body_has_one_brake_light_and_known_colours() {
+    fn every_car_body_has_a_model_of_its_kind_s_size_with_brake_lights() {
         let net = CarNetwork::build(&crossroads(false), 2.0, false, false, &world(), flat, open);
         let bodies = net.bedrock_bodies();
         assert_eq!(bodies.len(), all_bodies().len());
         let names: FnvHashSet<&str> = bodies.iter().map(|b| b.name.as_str()).collect();
         assert_eq!(names.len(), bodies.len(), "names are unique");
-        for body in &bodies {
-            assert_eq!(
-                body.shapes.iter().filter(|s| s.lamp == Lamp::Brake).count(),
-                1,
-                "{}",
-                body.name
+        for (kind, _) in KINDS {
+            let model = vehicle_models::model(kind.model());
+            assert!(model.has_brake(), "{kind:?}");
+            let [lo, hi] = model.meta().bounds;
+            let (len, width) = kind.size_m();
+            let built_len = (hi[2] - lo[2]) / 16.0;
+            assert!(
+                (built_len - len).abs() <= 0.3,
+                "{kind:?}: {built_len} m long, not {len}"
             );
-            for s in &body.shapes {
-                assert!(crate::bedrock_addon::palette_has(s.block), "{}", s.block);
-                assert!(s.size.iter().all(|&v| v > 0.0));
-            }
+            // Mirrors may stand out a little either side.
+            let built_width = (hi[0] - lo[0]) / 16.0;
+            assert!(
+                built_width >= width - 0.1 && built_width <= width + 0.5,
+                "{kind:?}: {built_width} m wide"
+            );
+            assert!(model.wheels().len() >= 4, "{kind:?} turns its wheels");
         }
-        // Built at the size the world's cars are.
-        let sedan = bodies.iter().find(|b| b.name == "car_sedan_white").unwrap();
-        let long = sedan
-            .shapes
-            .iter()
-            .map(|s| s.size[2])
-            .fold(0.0f32, f32::max);
-        assert!((long - 4.6 * 2.0).abs() < 1e-4, "{long}");
     }
 
     #[test]

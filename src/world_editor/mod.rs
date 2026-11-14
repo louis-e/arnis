@@ -334,6 +334,8 @@ pub struct WorldEditor<'a> {
     traffic_signals: Option<Arc<crate::element_processing::traffic_lights::SignalIndex>>,
     /// Lanes and cars, placed as their roads are built.
     car_network: Option<Arc<crate::element_processing::cars::CarNetwork>>,
+    /// Parked cars are the moving cars' models rather than block cars.
+    parked_car_models: bool,
     /// Strict (non-halo) bounds of a tile editor: min_x, min_z, max_x, max_z inclusive.
     /// None for the main editor, which owns everything.
     strict_bounds: Option<(i32, i32, i32, i32)>,
@@ -406,6 +408,7 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             traffic_signals: None,
             car_network: None,
+            parked_car_models: false,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
@@ -478,6 +481,7 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             traffic_signals: None,
             car_network: None,
+            parked_car_models: false,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
@@ -550,6 +554,7 @@ impl<'a> WorldEditor<'a> {
             signage: None,
             traffic_signals: None,
             car_network: None,
+            parked_car_models: false,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
@@ -1027,6 +1032,16 @@ impl<'a> WorldEditor<'a> {
 
     pub fn car_network(&self) -> Option<Arc<crate::element_processing::cars::CarNetwork>> {
         self.car_network.clone()
+    }
+
+    /// Parks the moving cars' models rather than block cars, as on Java with moving
+    /// vehicles, where the resource pack carries them.
+    pub fn set_parked_car_models(&mut self, on: bool) {
+        self.parked_car_models = on;
+    }
+
+    pub fn parked_car_models(&self) -> bool {
+        self.parked_car_models
     }
 
     /// Detaches the signage context, so the caller can hold the only handle.

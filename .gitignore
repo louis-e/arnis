@@ -85,3 +85,7 @@ gen/
 
 # Python bytecode
 __pycache__/
+
+# Blockbench views of the vehicle models, written by assets/vehicles/build.py
+assets/vehicles/out/*.bbmodel
+assets/vehicles/review.bbmodel
