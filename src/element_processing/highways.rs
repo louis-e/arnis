@@ -1690,15 +1690,16 @@ fn generate_highways_internal(
             // Signal heads for signalised crossings and standalone traffic_signals nodes.
             let signalised = highway_type == "traffic_signals"
                 || element.tags().get("crossing").map(String::as_str) == Some("traffic_signals");
+            let signals = editor.traffic_signals();
+            let placed = match (signalised, element, &signals) {
+                (true, ProcessedElement::Node(node), Some(signals)) => {
+                    signals.place(editor, node, &signal_base)
+                }
+                _ => false,
+            };
             // With the extras' lights on, a signal they have no road for gets no head: a
-            // banner one would never change.
-            let cycling = editor.traffic_signals();
-            if let (true, ProcessedElement::Node(node), Some(signals)) =
-                (signalised, element, &cycling)
-            {
-                signals.place(editor, node, &signal_base);
-            }
-            if signalised && cycling.is_none() {
+            // banner one would never change. Standing heads fall back to it.
+            if signalised && !placed && !signals.as_ref().is_some_and(|s| s.cycling()) {
                 if let ProcessedElement::Node(node) = element {
                     let x = node.x;
                     let z = node.z;

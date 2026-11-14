@@ -3620,7 +3620,7 @@ mod tests {
             mask
         };
         let stops = |paved: &dyn Fn(i32, i32) -> bool| {
-            let heads = SignalIndex::build(&elements, 1.0, false, &mask(paved));
+            let heads = SignalIndex::build(&elements, 1.0, false, &mask(paved), true);
             let net = CarNetwork::build_with_heads(
                 &elements,
                 1.0,

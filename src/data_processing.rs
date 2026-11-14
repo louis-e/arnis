@@ -546,6 +546,8 @@ fn process_element(
                 );
             } else if way.tags.get("service").map(String::as_str) == Some("siding") {
                 highways::generate_siding(editor, way, bridge_surface);
+            } else if let Some(form) = statues::form(&way.tags) {
+                statues::place_on_way(editor, way, form);
             } else if way.tags.get("tomb").map(String::as_str) == Some("pyramid") {
                 historic::generate_pyramid(editor, way, args, flood_fill_cache);
             } else if way.tags.contains_key("man_made") {
@@ -1381,13 +1383,16 @@ pub fn generate_world_with_options(
     let fuel_index = Arc::new(fuel_stations::FuelIndex::build(&elements, args.scale));
     editor.set_fuel_index(Arc::clone(&fuel_index));
 
-    let traffic_signals = extras.traffic_lights.then(|| {
+    // Without the data pack Java still gets the same poles and heads, built from vanilla
+    // blocks and standing still; other formats keep their banner heads.
+    let traffic_signals = (extras.traffic_lights || java).then(|| {
         Arc::new(
             crate::element_processing::traffic_lights::SignalIndex::build(
                 &elements,
                 args.scale,
                 sign_region.drives_on_left(),
                 &road_mask,
+                extras.traffic_lights,
             ),
         )
     });
@@ -1491,7 +1496,7 @@ pub fn generate_world_with_options(
             args.scale,
             sign_region.drives_on_left(),
             extras.traffic_lights,
-            traffic_signals.as_deref(),
+            traffic_signals.as_deref().filter(|s| s.cycling()),
             Some(&road_markings),
             &xzbbox,
             |way, x, z| surfaces.y_at(way, x, z),

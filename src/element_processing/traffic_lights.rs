@@ -442,6 +442,9 @@ pub struct SignalIndex {
     poles: Vec<Pole>,
     /// Poles each signal node builds.
     by_node: FnvHashMap<u64, Vec<usize>>,
+    /// The extras' data pack cycles the heads. Without it they are built from vanilla
+    /// blocks, frozen in their first state.
+    cycling: bool,
 }
 
 /// Two heads facing one way this close together are one head mapped twice, as a junction
@@ -604,6 +607,7 @@ impl SignalIndex {
         scale: f64,
         drives_on_left: bool,
         road_mask: &RoadMaskBitmap,
+        cycling: bool,
     ) -> Self {
         let nodes = signal_nodes(elements, scale);
         let mut ids: Vec<u64> = nodes.keys().copied().collect();
@@ -621,7 +625,13 @@ impl SignalIndex {
         Self {
             poles: plan.poles,
             by_node: plan.by_node,
+            cycling,
         }
+    }
+
+    /// Whether the data pack cycles these heads.
+    pub fn cycling(&self) -> bool {
+        self.cycling
     }
 
     /// Whether a car head near `at`, within reach of a junction's widest heads, faces
@@ -642,19 +652,22 @@ impl SignalIndex {
     }
 
     /// Builds the poles and heads this node owns.
+    /// Builds the poles `node` planned; false when it planned none.
     pub fn place(
         &self,
         editor: &mut WorldEditor,
         node: &ProcessedNode,
         base_y: &dyn Fn(&WorldEditor, i32, i32, i32) -> i32,
-    ) {
-        for &i in self.by_node.get(&node.id).into_iter().flatten() {
+    ) -> bool {
+        let poles = self.by_node.get(&node.id).map_or(&[][..], Vec::as_slice);
+        for &i in poles {
             let pole = &self.poles[i];
             let base = base_y(editor, pole.x, pole.z, 1);
             let mut builder = Builder {
                 editor,
                 seed_base: i as i64 * 1_000,
                 parts: 0,
+                cycling: self.cycling,
             };
             builder.post(pole.x, pole.z, base, pole.top);
             let pole_centre = (f64::from(pole.x) + 0.5, f64::from(pole.z) + 0.5);
@@ -685,6 +698,7 @@ impl SignalIndex {
                 builder.head(back, centre_y, head, false);
             }
         }
+        !poles.is_empty()
     }
 }
 
@@ -780,6 +794,28 @@ struct Builder<'e, 'a> {
     editor: &'e mut WorldEditor<'a>,
     seed_base: i64,
     parts: i64,
+    cycling: bool,
+}
+
+/// A head built from blocks: its housing, as deep as the model's is.
+const HOUSING: &str = "minecraft:black_concrete";
+const HOUSING_DEPTH: f64 = 0.3;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lamp {
+    Red,
+    Amber,
+    Green,
+}
+
+impl Lamp {
+    fn block(self) -> &'static str {
+        match self {
+            Lamp::Red => "minecraft:red_concrete",
+            Lamp::Amber => "minecraft:orange_concrete",
+            Lamp::Green => "minecraft:lime_concrete",
+        }
+    }
 }
 
 impl Builder<'_, '_> {
@@ -792,9 +828,86 @@ impl Builder<'_, '_> {
         }
     }
 
-    /// One head: a display of its model, its back at `back` (the face of the post its
-    /// brackets meet, if `bracketed`), its middle `centre_y` up, facing its traffic.
+    /// One head, its back at `back` (the face of the post its brackets meet, if
+    /// `bracketed`), its middle `centre_y` up, facing its traffic.
     fn head(&mut self, back: (f64, f64), centre_y: f64, head: Head, bracketed: bool) {
+        if self.cycling {
+            self.model_head(back, centre_y, head, bracketed);
+        } else {
+            self.block_head(back, centre_y, head, bracketed);
+        }
+    }
+
+    /// A head of scaled vanilla blocks, for a world without the data pack and the
+    /// resource pack its model comes in. It shows the state the data pack would start it
+    /// in: roads of group a on green, the others on red, walkers the other way round.
+    fn block_head(&mut self, back: (f64, f64), centre_y: f64, head: Head, bracketed: bool) {
+        let k = head.kind.size();
+        let out = if bracketed { BRACKET_M * k } else { 0.0 };
+        let forward = out + HOUSING_DEPTH * k / 2.0;
+        let centre = (
+            back.0 + head.facing.0 * forward,
+            centre_y,
+            back.1 + head.facing.1 * forward,
+        );
+        let walk = head.kind == Kind::Pedestrian;
+        let (housing, lamps): ((f64, f64), &[(Lamp, f64)]) = if walk {
+            ((0.34, 0.72), &[(Lamp::Red, 0.17), (Lamp::Green, -0.17)])
+        } else {
+            (
+                (0.42, 1.1),
+                &[(Lamp::Red, 0.34), (Lamp::Amber, 0.0), (Lamp::Green, -0.34)],
+            )
+        };
+        let lit = match (walk, head.group) {
+            (false, 'a') | (true, 'b') => Lamp::Green,
+            _ => Lamp::Red,
+        };
+        let depth = HOUSING_DEPTH * k;
+        self.part(
+            centre,
+            head.facing,
+            0.0,
+            0.0,
+            ((housing.0 * k) as f32, (housing.1 * k) as f32, depth as f32),
+            HOUSING,
+            Vec::new(),
+            None,
+        );
+        let lens = if walk { 0.24 } else { 0.26 } * k;
+        for &(lamp, y) in lamps {
+            // A lit lens shows at full brightness whatever the light around it.
+            let brightness = if lamp == lit { (15, 15) } else { (2, 0) };
+            self.part(
+                centre,
+                head.facing,
+                y * k,
+                depth / 2.0 + 0.02 * k,
+                (lens as f32, lens as f32, (0.04 * k) as f32),
+                lamp.block(),
+                Vec::new(),
+                Some(brightness),
+            );
+            // The visor over it.
+            self.part(
+                centre,
+                head.facing,
+                (y + lens / k / 2.0 + 0.02) * k,
+                depth / 2.0 + 0.075 * k,
+                (
+                    (lens + 0.06 * k) as f32,
+                    (0.035 * k) as f32,
+                    (0.15 * k) as f32,
+                ),
+                HOUSING,
+                Vec::new(),
+                None,
+            );
+        }
+    }
+
+    /// A display of the head's model, which the data pack switches between states.
+    fn model_head(&mut self, back: (f64, f64), centre_y: f64, head: Head, bracketed: bool) {
         use crate::vehicle_models::{display_nbt, item_model};
         let size = head.kind.size();
         let (model, tag) = head.kind.start(head.group);
@@ -1002,7 +1115,7 @@ mod tests {
     #[test]
     fn a_junction_gets_one_head_per_approach_facing_its_traffic_off_the_road() {
         let (elements, mask) = crossroads(&[]);
-        let index = SignalIndex::build(&elements, 1.0, false, &mask);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, true);
         let heads: Vec<(&Pole, &Head)> = index
             .poles
             .iter()
@@ -1022,7 +1135,7 @@ mod tests {
         let (alone, mask) = crossroads(&[]);
         let (mapped_twice, _) = crossroads(&[(20, -5, 0), (21, 5, 0)]);
         let count = |els: &[ProcessedElement]| {
-            SignalIndex::build(els, 1.0, false, &mask)
+            SignalIndex::build(els, 1.0, false, &mask, true)
                 .poles
                 .iter()
                 .map(|p| p.heads.len())
@@ -1060,7 +1173,7 @@ mod tests {
             ),
         ];
         let paved = (-40..=40).flat_map(|t| (-2..=2).flat_map(move |w| [(t, w), (w, t)]));
-        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved));
+        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved), true);
         let heads: Vec<(&Pole, &Head)> = index
             .poles
             .iter()
@@ -1112,7 +1225,7 @@ mod tests {
             &[("highway", "residential")],
         );
         let mask = road_mask((-30..=30).flat_map(|x| (-2..=2).map(move |z| (x, z))));
-        let index = SignalIndex::build(&[crossing], 1.0, false, &mask);
+        let index = SignalIndex::build(&[crossing], 1.0, false, &mask, true);
         let peds: Vec<&Head> = index
             .poles
             .iter()
@@ -1145,7 +1258,7 @@ mod tests {
             &[("highway", "cycleway"), ("oneway", "yes")],
         );
         let mask = road_mask((-30..=30).flat_map(|x| (-1..=1).map(move |z| (x, z))));
-        let index = SignalIndex::build(&[path], 1.0, false, &mask);
+        let index = SignalIndex::build(&[path], 1.0, false, &mask, true);
         let bikes = heads_of(&index, Kind::Bike);
         assert_eq!(bikes.len(), 1);
         assert!(heads_of(&index, Kind::Car).is_empty());
@@ -1180,7 +1293,7 @@ mod tests {
         ];
         let paved = (-30..=30).flat_map(|t| (-1..=1).flat_map(move |w| [(t, w), (w, t / 3)]));
         let mask = road_mask(paved);
-        let index = SignalIndex::build(&elements, 1.0, false, &mask);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, true);
         let walkers = heads_of(&index, Kind::Pedestrian);
         assert_eq!(walkers.len(), 2);
         for (pole, head) in walkers {
@@ -1216,7 +1329,7 @@ mod tests {
                 &[("highway", "footway"), ("footway", "crossing")],
             ),
         ];
-        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(std::iter::empty()));
+        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(std::iter::empty()), true);
         assert_eq!(heads_of(&index, Kind::Pedestrian).len(), 2);
     }
 
@@ -1225,6 +1338,44 @@ mod tests {
         // Driving north, the right-hand kerb is to the east.
         assert_eq!(kerb_side((0.0, -1.0), false), (1.0, 0.0));
         assert_eq!(kerb_side((0.0, -1.0), true), (-1.0, 0.0));
+    }
+
+    /// Without the data pack a head is built of vanilla blocks and stands still: one lamp
+    /// of each head is lit, green for the group whose turn it is and red for the other.
+    #[test]
+    fn without_the_pack_heads_are_still_blocks_with_one_lamp_lit() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let (elements, mask) = crossroads(&[]);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, false);
+        assert!(!index.cycling());
+        let bbox = XZBBox::rect_from_min_max(-64, -64, 64, 64).unwrap();
+        let llbbox = LLBBox::new(47.0, 8.0, 47.001, 8.001).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &bbox, llbbox);
+        let junction = node(9, 0, 0, &[("highway", "traffic_signals")]);
+        assert!(index.place(&mut editor, &junction, &|e, x, z, y| e
+            .get_absolute_y(x, y, z)));
+        // No models: nothing here needs the resource pack.
+        assert!(editor.item_displays().is_empty());
+        let parts = editor.entities_of("minecraft:block_display");
+        let block = |p: &HashMap<String, Value>| match p.get("block_state") {
+            Some(Value::Compound(state)) => match state.get("Name") {
+                Some(Value::String(name)) => name.clone(),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        };
+        let lit = |p: &HashMap<String, Value>| {
+            matches!(p.get("brightness"), Some(Value::Compound(b))
+                if b.get("block") == Some(&Value::Int(15)))
+        };
+        let lit_lamps: Vec<String> = parts.iter().filter(|p| lit(p)).map(block).collect();
+        // Four heads, one lamp lit on each, two of them green.
+        assert_eq!(lit_lamps.len(), 4, "{lit_lamps:?}");
+        let green = lit_lamps.iter().filter(|b| *b == "minecraft:lime_concrete");
+        assert_eq!(green.count(), 2);
+        assert!(parts.iter().any(|p| block(p) == "minecraft:black_concrete"));
     }
 
     /// The data pack switches a head between models by id: each must be one the resource
