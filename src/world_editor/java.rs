@@ -5,10 +5,11 @@
 use super::common::{Chunk, ChunkToModify, Section};
 use super::WorldEditor;
 use crate::block_definitions::Block;
+use crate::coordinate_system::cartesian::XZPoint;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{ByteArray, LongArray, Value};
+use fastnbt::{ByteArray, IntArray, LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -195,6 +196,8 @@ impl<'a> WorldEditor<'a> {
 pub(crate) enum RegionWriteMode {
     /// New region file, every chunk written (content or filler).
     Fresh,
+    /// New region file, only populated Arnis feature chunks written.
+    SparseFeatures,
     /// Only the chunks inside the inclusive block bounds, written into the
     /// existing region file. Every other chunk stays as it was.
     Merge {
@@ -211,7 +214,7 @@ impl RegionWriteMode {
     /// neighbour's region and must not open its file.
     fn touches_region(&self, rx: i32, rz: i32) -> bool {
         match *self {
-            RegionWriteMode::Fresh => true,
+            RegionWriteMode::Fresh | RegionWriteMode::SparseFeatures => true,
             RegionWriteMode::Merge {
                 min_x,
                 min_z,
@@ -233,7 +236,7 @@ impl RegionWriteMode {
 
     fn writes_chunk(&self, abs_chunk_x: i32, abs_chunk_z: i32) -> bool {
         match *self {
-            RegionWriteMode::Fresh => true,
+            RegionWriteMode::Fresh | RegionWriteMode::SparseFeatures => true,
             RegionWriteMode::Merge {
                 min_x,
                 min_z,
@@ -492,6 +495,7 @@ fn slot_write<'a>(
         Some(chunk) if !(chunk.sections.is_empty() && chunk.other.is_empty()) => {
             SlotWrite::Chunk(chunk)
         }
+        _ if matches!(mode, RegionWriteMode::SparseFeatures) => SlotWrite::Skip,
         // A fresh void region holds only the chunks the area touches; the void generator
         // makes the rest. A merge stays inside its area anyway.
         _ if void_world && !mode.is_merge() => SlotWrite::Skip,
@@ -594,7 +598,7 @@ fn write_region_to_disk(
     // A merge goes where the world keeps its overworld, which 26.1 moves.
     let merge_dir = match *mode {
         RegionWriteMode::Merge { layout, .. } => Some(layout.overworld_dir(world_dir)),
-        RegionWriteMode::Fresh => None,
+        RegionWriteMode::Fresh | RegionWriteMode::SparseFeatures => None,
     };
     let merge = mode.is_merge();
     if merge && blinear_level.is_some() {
@@ -640,7 +644,7 @@ fn write_region_to_disk(
                     let chunk_z = sz * 2 + dz;
                     let abs_chunk_x = chunk_x + (region_x * 32);
                     let abs_chunk_z = chunk_z + (region_z * 32);
-                    let (sections, other, lighting, span) =
+                    let (sections, mut other, lighting, span) =
                         match slots[slot_index(chunk_x, chunk_z)] {
                             SlotWrite::Skip => continue,
                             SlotWrite::Chunk(chunk_to_modify) => {
@@ -662,6 +666,25 @@ fn write_region_to_disk(
                                 (base_min_y, base_max_y),
                             ),
                         };
+
+                    if matches!(mode, RegionWriteMode::SparseFeatures) {
+                        if let Some(ground) = ground {
+                            let heights = (0..256)
+                                .map(|column| {
+                                    let x = column % 16;
+                                    let z = column / 16;
+                                    ground.level(XZPoint::new(
+                                        abs_chunk_x * 16 + x - ground_origin.0,
+                                        abs_chunk_z * 16 + z - ground_origin.1,
+                                    ))
+                                })
+                                .collect();
+                            other.insert(
+                                super::region_overlay::SPARSE_GROUND_HEIGHTS_KEY.to_string(),
+                                Value::IntArray(IntArray::new(heights)),
+                            );
+                        }
+                    }
 
                     let biome_names = crate::biome::chunk_biome_names(
                         abs_chunk_x,
@@ -1677,7 +1700,11 @@ fn build_section_value(section: &Section) -> HashMap<String, Value> {
 /// Bit width is determined dynamically based on total world height.
 /// Value for each column = (highest_non_air_Y - min_block_y + 1), or 0 if all air,
 /// clamped to the dimension height so a block outside it cannot wrap the packed mask.
-fn compute_heightmaps(sections: &[Section], min_section_y: i8, total_height: i32) -> Value {
+pub(crate) fn compute_heightmaps(
+    sections: &[Section],
+    min_section_y: i8,
+    total_height: i32,
+) -> Value {
     // Precompute per-section metadata to avoid redundant work in the inner loop.
     enum SectionKind<'a> {
         Uniform {
@@ -2684,6 +2711,19 @@ mod merge_tests {
         );
     }
 
+    #[test]
+    fn a_sparse_feature_write_contains_only_populated_chunks() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut region = region_with(&[(5, 5)], STONE);
+        region.get_or_create_chunk(6, 6);
+        write(dir.path(), &region, RegionWriteMode::SparseFeatures);
+        assert_eq!(present_chunks(dir.path()), vec![(5, 5)]);
+        assert_eq!(
+            base_block_name(dir.path(), 5, 5).as_deref(),
+            Some("minecraft:stone")
+        );
+    }
+
     /// Bytes that do not compress.
     fn noise(len: usize) -> Vec<u8> {
         let mut x: u32 = 0x9E37_79B9;
@@ -3066,5 +3106,6 @@ mod write_bounds_tests {
         assert!(!mode.touches_region(-1, -1));
         assert!(!mode.touches_region(0, 0));
         assert!(RegionWriteMode::Fresh.touches_region(7, 7));
+        assert!(RegionWriteMode::SparseFeatures.touches_region(7, 7));
     }
 }

@@ -298,6 +298,7 @@ fn landuse_area(
                     .unwrap_or(&mut rng)
                     .random_range(0..tree_threshold)
                     == 0
+                    && !args.no_trees
                 {
                     let tree_type = *trees_ok_to_generate
                         .choose(cell.as_mut().unwrap_or(&mut rng))
@@ -380,7 +381,7 @@ fn landuse_area(
             }
             "meadow" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                 let random_choice: i32 = rng.random_range(0..1001);
-                if random_choice < 5 && editor.land_cover_backs_trees(x, z) {
+                if random_choice < 5 && !args.no_trees && editor.land_cover_backs_trees(x, z) {
                     if roots {
                         Tree::create(
                             editor,
@@ -409,8 +410,32 @@ fn landuse_area(
                     editor.set_block(GRASS, x, 1, z, None, None);
                 }
             }
-            "brownfield" | "landfill" if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT])) => {
-                // Sparse regrowth on abandoned land; spoil heaps are gravel and skipped.
+            "orchard" => {
+                if x % 18 == 0 && z % 10 == 0 && !args.no_trees {
+                    Tree::create(
+                        editor,
+                        (x, 1, z),
+                        Some(building_footprints),
+                        Some(bridge_surface),
+                    );
+                } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                    match rng.random_range(0..100) {
+                        0 => place_bush(editor, x, z, BushKind::Wild),
+                        1..=2 => editor.set_block(FERN, x, 1, z, None, None),
+                        3..=20 => editor.set_block(GRASS, x, 1, z, None, None),
+                        _ => {}
+                    }
+                }
+            }
+            "vineyard" | "brownfield" | "landfill"
+                if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT])) =>
+            {
+                // Sparse weeds/regrowth on coarse-dirt surfaces: vineyard rows
+                // grow some grass between vines, and brownfield/landfill are
+                // abandoned land that nature is slowly reclaiming. Kept rare so
+                // the ground still reads as dry/disturbed rather than meadow.
+                // (Skipped for landfill spoil heaps — those are GRAVEL, not
+                // COARSE_DIRT, and the guard above filters them out.)
                 match rng.random_range(0..150) {
                     0..=3 if !roots => {}
                     0..=3 => place_bush(editor, x, z, BushKind::Low),

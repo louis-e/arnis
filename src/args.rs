@@ -123,6 +123,31 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = GenerationMode::GeoTerrain)]
     pub mode: GenerationMode,
 
+    /// Java only: write OSM feature blocks without terrain or filler chunks.
+    /// Intended as sparse input for overlaying features onto another terrain world.
+    #[arg(long, default_value_t = false)]
+    pub sparse_features: bool,
+
+    /// Export a WorldPainter project and overlay generated Arnis features onto its terrain.
+    #[arg(long = "worldpainter-project", value_name = "FILE")]
+    pub worldpainter_project: Option<PathBuf>,
+
+    /// Path to the WorldPainter `wpscript` executable.
+    #[arg(long = "worldpainter-executable", value_name = "FILE")]
+    pub worldpainter_executable: Option<PathBuf>,
+
+    /// Include Arnis-generated trees in a WorldPainter export.
+    #[arg(long = "worldpainter-include-arnis-trees", default_value_t = false)]
+    pub include_arnis_trees: bool,
+
+    /// Retain the unmerged WorldPainter export inside the generated world.
+    #[arg(
+        long = "worldpainter-keep-export",
+        default_value_t = true,
+        action = ArgAction::Set
+    )]
+    pub keep_worldpainter_export: bool,
+
     /// Turn the world into a ruin: buildings partly collapsed and broken open, roads cracked
     /// and overgrown, lights out
     #[arg(long, default_value_t = false, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
@@ -196,6 +221,10 @@ pub struct Args {
     /// species in the same community where there is one.
     #[arg(long, value_enum, default_value_t = crate::trees::tree_library::TreeSize::Giant)]
     pub max_tree_size: crate::trees::tree_library::TreeSize,
+
+    /// Do not generate any trees, including mapped trees, land-cover trees and canopy trees.
+    #[arg(long, default_value_t = false)]
+    pub no_trees: bool,
 
     /// Place trees from the Meta/WRI global canopy height map instead of assuming
     /// every tree-cover cell is forest. Land cover still decides the surface.
@@ -1621,6 +1650,15 @@ pub fn resolve_shapes(args: &mut Args) -> Result<(), String> {
     Ok(())
 }
 
+/// Configures sparse output and the tree default for WorldPainter export mode.
+pub fn apply_worldpainter_defaults(args: &mut Args) {
+    if args.worldpainter_project.is_some() {
+        args.sparse_features = true;
+        args.no_trees |= !args.include_arnis_trees;
+        args.map_preview = false;
+    }
+}
+
 pub fn validate_args(args: &Args) -> Result<(), String> {
     let cave_preview = args.cave_zone_map.is_some();
     if (args.cave_style.is_some() || args.cave_seed.is_some()) && !args.caves && !cave_preview {
@@ -1736,6 +1774,65 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         > 1
     {
         return Err("Pick one of --bedrock, --luanti and --hytale.".to_string());
+    }
+
+    let worldpainter_enabled =
+        args.worldpainter_project.is_some() || args.worldpainter_executable.is_some();
+    if worldpainter_enabled {
+        let project = args.worldpainter_project.as_ref().ok_or_else(|| {
+            "--worldpainter-project is required with --worldpainter-executable.".to_string()
+        })?;
+        let executable = args.worldpainter_executable.as_ref().ok_or_else(|| {
+            "--worldpainter-executable is required with --worldpainter-project.".to_string()
+        })?;
+        if !project.is_file()
+            || project
+                .extension()
+                .is_none_or(|ext| !ext.eq_ignore_ascii_case("world"))
+        {
+            return Err(format!(
+                "WorldPainter project must be an existing .world file: {}",
+                project.display()
+            ));
+        }
+        if !executable.is_file() {
+            return Err(format!(
+                "WorldPainter executable does not exist: {}",
+                executable.display()
+            ));
+        }
+        if args.bedrock || args.luanti {
+            return Err("WorldPainter export is only available for Java Edition.".to_string());
+        }
+        if args.one_world || args.live.live {
+            return Err(
+                "WorldPainter export cannot be used with One World or Live mode.".to_string(),
+            );
+        }
+    }
+
+    if args.sparse_features {
+        if args.bedrock || args.luanti {
+            return Err("--sparse-features is only available for Java Edition.".to_string());
+        }
+        if !args.body.is_earth() {
+            return Err("--sparse-features requires --body earth because other bodies have no OSM features.".to_string());
+        }
+        if args.one_world {
+            return Err("--sparse-features cannot be used with --one-world.".to_string());
+        }
+        if args.fillground || args.caves {
+            return Err(
+                "--sparse-features cannot be used with --fillground or --caves; those add terrain blocks."
+                    .to_string(),
+            );
+        }
+        if args.map_preview || args.voxy_lod || args.dh_lod {
+            return Err(
+                "--sparse-features cannot generate map previews or LOD caches because its chunks have no terrain."
+                    .to_string(),
+            );
+        }
     }
 
     // The legacy --terrain flag is redundant now that terrain is the default, but it must
@@ -2416,6 +2513,14 @@ mod tests {
         assert!(args.skip_objects());
         assert!(validate_args(&args).is_ok());
 
+        let args = parse(&["--sparse-features"]);
+        assert!(args.sparse_features);
+        assert!(validate_args(&args).is_ok());
+        assert!(validate_args(&parse(&["--sparse-features", "--bedrock"])).is_err());
+        assert!(validate_args(&parse(&["--sparse-features", "--one-world"])).is_err());
+        assert!(validate_args(&parse(&["--sparse-features", "--fillground"])).is_err());
+        assert!(validate_args(&parse(&["--sparse-features", "--map-preview"])).is_err());
+
         // The legacy --terrain flag contradicts flat ground, so it must not pass silently
         let args = parse(&["--mode", "geo-only", "--terrain"]);
         assert!(validate_args(&args).is_err());
@@ -2462,6 +2567,84 @@ mod tests {
                 "accepted {bad}"
             );
         }
+    }
+
+    #[test]
+    fn no_trees_flag_is_opt_in() {
+        let parse = |extra: &[&str]| {
+            let mut cmd = vec!["arnis", "--output-dir", ".", "--bbox", "1,2,3,4"];
+            cmd.extend_from_slice(extra);
+            Args::try_parse_from(cmd.iter()).unwrap()
+        };
+
+        assert!(!parse(&[]).no_trees);
+        assert!(parse(&["--no-trees"]).no_trees);
+    }
+
+    #[test]
+    fn worldpainter_export_defaults_to_sparse_features_without_arnis_trees() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project.world");
+        let executable = temp.path().join("wpscript.exe");
+        std::fs::write(&project, []).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        let mut args = Args::parse_from([
+            "arnis",
+            "--output-dir",
+            temp.path().to_str().unwrap(),
+            "--bbox",
+            "1,2,3,4",
+            "--worldpainter-project",
+            project.to_str().unwrap(),
+            "--worldpainter-executable",
+            executable.to_str().unwrap(),
+        ]);
+
+        apply_worldpainter_defaults(&mut args);
+
+        assert!(args.sparse_features);
+        assert!(args.no_trees);
+        assert!(!args.map_preview);
+        assert!(args.keep_worldpainter_export);
+        assert!(validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn worldpainter_tree_override_and_required_inputs_are_validated() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("project.world");
+        let executable = temp.path().join("wpscript.exe");
+        std::fs::write(&project, []).unwrap();
+        std::fs::write(&executable, []).unwrap();
+        let mut args = Args::parse_from([
+            "arnis",
+            "--output-dir",
+            temp.path().to_str().unwrap(),
+            "--bbox",
+            "1,2,3,4",
+            "--worldpainter-project",
+            project.to_str().unwrap(),
+            "--worldpainter-executable",
+            executable.to_str().unwrap(),
+            "--worldpainter-include-arnis-trees",
+        ]);
+
+        apply_worldpainter_defaults(&mut args);
+
+        assert!(!args.no_trees);
+        assert!(validate_args(&args).is_ok());
+        let missing_executable = Args::parse_from([
+            "arnis",
+            "--output-dir",
+            temp.path().to_str().unwrap(),
+            "--bbox",
+            "1,2,3,4",
+            "--worldpainter-project",
+            project.to_str().unwrap(),
+        ]);
+        assert!(validate_args(&missing_executable)
+            .unwrap_err()
+            .contains("--worldpainter-executable"));
     }
 
     #[test]

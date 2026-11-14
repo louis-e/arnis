@@ -87,6 +87,7 @@ mod water_steps;
 mod work_units;
 mod world_editor;
 mod world_utils;
+mod worldpainter;
 mod y_bounds;
 
 use args::Args;
@@ -361,6 +362,7 @@ fn run_cli() {
     }
     args::apply_body_defaults(&mut args);
     args::apply_feature_needs(&mut args);
+    args::apply_worldpainter_defaults(&mut args);
     y_bounds::apply(&mut args);
     let one_world = args.one_world;
     scale::budget::single_below_break_even(&mut args, one_world);
@@ -1261,8 +1263,40 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
 
     // Generation places the map item at it; an extended One World moves it only to a marker.
     let extending = args.one_world_run.as_ref().is_some_and(|r| r.extending);
+    let worldpainter_run = if let (Some(project), Some(executable)) = (
+        args.worldpainter_project.as_deref(),
+        args.worldpainter_executable.as_deref(),
+    ) {
+        match worldpainter::WorldPainterRun::prepare(
+            project,
+            executable,
+            &generation_path,
+            args.keep_worldpainter_export,
+        ) {
+            Ok(run) => Some(run),
+            Err(e) => {
+                eprintln!("{} {}", "Error:".red().bold(), e);
+                if let Err(cleanup_error) = fs::remove_dir_all(&generation_path) {
+                    if cleanup_error.kind() != std::io::ErrorKind::NotFound {
+                        eprintln!(
+                            "{} Failed to remove incomplete world {}: {cleanup_error}",
+                            "Warning:".yellow().bold(),
+                            generation_path.display()
+                        );
+                    }
+                }
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     let generation_options = data_processing::GenerationOptions {
-        path: generation_path.clone(),
+        path: worldpainter_run
+            .as_ref()
+            .map(|run| run.features_world().to_path_buf())
+            .unwrap_or_else(|| generation_path.clone()),
         format: world_format,
         level_name,
         spawn_point: if extending { spawn_point } else { java_spawn },
@@ -1284,6 +1318,22 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         housing_parts,
     ) {
         Ok(_) => {
+            if let Some(run) = worldpainter_run.as_ref() {
+                if let Err(e) = run.publish(&generation_path) {
+                    eprintln!("{} {}", "Error:".red().bold(), e);
+                    run.cleanup();
+                    if let Err(cleanup_error) = fs::remove_dir_all(&generation_path) {
+                        if cleanup_error.kind() != std::io::ErrorKind::NotFound {
+                            eprintln!(
+                                "{} Failed to remove incomplete world {}: {cleanup_error}",
+                                "Warning:".yellow().bold(),
+                                generation_path.display()
+                            );
+                        }
+                    }
+                    exit_failed();
+                }
+            }
             if args.bedrock {
                 println!(
                     "{} Bedrock world saved to: {}",
@@ -1292,20 +1342,35 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                 );
             }
 
-            // For Java Edition, write the spawn point into level.dat
+            // Write the spawn after export: WorldPainter's level.dat replaces the
+            // metadata created for the sparse Arnis feature world.
             if world_format == world_editor::WorldFormat::JavaAnvil && !extending {
-                if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (java_spawn, spawn_y_for_java) {
-                    if let Err(e) = world_utils::set_spawn_in_level_dat(
-                        &generation_path,
-                        spawn_x,
-                        spawn_y,
-                        spawn_z,
-                    ) {
-                        eprintln!(
-                            "{} Failed to set spawn point in level.dat: {}",
+                if let Some((spawn_x, spawn_z)) = java_spawn {
+                    let spawn_y = match worldpainter_run.as_ref() {
+                        Some(run) => run.spawn_y_at(&generation_path, spawn_x, spawn_z),
+                        None => spawn_y_for_java
+                            .ok_or_else(|| "Arnis spawn height is unavailable".to_string()),
+                    };
+                    match spawn_y {
+                        Ok(spawn_y) => {
+                            if let Err(e) = world_utils::set_spawn_in_level_dat(
+                                &generation_path,
+                                spawn_x,
+                                spawn_y,
+                                spawn_z,
+                            ) {
+                                eprintln!(
+                                    "{} Failed to set spawn point in level.dat: {}",
+                                    "Warning:".yellow().bold(),
+                                    e
+                                );
+                            }
+                        }
+                        Err(e) => eprintln!(
+                            "{} Failed to find a safe spawn height: {}",
                             "Warning:".yellow().bold(),
                             e
-                        );
+                        ),
                     }
                 }
             }
@@ -1314,6 +1379,18 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             // Generation stops after the 3D prescan when the cache lacks a model.
             exit_if_offline_misses(fresh_world);
             eprintln!("{} {}", "Error:".red().bold(), e);
+            if let Some(run) = worldpainter_run.as_ref() {
+                run.cleanup();
+                if let Err(cleanup_error) = fs::remove_dir_all(&generation_path) {
+                    if cleanup_error.kind() != std::io::ErrorKind::NotFound {
+                        eprintln!(
+                            "{} Failed to remove incomplete world {}: {cleanup_error}",
+                            "Warning:".yellow().bold(),
+                            generation_path.display()
+                        );
+                    }
+                }
+            }
             exit_failed();
         }
     }

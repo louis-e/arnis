@@ -194,7 +194,7 @@ fn leisure_area(
                         105..120 => {
                             // Only where land cover says woody, else a park
                             // canopies its own meadows.
-                            if editor.land_cover_backs_trees(x, z) {
+                            if !args.no_trees && editor.land_cover_backs_trees(x, z) {
                                 Tree::create(
                                     editor,
                                     (x, 1, z),

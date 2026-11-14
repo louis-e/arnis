@@ -63,6 +63,26 @@ impl Drop for NewWorldCleanup {
     }
 }
 
+fn apply_worldpainter_spawn(
+    run: &crate::worldpainter::WorldPainterRun,
+    world_path: &Path,
+    spawn_point: Option<(i32, i32)>,
+) {
+    let Some((spawn_x, spawn_z)) = spawn_point else {
+        return;
+    };
+    let result = run
+        .spawn_y_at(world_path, spawn_x, spawn_z)
+        .and_then(|spawn_y| {
+            crate::world_utils::set_spawn_in_level_dat(world_path, spawn_x, spawn_y, spawn_z)
+        });
+    if let Err(error) = result {
+        let message = format!("Failed to set WorldPainter world spawn point: {error}");
+        eprintln!("Warning: {message}");
+        send_log(LogLevel::Warning, &message);
+    }
+}
+
 /// Whether a One World job that failed takes its world with it: only one it
 /// created, that held no area before and finished no piece.
 fn remove_failed_new_world(
@@ -169,7 +189,6 @@ fn prewarm_scratch() -> Result<NewWorldCleanup, String> {
     fs::create_dir(&dir).map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
     Ok(NewWorldCleanup::new(dir))
 }
-
 pub fn run_gui() -> Result<(), String> {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
@@ -228,6 +247,8 @@ pub fn run_gui() -> Result<(), String> {
             gui_get_default_hytale_save_path,
             gui_set_save_path,
             gui_pick_save_directory,
+            gui_pick_worldpainter_project,
+            gui_pick_worldpainter_executable,
             gui_start_generation,
             gui_pause_generation,
             gui_default_archive_folder,
@@ -799,6 +820,37 @@ fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
         Some(folder) => Ok(folder.display().to_string()),
         None => Ok(start_path),
     }
+}
+
+fn pick_worldpainter_file(start_path: &str, description: &str, extensions: &[&str]) -> String {
+    let start = PathBuf::from(start_path);
+    let directory = if start.is_dir() {
+        Some(start.as_path())
+    } else {
+        start.parent().filter(|parent| parent.is_dir())
+    };
+    let mut dialog = FileDialog::new().add_filter(description, extensions);
+    if let Some(directory) = directory {
+        dialog = dialog.set_directory(directory);
+    }
+    dialog
+        .pick_file()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn gui_pick_worldpainter_project(start_path: String) -> String {
+    pick_worldpainter_file(&start_path, "WorldPainter project", &["world"])
+}
+
+#[tauri::command]
+fn gui_pick_worldpainter_executable(start_path: String) -> String {
+    pick_worldpainter_file(
+        &start_path,
+        "WorldPainter command-line executable",
+        &["exe", "bat", "cmd", "sh"],
+    )
 }
 
 /// Creates a new Java Edition world in the given base save directory.
@@ -2729,10 +2781,29 @@ fn gui_start_generation(
     // The "Meld features" settings as CLI flags (`--name=value`); none when the switch is off.
     flags: Vec<String>,
     selection_shapes: Option<Vec<Vec<(f64, f64)>>>,
+    worldpainter_project: String,
+    worldpainter_executable: String,
+    include_arnis_trees: bool,
+    keep_worldpainter_export: bool,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
     let is_new_world = owns_selected_world(is_new_world, one_world, &flags);
+
+    let worldpainter_enabled =
+        !worldpainter_project.trim().is_empty() || !worldpainter_executable.trim().is_empty();
+    if worldpainter_enabled && !is_new_world {
+        let e = "WorldPainter export can only create a new Java world.".to_string();
+        emit_gui_error(&e);
+        return Err(e);
+    }
+    if worldpainter_enabled && (world_format != "java" || one_world) {
+        let e =
+            "WorldPainter export is only available for new Java worlds outside Live and One World modes."
+                .to_string();
+        emit_gui_error(&e);
+        return Err(e);
+    }
 
     // Shapes replace the rectangle; the status line holds 35 characters, so details go to the log.
     let shapes = match selection_shapes.filter(|rings| !rings.is_empty()) {
@@ -3060,6 +3131,13 @@ fn gui_start_generation(
                     .flatten(),
                 ground_level,
                 mode: crate::args::GenerationMode::from_name(&generation_mode),
+                sparse_features: false,
+                worldpainter_project: (!worldpainter_project.trim().is_empty())
+                    .then(|| PathBuf::from(worldpainter_project.trim())),
+                worldpainter_executable: (!worldpainter_executable.trim().is_empty())
+                    .then(|| PathBuf::from(worldpainter_executable.trim())),
+                include_arnis_trees,
+                keep_worldpainter_export,
                 post_apocalyptic: post_apocalyptic_enabled,
                 winter: winter_enabled,
                 legacy_terrain: false,
@@ -3074,6 +3152,7 @@ fn gui_start_generation(
                 cave_zone_map_step: None,
                 legacy_trees: legacy_trees_enabled,
                 max_tree_size: crate::trees::tree_library::TreeSize::from_str_lossy(&max_tree_size),
+                no_trees: false,
                 fields: crate::element_processing::field_texture::FieldPreset::from_str_lossy(
                     &field_preset,
                 ),
@@ -3173,6 +3252,12 @@ fn gui_start_generation(
             // above) has to apply the body rules on its own.
             crate::args::apply_body_defaults(&mut args);
             crate::args::apply_feature_needs(&mut args);
+            crate::args::apply_worldpainter_defaults(&mut args);
+            if worldpainter_enabled {
+                crate::args::validate_args(&args).inspect_err(|error| {
+                    emit_gui_error(error);
+                })?;
+            }
             crate::y_bounds::apply(&mut args);
             crate::scale::budget::single_below_break_even(&mut args, one_world);
 
@@ -3336,9 +3421,32 @@ fn gui_start_generation(
                 }
             };
 
+            let worldpainter_run = if let (Some(project), Some(executable)) = (
+                args.worldpainter_project.as_deref(),
+                args.worldpainter_executable.as_deref(),
+            ) {
+                match crate::worldpainter::WorldPainterRun::prepare(
+                    project,
+                    executable,
+                    &generation_path,
+                    args.keep_worldpainter_export,
+                ) {
+                    Ok(run) => Some(run),
+                    Err(e) => {
+                        emit_gui_error(&e);
+                        return Err(e);
+                    }
+                }
+            } else {
+                None
+            };
+
             // Create generation options. Spawn point and facade job are set below.
             let mut generation_options = GenerationOptions {
-                path: generation_path.clone(),
+                path: worldpainter_run
+                    .as_ref()
+                    .map(|run| run.features_world().to_path_buf())
+                    .unwrap_or_else(|| generation_path.clone()),
                 format: world_format,
                 level_name,
                 spawn_point: None,
@@ -3479,6 +3587,13 @@ fn gui_start_generation(
                 ) {
                     emit_gui_error(&e);
                     return Err(e);
+                }
+                if let Some(run) = worldpainter_run.as_ref() {
+                    if let Err(e) = run.publish(&generation_path) {
+                        emit_gui_error(&e);
+                        return Err(e);
+                    }
+                    apply_worldpainter_spawn(run, &generation_path, mc_spawn_point);
                 }
                 if let Some(g) = cleanup_guard.as_mut() {
                     g.disarm();
@@ -3692,6 +3807,13 @@ fn gui_start_generation(
                         send_log(LogLevel::Error, &format!("World generation failed: {e}"));
                         emit_gui_error(&e);
                         return Err(e);
+                    }
+                    if let Some(run) = worldpainter_run.as_ref() {
+                        if let Err(e) = run.publish(&generation_path) {
+                            emit_gui_error(&e);
+                            return Err(e);
+                        }
+                        apply_worldpainter_spawn(run, &generation_path, mc_spawn_point);
                     }
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
