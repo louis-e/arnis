@@ -22,6 +22,9 @@ const DT_MAX: u8 = u8::MAX;
 
 /// Maximum water carve depth, in blocks (the deepest tier).
 pub(crate) const MAX_WATER_DEPTH: i32 = 6;
+/// Carve depth of mapped water the land cover missed, past a shelf this wide on its banks.
+const MAPPED_DEPTH: i32 = 2;
+const MAPPED_SHELF: i32 = 2;
 
 /// Room a tunnel needs under the deepest bed, on top of the floor the carve leaves it. That
 /// bed lies on `min_y() + 1`; a bore keeping its cover under it needs it at `min_y() + 9`.
@@ -676,6 +679,11 @@ pub fn carve_water_column(
         "water carve depth {depth} exceeds the max tier {MAX_WATER_DEPTH}"
     );
     let mut depth = carve_depth(depth, water_y);
+    // Water OSM maps where the land cover has none, as a town's canals, still gets depth.
+    let missed = depth == 0 && !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
+    if missed {
+        depth = carve_depth(mapped_depth(editor, x, z), water_y);
+    }
     // Opt-in beds leave water that stands over a lower neighbour one block deep, or more
     // of its side would show than the default bed does.
     if depth > 0 && bwf.deeper_than_crust && editor.water_stands_over_neighbour(x, z, water_y) {
@@ -697,7 +705,9 @@ pub fn carve_water_column(
     let is_river = bwf.is_river(x, z);
 
     // Keep the bed plain near causeways so blobs/dunes/veg don't clutter piers.
-    let near_bridge = depth >= 2 && !road_mask.is_empty() && bridge_adjacent(road_mask, x, z);
+    // A canal's bed stays plain, as it does by a bridge.
+    let near_bridge =
+        depth >= 2 && (missed || (!road_mask.is_empty() && bridge_adjacent(road_mask, x, z)));
 
     // Layered bed: gravel base with noise-driven sand/clay/dirt patches over stone.
     let (top_block, under_block) = match depth {
@@ -911,6 +921,18 @@ pub(crate) fn clear_tree_within(
         ] {
             stack.push((cx + dx, cy + dy, cz + dz));
         }
+    }
+}
+
+/// Depth of mapped water the land cover missed: deeper past a shelf along its banks.
+fn mapped_depth(editor: &WorldEditor, x: i32, z: i32) -> i32 {
+    let interior = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .iter()
+        .all(|&(dx, dz)| editor.is_mapped_water(x + dx * MAPPED_SHELF, z + dz * MAPPED_SHELF));
+    if interior {
+        MAPPED_DEPTH
+    } else {
+        1
     }
 }
 

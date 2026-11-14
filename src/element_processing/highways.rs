@@ -7,7 +7,7 @@ use crate::element_processing::bridge_styles::{
     BridgePathSample, BridgeStyle,
 };
 use crate::element_processing::bridges::{
-    is_bridge_way, lays_deck, way_cells, BridgeStructureMap, BridgeSurfaceMap,
+    along_steps, is_bridge_way, lays_deck, way_cells, BridgeStructureMap, BridgeSurfaceMap,
 };
 use crate::element_processing::connected_blocks::{
     connected_iron_bars, four_connected_line, place_connected, stair_steps,
@@ -2094,21 +2094,19 @@ fn generate_highways_internal(
                         None
                     };
 
-                    // How far along the way a cell sits. Projected onto the segment's step
-                    // vector, not the dominant axis, which tips a 45-degree road sideways.
-                    let along_offset = {
-                        let run = (x2 - x1).abs().max((z2 - z1).abs()).max(1) as f32;
-                        let (ex, ez) = ((x2 - x1) as f32 / run, (z2 - z1) as f32 / run);
-                        let inv = 1.0 / (ex * ex + ez * ez).max(f32::EPSILON);
-                        move |dx: i32, dz: i32| {
-                            ((dx as f32 * ex + dz as f32 * ez) * inv).round() as i32
-                        }
-                    };
+                    // How far along the way a cell sits.
+                    let along_offset = along_steps((x1, z1), (x2, z2));
                     // Profile height of a column, placed from the segment's start so every
                     // stamp along it reads the same cell.
                     let segment_tds = cumulative_distance_from_start;
                     let profile_y =
                         |cx: i32, cz: i32| road_y_at(segment_tds, along_offset(cx - x1, cz - z1));
+                    // The deck cell a column takes its level from, read the same way.
+                    let column_tds = |cx: i32, cz: i32| {
+                        (segment_tds as i32 + along_offset(cx - x1, cz - z1))
+                            .clamp(0, total_bresenham_length as i32 - 1)
+                            as usize
+                    };
                     // A column another road already surfaced keeps its level, so the two never
                     // stack. A ramp only takes one within a block of its own, not the street below.
                     let flat_y = |editor: &WorldEditor, cx: i32, cz: i32, offset: i32| {
@@ -2228,8 +2226,8 @@ fn generate_highways_internal(
                                 // (flat cross-section) and register the
                                 // same effective-ground override.
                                 let approach_y = approach_at(dx, dz);
-                                let cell_y = if let Some(by) = bridge_y_here {
-                                    by
+                                let cell_y = if let Some(info) = bridge_member {
+                                    info.y_at(column_tds(set_x, set_z))
                                 } else if let Some(ay) = approach_y {
                                     ay
                                 } else if flatten_width {
@@ -2404,9 +2402,7 @@ fn generate_highways_internal(
                                     if is_bridge_member {
                                         if bridge_style == BridgeStyle::Arch && !blocked {
                                             // Per-cell position so overlapping stamps keep the openings.
-                                            let cell_tds = (tds as i32 + along_offset(dx, dz))
-                                                .clamp(0, total_bresenham_length as i32 - 1)
-                                                as usize;
+                                            let cell_tds = column_tds(set_x, set_z);
                                             place_arch_below_deck(
                                                 editor,
                                                 set_x,
@@ -2567,8 +2563,8 @@ fn generate_highways_internal(
                                      sx: i32,
                                      sz: i32,
                                      over: &[Block]| {
-                            let sy = if let Some(by) = bridge_y_here {
-                                by
+                            let sy = if let Some(info) = bridge_member {
+                                info.y_at(column_tds(sx, sz))
                             } else if let Some(ay) = approach_at(sx - *x, sz - *z) {
                                 ay
                             } else if flatten_width {
@@ -6206,6 +6202,49 @@ mod tests {
         ];
         elems.extend_from_slice(extra);
         elems
+    }
+
+    #[test]
+    fn a_sloped_deck_lays_one_surface_per_column() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(99.0, 99.0).unwrap();
+        let mut editor = tunnel_editor(&xzbbox, sloped_ground(100, 100, |_, _| 0.0));
+        let road = [("highway", "residential")];
+        let deck = [
+            ("highway", "residential"),
+            ("bridge", "yes"),
+            ("layer", "1"),
+        ];
+        let elems = [
+            line_way(1, &[(0, 26), (10, 30)], &road),
+            line_way(2, &[(10, 30), (90, 66)], &deck),
+            line_way(3, &[(90, 66), (99, 70)], &road),
+        ];
+        render_roads(&mut editor, &xzbbox, &elems);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elems);
+        let connectivity = build_highway_connectivity_map(&elems);
+        let structures = BridgeStructureMap::build(&elems, &editor, &connectivity, &outlines, 1.0);
+        let member = structures.lookup_member(2).expect("a deck");
+        let slab = structures.structure_of(member).design.slab();
+        let ProcessedElement::Way(way) = &elems[1] else {
+            unreachable!()
+        };
+        let half = highway_block_range("residential", &HashMap::new(), 1.0);
+        let mut raised = 0;
+        for ((x, z), i) in crate::element_processing::bridges::deck_columns(way, half) {
+            let y = member.y_at(i);
+            raised += usize::from(y > 1);
+            assert_eq!(
+                editor.highest_block_between(x, z, -5, 30),
+                Some(y),
+                "({x}, {z})"
+            );
+            assert_eq!(
+                editor.get_block_absolute(x, y - 1, z),
+                Some(slab),
+                "({x}, {z})"
+            );
+        }
+        assert!(raised > 0, "the deck climbs");
     }
 
     #[test]

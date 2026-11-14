@@ -838,6 +838,15 @@ impl<'a> WorldEditor<'a> {
         })
     }
 
+    /// Land-cover water, or a lake, river or canal OSM maps where the land cover missed it.
+    pub fn is_mapped_water(&self, x: i32, z: i32) -> bool {
+        self.is_lc_water(x, z)
+            || self
+                .ground
+                .as_ref()
+                .is_some_and(|g| g.inland_water_mapped(self.ground_point(x, z)))
+    }
+
     /// Whether land cover backs a speculative tree at (x, z), one no tag claims.
     /// Tags that do assert trees, like `landuse=forest`, are authoritative and
     /// must not consult this. True without land cover, so those worlds are unchanged.

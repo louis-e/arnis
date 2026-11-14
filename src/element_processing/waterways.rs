@@ -13,6 +13,8 @@ pub struct ChannelBed<'a> {
     pub field: &'a BigWaterField,
     pub road_mask: &'a RoadMaskBitmap,
     pub tunnel_footprint: &'a RoadMaskBitmap,
+    /// Decks over the channel; under one that clears the water the bed is dug as elsewhere.
+    pub decks: &'a BridgeSurfaceMap,
     /// Set with a water option on: a channel under a road at grade is then left out, so a
     /// path along a stream leaves no strips of water on its sides.
     pub piped_under_roads: Option<&'a BridgeSurfaceMap>,
@@ -201,9 +203,12 @@ fn create_water_channel(
 
                 if let Some(water_y) = water_y {
                     editor.set_block_absolute(WATER, x, water_y, z, None, None);
-                    // The river's depth and bed, unless a road or a bore owns the column.
-                    if bed.field.is_river(x, z)
-                        && !bed.road_mask.contains(x, z)
+                    // A river's or missed canal's depth and bed, unless a road or bore owns it.
+                    let missed = !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
+                    let under_deck =
+                        bed.decks.deck_clears(x, z, water_y) && !bed.decks.over_grade_way(x, z);
+                    if (bed.field.is_river(x, z) || missed)
+                        && (!bed.road_mask.contains(x, z) || under_deck)
                         && !at_bore(bed.field, bed.tunnel_footprint, x, z)
                         && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
                     {
@@ -280,10 +285,13 @@ mod waterway_profile_tests {
             std::sync::LazyLock::new(BigWaterField::empty);
         static NONE: std::sync::LazyLock<RoadMaskBitmap> =
             std::sync::LazyLock::new(RoadMaskBitmap::new_empty);
+        static DECKS: std::sync::LazyLock<BridgeSurfaceMap> =
+            std::sync::LazyLock::new(BridgeSurfaceMap::empty);
         ChannelBed {
             field: &FIELD,
             road_mask: &NONE,
             tunnel_footprint: &NONE,
+            decks: &DECKS,
             piped_under_roads: None,
         }
     }
@@ -334,6 +342,7 @@ mod waterway_profile_tests {
             field: &field,
             road_mask: &road_mask,
             tunnel_footprint: &none,
+            decks: &decks,
             piped_under_roads: Some(&decks),
         };
         generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &bed);
@@ -347,6 +356,39 @@ mod waterway_profile_tests {
             "no bed"
         );
         assert_eq!(water_ys(&editor, CENTER_X, 30), vec![8], "dug under a road");
+    }
+
+    #[test]
+    fn a_canal_the_land_cover_missed_is_dug_past_its_banks() {
+        use crate::land_cover::{InlandWater, LandCoverData};
+        let bbox = world_bbox();
+        let mut mapped = InlandWater::new(SIDE, SIDE);
+        for z in 0..SIDE {
+            for x in 24..=40 {
+                mapped.set(x, z);
+            }
+        }
+        let lc = LandCoverData {
+            grid: vec![vec![10; SIDE]; SIDE],
+            water_distance: vec![vec![0; SIDE]; SIDE],
+            water_blend_cache: Default::default(),
+            beach_tiles: Default::default(),
+            inland_water: mapped,
+            width: SIDE,
+            height: SIDE,
+            cells_per_meter: 1.0,
+        };
+        let ground = Ground::new_elevation_test(vec![vec![8.0; SIDE]; SIDE], SIDE, SIDE)
+            .with_land_cover_test(lc);
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &bbox, llbbox);
+        editor.set_ground(Arc::new(ground));
+        let mut canal = stream(FIRST_Z, LAST_Z);
+        canal
+            .tags
+            .insert("waterway".to_string(), "canal".to_string());
+        generate_waterways(&mut editor, &canal, None, &no_bed());
+        assert_eq!(water_ys(&editor, CENTER_X, 30), vec![6, 7, 8]);
     }
 
     #[test]

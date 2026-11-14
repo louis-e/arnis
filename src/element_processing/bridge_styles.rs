@@ -243,6 +243,8 @@ const CABLE_FALLBACK_PIER_INTERVAL: usize = 24;
 const BOARDWALK_POST_INTERVAL: usize = 4;
 const ARCH_SPAN: usize = 20;
 const ARCH_RISE_FRACTION: f32 = 0.85;
+/// Least deck height over water that leaves an arch under it room to clear the water.
+const ARCH_WATER_ROOM: i32 = 6;
 const TRUSS_TOP_HEIGHT: i32 = 5;
 const TRUSS_DIAGONAL_PERIOD: usize = 8;
 const TRUSS_POST_INTERVAL: usize = 4;
@@ -303,6 +305,12 @@ pub fn place_arch_below_deck(
     use_absolute_y: bool,
     is_centerline: bool,
 ) {
+    // Too low over water for an arch to clear it: the deck spans it alone, or it dams it.
+    if editor.is_mapped_water(set_x, set_z)
+        && cell_y - editor.get_water_level(set_x, set_z) < ARCH_WATER_ROOM
+    {
+        return;
+    }
     place_arch_spandrel_cell(
         editor,
         set_x,

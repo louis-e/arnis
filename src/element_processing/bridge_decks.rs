@@ -3,7 +3,7 @@
 use crate::block_definitions::*;
 use crate::element_processing::bridge_styles::BridgeStyle;
 use crate::element_processing::bridges::{
-    grade_obstacle, way_cells, BridgeMemberInfo, BridgeStructureMap, BridgeSurfaceMap,
+    deck_columns, grade_obstacle, way_cells, BridgeMemberInfo, BridgeStructureMap, BridgeSurfaceMap,
 };
 use crate::element_processing::connected_blocks::{is_connectable, place_connected};
 use crate::element_processing::highways::highway_block_range;
@@ -16,13 +16,22 @@ use std::collections::{HashMap, HashSet};
 const GAP_FILL_MAX: i32 = 4;
 /// Deck height above the ground below which no pier stands.
 const PIER_MIN_HEIGHT: i32 = 3;
+/// Deck height above water below which no pier stands in it.
+const LOW_WATER_PIER: i32 = 6;
 /// Cells between lamps along a lit bridge.
 const LAMP_SPACING: usize = 16;
 /// Bucket side of the index over at-grade ways.
 const ROAD_GRID: i32 = 32;
+/// Longest way of a structure that may still be varied in look.
+const VARIED_MAX_LENGTH: f32 = 60.0;
+
+/// One of 8 looks for a structure, fixed by its lowest way id.
+fn variety(seed: u64) -> u64 {
+    seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 61
+}
 
 /// How a bridge structure is built: its deck edge, railing, beams and piers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DeckDesign {
     /// Motorways and trunk roads: concrete edge beams with a concrete parapet.
     Motorway,
@@ -30,6 +39,8 @@ pub enum DeckDesign {
     Road,
     /// Footbridges: slim concrete deck with a steel railing.
     Foot,
+    /// Footbridges with a glass balustrade.
+    Glass,
     /// Masonry curb and balustrade, as on old arch bridges.
     Stone,
     /// Brick curb and balustrade.
@@ -111,7 +122,54 @@ impl DeckDesign {
                 return DeckDesign::Timber;
             }
         }
-        road()
+        // Old bridges, and stepped or setted ones as in old towns, are masonry.
+        let old = tag("historic").is_some()
+            || tag("heritage").is_some()
+            || tag("start_date")
+                .and_then(|d| d.get(..4)?.parse::<i32>().ok())
+                .is_some_and(|year| year < 1900);
+        let masonry = ways.iter().any(|w| {
+            w.tags.get("highway").map(String::as_str) == Some("steps")
+                || matches!(
+                    w.tags.get("surface").map(String::as_str),
+                    Some("sett" | "cobblestone" | "unhewn_cobblestone" | "stone")
+                )
+        });
+        if old || masonry {
+            return DeckDesign::Stone;
+        }
+        // Where no tag decides, some short minor bridges are masonry, some footbridges glass.
+        let minor = ways.iter().all(|w| {
+            matches!(
+                w.tags.get("highway").map(String::as_str),
+                Some(
+                    "residential"
+                        | "unclassified"
+                        | "service"
+                        | "living_street"
+                        | "track"
+                        | "pedestrian"
+                        | "footway"
+                        | "path"
+                        | "cycleway"
+                        | "bridleway"
+                )
+            )
+        });
+        let short = ways.iter().all(|w| {
+            let length: f32 = w
+                .nodes
+                .windows(2)
+                .map(|p| ((p[1].x - p[0].x) as f32).hypot((p[1].z - p[0].z) as f32))
+                .sum();
+            length <= VARIED_MAX_LENGTH
+        });
+        let roll = variety(ways.iter().map(|w| w.id).min().unwrap_or(0));
+        match road() {
+            DeckDesign::Road if minor && short && roll < 3 => DeckDesign::Stone,
+            DeckDesign::Foot if roll < 2 => DeckDesign::Glass,
+            design => design,
+        }
     }
 
     /// The slab under the deck surface.
@@ -136,6 +194,7 @@ impl DeckDesign {
         match self {
             DeckDesign::Motorway => Some(ANDESITE_WALL),
             DeckDesign::Road | DeckDesign::Foot => Some(IRON_BARS),
+            DeckDesign::Glass => Some(GLASS_PANE),
             DeckDesign::Stone => Some(STONE_BRICK_WALL),
             DeckDesign::Brick => Some(BRICK_WALL),
             DeckDesign::Timber => Some(SPRUCE_FENCE),
@@ -171,8 +230,26 @@ impl DeckDesign {
             DeckDesign::Motorway
                 | DeckDesign::Road
                 | DeckDesign::Foot
+                | DeckDesign::Glass
                 | DeckDesign::Stone
                 | DeckDesign::Brick
+        )
+    }
+
+    /// A lamp post in the railing's own material, slim among bars and glass.
+    fn lamp_pole(self) -> Block {
+        match self.parapet() {
+            Some(IRON_BARS | GLASS_PANE) => IRON_BARS,
+            Some(railing) => railing,
+            None => STONE_BRICK_WALL,
+        }
+    }
+
+    /// Footbridges stand on slimmer piers, never walls.
+    fn slender(self) -> bool {
+        matches!(
+            self,
+            DeckDesign::Foot | DeckDesign::Glass | DeckDesign::Timber
         )
     }
 
@@ -182,7 +259,9 @@ impl DeckDesign {
             BridgeStyle::Truss => 32.0,
             BridgeStyle::Suspension | BridgeStyle::CableStayed => 24.0,
             _ => match self {
-                DeckDesign::Foot => (8.0 + height as f32 * 0.5).clamp(8.0, 20.0),
+                DeckDesign::Foot | DeckDesign::Glass => {
+                    (8.0 + height as f32 * 0.5).clamp(8.0, 20.0)
+                }
                 DeckDesign::Timber => 6.0,
                 _ => (12.0 + height as f32 * 0.6).clamp(12.0, 40.0),
             },
@@ -390,19 +469,15 @@ fn plan_structure(
     // The decks as the renderer stamps them, the higher level where two meet.
     let mut deck: HashMap<(i32, i32), DeckCell> = HashMap::new();
     for p in paths {
-        for (i, &(x, z)) in p.cells.iter().enumerate() {
+        for (column, i) in deck_columns(p.way, p.half) {
             let y = p.y(i);
-            for dx in -p.half..=p.half {
-                for dz in -p.half..=p.half {
-                    deck.entry((x + dx, z + dz))
-                        .and_modify(|c| {
-                            if y > c.y {
-                                *c = DeckCell { y, way: p.way.id };
-                            }
-                        })
-                        .or_insert(DeckCell { y, way: p.way.id });
-                }
-            }
+            deck.entry(column)
+                .and_modify(|c| {
+                    if y > c.y {
+                        *c = DeckCell { y, way: p.way.id };
+                    }
+                })
+                .or_insert(DeckCell { y, way: p.way.id });
         }
     }
 
@@ -631,7 +706,12 @@ fn plan_piers(
             .max()
             .unwrap_or(0);
         let spacing = design.pier_spacing(style, height);
-        let spans = (span / spacing).round().max(1.0) as usize;
+        // A span under twice the spacing is crossed in one.
+        let spans = if span < 2.0 * spacing {
+            1
+        } else {
+            (span / spacing).round() as usize
+        };
         let step = span / spans as f32;
         for k in 1..spans {
             let target = lo + step * k as f32;
@@ -665,6 +745,11 @@ fn plan_piers(
                     if y - ground < PIER_MIN_HEIGHT || hangs(p, cx, cz) {
                         break;
                     }
+                    // Low over water a pier would wall it off; look along for the bank.
+                    let water = editor.is_mapped_water(cx, cz);
+                    if water && y - editor.get_water_level(cx, cz) < LOW_WATER_PIER {
+                        continue;
+                    }
                     let line = station_line(p, i, all);
                     let free = line
                         .iter()
@@ -673,7 +758,6 @@ fn plan_piers(
                     if free * 2 < line.len() {
                         continue;
                     }
-                    let water = editor.is_lc_water(cx, cz);
                     lay_pier(p, i, &line, y - ground, water, design, surface, out);
                     placed.extend(line.iter().copied());
                     break;
@@ -729,18 +813,16 @@ fn lay_pier(
 ) {
     let y = p.y(i);
     let width = line.len();
-    let thick: i32 = match (design, height) {
-        (DeckDesign::Foot | DeckDesign::Timber, h) if h < 16 => 1,
-        (DeckDesign::Foot | DeckDesign::Timber, _) => 2,
-        (_, h) if h < 10 => 1,
-        (_, h) if h < 25 => 2,
-        (_, h) if h < 50 => 3,
+    let thick: i32 = match height {
+        h if design.slender() && h < 16 => 1,
+        _ if design.slender() => 2,
+        h if h < 10 => 1,
+        h if h < 25 => 2,
+        h if h < 50 => 3,
         _ => 4,
     };
     // Columns across the line, or a wall pier in water and under tall decks.
-    let wall = !matches!(design, DeckDesign::Foot | DeckDesign::Timber)
-        && width >= 5
-        && (water || height >= 30);
+    let wall = !design.slender() && width >= 5 && (water || height >= 30);
     let picks: Vec<usize> = if wall {
         (1..width - 1).collect()
     } else if design == DeckDesign::Timber && width >= 3 {
@@ -801,7 +883,10 @@ pub fn render(editor: &mut WorldEditor, design: DeckDesign, parts: &DeckParts) {
         editor.set_block_absolute(design.curb(), x, y, z, None, None);
         editor.set_block_absolute(slab, x, y - 1, z, None, None);
     }
-    let room = |editor: &WorldEditor, x: i32, z: i32, y: i32| y > editor.get_ground_level(x, z);
+    // Over water a beam keeps a block of air above it.
+    let room = |editor: &WorldEditor, x: i32, z: i32, y: i32| {
+        y > editor.get_ground_level(x, z) + i32::from(editor.is_mapped_water(x, z))
+    };
     for &(x, z, y) in parts.rails.iter().chain(&parts.lamps) {
         editor.set_block_absolute(design.curb(), x, y, z, None, Some(&[]));
         editor.set_block_absolute(slab, x, y - 1, z, None, None);
@@ -827,7 +912,7 @@ pub fn render(editor: &mut WorldEditor, design: DeckDesign, parts: &DeckParts) {
     }
     for &(x, z, y) in &parts.lamps {
         for dy in 1..=4 {
-            place_connected(editor, STONE_BRICK_WALL, x, y + dy, z);
+            place_connected(editor, design.lamp_pole(), x, y + dy, z);
         }
         editor.set_block_with_properties_absolute(lit_lamp(), x, y + 5, z, None, None);
         editor.set_block_absolute(IRON_TRAPDOOR, x, y + 6, z, None, None);
@@ -887,6 +972,46 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         }
+    }
+
+    #[test]
+    fn old_stepped_and_setted_bridges_are_masonry() {
+        let pick = |tags: &[(&str, &str)]| {
+            DeckDesign::pick(BridgeStyle::Beam, [way(7, tags, &[(0, 0), (20, 0)])].iter())
+        };
+        for tags in [
+            &[("highway", "footway"), ("historic", "bridge")][..],
+            &[("highway", "residential"), ("start_date", "1885")],
+            &[("highway", "steps")],
+            &[("highway", "footway"), ("surface", "sett")],
+        ] {
+            assert_eq!(pick(tags), DeckDesign::Stone, "{tags:?}");
+        }
+    }
+
+    #[test]
+    fn untagged_bridges_vary_but_main_roads_and_long_spans_keep_their_look() {
+        let looks = |highway: &str, length: i32| -> HashSet<DeckDesign> {
+            (1..64)
+                .map(|id| {
+                    let w = way(id, &[("highway", highway)], &[(0, 0), (length, 0)]);
+                    DeckDesign::pick(BridgeStyle::Beam, [w].iter())
+                })
+                .collect()
+        };
+        use DeckDesign::*;
+        assert_eq!(looks("residential", 30), HashSet::from([Road, Stone]));
+        assert_eq!(looks("footway", 30), HashSet::from([Foot, Glass]));
+        assert_eq!(looks("primary", 30), HashSet::from([Road]));
+        assert_eq!(looks("residential", 90), HashSet::from([Road]));
+    }
+
+    #[test]
+    fn lamp_posts_are_made_like_the_railing() {
+        assert_eq!(DeckDesign::Road.lamp_pole(), IRON_BARS);
+        assert_eq!(DeckDesign::Glass.lamp_pole(), IRON_BARS);
+        assert_eq!(DeckDesign::Stone.lamp_pole(), STONE_BRICK_WALL);
+        assert_eq!(DeckDesign::Motorway.lamp_pole(), ANDESITE_WALL);
     }
 
     /// Plans and draws `ways` over a 100x100 world whose ground at column x is `height(x)`.
