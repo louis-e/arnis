@@ -850,7 +850,7 @@ impl Lamp {
     fn block(self) -> &'static str {
         match self {
             Lamp::Red => "minecraft:red_concrete",
-            Lamp::Amber => "minecraft:orange_concrete",
+            Lamp::Amber => "minecraft:yellow_concrete",
             Lamp::Green => "minecraft:lime_concrete",
         }
     }
