@@ -10,7 +10,7 @@ use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use std::collections::HashMap;
 
 /// One direction a road leaves a signal node in.
@@ -442,6 +442,12 @@ pub struct SignalIndex {
     poles: Vec<Pole>,
     /// Poles each signal node builds.
     by_node: FnvHashMap<u64, Vec<usize>>,
+    /// Signal nodes the plan found a kerb for, including those whose heads another node's
+    /// pole carries or that a nearby head already covers.
+    handled: FnvHashSet<u64>,
+    /// The extras' data pack cycles the heads. Without it they are built from vanilla
+    /// blocks, frozen in their first state.
+    cycling: bool,
 }
 
 /// Two heads facing one way this close together are one head mapped twice, as a junction
@@ -451,6 +457,7 @@ const COVER: i32 = 6;
 struct Plan<'r> {
     poles: Vec<Pole>,
     by_node: FnvHashMap<u64, Vec<usize>>,
+    handled: FnvHashSet<u64>,
     drives_on_left: bool,
     road_mask: &'r RoadMaskBitmap,
 }
@@ -480,17 +487,17 @@ impl Plan<'_> {
                 node.x as f64 + 0.5 + arm.dir.0 * back as f64,
                 node.z as f64 + 0.5 + arm.dir.1 * back as f64,
             );
-            let kerb = kerb_cell(origin, side, arm.half, self.road_mask).or_else(|| {
-                // A bike path often runs along the road on that side; the head then stands
-                // on the other.
-                let other = (-side.0, -side.1);
-                (node.kind == Kind::Bike)
-                    .then(|| kerb_cell(origin, other, arm.half, self.road_mask))
-                    .flatten()
-            });
+            let kerb = kerb_cell(origin, side, arm.half, self.road_mask)
+                .or_else(|| {
+                    // A bike path, tram tracks or the other carriageway often run along
+                    // the road on that side; the head then stands on the other.
+                    kerb_cell(origin, (-side.0, -side.1), arm.half, self.road_mask)
+                })
+                .or_else(|| island_cell(origin, self.road_mask));
             let Some((px, pz, off)) = kerb else {
                 continue;
             };
+            self.handled.insert(id);
             let head = Head {
                 facing: arm.dir,
                 group: group_of(arm.dir),
@@ -540,16 +547,27 @@ impl Plan<'_> {
                 None => {
                     // The crossing path is paved as well, so the pole may have to stand
                     // beside it.
-                    let kerb = [0.0, 2.0, -2.0].iter().find_map(|&along| {
-                        let from = (origin.0 + road.dir.0 * along, origin.1 + road.dir.1 * along);
-                        kerb_cell(from, side, road.half, self.road_mask)
-                    });
+                    let kerb = [0.0, 2.0, -2.0]
+                        .iter()
+                        .find_map(|&along| {
+                            let from =
+                                (origin.0 + road.dir.0 * along, origin.1 + road.dir.1 * along);
+                            kerb_cell(from, side, road.half, self.road_mask)
+                        })
+                        .or_else(|| {
+                            let ahead = (
+                                origin.0 + side.0 * f64::from(road.half),
+                                origin.1 + side.1 * f64::from(road.half),
+                            );
+                            island_cell(ahead, self.road_mask)
+                        });
                     let Some((px, pz, _)) = kerb else {
                         continue;
                     };
                     self.pole(id, px, pz)
                 }
             };
+            self.handled.insert(id);
             let head = Head {
                 facing: (-side.0, -side.1),
                 group: group_of(road.dir),
@@ -604,6 +622,7 @@ impl SignalIndex {
         scale: f64,
         drives_on_left: bool,
         road_mask: &RoadMaskBitmap,
+        cycling: bool,
     ) -> Self {
         let nodes = signal_nodes(elements, scale);
         let mut ids: Vec<u64> = nodes.keys().copied().collect();
@@ -612,6 +631,7 @@ impl SignalIndex {
         let mut plan = Plan {
             poles: Vec::new(),
             by_node: FnvHashMap::default(),
+            handled: FnvHashSet::default(),
             drives_on_left,
             road_mask,
         };
@@ -621,7 +641,14 @@ impl SignalIndex {
         Self {
             poles: plan.poles,
             by_node: plan.by_node,
+            handled: plan.handled,
+            cycling,
         }
+    }
+
+    /// Whether the data pack cycles these heads.
+    pub fn cycling(&self) -> bool {
+        self.cycling
     }
 
     /// Whether a car head near `at`, within reach of a junction's widest heads, faces
@@ -641,20 +668,23 @@ impl SignalIndex {
         })
     }
 
-    /// Builds the poles and heads this node owns.
+    /// Builds the poles `node` owns. False when the plan found no kerb for it at all, so
+    /// that it has no head here or on another node's pole.
     pub fn place(
         &self,
         editor: &mut WorldEditor,
         node: &ProcessedNode,
         base_y: &dyn Fn(&WorldEditor, i32, i32, i32) -> i32,
-    ) {
-        for &i in self.by_node.get(&node.id).into_iter().flatten() {
+    ) -> bool {
+        let poles = self.by_node.get(&node.id).map_or(&[][..], Vec::as_slice);
+        for &i in poles {
             let pole = &self.poles[i];
             let base = base_y(editor, pole.x, pole.z, 1);
             let mut builder = Builder {
                 editor,
                 seed_base: i as i64 * 1_000,
                 parts: 0,
+                cycling: self.cycling,
             };
             builder.post(pole.x, pole.z, base, pole.top);
             let pole_centre = (f64::from(pole.x) + 0.5, f64::from(pole.z) + 0.5);
@@ -685,6 +715,7 @@ impl SignalIndex {
                 builder.head(back, centre_y, head, false);
             }
         }
+        self.handled.contains(&node.id)
     }
 }
 
@@ -696,6 +727,9 @@ fn kerb_side(travel: (f64, f64), drives_on_left: bool) -> (f64, f64) {
     }
 }
 
+/// How far past the road's edge a pole may stand: across a bike path or a sidewalk.
+const KERB_REACH: i32 = 6;
+
 /// The first cell off the road surface beside `origin`, and how far out it is.
 fn kerb_cell(
     origin: (f64, f64),
@@ -703,10 +737,28 @@ fn kerb_cell(
     half: i32,
     road_mask: &RoadMaskBitmap,
 ) -> Option<(i32, i32, i32)> {
-    (half + 1..=half + 4).find_map(|off| {
+    (half + 1..=half + KERB_REACH).find_map(|off| {
         let x = (origin.0 + side.0 * off as f64).floor() as i32;
         let z = (origin.1 + side.1 * off as f64).floor() as i32;
         (!road_mask.contains(x, z)).then_some((x, z, off))
+    })
+}
+
+/// In a junction paved wall to wall a head stands on the nearest traffic island, this
+/// far out at most.
+const ISLAND_REACH: i32 = 8;
+
+/// The nearest cell off the road within ISLAND_REACH of `origin`, as a kerb one block out,
+/// so that a mast from it stays short.
+fn island_cell(origin: (f64, f64), road_mask: &RoadMaskBitmap) -> Option<(i32, i32, i32)> {
+    let (ox, oz) = (origin.0.floor() as i32, origin.1.floor() as i32);
+    (1..=ISLAND_REACH).find_map(|r| {
+        (-r..=r)
+            .flat_map(|dx| (-r..=r).map(move |dz| (dx, dz)))
+            .filter(|&(dx, dz)| dx.abs().max(dz.abs()) == r)
+            .filter(|&(dx, dz)| !road_mask.contains(ox + dx, oz + dz))
+            .min_by_key(|&(dx, dz)| (dx * dx + dz * dz, dx, dz))
+            .map(|(dx, dz)| (ox + dx, oz + dz, 1))
     })
 }
 
@@ -780,6 +832,28 @@ struct Builder<'e, 'a> {
     editor: &'e mut WorldEditor<'a>,
     seed_base: i64,
     parts: i64,
+    cycling: bool,
+}
+
+/// A head built from blocks: its housing, as deep as the model's is.
+const HOUSING: &str = "minecraft:black_concrete";
+const HOUSING_DEPTH: f64 = 0.3;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lamp {
+    Red,
+    Amber,
+    Green,
+}
+
+impl Lamp {
+    fn block(self) -> &'static str {
+        match self {
+            Lamp::Red => "minecraft:red_concrete",
+            Lamp::Amber => "minecraft:yellow_concrete",
+            Lamp::Green => "minecraft:lime_concrete",
+        }
+    }
 }
 
 impl Builder<'_, '_> {
@@ -792,9 +866,73 @@ impl Builder<'_, '_> {
         }
     }
 
-    /// One head: a display of its model, its back at `back` (the face of the post its
-    /// brackets meet, if `bracketed`), its middle `centre_y` up, facing its traffic.
+    /// One head, its back at `back` (the face of the post its brackets meet, if
+    /// `bracketed`), its middle `centre_y` up, facing its traffic.
     fn head(&mut self, back: (f64, f64), centre_y: f64, head: Head, bracketed: bool) {
+        if self.cycling {
+            self.model_head(back, centre_y, head, bracketed);
+        } else {
+            self.block_head(back, centre_y, head, bracketed);
+        }
+    }
+
+    /// A head of scaled vanilla blocks, for a world without the data pack and the
+    /// resource pack its model comes in. It shows the state the data pack would start it
+    /// in: roads of group a on green, the others on red, walkers the other way round.
+    fn block_head(&mut self, back: (f64, f64), centre_y: f64, head: Head, bracketed: bool) {
+        let k = head.kind.size();
+        let out = if bracketed { BRACKET_M * k } else { 0.0 };
+        let forward = out + HOUSING_DEPTH * k / 2.0;
+        let centre = (
+            back.0 + head.facing.0 * forward,
+            centre_y,
+            back.1 + head.facing.1 * forward,
+        );
+        let walk = head.kind == Kind::Pedestrian;
+        let (housing, lamps): ((f64, f64), &[(Lamp, f64)]) = if walk {
+            ((0.34, 0.72), &[(Lamp::Red, 0.17), (Lamp::Green, -0.17)])
+        } else {
+            (
+                (0.42, 1.1),
+                &[(Lamp::Red, 0.34), (Lamp::Amber, 0.0), (Lamp::Green, -0.34)],
+            )
+        };
+        let lit = match (walk, head.group) {
+            (false, 'a') | (true, 'b') => Lamp::Green,
+            _ => Lamp::Red,
+        };
+        let depth = HOUSING_DEPTH * k;
+        self.part(
+            centre,
+            head.facing,
+            0.0,
+            0.0,
+            ((housing.0 * k) as f32, (housing.1 * k) as f32, depth as f32),
+            HOUSING,
+            Vec::new(),
+            None,
+        );
+        let lens = if walk { 0.24 } else { 0.26 } * k;
+        for &(lamp, y) in lamps {
+            // A lit lens shows at full brightness whatever the light around it.
+            // An unlit one is darker, but its colour still shows by day, so a head reads as
+            // a traffic light with all its lamps; by night it goes dark.
+            let brightness = if lamp == lit { (15, 15) } else { (11, 4) };
+            self.part(
+                centre,
+                head.facing,
+                y * k,
+                depth / 2.0 + 0.02 * k,
+                (lens as f32, lens as f32, (0.04 * k) as f32),
+                lamp.block(),
+                Vec::new(),
+                Some(brightness),
+            );
+        }
+    }
+
+    /// A display of the head's model, which the data pack switches between states.
+    fn model_head(&mut self, back: (f64, f64), centre_y: f64, head: Head, bracketed: bool) {
         use crate::vehicle_models::{display_nbt, item_model};
         let size = head.kind.size();
         let (model, tag) = head.kind.start(head.group);
@@ -1002,7 +1140,7 @@ mod tests {
     #[test]
     fn a_junction_gets_one_head_per_approach_facing_its_traffic_off_the_road() {
         let (elements, mask) = crossroads(&[]);
-        let index = SignalIndex::build(&elements, 1.0, false, &mask);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, true);
         let heads: Vec<(&Pole, &Head)> = index
             .poles
             .iter()
@@ -1022,7 +1160,7 @@ mod tests {
         let (alone, mask) = crossroads(&[]);
         let (mapped_twice, _) = crossroads(&[(20, -5, 0), (21, 5, 0)]);
         let count = |els: &[ProcessedElement]| {
-            SignalIndex::build(els, 1.0, false, &mask)
+            SignalIndex::build(els, 1.0, false, &mask, true)
                 .poles
                 .iter()
                 .map(|p| p.heads.len())
@@ -1060,7 +1198,7 @@ mod tests {
             ),
         ];
         let paved = (-40..=40).flat_map(|t| (-2..=2).flat_map(move |w| [(t, w), (w, t)]));
-        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved));
+        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved), true);
         let heads: Vec<(&Pole, &Head)> = index
             .poles
             .iter()
@@ -1112,7 +1250,7 @@ mod tests {
             &[("highway", "residential")],
         );
         let mask = road_mask((-30..=30).flat_map(|x| (-2..=2).map(move |z| (x, z))));
-        let index = SignalIndex::build(&[crossing], 1.0, false, &mask);
+        let index = SignalIndex::build(&[crossing], 1.0, false, &mask, true);
         let peds: Vec<&Head> = index
             .poles
             .iter()
@@ -1145,7 +1283,7 @@ mod tests {
             &[("highway", "cycleway"), ("oneway", "yes")],
         );
         let mask = road_mask((-30..=30).flat_map(|x| (-1..=1).map(move |z| (x, z))));
-        let index = SignalIndex::build(&[path], 1.0, false, &mask);
+        let index = SignalIndex::build(&[path], 1.0, false, &mask, true);
         let bikes = heads_of(&index, Kind::Bike);
         assert_eq!(bikes.len(), 1);
         assert!(heads_of(&index, Kind::Car).is_empty());
@@ -1180,7 +1318,7 @@ mod tests {
         ];
         let paved = (-30..=30).flat_map(|t| (-1..=1).flat_map(move |w| [(t, w), (w, t / 3)]));
         let mask = road_mask(paved);
-        let index = SignalIndex::build(&elements, 1.0, false, &mask);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, true);
         let walkers = heads_of(&index, Kind::Pedestrian);
         assert_eq!(walkers.len(), 2);
         for (pole, head) in walkers {
@@ -1216,7 +1354,7 @@ mod tests {
                 &[("highway", "footway"), ("footway", "crossing")],
             ),
         ];
-        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(std::iter::empty()));
+        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(std::iter::empty()), true);
         assert_eq!(heads_of(&index, Kind::Pedestrian).len(), 2);
     }
 
@@ -1225,6 +1363,117 @@ mod tests {
         // Driving north, the right-hand kerb is to the east.
         assert_eq!(kerb_side((0.0, -1.0), false), (1.0, 0.0));
         assert_eq!(kerb_side((0.0, -1.0), true), (-1.0, 0.0));
+    }
+
+    /// Without the data pack a head is built of vanilla blocks and stands still: one lamp
+    /// of each head is lit, green for the group whose turn it is and red for the other.
+    #[test]
+    fn without_the_pack_heads_are_still_blocks_with_one_lamp_lit() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let (elements, mask) = crossroads(&[]);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, false);
+        assert!(!index.cycling());
+        let bbox = XZBBox::rect_from_min_max(-64, -64, 64, 64).unwrap();
+        let llbbox = LLBBox::new(47.0, 8.0, 47.001, 8.001).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &bbox, llbbox);
+        let junction = node(9, 0, 0, &[("highway", "traffic_signals")]);
+        assert!(index.place(&mut editor, &junction, &|e, x, z, y| e
+            .get_absolute_y(x, y, z)));
+        // No models: nothing here needs the resource pack.
+        assert!(editor.item_displays().is_empty());
+        let parts = editor.entities_of("minecraft:block_display");
+        let block = |p: &HashMap<String, Value>| match p.get("block_state") {
+            Some(Value::Compound(state)) => match state.get("Name") {
+                Some(Value::String(name)) => name.clone(),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        };
+        let lit = |p: &HashMap<String, Value>| {
+            matches!(p.get("brightness"), Some(Value::Compound(b))
+                if b.get("block") == Some(&Value::Int(15)))
+        };
+        let lit_lamps: Vec<String> = parts.iter().filter(|p| lit(p)).map(block).collect();
+        // Four heads, one lamp lit on each, two of them green.
+        assert_eq!(lit_lamps.len(), 4, "{lit_lamps:?}");
+        let green = lit_lamps.iter().filter(|b| *b == "minecraft:lime_concrete");
+        assert_eq!(green.count(), 2);
+        assert!(parts.iter().any(|p| block(p) == "minecraft:black_concrete"));
+    }
+
+    /// One carriageway of a dual road often has a bike path, tram tracks or the other
+    /// carriageway along its kerb; its head then stands on the median side.
+    #[test]
+    fn a_one_way_carriageway_blocked_on_its_kerb_side_gets_a_head_on_the_other() {
+        for (from, to) in [(-40, 40), (40, -40)] {
+            let signal = [("highway", "traffic_signals")];
+            let elements = vec![way(
+                1,
+                vec![
+                    node(1, from, 0, &[]),
+                    node(9, 0, 0, &signal),
+                    node(2, to, 0, &[]),
+                ],
+                &[("highway", "secondary"), ("oneway", "yes")],
+            )];
+            // Paved two blocks either side, and ten more on the south.
+            let paved = (-40..=40).flat_map(|x| (-2..=12).map(move |z| (x, z)));
+            let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved), false);
+            let heads: Vec<&Pole> = index.poles.iter().filter(|p| !p.heads.is_empty()).collect();
+            assert_eq!(heads.len(), 1, "travelling {from} to {to}");
+            assert!(
+                heads[0].z < 0,
+                "head on the open north side, at z {}",
+                heads[0].z
+            );
+        }
+    }
+
+    /// In a junction paved far out on both sides the head stands on the nearest island.
+    #[test]
+    fn a_head_in_a_wide_paved_junction_stands_on_an_island() {
+        let signal = [("highway", "traffic_signals")];
+        let elements = vec![way(
+            1,
+            vec![
+                node(1, -40, 0, &[]),
+                node(9, 0, 0, &signal),
+                node(2, 40, 0, &[]),
+            ],
+            &[("highway", "secondary"), ("oneway", "yes")],
+        )];
+        // Paved twenty blocks out on both sides, but for a small island.
+        let paved = (-40..=40)
+            .flat_map(|x| (-20..=20).map(move |z| (x, z)))
+            .filter(|&(x, z)| !((-6..=-4).contains(&x) && (5..=6).contains(&z)));
+        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved), false);
+        let poles: Vec<&Pole> = index.poles.iter().filter(|p| !p.heads.is_empty()).collect();
+        assert_eq!(poles.len(), 1);
+        assert!((-6..=-4).contains(&poles[0].x) && (5..=6).contains(&poles[0].z));
+    }
+
+    /// A signal whose head another signal's pole carries is handled: without the data pack
+    /// it must not fall back to a banner signal of its own beside it.
+    #[test]
+    fn a_signal_covered_by_another_counts_as_placed() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let (elements, mask) = crossroads(&[(21, -6, 0), (22, 6, 0)]);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, false);
+        let bbox = XZBBox::rect_from_min_max(-64, -64, 64, 64).unwrap();
+        let llbbox = LLBBox::new(47.0, 8.0, 47.001, 8.001).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &bbox, llbbox);
+        let base = |e: &WorldEditor, x: i32, z: i32, y: i32| e.get_absolute_y(x, y, z);
+        let signal = [("highway", "traffic_signals")];
+        for (id, x) in [(21, -6), (22, 6), (9, 0)] {
+            let placed = index.place(&mut editor, &node(id, x, 0, &signal), &base);
+            assert!(placed, "signal {id} would get a banner signal too");
+        }
+        // A signal far from any road is not.
+        assert!(!index.place(&mut editor, &node(99, 60, 60, &signal), &base));
     }
 
     /// The data pack switches a head between models by id: each must be one the resource

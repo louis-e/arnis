@@ -1690,15 +1690,16 @@ fn generate_highways_internal(
             // Signal heads for signalised crossings and standalone traffic_signals nodes.
             let signalised = highway_type == "traffic_signals"
                 || element.tags().get("crossing").map(String::as_str) == Some("traffic_signals");
-            // With the extras' lights on, a signal they have no road for gets no head: a
-            // banner one would never change.
-            let cycling = editor.traffic_signals();
-            if let (true, ProcessedElement::Node(node), Some(signals)) =
-                (signalised, element, &cycling)
-            {
-                signals.place(editor, node, &signal_base);
-            }
-            if signalised && cycling.is_none() {
+            let signals = editor.traffic_signals();
+            let placed = match (signalised, element, &signals) {
+                (true, ProcessedElement::Node(node), Some(signals)) => {
+                    signals.place(editor, node, &signal_base)
+                }
+                _ => false,
+            };
+            // On Java every signal is planned; one the plan found no kerb for gets no head,
+            // rather than a banner one beside the others. Other formats keep the banners.
+            if signalised && !placed && signals.is_none() {
                 if let ProcessedElement::Node(node) = element {
                     let x = node.x;
                     let z = node.z;

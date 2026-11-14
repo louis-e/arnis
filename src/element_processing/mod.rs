@@ -50,6 +50,7 @@ pub mod signage;
 pub mod sport_pitches;
 pub mod stadiums;
 pub mod stations;
+pub mod statues;
 pub mod street_furniture;
 pub(crate) mod structure_kit;
 pub mod subprocessor;
