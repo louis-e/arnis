@@ -821,6 +821,11 @@ impl<'a> WorldEditor<'a> {
         self.carriageway.as_ref().is_some_and(|m| m.contains(x, z))
     }
 
+    /// The carriageway mask, while vegetation and signs are placed.
+    pub fn carriageway(&self) -> Option<&crate::floodfill_cache::CoordinateBitmap> {
+        self.carriageway.as_deref()
+    }
+
     /// ESA land-cover class at (x, z), or 0 where there is no land cover.
     #[inline]
     pub fn cover_class(&self, x: i32, z: i32) -> u8 {
@@ -991,6 +996,11 @@ impl<'a> WorldEditor<'a> {
     /// Attach the signage context (decal registry, styles, intersections).
     pub fn set_signage(&mut self, ctx: Arc<crate::element_processing::signage::SignageContext>) {
         self.signage = Some(ctx);
+    }
+
+    /// Whether a tree already stands in the slot at (x, z).
+    pub fn tree_slot_taken(&self, x: i32, z: i32) -> bool {
+        self.tree_slots.contains(&(x, z))
     }
 
     /// Claims the trunk slot (x, z); false when a tree already stands in it.

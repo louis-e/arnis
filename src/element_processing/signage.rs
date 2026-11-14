@@ -4,7 +4,6 @@
 use crate::args::{Args, SignageLevel};
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::decals::font;
 use crate::decals::region::SignRegion;
@@ -12,7 +11,7 @@ use crate::decals::{pictograms, DecalKey, DecalRegistry, ShieldStyle, TextStyle,
 use crate::element_processing::building_facade::FacadeAnchor;
 use crate::element_processing::buildings::is_underground_building;
 use crate::element_processing::highways::{
-    collect_carriageway_coords, highway_block_range, is_carriageway, surface_highway_type,
+    highway_block_range, is_carriageway, surface_highway_type,
 };
 use crate::element_processing::{get_nearest_non_road_block, get_nearest_road_block};
 use crate::floodfill_cache::{BuildingFootprintBitmap, RoadMaskBitmap};
@@ -54,8 +53,6 @@ pub struct SignageContext {
     /// Node id -> which way its stop, give-way or crossing sign faces.
     pub node_headings: HashMap<u64, NodeSignHeading>,
     pub scale: f64,
-    /// Vehicular road surfaces; posts stand beside these (sidewalks are fine).
-    pub carriageway: RoadMaskBitmap,
     /// Placement tally for the end-of-run summary.
     report: Mutex<PlacementReport>,
 }
@@ -77,15 +74,12 @@ impl SignageContext {
             intersections: IntersectionIndex::new(),
             node_headings: HashMap::new(),
             scale: 1.0,
-            carriageway: RoadMaskBitmap::new_empty(),
             report: Mutex::new(PlacementReport::new()),
         }
     }
 
-    /// Frees what only element placement reads: the carriageway mask, a bit per world
-    /// column, and the node sign headings.
+    /// Frees what only element placement reads: the node sign headings.
     pub fn release_placement_masks(&mut self) {
-        self.carriageway = RoadMaskBitmap::new_empty();
         self.node_headings = HashMap::new();
     }
 
@@ -989,14 +983,12 @@ pub fn build_context(
     elements: &[ProcessedElement],
     args: &Args,
     llbbox: LLBBox,
-    xzbbox: &XZBBox,
     first_map_id: i32,
 ) -> Option<SignageContext> {
     let level = args.signage;
     if !level.enabled() {
         return None;
     }
-    let carriageway = collect_carriageway_coords(elements, xzbbox, args.scale);
     let lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
     let lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
     let region = SignRegion::detect(lat, lon);
@@ -1025,7 +1017,6 @@ pub fn build_context(
         intersections,
         node_headings,
         scale: args.scale,
-        carriageway,
         report: Mutex::new(PlacementReport::new()),
     })
 }
@@ -1460,7 +1451,7 @@ pub fn generate_power_signage(
         return;
     };
     let (x, z) = (node.x, node.z);
-    if ctx.carriageway.contains(x, z) || !editor.owns(x, z) {
+    if editor.on_carriageway(x, z) || !editor.owns(x, z) {
         return;
     }
     let ground = editor.get_absolute_y(x, 0, z);
@@ -1525,7 +1516,7 @@ pub fn generate_parking_signage(
         return;
     };
     let (x, z) = (node.x, node.z);
-    if ctx.carriageway.contains(x, z) || !editor.owns(x, z) {
+    if editor.on_carriageway(x, z) || !editor.owns(x, z) {
         return;
     }
     let ground = editor.get_absolute_y(x, 0, z);
@@ -1755,7 +1746,7 @@ fn place_roadside_sign(
             )
         })
         .find_map(|(sx, sz)| {
-            post_ground(editor, ctx, footprints, sx, sz, POST_SHAFT + 1).map(|g| (sx, sz, g))
+            post_ground(editor, footprints, sx, sz, POST_SHAFT + 1).map(|g| (sx, sz, g))
         })
     else {
         return;
@@ -1812,7 +1803,7 @@ fn place_street_name_post(
         })
         .map(|(dx, dz)| (node.x + dx, node.z + dz))
         .find_map(|(px, pz)| {
-            post_ground(editor, ctx, footprints, px, pz, POST_SHAFT + 2).map(|g| (px, pz, g))
+            post_ground(editor, footprints, px, pz, POST_SHAFT + 2).map(|g| (px, pz, g))
         })
     else {
         return;
@@ -1870,8 +1861,11 @@ pub fn generate_highway_node_signage(
     let (px, pz) = match kerb {
         Some(p) => p,
         // The node sits on the carriageway; the post goes to the nearest kerb.
-        None if ctx.carriageway.contains(x, z) => {
-            match get_nearest_non_road_block(x, z, 10, &ctx.carriageway) {
+        None if editor.on_carriageway(x, z) => {
+            match editor
+                .carriageway()
+                .and_then(|roads| get_nearest_non_road_block(x, z, 10, roads))
+            {
                 Some(p) => p,
                 None => return,
             }
@@ -1928,11 +1922,11 @@ fn kerb_beside(
     };
     let edge = (1..=12).find(|&k| {
         let (cx, cz) = cell(k);
-        !ctx.carriageway.contains(cx, cz)
+        !editor.on_carriageway(cx, cz)
     })?;
     (edge..edge + 4)
         .map(cell)
-        .find(|&(cx, cz)| post_ground(editor, ctx, footprints, cx, cz, POST_SHAFT + 1).is_some())
+        .find(|&(cx, cz)| post_ground(editor, footprints, cx, cz, POST_SHAFT + 1).is_some())
 }
 
 /// Unit vector to the kerb that traffic travelling along `dir` keeps to.
@@ -1948,13 +1942,12 @@ fn kerb_side(region: SignRegion, (dx, dz): (f64, f64)) -> (f64, f64) {
 /// carriageway, outside buildings and water, in free cells.
 fn post_ground(
     editor: &WorldEditor,
-    ctx: &SignageContext,
     footprints: &BuildingFootprintBitmap,
     x: i32,
     z: i32,
     height: i32,
 ) -> Option<i32> {
-    if ctx.carriageway.contains(x, z) || footprints.contains(x, z) || editor.is_lc_water(x, z) {
+    if editor.on_carriageway(x, z) || footprints.contains(x, z) || editor.is_lc_water(x, z) {
         return None;
     }
     let ground = editor.get_absolute_y(x, 0, z);
@@ -2011,7 +2004,7 @@ pub fn generate_railway_node_signage(
         return;
     }
     // Metro entrance / tram stop: a lit logo on all four faces of a post.
-    if ctx.carriageway.contains(x, z) {
+    if editor.on_carriageway(x, z) {
         return;
     }
     let Some(head) = traffic_sign_post(editor, x, ground, z) else {
@@ -2808,7 +2801,7 @@ mod tests {
                 carriageway.set(x, z);
             }
         }
-        ctx.carriageway = carriageway;
+        editor.set_carriageway(std::sync::Arc::new(carriageway));
         ctx.node_headings.insert(
             7,
             NodeSignHeading {

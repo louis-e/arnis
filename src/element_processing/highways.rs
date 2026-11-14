@@ -3584,26 +3584,7 @@ pub fn collect_road_surface_coords(
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
 ) -> CoordinateBitmap {
-    collect_highway_surface_coords(elements, Some(editor), xzbbox, scale, water_detail, |_| {
-        true
-    })
-}
-
-/// Vehicular carriageways only (no footways, cycleways, paths, steps or pedestrian
-/// streets). Signage uses this to keep posts on the sidewalk but off the road.
-pub fn collect_carriageway_coords(
-    elements: &[ProcessedElement],
-    xzbbox: &XZBBox,
-    scale: f64,
-) -> CoordinateBitmap {
-    collect_highway_surface_coords(
-        elements,
-        None,
-        xzbbox,
-        scale,
-        Default::default(),
-        is_carriageway,
-    )
+    collect_road_and_carriageway_coords(elements, editor, xzbbox, scale, water_detail).0
 }
 
 /// True for highway types that carry vehicles rather than people on foot, bike or horse.
@@ -3668,22 +3649,6 @@ pub(crate) fn tunnel_renders_at_surface(
     !renders_as_highway_tunnel(way) || editor.is_some_and(|e| !tunnel_bore_fits(e, way, scale))
 }
 
-/// Shared stamping loop for the road-surface bitmaps; `include` filters by highway type.
-fn collect_highway_surface_coords(
-    elements: &[ProcessedElement],
-    editor: Option<&WorldEditor>,
-    xzbbox: &XZBBox,
-    scale: f64,
-    water_detail: crate::water_detail::WaterDetail,
-    include: impl Fn(&str) -> bool,
-) -> CoordinateBitmap {
-    let mut bitmap = CoordinateBitmap::new(xzbbox);
-    stamp_highway_surfaces(elements, editor, scale, water_detail, include, |_, x, z| {
-        bitmap.set(x, z)
-    });
-    bitmap
-}
-
 /// Collect all (x, z) coordinates that are covered by any rendered road or path
 /// surface, and in a second bitmap the carriageways among them, in one pass over the
 /// roads. The first bitmap has 1 for every block that the highway renderer
@@ -3709,12 +3674,12 @@ pub fn collect_road_and_carriageway_coords(
 ) -> (CoordinateBitmap, CoordinateBitmap) {
     let mut roads = CoordinateBitmap::new(xzbbox);
     let mut carriageways = CoordinateBitmap::new(xzbbox);
+    let editor = Some(editor);
     stamp_highway_surfaces(
         elements,
-        Some(editor),
+        editor,
         scale,
         water_detail,
-        |_| true,
         |carriageway, x, z| {
             roads.set(x, z);
             if carriageway {
@@ -3725,14 +3690,12 @@ pub fn collect_road_and_carriageway_coords(
     (roads, carriageways)
 }
 
-/// Hands `stamp` every surface cell of the highways `include` takes, with whether the
-/// way carries vehicles.
+/// Hands `stamp` every road and path surface cell, with whether its way carries vehicles.
 fn stamp_highway_surfaces(
     elements: &[ProcessedElement],
     editor: Option<&WorldEditor>,
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
-    include: impl Fn(&str) -> bool,
     mut stamp: impl FnMut(bool, i32, i32),
 ) {
     // A way that meets a bridge is its ramp or its approach, and keeps its surface.
@@ -3762,7 +3725,7 @@ fn stamp_highway_surfaces(
         let Some(highway_type) = surface_highway_type(way) else {
             continue;
         };
-        if !include(highway_type) || !tunnel_renders_at_surface(way, editor, scale) {
+        if !tunnel_renders_at_surface(way, editor, scale) {
             continue;
         }
 

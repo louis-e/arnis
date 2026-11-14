@@ -1132,7 +1132,7 @@ pub fn generate_world_with_options(
         };
     let mut signage_ctx: Option<Arc<signage::SignageContext>> = (world_format
         == WorldFormat::JavaAnvil)
-        .then(|| signage::build_context(&elements, args, llbbox, &xzbbox, first_decal_id))
+        .then(|| signage::build_context(&elements, args, llbbox, first_decal_id))
         .flatten()
         .map(Arc::new);
     if let (Some(t), Some(_)) = (signage_start, signage_ctx.as_ref()) {

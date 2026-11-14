@@ -384,18 +384,20 @@ fn is_log(b: Block) -> bool {
     crate::ground_decoration::WOOD.contains(&b)
 }
 
-/// True if no wood of the model, anchored at (ax, az) with its base row at `base_y`, stands
-/// in the headroom over a column `keep_off` names. Leaves are trimmed there instead, but a
-/// trunk, a root flare or a low branch cut off at the kerb would read as broken.
+/// True if no wood of the model, anchored at (ax, az) with its base row at `base_y()`,
+/// stands in the headroom over a column `keep_off` names. Leaves are trimmed there instead,
+/// but a trunk, a root flare or a low branch cut off at the kerb would read as broken.
+/// The base is only worked out once some wood stands over such a column.
 pub fn low_wood_clear(
     editor: &WorldEditor,
     schem: &Schematic,
     rot: u8,
     ax: i32,
     az: i32,
-    base_y: i32,
     keep_off: impl Fn(i32, i32) -> bool,
+    base_y: impl Fn() -> i32,
 ) -> bool {
+    let mut base = None;
     let (fw, fl) = if rot & 1 == 0 {
         (schem.width, schem.length)
     } else {
@@ -414,7 +416,7 @@ pub fn low_wood_clear(
         let bottom = if vy <= schem.min_log_vy + ROOT_BASE_VY {
             i32::MIN
         } else {
-            base_y + vy
+            *base.get_or_insert_with(&base_y) + vy
         };
         !crate::element_processing::tree::in_headroom(editor, wx, bottom, wz)
     })
@@ -625,9 +627,9 @@ mod tests {
         };
         let paved = |x: i32, z: i32| editor.surface_is_sealed(x, z);
         // Anchored at (16, 16) the east trunk column lands on the paving at (17, 16).
-        assert!(!low_wood_clear(&editor, &schem, 0, 16, 16, 1, paved));
+        assert!(!low_wood_clear(&editor, &schem, 0, 16, 16, paved, || 1));
         // Turned twice, the second trunk column stands west of the middle, on open ground.
-        assert!(low_wood_clear(&editor, &schem, 2, 16, 16, 1, paved));
+        assert!(low_wood_clear(&editor, &schem, 2, 16, 16, paved, || 1));
         // Anchored one row south, the leaf sits over the paving at (16, 18) but no wood does.
         let under_the_leaf = |x: i32, z: i32| (x, z) == (16, 18);
         assert!(low_wood_clear(
@@ -636,8 +638,8 @@ mod tests {
             0,
             16,
             17,
-            1,
-            under_the_leaf
+            under_the_leaf,
+            || 1
         ));
     }
 
