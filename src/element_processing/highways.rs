@@ -2192,7 +2192,7 @@ fn generate_highways_internal(
                                         for fdx in -block_range..=block_range {
                                             for fdz in -block_range..=block_range {
                                                 editor.set_block_absolute(
-                                                    STONE_BRICKS,
+                                                    bridge_foundation_block,
                                                     *x + fdx,
                                                     fill_y,
                                                     *z + fdz,

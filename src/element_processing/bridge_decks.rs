@@ -3,7 +3,8 @@
 use crate::block_definitions::*;
 use crate::element_processing::bridge_styles::BridgeStyle;
 use crate::element_processing::bridges::{
-    deck_columns, grade_obstacle, way_cells, BridgeMemberInfo, BridgeStructureMap, BridgeSurfaceMap,
+    deck_columns, grade_obstacle, is_non_vehicular_bridge_highway, way_cells, BridgeMemberInfo,
+    BridgeStructureMap, BridgeSurfaceMap,
 };
 use crate::element_processing::connected_blocks::{is_connectable, place_connected};
 use crate::element_processing::highways::highway_block_range;
@@ -67,10 +68,9 @@ impl DeckDesign {
                 .find_map(|w| w.tags.get(key).map(String::as_str))
         };
         let vehicular = ways.iter().any(|w| {
-            !matches!(
-                w.tags.get("highway").map(String::as_str),
-                Some("footway" | "pedestrian" | "path" | "cycleway" | "bridleway" | "steps")
-            )
+            !w.tags
+                .get("highway")
+                .is_some_and(|h| is_non_vehicular_bridge_highway(h))
         });
         let road = || {
             let major = ways.iter().any(|w| {

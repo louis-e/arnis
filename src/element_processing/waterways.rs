@@ -204,11 +204,11 @@ fn create_water_channel(
                 if let Some(water_y) = water_y {
                     editor.set_block_absolute(WATER, x, water_y, z, None, None);
                     // A river's or missed canal's depth and bed, unless a road or bore owns it.
-                    let missed = !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
+                    let missed = || !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
                     let under_deck =
-                        bed.decks.deck_clears(x, z, water_y) && !bed.decks.over_grade_way(x, z);
-                    if (bed.field.is_river(x, z) || missed)
-                        && (!bed.road_mask.contains(x, z) || under_deck)
+                        || bed.decks.deck_clears(x, z, water_y) && !bed.decks.over_grade_way(x, z);
+                    if (bed.field.is_river(x, z) || missed())
+                        && (!bed.road_mask.contains(x, z) || under_deck())
                         && !at_bore(bed.field, bed.tunnel_footprint, x, z)
                         && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
                     {

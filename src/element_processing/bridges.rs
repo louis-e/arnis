@@ -62,7 +62,7 @@ const RAIL_ON_DECK_REACH: i32 = 2;
 const RAIL_SIDE_BY_SIDE_DISTANCE: f32 =
     (2 * railways::RAIL_DECK_HALF_WIDTH + 1 + railways::RAIL_DECK_GAP_FILL) as f32 + 0.5;
 
-fn is_non_vehicular_bridge_highway(highway: &str) -> bool {
+pub(crate) fn is_non_vehicular_bridge_highway(highway: &str) -> bool {
     matches!(
         highway,
         "footway" | "pedestrian" | "path" | "cycleway" | "bridleway" | "steps"
@@ -152,7 +152,7 @@ fn ramp_profile(ground: &[i32], deck_y: i32, bridge_side_at_start: bool) -> Vec<
 
 /// Deck surface above the water under it: a slab, then a block of air.
 const WATER_GAP: i32 = 3;
-/// Least a deck stands over water to let it run on underneath, right under its slab.
+/// Least a deck stands over water for it to run right under the slab.
 const FLOW_GAP: i32 = 2;
 /// A boardwalk's planks stand right over the water.
 const BOARDWALK_WATER_GAP: i32 = FLOW_GAP;
@@ -729,8 +729,7 @@ impl BridgeStructureMap {
                 (axis_ends.1 .0 - axis_ends.0 .0) as f32,
                 (axis_ends.1 .1 - axis_ends.0 .1) as f32,
             );
-            // The members' own heading, so decks side by side share it rather than the
-            // diagonal between their far ends, which skews where each one lands.
+            // Along the members, not the diagonal between far ends that skews decks side by side.
             let heading = group_indices.iter().fold((0.0f32, 0.0f32), |acc, &i| {
                 let (s, e) = ends(i);
                 let d = ((e.0 - s.0) as f32, (e.1 - s.1) as f32);
@@ -968,8 +967,7 @@ impl BridgeStructureMap {
                                 capped.max((over as f32).min(reachable(u, MAX_CLEARANCE_SLOPE)));
                         }
                     }
-                    // Water the deck crosses runs on under it, where its climb clears it; a
-                    // block's bump short of that would not let it through.
+                    // Clear the water crossed where the climb allows; a lower bump wouldn't pass it.
                     let reach = reachable(u, 1.0 / water_run);
                     let water = editor.get_water_level(x, z);
                     if crossing[i] && reach >= (water + FLOW_GAP) as f32 {
@@ -1159,7 +1157,7 @@ impl BridgeStructureMap {
             }
             let live = vec![true; group_indices.len()];
             settle_deck(&mut member_ys, &cells, &needs, &live, &holds);
-            let landing_run = if over_water && !stairs {
+            let landing_run = if stairs || over_water {
                 water_run
             } else {
                 HARD_RUN
@@ -1428,16 +1426,15 @@ impl BridgeStructureMap {
                     ys[i] = ys[i + 1];
                 }
             }
-            let mut ys: Vec<i32> = ys
-                .into_iter()
-                .zip(&path)
-                .map(|(y, &(x, z))| y.unwrap_or_default().max(editor.get_ground_level(x, z)))
-                .collect();
+            let mut ys: Vec<i32> = ys.into_iter().map(Option::unwrap_or_default).collect();
             // A lone cell off its neighbours' level would kink the track.
             for i in 1..ys.len().saturating_sub(1) {
                 if ys[i - 1] == ys[i + 1] && ys[i] != ys[i - 1] {
                     ys[i] = ys[i - 1];
                 }
+            }
+            for (y, &(x, z)) in ys.iter_mut().zip(&path) {
+                *y = (*y).max(editor.get_ground_level(x, z));
             }
             rail_decks.insert(way.id, RailDeck::Carried(ys));
         }
@@ -1662,8 +1659,7 @@ impl BridgeSurfaceMap {
             .is_some_and(|s| s.low <= y + tolerance && s.high >= y - tolerance)
     }
 
-    /// True when every deck over (x, z) stands clear of water at `water_y`; the beams and
-    /// girders under a deck keep a block over the water on their own.
+    /// True when every deck over (x, z) stands clear of water at `water_y`.
     pub fn deck_clears(&self, x: i32, z: i32, water_y: i32) -> bool {
         self.cells
             .get(&(x, z))
@@ -1943,12 +1939,15 @@ pub(crate) fn is_bridge_way(way: &ProcessedWay) -> bool {
         .is_some_and(|v| v != "no")
 }
 
-/// A bridge way that is a deck of its own, not a platform or area drawn on one.
+/// A bridge way that is a deck of its own, not a platform outline or area drawn on one.
 pub(crate) fn lays_deck(way: &ProcessedWay) -> bool {
-    !matches!(
+    let stop = matches!(
         way.tags.get("highway").map(String::as_str),
         Some("platform" | "bus_stop")
-    ) && way.tags.get("area").map(String::as_str) != Some("yes")
+    );
+    let ring = way.nodes.len() > 2
+        && way.nodes.first().map(|n| (n.x, n.z)) == way.nodes.last().map(|n| (n.x, n.z));
+    !(stop && ring) && way.tags.get("area").map(String::as_str) != Some("yes")
 }
 
 /// A highway leaving a bridge end node.
@@ -2158,14 +2157,15 @@ impl<'a> GradeObstacles<'a> {
             let ProcessedElement::Way(way) = elem else {
                 continue;
             };
-            let Some((half, headroom, must_clear)) = grade_obstacle(way, scale)
-                .or_else(|| waterway_clearance(way).map(|headroom| (0, headroom, false)))
+            let grade = grade_obstacle(way, scale);
+            let water = grade.is_none();
+            let Some((half, headroom, must_clear)) =
+                grade.or_else(|| waterway_clearance(way).map(|headroom| (0, headroom, false)))
             else {
                 continue;
             };
             let reach = half as f32 + 0.5;
             let r = half + 1;
-            let water = grade_obstacle(way, scale).is_none();
             let (run, least_headroom) = if water {
                 (SOFT_RUN, None)
             } else if must_clear {
@@ -2260,8 +2260,7 @@ pub(crate) fn way_cells(way: &ProcessedWay) -> Vec<(i32, i32)> {
     cells
 }
 
-/// Steps along the segment `from`-`to` an offset reaches, projected onto its step vector
-/// rather than the dominant axis, which tips a 45-degree way sideways.
+/// Steps along segment `from`-`to` an offset reaches, on its step vector, not the main axis.
 pub(crate) fn along_steps(from: (i32, i32), to: (i32, i32)) -> impl Fn(i32, i32) -> i32 {
     let (dx, dz) = (to.0 - from.0, to.1 - from.1);
     let run = dx.abs().max(dz.abs()).max(1) as f32;
@@ -2270,8 +2269,7 @@ pub(crate) fn along_steps(from: (i32, i32), to: (i32, i32)) -> impl Fn(i32, i32)
     move |ox: i32, oz: i32| ((ox as f32 * ex + oz as f32 * ez) * inv).round() as i32
 }
 
-/// Every column a way's square stamps of `half` cover, with the centerline cell it takes its
-/// level from: its own place along its segment, so stamps on a slope lay one surface.
+/// Columns a way's stamps cover, each with the centerline cell its level comes from.
 pub(crate) fn deck_columns(way: &ProcessedWay, half: i32) -> Vec<((i32, i32), usize)> {
     let total: usize = way
         .nodes
@@ -2491,8 +2489,7 @@ fn settle_deck(
     }
 }
 
-/// Eases members off their landings at `run` cells a block; skewed twin decks would step
-/// up there.
+/// Eases members off their landings at `run` cells a block, where skewed twin decks step.
 fn ease_landings(ys: &mut [Vec<i32>], needs: &[Vec<i32>], holds: &[DeckHold], run: f32) {
     for h in holds {
         let (row, need) = (&mut ys[h.member], &needs[h.member]);
@@ -3209,6 +3206,27 @@ mod tests {
         );
         assert_eq!(ys(&beside, 1), alone);
         assert_eq!(ys(&beside, 2), alone);
+    }
+
+    #[test]
+    fn a_platform_along_a_bridge_is_a_deck_but_its_outline_is_not() {
+        let platform = &[("highway", "platform"), ("bridge", "yes")];
+        assert!(lays_deck(&way_with(1, platform, &[(10, 40), (50, 40)])));
+        let outline = [(10, 40), (50, 40), (50, 44), (10, 44), (10, 40)];
+        assert!(!lays_deck(&way_with(2, platform, &outline)));
+    }
+
+    #[test]
+    fn stairs_down_off_a_terrace_descend_evenly() {
+        let tags = &[("highway", "steps"), ("bridge", "yes")];
+        let terrace = |x: usize| if x < 20 { 8.0 } else { 0.0 };
+        let (structures, _) = structures_over(&[way_with(1, tags, &[(10, 40), (32, 40)])], terrace);
+        let profile = ys(&structures, 1);
+        let descent = &profile[9..];
+        assert!(descent.windows(2).all(|w| w[1] <= w[0]), "{profile:?}");
+        let runs: Vec<usize> = descent.chunk_by(|a, b| a == b).map(<[i32]>::len).collect();
+        let inner = &runs[1..runs.len() - 1];
+        assert!(inner.iter().max() <= Some(&2), "{profile:?}");
     }
 
     #[test]
