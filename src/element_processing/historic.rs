@@ -141,14 +141,15 @@ fn generate_memorial(editor: &mut WorldEditor, node: &ProcessedNode) {
     }
 }
 
-/// A monument: a column on a stepped base, ten blocks tall unless mapped otherwise.
+/// A monument: a column on a stepped base, ten blocks tall unless mapped otherwise. A
+/// figure stands on it only where the tags say it is a statue or a column.
 fn generate_monument(editor: &mut WorldEditor, node: &ProcessedNode) {
-    let height = node
-        .tags
-        .get("height")
-        .and_then(|h| h.trim().trim_end_matches('m').trim().parse::<f64>().ok())
-        .unwrap_or(10.0);
-    statues::column(editor, node, height.clamp(5.0, 20.0));
+    let height = statues::height(&node.tags).unwrap_or(10.0);
+    let figure = matches!(
+        node.tags.get("memorial").map(String::as_str),
+        Some("statue" | "column")
+    );
+    statues::column(editor, node, height.clamp(5.0, 20.0), figure);
 }
 
 /// Generate a wayside cross

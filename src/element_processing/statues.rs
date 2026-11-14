@@ -9,6 +9,7 @@
 
 use crate::block_definitions::*;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::structure_kit::rotate;
 use crate::osm_parser::{ProcessedNode, ProcessedWay};
 use crate::world_editor::{WorldEditor, WorldFormat};
 use fastnbt::Value;
@@ -285,10 +286,7 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
         scale: 1.0,
     };
     match form {
-        // A statue on a column, a Marian or a victory column.
-        Form::Statue if height(&node.tags).is_some_and(|h| h >= COLUMN_HEIGHT) => {
-            column(editor, node, height(&node.tags).unwrap_or(COLUMN_HEIGHT));
-        }
+        // A rider stays on a plinth, however tall the two of them are mapped.
         Form::Statue if node.tags.get("statue").map(String::as_str) == Some("equestrian") => {
             let top = pedestal(editor, x, z, roll, 2);
             if java {
@@ -297,9 +295,18 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
                 figure.rider(editor, roll);
             } else {
                 for dy in 0..3 {
-                    editor.set_block_absolute(material.block(), x, top + dy, z, None, OVERWRITE);
+                    put(editor, material.block(), x, top + dy, z);
                 }
             }
+        }
+        // A statue on a column, a Marian or a victory column.
+        Form::Statue if height(&node.tags).is_some_and(|h| h >= COLUMN_HEIGHT) => {
+            column(
+                editor,
+                node,
+                height(&node.tags).unwrap_or(COLUMN_HEIGHT),
+                true,
+            );
         }
         Form::Statue => {
             let top = pedestal(editor, x, z, roll, 1);
@@ -310,7 +317,7 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
             } else {
                 // The figure takes the cap's place: a block on a slab would float.
                 for dy in 0..3 {
-                    editor.set_block_absolute(material.block(), x, top + dy, z, None, OVERWRITE);
+                    put(editor, material.block(), x, top + dy, z);
                 }
             }
         }
@@ -321,12 +328,13 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
                 figure.scale = BUST_SCALE;
                 figure.bust(editor);
             } else {
-                editor.set_block_absolute(material.block(), x, top + 1, z, None, OVERWRITE);
+                // In the slab's place: a block on a slab would float.
+                put(editor, material.block(), x, top, z);
             }
         }
         Form::Sculpture => {
-            editor.set_block(POLISHED_ANDESITE, x, 1, z, None, OVERWRITE);
-            let top = editor.get_absolute_y(x, 2, z);
+            let top = editor.get_ground_level(x, z) + 2;
+            put(editor, POLISHED_ANDESITE, x, top - 1, z);
             if java {
                 figure.at.1 = f64::from(top);
                 figure.block = match (roll >> 16) % 4 {
@@ -338,7 +346,7 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
                 figure.sculpture(editor, roll);
             } else {
                 for dy in 0..3 {
-                    editor.set_block_absolute(material.block(), x, top + dy, z, None, OVERWRITE);
+                    put(editor, material.block(), x, top + dy, z);
                 }
             }
         }
@@ -367,14 +375,19 @@ pub fn place_on_way(editor: &mut WorldEditor, way: &ProcessedWay, form: Form) {
     place(editor, &centre, form);
 }
 
-/// Yaw a figure faces: the mapped `direction`, else one of four set by the node.
+/// Yaw a figure faces: the mapped `direction`, in degrees or as a point of the compass,
+/// else one of four set by the node.
 fn facing_yaw(tags: &HashMap<String, String>, roll: u32) -> f32 {
-    let mapped = tags.get("direction").and_then(|d| match d.as_str() {
-        "N" => Some(0.0),
-        "E" => Some(90.0),
-        "S" => Some(180.0),
-        "W" => Some(270.0),
-        other => other.parse::<f32>().ok(),
+    const POINTS: [&str; 16] = [
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW",
+        "NW", "NNW",
+    ];
+    let mapped = tags.get("direction").and_then(|d| {
+        let d = d.trim();
+        match POINTS.iter().position(|p| p.eq_ignore_ascii_case(d)) {
+            Some(i) => Some(i as f32 * 22.5),
+            None => d.parse::<f32>().ok().filter(|v| v.is_finite()),
+        }
     });
     // OSM measures clockwise from north; a Minecraft yaw of 0 faces south.
     match mapped {
@@ -383,20 +396,51 @@ fn facing_yaw(tags: &HashMap<String, String>, roll: u32) -> f32 {
     }
 }
 
-/// Pedestals and columns stand where they are mapped, through whatever a tree or the
-/// terrain put there first.
-pub const OVERWRITE: Option<&[Block]> = Some(&[]);
+/// Whether a block grew rather than was built: a tree or a plant.
+fn is_plant(block: Block) -> bool {
+    let name = block.name();
+    [
+        "leaves", "_log", "_wood", "_stem", "_hyphae", "grass", "fern", "bush", "vine",
+    ]
+    .iter()
+    .any(|part| name.contains(part))
+        || matches!(
+            name,
+            "dandelion" | "poppy" | "allium" | "cornflower" | "oxeye_daisy" | "azure_bluet"
+        )
+        || name.ends_with("_tulip")
+        || name.ends_with("_sapling")
+}
+
+/// Pedestals and columns stand where they are mapped, through a tree that grew there
+/// first, but never through anything built.
+fn put_with(editor: &mut WorldEditor, block: BlockWithProperties, x: i32, y: i32, z: i32) {
+    if editor
+        .get_block_absolute(x, y, z)
+        .is_some_and(|existing| !is_plant(existing))
+    {
+        return;
+    }
+    editor.set_block_with_properties_absolute(block, x, y, z, None, Some(&[]));
+}
+
+fn put(editor: &mut WorldEditor, block: Block, x: i32, y: i32, z: i32) {
+    put_with(
+        editor,
+        BlockWithProperties {
+            block,
+            properties: None,
+        },
+        x,
+        y,
+        z,
+    );
+}
 
 /// The lowest ground within `r` of a point. A pedestal is built up from it, so none of
 /// its steps hangs in the air on a slope.
-pub fn lowest_ground(editor: &WorldEditor, x: i32, z: i32, r: i32) -> i32 {
-    let mut low = i32::MAX;
-    for dx in -r..=r {
-        for dz in -r..=r {
-            low = low.min(editor.get_ground_level(x + dx, z + dz));
-        }
-    }
-    low
+fn lowest_ground(editor: &WorldEditor, x: i32, z: i32, r: i32) -> i32 {
+    crate::models_3d::lowest_ground_in_bbox(editor, x - r, z - r, x + r, z + r)
 }
 
 /// A square of `fill` reaching `r - 1` from the centre at `y`, ringed by `stairs`
@@ -413,7 +457,7 @@ pub fn stepped_square(
         for dz in -r..=r {
             let (edge_x, edge_z) = (dx.abs() == r, dz.abs() == r);
             if !edge_x && !edge_z {
-                editor.set_block_absolute(fill, x + dx, y, z + dz, None, OVERWRITE);
+                put(editor, fill, x + dx, y, z + dz);
                 continue;
             }
             // Each stair's high side faces the middle.
@@ -435,7 +479,7 @@ pub fn stepped_square(
                 }
             };
             let stair = create_stair_with_properties(stairs, facing, shape);
-            editor.set_block_with_properties_absolute(stair, x + dx, y, z + dz, None, OVERWRITE);
+            put_with(editor, stair, x + dx, y, z + dz);
         }
     }
 }
@@ -464,15 +508,15 @@ fn pedestal(editor: &mut WorldEditor, x: i32, z: i32, roll: u32, r: i32) -> i32 
     stepped_square(editor, (x, z), r, ground + 1, die, stairs);
     for dx in 1 - r..r {
         for dz in 1 - r..r {
-            editor.set_block_absolute(die, x + dx, ground + 2, z + dz, None, OVERWRITE);
-            editor.set_block_absolute(cap, x + dx, ground + 3, z + dz, None, OVERWRITE);
+            put(editor, die, x + dx, ground + 2, z + dz);
+            put(editor, cap, x + dx, ground + 3, z + dz);
         }
     }
     ground + 3
 }
 
 /// A mapped `height` in metres.
-fn height(tags: &HashMap<String, String>) -> Option<f64> {
+pub(crate) fn height(tags: &HashMap<String, String>) -> Option<f64> {
     tags.get("height")?
         .trim()
         .trim_end_matches('m')
@@ -485,8 +529,8 @@ fn height(tags: &HashMap<String, String>) -> Option<f64> {
 const COLUMN_HEIGHT: f64 = 6.0;
 
 /// A column on a stepped base, built up from the lowest ground under it, `height`
-/// blocks to its top. On Java a tall one carries a figure; elsewhere it ends in a cap.
-pub fn column(editor: &mut WorldEditor, node: &ProcessedNode, height: f64) {
+/// blocks to its top. On Java a `figure` stands on it; elsewhere it ends in a cap.
+pub fn column(editor: &mut WorldEditor, node: &ProcessedNode, height: f64, figure: bool) {
     let (x, z) = (node.x, node.z);
     let height = (height.round() as i32).clamp(5, 30);
     let ground = lowest_ground(editor, x, z, 2);
@@ -507,7 +551,7 @@ pub fn column(editor: &mut WorldEditor, node: &ProcessedNode, height: f64) {
                 } else {
                     POLISHED_ANDESITE
                 };
-                editor.set_block_absolute(block, x + dx, y, z + dz, None, OVERWRITE);
+                put(editor, block, x + dx, y, z + dz);
             }
         }
     }
@@ -519,17 +563,18 @@ pub fn column(editor: &mut WorldEditor, node: &ProcessedNode, height: f64) {
         POLISHED_ANDESITE,
         POLISHED_ANDESITE_STAIRS,
     );
-    // A figure about three blocks tall takes the top of a tall column's height.
-    let crowned = height >= 9 && editor.format() == WorldFormat::JavaAnvil;
-    let capital = ground + if crowned { height - 3 } else { height };
+    // A figure about three blocks tall takes the top of the column's height, down to a
+    // capital right on the base.
+    let crowned = figure && editor.format() == WorldFormat::JavaAnvil;
+    let capital = ground + if crowned { (height - 3).max(5) } else { height };
     for y in ground + 5..capital {
-        editor.set_block_absolute(QUARTZ_PILLAR, x, y, z, None, OVERWRITE);
+        put(editor, QUARTZ_PILLAR, x, y, z);
     }
-    editor.set_block_absolute(CHISELED_QUARTZ_BLOCK, x, capital, z, None, OVERWRITE);
+    put(editor, CHISELED_QUARTZ_BLOCK, x, capital, z);
     if crowned {
         crown(editor, node, capital + 1);
     } else {
-        editor.set_block_absolute(SMOOTH_QUARTZ_SLAB, x, capital + 1, z, None, OVERWRITE);
+        put(editor, SMOOTH_QUARTZ_SLAB, x, capital + 1, z);
     }
 }
 
@@ -561,10 +606,11 @@ fn crown(editor: &mut WorldEditor, node: &ProcessedNode, y: i32) {
 
 /// A slender pedestal for a bust: a block, a wall post and a slab. Returns the slab's Y.
 fn bust_pedestal(editor: &mut WorldEditor, x: i32, z: i32) -> i32 {
-    editor.set_block(POLISHED_ANDESITE, x, 1, z, None, OVERWRITE);
-    editor.set_block(ANDESITE_WALL, x, 2, z, None, OVERWRITE);
-    editor.set_block(POLISHED_ANDESITE_SLAB, x, 3, z, None, OVERWRITE);
-    editor.get_absolute_y(x, 3, z)
+    let ground = editor.get_ground_level(x, z);
+    put(editor, POLISHED_ANDESITE, x, ground + 1, z);
+    put(editor, ANDESITE_WALL, x, ground + 2, z);
+    put(editor, POLISHED_ANDESITE_SLAB, x, ground + 3, z);
+    ground + 3
 }
 
 /// Builds a figure from block displays, its feet at `at`, facing `yaw`.
@@ -597,20 +643,6 @@ fn mul(a: Quat, b: Quat) -> Quat {
         aw * by - ax * bz + ay * bw + az * bx,
         aw * bz + ax * by - ay * bx + az * bw,
         aw * bw - ax * bx - ay * by - az * bz,
-    ]
-}
-
-fn rotate(q: Quat, v: [f64; 3]) -> [f64; 3] {
-    let [x, y, z, w] = q;
-    let t = [
-        2.0 * (y * v[2] - z * v[1]),
-        2.0 * (z * v[0] - x * v[2]),
-        2.0 * (x * v[1] - y * v[0]),
-    ];
-    [
-        v[0] + w * t[0] + (y * t[2] - z * t[1]),
-        v[1] + w * t[1] + (z * t[0] - x * t[2]),
-        v[2] + w * t[2] + (x * t[1] - y * t[0]),
     ]
 }
 
@@ -1125,6 +1157,98 @@ mod tests {
         assert!(editor.get_block_absolute(34, low + 1, 34).is_some());
         // A horse's barrel, legs, neck, head, ears and tail and its rider.
         assert!(editor.entities_of("minecraft:block_display").len() >= 25);
+    }
+
+    #[test]
+    fn a_tall_rider_stays_on_a_plinth() {
+        let mut editor = sloped_editor();
+        let statue = node(
+            10,
+            &[
+                ("historic", "memorial"),
+                ("memorial", "statue"),
+                ("statue", "equestrian"),
+                ("height", "8"),
+            ],
+        );
+        place(&mut editor, &statue, Form::Statue);
+        let low = lowest_ground(&editor, 32, 32, 2);
+        assert!(
+            editor.get_block_absolute(32, low + 5, 32).is_none(),
+            "no column"
+        );
+        assert!(editor.entities_of("minecraft:block_display").len() >= 25);
+    }
+
+    #[test]
+    fn a_statue_on_a_short_column_keeps_its_figure() {
+        let mut editor = sloped_editor();
+        let low = lowest_ground(&editor, 32, 32, 2);
+        let statue = node(
+            11,
+            &[
+                ("historic", "memorial"),
+                ("memorial", "statue"),
+                ("height", "7"),
+            ],
+        );
+        place(&mut editor, &statue, Form::Statue);
+        // The capital right on the base, the figure on it.
+        assert_eq!(
+            editor.get_block_absolute(32, low + 5, 32),
+            Some(CHISELED_QUARTZ_BLOCK)
+        );
+        assert!(!editor.entities_of("minecraft:block_display").is_empty());
+    }
+
+    #[test]
+    fn a_monument_carries_a_figure_only_when_tagged_as_one() {
+        let mut editor = sloped_editor();
+        let low = lowest_ground(&editor, 32, 32, 2);
+        column(
+            &mut editor,
+            &node(12, &[("historic", "monument")]),
+            10.0,
+            false,
+        );
+        assert!(editor.entities_of("minecraft:block_display").is_empty());
+        assert_eq!(
+            editor.get_block_absolute(32, low + 10, 32),
+            Some(CHISELED_QUARTZ_BLOCK)
+        );
+        assert_eq!(
+            editor.get_block_absolute(32, low + 11, 32),
+            Some(SMOOTH_QUARTZ_SLAB)
+        );
+    }
+
+    #[test]
+    fn a_pedestal_goes_through_a_tree_but_not_a_wall() {
+        let mut editor = sloped_editor();
+        let low = lowest_ground(&editor, 32, 32, 1);
+        editor.set_block_absolute(STONE_BRICKS, 31, low + 1, 31, None, None);
+        editor.set_block_absolute(OAK_LEAVES, 33, low + 1, 33, None, None);
+        let statue = node(13, &[("historic", "memorial"), ("memorial", "statue")]);
+        place(&mut editor, &statue, Form::Statue);
+        assert_eq!(
+            editor.get_block_absolute(31, low + 1, 31),
+            Some(STONE_BRICKS)
+        );
+        let corner = editor.get_block_absolute(33, low + 1, 33);
+        assert!(
+            corner.is_some_and(|b| b.name().ends_with("_stairs")),
+            "{corner:?}"
+        );
+    }
+
+    #[test]
+    fn compass_points_turn_the_figure_and_nonsense_does_not() {
+        let tags = |d: &str| HashMap::from([("direction".to_string(), d.to_string())]);
+        // Facing north-east is a yaw of 225.
+        assert_eq!(facing_yaw(&tags("NE"), 0), 225.0);
+        assert_eq!(facing_yaw(&tags("ssw"), 0), 22.5);
+        let yaw = facing_yaw(&tags("inf"), 5);
+        assert!(yaw.is_finite() && yaw % 90.0 == 0.0);
     }
 
     #[test]

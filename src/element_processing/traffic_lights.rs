@@ -10,7 +10,7 @@ use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use std::collections::HashMap;
 
 /// One direction a road leaves a signal node in.
@@ -442,6 +442,9 @@ pub struct SignalIndex {
     poles: Vec<Pole>,
     /// Poles each signal node builds.
     by_node: FnvHashMap<u64, Vec<usize>>,
+    /// Signal nodes the plan found a kerb for, including those whose heads another node's
+    /// pole carries or that a nearby head already covers.
+    handled: FnvHashSet<u64>,
     /// The extras' data pack cycles the heads. Without it they are built from vanilla
     /// blocks, frozen in their first state.
     cycling: bool,
@@ -454,6 +457,7 @@ const COVER: i32 = 6;
 struct Plan<'r> {
     poles: Vec<Pole>,
     by_node: FnvHashMap<u64, Vec<usize>>,
+    handled: FnvHashSet<u64>,
     drives_on_left: bool,
     road_mask: &'r RoadMaskBitmap,
 }
@@ -494,6 +498,7 @@ impl Plan<'_> {
             let Some((px, pz, off)) = kerb else {
                 continue;
             };
+            self.handled.insert(id);
             let head = Head {
                 facing: arm.dir,
                 group: group_of(arm.dir),
@@ -553,6 +558,7 @@ impl Plan<'_> {
                     self.pole(id, px, pz)
                 }
             };
+            self.handled.insert(id);
             let head = Head {
                 facing: (-side.0, -side.1),
                 group: group_of(road.dir),
@@ -616,6 +622,7 @@ impl SignalIndex {
         let mut plan = Plan {
             poles: Vec::new(),
             by_node: FnvHashMap::default(),
+            handled: FnvHashSet::default(),
             drives_on_left,
             road_mask,
         };
@@ -625,6 +632,7 @@ impl SignalIndex {
         Self {
             poles: plan.poles,
             by_node: plan.by_node,
+            handled: plan.handled,
             cycling,
         }
     }
@@ -651,8 +659,8 @@ impl SignalIndex {
         })
     }
 
-    /// Builds the poles and heads this node owns.
-    /// Builds the poles `node` planned; false when it planned none.
+    /// Builds the poles `node` owns. False when the plan found no kerb for it at all, so
+    /// that it has no head here or on another node's pole.
     pub fn place(
         &self,
         editor: &mut WorldEditor,
@@ -698,7 +706,7 @@ impl SignalIndex {
                 builder.head(back, centre_y, head, false);
             }
         }
-        !poles.is_empty()
+        self.handled.contains(&node.id)
     }
 }
 
@@ -887,21 +895,6 @@ impl Builder<'_, '_> {
                 lamp.block(),
                 Vec::new(),
                 Some(brightness),
-            );
-            // The visor over it.
-            self.part(
-                centre,
-                head.facing,
-                (y + lens / k / 2.0 + 0.02) * k,
-                depth / 2.0 + 0.075 * k,
-                (
-                    (lens + 0.06 * k) as f32,
-                    (0.035 * k) as f32,
-                    (0.15 * k) as f32,
-                ),
-                HOUSING,
-                Vec::new(),
-                None,
             );
         }
     }
@@ -1376,6 +1369,28 @@ mod tests {
         let green = lit_lamps.iter().filter(|b| *b == "minecraft:lime_concrete");
         assert_eq!(green.count(), 2);
         assert!(parts.iter().any(|p| block(p) == "minecraft:black_concrete"));
+    }
+
+    /// A signal whose head another signal's pole carries is handled: without the data pack
+    /// it must not fall back to a banner signal of its own beside it.
+    #[test]
+    fn a_signal_covered_by_another_counts_as_placed() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let (elements, mask) = crossroads(&[(21, -6, 0), (22, 6, 0)]);
+        let index = SignalIndex::build(&elements, 1.0, false, &mask, false);
+        let bbox = XZBBox::rect_from_min_max(-64, -64, 64, 64).unwrap();
+        let llbbox = LLBBox::new(47.0, 8.0, 47.001, 8.001).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &bbox, llbbox);
+        let base = |e: &WorldEditor, x: i32, z: i32, y: i32| e.get_absolute_y(x, y, z);
+        let signal = [("highway", "traffic_signals")];
+        for (id, x) in [(21, -6), (22, 6), (9, 0)] {
+            let placed = index.place(&mut editor, &node(id, x, 0, &signal), &base);
+            assert!(placed, "signal {id} would get a banner signal too");
+        }
+        // A signal far from any road is not.
+        assert!(!index.place(&mut editor, &node(99, 60, 60, &signal), &base));
     }
 
     /// The data pack switches a head between models by id: each must be one the resource
