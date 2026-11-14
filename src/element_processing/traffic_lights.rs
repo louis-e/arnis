@@ -487,14 +487,13 @@ impl Plan<'_> {
                 node.x as f64 + 0.5 + arm.dir.0 * back as f64,
                 node.z as f64 + 0.5 + arm.dir.1 * back as f64,
             );
-            let kerb = kerb_cell(origin, side, arm.half, self.road_mask).or_else(|| {
-                // A bike path often runs along the road on that side; the head then stands
-                // on the other.
-                let other = (-side.0, -side.1);
-                (node.kind == Kind::Bike)
-                    .then(|| kerb_cell(origin, other, arm.half, self.road_mask))
-                    .flatten()
-            });
+            let kerb = kerb_cell(origin, side, arm.half, self.road_mask)
+                .or_else(|| {
+                    // A bike path, tram tracks or the other carriageway often run along
+                    // the road on that side; the head then stands on the other.
+                    kerb_cell(origin, (-side.0, -side.1), arm.half, self.road_mask)
+                })
+                .or_else(|| island_cell(origin, self.road_mask));
             let Some((px, pz, off)) = kerb else {
                 continue;
             };
@@ -548,10 +547,20 @@ impl Plan<'_> {
                 None => {
                     // The crossing path is paved as well, so the pole may have to stand
                     // beside it.
-                    let kerb = [0.0, 2.0, -2.0].iter().find_map(|&along| {
-                        let from = (origin.0 + road.dir.0 * along, origin.1 + road.dir.1 * along);
-                        kerb_cell(from, side, road.half, self.road_mask)
-                    });
+                    let kerb = [0.0, 2.0, -2.0]
+                        .iter()
+                        .find_map(|&along| {
+                            let from =
+                                (origin.0 + road.dir.0 * along, origin.1 + road.dir.1 * along);
+                            kerb_cell(from, side, road.half, self.road_mask)
+                        })
+                        .or_else(|| {
+                            let ahead = (
+                                origin.0 + side.0 * f64::from(road.half),
+                                origin.1 + side.1 * f64::from(road.half),
+                            );
+                            island_cell(ahead, self.road_mask)
+                        });
                     let Some((px, pz, _)) = kerb else {
                         continue;
                     };
@@ -718,6 +727,9 @@ fn kerb_side(travel: (f64, f64), drives_on_left: bool) -> (f64, f64) {
     }
 }
 
+/// How far past the road's edge a pole may stand: across a bike path or a sidewalk.
+const KERB_REACH: i32 = 6;
+
 /// The first cell off the road surface beside `origin`, and how far out it is.
 fn kerb_cell(
     origin: (f64, f64),
@@ -725,10 +737,28 @@ fn kerb_cell(
     half: i32,
     road_mask: &RoadMaskBitmap,
 ) -> Option<(i32, i32, i32)> {
-    (half + 1..=half + 4).find_map(|off| {
+    (half + 1..=half + KERB_REACH).find_map(|off| {
         let x = (origin.0 + side.0 * off as f64).floor() as i32;
         let z = (origin.1 + side.1 * off as f64).floor() as i32;
         (!road_mask.contains(x, z)).then_some((x, z, off))
+    })
+}
+
+/// In a junction paved wall to wall a head stands on the nearest traffic island, this
+/// far out at most.
+const ISLAND_REACH: i32 = 8;
+
+/// The nearest cell off the road within ISLAND_REACH of `origin`, as a kerb one block out,
+/// so that a mast from it stays short.
+fn island_cell(origin: (f64, f64), road_mask: &RoadMaskBitmap) -> Option<(i32, i32, i32)> {
+    let (ox, oz) = (origin.0.floor() as i32, origin.1.floor() as i32);
+    (1..=ISLAND_REACH).find_map(|r| {
+        (-r..=r)
+            .flat_map(|dx| (-r..=r).map(move |dz| (dx, dz)))
+            .filter(|&(dx, dz)| dx.abs().max(dz.abs()) == r)
+            .filter(|&(dx, dz)| !road_mask.contains(ox + dx, oz + dz))
+            .min_by_key(|&(dx, dz)| (dx * dx + dz * dz, dx, dz))
+            .map(|(dx, dz)| (ox + dx, oz + dz, 1))
     })
 }
 
@@ -885,7 +915,9 @@ impl Builder<'_, '_> {
         let lens = if walk { 0.24 } else { 0.26 } * k;
         for &(lamp, y) in lamps {
             // A lit lens shows at full brightness whatever the light around it.
-            let brightness = if lamp == lit { (15, 15) } else { (2, 0) };
+            // An unlit one is darker, but its colour still shows by day, so a head reads as
+            // a traffic light with all its lamps; by night it goes dark.
+            let brightness = if lamp == lit { (15, 15) } else { (11, 4) };
             self.part(
                 centre,
                 head.facing,
@@ -1369,6 +1401,57 @@ mod tests {
         let green = lit_lamps.iter().filter(|b| *b == "minecraft:lime_concrete");
         assert_eq!(green.count(), 2);
         assert!(parts.iter().any(|p| block(p) == "minecraft:black_concrete"));
+    }
+
+    /// One carriageway of a dual road often has a bike path, tram tracks or the other
+    /// carriageway along its kerb; its head then stands on the median side.
+    #[test]
+    fn a_one_way_carriageway_blocked_on_its_kerb_side_gets_a_head_on_the_other() {
+        for (from, to) in [(-40, 40), (40, -40)] {
+            let signal = [("highway", "traffic_signals")];
+            let elements = vec![way(
+                1,
+                vec![
+                    node(1, from, 0, &[]),
+                    node(9, 0, 0, &signal),
+                    node(2, to, 0, &[]),
+                ],
+                &[("highway", "secondary"), ("oneway", "yes")],
+            )];
+            // Paved two blocks either side, and ten more on the south.
+            let paved = (-40..=40).flat_map(|x| (-2..=12).map(move |z| (x, z)));
+            let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved), false);
+            let heads: Vec<&Pole> = index.poles.iter().filter(|p| !p.heads.is_empty()).collect();
+            assert_eq!(heads.len(), 1, "travelling {from} to {to}");
+            assert!(
+                heads[0].z < 0,
+                "head on the open north side, at z {}",
+                heads[0].z
+            );
+        }
+    }
+
+    /// In a junction paved far out on both sides the head stands on the nearest island.
+    #[test]
+    fn a_head_in_a_wide_paved_junction_stands_on_an_island() {
+        let signal = [("highway", "traffic_signals")];
+        let elements = vec![way(
+            1,
+            vec![
+                node(1, -40, 0, &[]),
+                node(9, 0, 0, &signal),
+                node(2, 40, 0, &[]),
+            ],
+            &[("highway", "secondary"), ("oneway", "yes")],
+        )];
+        // Paved twenty blocks out on both sides, but for a small island.
+        let paved = (-40..=40)
+            .flat_map(|x| (-20..=20).map(move |z| (x, z)))
+            .filter(|&(x, z)| !((-6..=-4).contains(&x) && (5..=6).contains(&z)));
+        let index = SignalIndex::build(&elements, 1.0, false, &road_mask(paved), false);
+        let poles: Vec<&Pole> = index.poles.iter().filter(|p| !p.heads.is_empty()).collect();
+        assert_eq!(poles.len(), 1);
+        assert!((-6..=-4).contains(&poles[0].x) && (5..=6).contains(&poles[0].z));
     }
 
     /// A signal whose head another signal's pole carries is handled: without the data pack

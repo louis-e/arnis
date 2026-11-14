@@ -1697,9 +1697,9 @@ fn generate_highways_internal(
                 }
                 _ => false,
             };
-            // With the extras' lights on, a signal they have no road for gets no head: a
-            // banner one would never change. Standing heads fall back to it.
-            if signalised && !placed && !signals.as_ref().is_some_and(|s| s.cycling()) {
+            // On Java every signal is planned; one the plan found no kerb for gets no head,
+            // rather than a banner one beside the others. Other formats keep the banners.
+            if signalised && !placed && signals.is_none() {
                 if let ProcessedElement::Node(node) = element {
                     let x = node.x;
                     let z = node.z;

@@ -333,8 +333,14 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
             }
         }
         Form::Sculpture => {
-            let top = editor.get_ground_level(x, z) + 2;
-            put(editor, POLISHED_ANDESITE, x, top - 1, z);
+            // A horse needs room for its hooves; anything else stands on one block.
+            let r = i32::from(names_a_horse(&node.tags));
+            let top = lowest_ground(editor, x, z, r) + 2;
+            for dx in -r..=r {
+                for dz in -r..=r {
+                    put(editor, POLISHED_ANDESITE, x + dx, top - 1, z + dz);
+                }
+            }
             if java {
                 figure.at.1 = f64::from(top);
                 figure.block = match (roll >> 16) % 4 {
@@ -343,7 +349,7 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
                     2 => "minecraft:polished_blackstone",
                     _ => "minecraft:waxed_copper_block",
                 };
-                figure.sculpture(editor, roll);
+                figure.sculpture(editor, roll, &node.tags);
             } else {
                 for dy in 0..3 {
                     put(editor, material.block(), x, top + dy, z);
@@ -351,6 +357,27 @@ pub fn place(editor: &mut WorldEditor, node: &ProcessedNode, form: Form) {
             }
         }
     }
+}
+
+/// Whether a sculpture's name or subject says it is a horse.
+fn names_a_horse(tags: &HashMap<String, String>) -> bool {
+    // Words that sit inside other words ("ross" in "Grosser") are left out.
+    const HORSE: [&str; 7] = [
+        "horse", "pferd", "cheval", "caballo", "cavallo", "paard", "koń",
+    ];
+    [
+        "name",
+        "name:en",
+        "subject",
+        "artwork_subject",
+        "description",
+    ]
+    .iter()
+    .filter_map(|k| tags.get(*k))
+    .any(|v| {
+        let v = v.to_lowercase();
+        HORSE.iter().any(|h| v.contains(h))
+    })
 }
 
 /// A statue mapped as the outline of its pedestal stands in its middle.
@@ -834,9 +861,9 @@ impl Figure {
         self.part(editor, hand, [-0.03, -0.08, -0.12], [0.06, 0.035, 0.24], q);
     }
 
-    /// A rider on a horse, the horse pawing the ground or standing square.
-    fn rider(&mut self, editor: &mut WorldEditor, roll: u32) {
-        // The horse: barrel, four legs, neck, head with its ears, and tail.
+    /// A horse, pawing the ground with a foreleg or standing square: barrel, four legs,
+    /// neck, head with its ears, and tail.
+    fn horse(&mut self, editor: &mut WorldEditor, pawing: bool) {
         self.part(
             editor,
             [0.0; 3],
@@ -844,7 +871,6 @@ impl Figure {
             [0.46, 0.56, 1.55],
             NO_TURN,
         );
-        let pawing = (roll >> 16).is_multiple_of(2);
         let raised = if pawing {
             limb([-42.0, 0.0, 0.0], [80.0, 0.0, 0.0])
         } else {
@@ -886,6 +912,11 @@ impl Figure {
             [0.12, 0.8, 0.12],
             quat([22.0, 0.0, 0.0]),
         );
+    }
+
+    /// A rider on a horse, the horse pawing the ground or standing square.
+    fn rider(&mut self, editor: &mut WorldEditor, roll: u32) {
+        self.horse(editor, (roll >> 16).is_multiple_of(2));
         // The rider, sitting tall in the saddle.
         let seat = 1.5;
         self.part(
@@ -958,9 +989,12 @@ impl Figure {
         self.head(editor, 0.25, [4.0, 0.0, 0.0]);
     }
 
-    /// An abstract sculpture: a twisted column or a ring standing on edge.
-    fn sculpture(&mut self, editor: &mut WorldEditor, roll: u32) {
-        if (roll >> 20).is_multiple_of(2) {
+    /// A sculpture: a horse where its name says so, else an abstract twisted column or
+    /// stones balanced one on another.
+    fn sculpture(&mut self, editor: &mut WorldEditor, roll: u32, tags: &HashMap<String, String>) {
+        if names_a_horse(tags) {
+            self.horse(editor, (roll >> 16).is_multiple_of(2));
+        } else if (roll >> 20).is_multiple_of(2) {
             // Slabs stacked, each turned a little further.
             for k in 0..7 {
                 self.part(
@@ -972,15 +1006,22 @@ impl Figure {
                 );
             }
         } else {
-            for k in 0..12 {
-                let a = f64::from(k) / 12.0 * std::f64::consts::TAU;
+            // Stones balanced one on another, each smaller and turned its own way.
+            let mut y = 0.0;
+            for (size, turn) in [
+                ([1.1, 0.55, 0.8], [0.0, 0.0, 3.0]),
+                ([0.85, 0.5, 0.65], [0.0, 37.0, -4.0]),
+                ([0.66, 0.45, 0.52], [3.0, -21.0, 0.0]),
+                ([0.46, 0.4, 0.4], [0.0, 52.0, 5.0]),
+            ] {
                 self.part(
                     editor,
-                    [a.cos(), 1.1 + a.sin(), 0.0],
-                    [-0.3, -0.15, -0.15],
-                    [0.6, 0.3, 0.3],
-                    quat([0.0, 0.0, (a.to_degrees() + 90.0) as f32]),
+                    [0.0, y, 0.0],
+                    [-size[0] / 2.0, 0.0, -size[2] / 2.0],
+                    size,
+                    quat(turn),
                 );
+                y += size[1] - 0.04;
             }
         }
     }
@@ -1249,6 +1290,21 @@ mod tests {
         assert_eq!(facing_yaw(&tags("ssw"), 0), 22.5);
         let yaw = facing_yaw(&tags("inf"), 5);
         assert!(yaw.is_finite() && yaw % 90.0 == 0.0);
+    }
+
+    #[test]
+    fn a_sculpture_named_for_horses_is_a_horse() {
+        let tags = |name: &str| {
+            HashMap::from([
+                ("tourism".to_string(), "artwork".to_string()),
+                ("artwork_type".to_string(), "sculpture".to_string()),
+                ("name".to_string(), name.to_string()),
+            ])
+        };
+        assert!(names_a_horse(&tags("Springende Pferde")));
+        assert!(names_a_horse(&tags("The Horse Tamer")));
+        assert!(!names_a_horse(&tags("Mann mit ausgebreiteten Armen")));
+        assert!(!names_a_horse(&tags("Grosser Brunnen")));
     }
 
     #[test]
