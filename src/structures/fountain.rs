@@ -31,7 +31,7 @@ fn variants() -> &'static [Option<StructureSchematic>; 4] {
 
 /// Stamp a fountain at (x, z); `area_cells` is footprint size (0 for a node), large areas get fountain 4 else a random small one (1-3).
 pub fn place(editor: &mut WorldEditor, x: i32, z: i32, area_cells: usize) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Fountain) {
         return;
     }
     let variants = variants();

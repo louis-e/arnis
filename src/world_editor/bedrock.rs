@@ -1756,6 +1756,7 @@ impl SaveProgress {
     fn chunk_done(&self) {
         let done = self.done.fetch_add(1, Ordering::Relaxed) + 1;
         self.bar.inc(1);
+        crate::progress_json::CHUNKS_WRITTEN.fetch_add(1, Ordering::Relaxed);
         // GUI progress spans 92%..97% for chunk writing, a step every half percent of it.
         // Two threads may emit out of order; the emitter never lets the bar move back.
         let step = (self.total / 200).max(1);

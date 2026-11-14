@@ -948,8 +948,20 @@ $(document).ready(function () {
     var sliderControl = null;
     // One World: the user hid the areas, and the world they were hidden for.
     var oneWorldOverlayHidden = false;
-    // Slider positions: a One World shows its areas opaque unless told otherwise.
+    // Slider positions per kind: the opacity (0..100; a One World opaque by default), and with
+    // Advanced features the balance (-100..100, 0 = both layers at their default).
     var overlayOpacity = { world: 70, oneWorld: 100 };
+    var overlayBalance = { world: 0, oneWorld: 0 };
+    // On the map-first page the world's preview images draw under the selection and the piece
+    // outlines (overlayPane is 400); Classic keeps them in overlayPane.
+    map.createPane('arnisPreview').style.zIndex = 350;
+    // The cell overlay (its darkening, outlines and fills) and its numbers each get a pane, so the
+    // balance slider can fade them as one. The outlines sit just under the selection's pane.
+    var cellsPane = map.createPane('arnisCells');
+    cellsPane.style.zIndex = 399;
+    var cellLabelsPane = map.createPane('arnisCellLabels');
+    cellLabelsPane.style.zIndex = 640;
+    var previewPane = function () { return window.arnisMapFirst ? 'arnisPreview' : 'overlayPane'; };
     var oneWorldFittedPath = null;
 
     function setWorldOverlayOpacity(value) {
@@ -974,6 +986,7 @@ $(document).ready(function () {
         if (!data.areas) {
             var bounds = L.latLngBounds([data.min_lat, data.min_lon], [data.max_lat, data.max_lon]);
             return L.imageOverlay(data.image_base64, bounds, {
+                pane: previewPane(),
                 opacity: opacityValue,
                 interactive: false,
                 zIndex: 500
@@ -984,6 +997,7 @@ $(document).ready(function () {
             var b = L.latLngBounds([area.min_lat, area.min_lon], [area.max_lat, area.max_lon]);
             if (area.image_base64) {
                 group.addLayer(L.imageOverlay(area.image_base64, b, {
+                    pane: previewPane(),
                     opacity: opacityValue,
                     interactive: false,
                     zIndex: 500 + index
@@ -1012,6 +1026,61 @@ $(document).ready(function () {
         return bounds;
     }
 
+    // The world overlay's own default opacity: 70 %, or opaque for a One World in Classic.
+    function worldBaseOpacity() {
+        return worldOverlayData && worldOverlayData.areas && !window.arnisMapFirst ? 1 : 0.7;
+    }
+
+    function balanceValue() {
+        var slider = document.getElementById('world-preview-opacity');
+        return slider ? Number(slider.value) : 0;
+    }
+
+    // The slider is the balance with Advanced features on, the plain opacity otherwise.
+    function balanceOn() {
+        return Boolean(window.arnisMeldOn);
+    }
+
+    function sliderKind() {
+        return worldOverlayData && worldOverlayData.areas ? 'oneWorld' : 'world';
+    }
+
+    function worldOpacity() {
+        return balanceOn() ? window.arnisBalance(balanceValue(), worldBaseOpacity()).world : balanceValue() / 100;
+    }
+
+    // Fade the world overlay (left of centre) or the cell overlay (right of centre).
+    function applyBalance() {
+        var cells = balanceOn() ? window.arnisBalance(balanceValue(), worldBaseOpacity()).cells : 1;
+        setWorldOverlayOpacity(worldOpacity());
+        cellsPane.style.opacity = cellLabelsPane.style.opacity = String(cells);
+        cellsPane.style.display = cellLabelsPane.style.display = cells <= 0 ? 'none' : '';
+    }
+
+    // The slider shows while the world overlay (or, as the balance, the cells) is on the map.
+    function updateSliderVisibility() {
+        var box = document.getElementById('world-preview-slider-container');
+        if (!box) return;
+        var balance = balanceOn();
+        box.style.display = !(worldOverlay || (balance && lastPieces.length)) ? 'none' : balance ? 'flex' : 'block';
+        // Read each time, so a language change reaches it.
+        box.title = balance ? mapText('map_balance_tip', 'Left fades the world tiles, right fades the cells. Double-click to reset.') : '';
+    }
+
+    // The Advanced features switch turns the slider into the balance and back.
+    function syncSliderMode() {
+        var slider = document.getElementById('world-preview-opacity');
+        var box = document.getElementById('world-preview-slider-container');
+        if (!slider || !box) return;
+        var balance = balanceOn();
+        box.classList.toggle('is-balance', balance);
+        slider.min = balance ? '-100' : '0';
+        slider.title = balance ? '' : 'Overlay Opacity';
+        slider.value = String((balance ? overlayBalance : overlayOpacity)[sliderKind()]);
+        applyBalance();
+        updateSliderVisibility();
+    }
+
     // Create the opacity slider as a proper Leaflet control
     var SliderControl = L.Control.extend({
         options: { position: 'topleft' },
@@ -1020,18 +1089,33 @@ $(document).ready(function () {
             container.id = 'world-preview-slider-container';
             container.style.display = 'none';
 
-            var slider = L.DomUtil.create('input', 'world-preview-slider', container);
+            // Tiles on the left, the grid on the right: what each end fades.
+            var icon = function (paths) {
+                var span = L.DomUtil.create('span', 'world-preview-slider-icon', container);
+                span.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' + paths + '</svg>';
+                return span;
+            };
+            icon('<rect x="2" y="2" width="5" height="5" fill="currentColor" stroke="none"/><rect x="9" y="2" width="5" height="5" fill="currentColor" stroke="none" opacity=".5"/><rect x="2" y="9" width="5" height="5" fill="currentColor" stroke="none" opacity=".5"/><rect x="9" y="9" width="5" height="5" fill="currentColor" stroke="none"/>');
+            var track = L.DomUtil.create('span', 'world-preview-slider-track', container);
+            var slider = L.DomUtil.create('input', 'world-preview-slider', track);
             slider.type = 'range';
             slider.min = '0';
             slider.max = '100';
             slider.value = '70';
             slider.id = 'world-preview-opacity';
             slider.title = 'Overlay Opacity';
+            L.DomUtil.create('i', 'world-preview-slider-tick', track);
+            icon('<rect x="2" y="2" width="12" height="12"/><path d="M8 2v12M2 8h12"/>');
 
             L.DomEvent.on(slider, 'input', function(e) {
-                var kind = worldOverlayData && worldOverlayData.areas ? 'oneWorld' : 'world';
-                overlayOpacity[kind] = Number(e.target.value);
-                setWorldOverlayOpacity(e.target.value / 100);
+                (balanceOn() ? overlayBalance : overlayOpacity)[sliderKind()] = Number(e.target.value);
+                applyBalance();
+            });
+            // Double-click puts the balance back at the centre.
+            L.DomEvent.on(slider, 'dblclick', function() {
+                if (!balanceOn()) return;
+                slider.value = '0';
+                slider.dispatchEvent(new Event('input'));
             });
 
             // Prevent all map interactions
@@ -1089,7 +1173,6 @@ $(document).ready(function () {
 
         worldOverlayEnabled = !worldOverlayEnabled;
         var btn = document.getElementById('world-preview-btn');
-        var sliderContainer = document.getElementById('world-preview-slider-container');
 
         if (worldOverlayEnabled) {
             // Show overlay
@@ -1099,18 +1182,12 @@ $(document).ready(function () {
                 map.removeLayer(worldOverlay);
             }
 
-            var opacity = document.getElementById('world-preview-opacity');
-            var opacityValue = opacity ? opacity.value / 100 : 0.7;
-
-            worldOverlay = buildWorldOverlay(data, opacityValue);
+            worldOverlay = buildWorldOverlay(data, worldOpacity());
             worldOverlay.addTo(map);
 
             if (btn) {
                 btn.classList.add('active');
                 refreshToolLabel(btn);
-            }
-            if (sliderContainer) {
-                sliderContainer.style.display = 'block';
             }
         } else {
             // Hide overlay
@@ -1122,10 +1199,8 @@ $(document).ready(function () {
                 btn.classList.remove('active');
                 refreshToolLabel(btn);
             }
-            if (sliderContainer) {
-                sliderContainer.style.display = 'none';
-            }
         }
+        updateSliderVisibility();
     }
 
     // Enable the preview button when data is available
@@ -1139,7 +1214,7 @@ $(document).ready(function () {
         worldOverlayData = data;
         worldPreviewAvailable = true;
         var slider = document.getElementById('world-preview-opacity');
-        if (slider) slider.value = String(overlayOpacity[data.areas ? 'oneWorld' : 'world']);
+        if (slider) slider.value = String((balanceOn() ? overlayBalance : overlayOpacity)[sliderKind()]);
         var btn = document.getElementById('world-preview-btn');
         if (btn) {
             btn.classList.remove('disabled');
@@ -1159,15 +1234,12 @@ $(document).ready(function () {
         }
 
         var btn = document.getElementById('world-preview-btn');
-        var sliderContainer = document.getElementById('world-preview-slider-container');
         if (btn) {
             btn.classList.add('disabled');
             btn.classList.remove('active');
             refreshToolLabel(btn);
         }
-        if (sliderContainer) {
-            sliderContainer.style.display = 'none';
-        }
+        updateSliderVisibility();
     }
 
 
@@ -1242,8 +1314,9 @@ $(document).ready(function () {
     }
 
     // Show context menu at position
-    function showContextMenu(x, y, latLng, canCopy, area) {
+    function showContextMenu(x, y, latLng, canCopy, area, cells) {
         var menu = createContextMenu();
+        fillCellActions(menu, cells || []);
         menu._area = area || null;
         menu.querySelector('#copy-coords-item').style.display = canCopy ? '' : 'none';
         menu.querySelector('#live-teleport-item').style.display = liveCanTeleport ? '' : 'none';
@@ -1253,8 +1326,9 @@ $(document).ready(function () {
         menu.querySelector('#remove-area-text').textContent = mapText('map_remove_area', 'Remove this area');
 
         // Position the menu, ensuring it stays within viewport
-        var menuWidth = 180;
-        var menuHeight = 4 + 36 * [canCopy, liveCanTeleport, !!area].filter(Boolean).length;
+        menu.style.display = 'block';
+        var menuWidth = menu.offsetWidth || 180;
+        var menuHeight = menu.offsetHeight || 4 + 36 * [canCopy, liveCanTeleport, !!area].filter(Boolean).length;
         var viewportWidth = window.innerWidth;
         var viewportHeight = window.innerHeight;
 
@@ -1276,6 +1350,70 @@ $(document).ready(function () {
         // Store the latLng for copying
         menu.dataset.lat = latLng.lat;
         menu.dataset.lng = latLng.lng;
+        // The keyboard starts on the first cell action.
+        var first = menu.querySelector('.cell-actions [role="menuitem"]');
+        if (first) first.focus();
+    }
+
+    // The cell actions at the top of the menu: the count, then what fits every picked cell. An action
+    // the head cell cannot take says why, instead of going grey without a word.
+    function fillCellActions(menu, cells) {
+        var old = menu.querySelector('.cell-actions');
+        if (old) old.remove();
+        if (!cells.length) return;
+        var records = lastPieces.filter(function(p) { return cells.indexOf(p.i) >= 0; });
+        var box = document.createElement('div');
+        box.className = 'cell-actions';
+        var head = document.createElement('div');
+        head.className = 'cell-actions-head';
+        head.textContent = cellCount(cells.length);
+        box.appendChild(head);
+        var actions = window.arnisCells.actions(records, cellsRunning);
+        actions.forEach(function(a) {
+            var item = document.createElement('div');
+            item.className = 'coordinate-context-menu-item' + (a.why ? ' is-off' : '');
+            item.setAttribute('role', 'menuitem');
+            // Reached with Tab and taken with Enter or Space, as a button.
+            item.tabIndex = 0;
+            item.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                item.click();
+            });
+            var label = document.createElement('span');
+            label.textContent = mapText(a.label[0], a.label[1]);
+            item.appendChild(label);
+            if (a.why) {
+                var why = document.createElement('small');
+                why.textContent = mapText(a.why[0], a.why[1]);
+                item.appendChild(why);
+                item.setAttribute('aria-disabled', 'true');
+            } else {
+                item.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    hideContextMenu();
+                    window.parent.postMessage({ type: 'cellsAction', action: a.id, cells: cells }, '*');
+                });
+            }
+            box.appendChild(item);
+        });
+        if (!actions.length) {
+            var none = document.createElement('div');
+            none.className = 'cell-actions-none';
+            none.textContent = mapText('cell_none', 'No action fits all of these cells.');
+            box.appendChild(none);
+        }
+        var sep = document.createElement('div');
+        sep.className = 'coordinate-context-menu-separator';
+        box.appendChild(sep);
+        menu.insertBefore(box, menu.firstChild);
+    }
+
+    // The count of cells in the language shown ("12 cells"); the window writes it.
+    function cellCount(n) {
+        var f = window.parent && window.parent.arnisCellCount;
+        return f ? f(n) : n + ' cells';
     }
 
     // Hide context menu
@@ -1399,8 +1537,16 @@ $(document).ready(function () {
         // During a live session the copied command would jump onto land not built yet.
         if (liveActive) canCopy = false;
         var area = areaAt(e.latlng);
-        if (canCopy || liveCanTeleport || area) {
-            showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng, canCopy, area);
+        // With the select tool on, a cell under the pointer: the menu acts on the picked cells (the cell
+        // alone if it was not one of them).
+        var cells = [];
+        var hit = cellTool ? window.arnisCells.at(lastPieces, e.latlng.lat, e.latlng.lng) : -1;
+        if (hit >= 0) {
+            if (!cellPick.has(hit)) pickCells(new Set([hit]));
+            cells = Array.from(cellPick).sort(function(a, b) { return a - b; });
+        }
+        if (canCopy || liveCanTeleport || area || cells.length) {
+            showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng, canCopy, area, cells);
         }
     });
 
@@ -1504,6 +1650,284 @@ $(document).ready(function () {
         // Restored rectangles fire as "polygon"; the handler keys off instanceof.
         map.fire('draw:created', { layer: lyr, layerType: 'polygon' });
     }
+    // A place picked in the search (search.js) becomes the selection the same way.
+    window.arnisSelectBounds = applyBboxFromParent;
+
+    // An outline (GeoJSON Polygon or MultiPolygon, from the shape tool or a search result):
+    // its bounding box becomes the selection and the outline the plan's mask.
+    window.arnisSelectShape = function (geometry) {
+        var b = L.geoJSON(geometry).getBounds();
+        applyBboxFromParent([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()]);
+        setPlanMask(geometry);
+    };
+
+    var pieceLayer = L.layerGroup().addTo(map);
+    var stretchLayer = L.layerGroup().addTo(map);
+    // The colours and line patterns live in piece-style.js, which the legend reads too.
+    var PIECE_COLORS = window.arnisPieceStyle.colors;
+    // How full each state's cup is: a running piece fills to its percent, a finished one to the top.
+    var PIECE_FULL = { done: 1, skipped: 1, failed: 1, stopped: 1 };
+    // A cell's colour and line pattern say its state; its label is the number alone.
+    var PIECE_DASH = window.arnisPieceStyle.dash;
+    var lastPieces = [];
+    var pieceHalo = false;
+    // Below this width on screen (px) a piece shows no number: zoomed out, thousands of numbers
+    // would only clutter the map.
+    var PIECE_LABEL_MIN_PX = 64;
+
+    function pieceElapsed(p) {
+        if (!p.since) return '';
+        var s = Math.max(0, Math.round(((p.end || Date.now()) - p.since) / 1000));
+        return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+    }
+
+    function pieceTip(p) {
+        var row = function(text) {
+            var d = document.createElement('div');
+            d.textContent = text;
+            return d;
+        };
+        var box = document.createElement('div');
+        var running = p.state === 'start' || p.state === 'retry';
+        // Line 1: the state's dot and word (and percent), the piece's name muted after it.
+        var head = row(p.text.state + (running && p.pct != null ? ' ' + p.pct + '%' : ''));
+        head.className = 'piece-tip-head';
+        var dot = document.createElement('i');
+        dot.className = 'piece-tip-dot';
+        dot.style.background = PIECE_COLORS[p.state] || '#8a8a8a';
+        var name = document.createElement('span');
+        name.textContent = p.text.piece;
+        head.prepend(dot);
+        head.appendChild(name);
+        box.appendChild(head);
+        if (p.text.size) box.appendChild(row(p.text.size));
+        if (p.text.worker) box.appendChild(row(p.text.worker));
+        if (p.since) box.appendChild(row(pieceElapsed(p)));
+        if (p.text.error) box.appendChild(row(p.text.error));
+        if (p.text.hint) box.appendChild(row(p.text.hint));
+        if (p.text.openLog) {
+            var open = row(p.text.openLog);
+            open.className = 'piece-tip-log';
+            open.onclick = function(e) {
+                e.stopPropagation();
+                window.parent.postMessage({ type: 'openLog', piece: p.i }, '*');
+            };
+            box.appendChild(open);
+        }
+        return box;
+    }
+
+    // One outline, label and tooltip per piece, kept between records and updated in place: a
+    // progress record every second must not rebuild the map layers or close an open tooltip.
+    var pieceLayers = {};
+    var heldCard = null;
+
+    // At most this many cells are drawn at once: the ones inside the view. Zoomed out past that,
+    // only the job's outline is drawn; zooming in brings the cells back (moveend below).
+    var CELL_CAP = 2000;
+    var cellExtent = null;
+    var cellShade = null;
+    var cellAreaKey = '';
+
+    // The cell select tool: on, the cells picked (plan indexes), a drag in progress, and the button.
+    var cellTool = false;
+    var cellPick = new Set();
+    var cellsRunning = false;
+    var cellDrag = null;
+    var cellBoxLayer = null;
+    var cellBtn = null;
+
+    // A hatched fill for the cells left out of the job; the SVG pattern goes in the cell pane's svg once.
+    function ensureHatch(layer) {
+        var svg = layer._renderer && layer._renderer._container;
+        if (!svg || svg.querySelector('#arnis-hatch')) return;
+        var ns = 'http://www.w3.org/2000/svg';
+        var pat = document.createElementNS(ns, 'pattern');
+        pat.setAttribute('id', 'arnis-hatch');
+        pat.setAttribute('patternUnits', 'userSpaceOnUse');
+        pat.setAttribute('width', '6');
+        pat.setAttribute('height', '6');
+        pat.setAttribute('patternTransform', 'rotate(45)');
+        var line = document.createElementNS(ns, 'line');
+        line.setAttribute('y2', '6');
+        line.setAttribute('stroke', PIECE_COLORS.omitted);
+        line.setAttribute('stroke-width', '2');
+        pat.appendChild(line);
+        var defs = document.createElementNS(ns, 'defs');
+        defs.appendChild(pat);
+        svg.insertBefore(defs, svg.firstChild);
+    }
+
+    function drawPieceOutlines(pieces) {
+        lastPieces = pieces;
+        syncCellTool();
+        // While pieces build, the selection and its handles fade so the pieces read (bbox.css).
+        document.body.classList.toggle('pieces-building', pieces.some(function(p) { return p.state === 'start' || p.state === 'retry'; }));
+        var view = map.getBounds();
+        var inView = window.arnisCellsInView(pieces, [view.getSouth(), view.getWest(), view.getNorth(), view.getEast()], CELL_CAP);
+        var extent = inView.over ? window.arnisCellsExtent(pieces) : null;
+        // One faint dark fill under the whole plan area, so the cells' colours and numbers read
+        // against the map. Below the outlines, gone with the grid.
+        var area = window.arnisCellsExtent(pieces);
+        // Both are drawn again only when they move.
+        var areaKey = String(extent) + '/' + String(area);
+        if (areaKey !== cellAreaKey) {
+            cellAreaKey = areaKey;
+            if (cellExtent) { pieceLayer.removeLayer(cellExtent); cellExtent = null; }
+            if (extent) {
+                cellExtent = L.rectangle([[extent[0], extent[1]], [extent[2], extent[3]]], {
+                    color: PIECE_COLORS.planned, weight: 2, fill: false, interactive: false, pane: 'arnisCells'
+                }).addTo(pieceLayer);
+            }
+            if (cellShade) { pieceLayer.removeLayer(cellShade); cellShade = null; }
+            if (area) {
+                cellShade = L.rectangle([[area[0], area[1]], [area[2], area[3]]], {
+                    stroke: false, fillColor: '#000', fillOpacity: 0.15, interactive: false, pane: 'arnisCells'
+                }).addTo(pieceLayer);
+                cellShade.bringToBack();
+            }
+        }
+        // Past the cap only the job's outline is drawn: a first 2,000 cells would be a patch, not a grid.
+        pieces = inView.over ? [] : inView.cells;
+        var seen = {};
+        var moved = false;
+        pieces.forEach(function(p) {
+            seen[p.i] = true;
+            var color = PIECE_COLORS[p.state] || '#8a8a8a';
+            var running = p.state === 'start' || p.state === 'retry';
+            var retryable = Boolean(p.text.hint);
+            var b = p.bounds;
+            var item = pieceLayers[p.i];
+            if (!item) {
+                moved = true;
+                item = pieceLayers[p.i] = {};
+                item.rect = L.rectangle([[b[0], b[1]], [b[2], b[3]]], { interactive: true, pane: 'arnisCells' }).addTo(pieceLayer);
+                ensureHatch(item.rect);
+                // A failed piece's card holds an "Open log" button, so it must be reachable: it
+                // stays put (not sticky) and closes a moment after the pointer leaves both.
+                // Leaflet registers closeTooltip when binding, so the wrapper goes on first.
+                var closeNow = item.rect.closeTooltip;
+                item.holds = function() {
+                    var tip = item.rect.getTooltip() && item.rect.getTooltip().getElement();
+                    return window.arnisCardHold(Boolean(tip && tip.matches(':hover')), item.leftAt, Date.now());
+                };
+                item.rect.closeTooltip = function() {
+                    if (!item.p.text.openLog) return closeNow.call(item.rect);
+                    clearTimeout(item.closing);
+                    (function poll() {
+                        if (item.holds()) { item.closing = setTimeout(poll, 150); return; }
+                        if (heldCard === item) heldCard = null;
+                        closeNow.call(item.rect);
+                    })();
+                    return item.rect;
+                };
+                item.rect.on('mouseover', function() { item.leftAt = null; });
+                item.rect.on('mouseout', function() { item.leftAt = Date.now(); });
+                item.rect.bindTooltip(pieceTip(p), { sticky: true, interactive: true, className: 'piece-tip' });
+                item.rect.on('tooltipopen', function(e) {
+                    // While the pointer travels to a failed piece's card, a neighbour's card
+                    // does not take its place.
+                    if (heldCard && heldCard !== item && heldCard.holds()) return closeNow.call(item.rect);
+                    // The card is made as it opens: its clock is not redrawn on every record.
+                    item.rect.setTooltipContent(pieceTip(item.p));
+                    if (item.p.text.openLog) heldCard = item;
+                    e.tooltip.options.sticky = !item.p.text.openLog;
+                    e.tooltip.getElement().onmouseleave = function() { item.leftAt = 0; item.rect.closeTooltip(); };
+                });
+                item.rect.on('click', function() {
+                    if (!cellTool && item.p.text.hint) window.parent.postMessage({ type: 'retryPiece', piece: item.p.i }, '*');
+                });
+                item.label = L.tooltip({ permanent: true, direction: 'center', className: 'piece-label', interactive: false, pane: 'arnisCellLabels' })
+                    .setLatLng(item.rect.getBounds().getCenter()).addTo(pieceLayer);
+            }
+            // A plan drawn again may give this number another place: a layer kept by number but
+            // left where it was drew an old plan's piece over the new one's.
+            if (!item.rect.getBounds().equals([[b[0], b[1]], [b[2], b[3]]])) {
+                item.rect.setBounds(L.latLngBounds([b[0], b[1]], [b[2], b[3]]));
+                item.label.setLatLng(item.rect.getBounds().getCenter());
+                item.sig = null;
+                moved = true;
+            }
+            item.p = p;
+            // A cell drawn as it is now is left alone: a large job sends many records a second.
+            var picked = cellPick.has(p.i);
+            var sig = [p.state, p.pct, p.n, picked, p.ring, pieceHalo && p.halo ? p.halo.join() : '', p.since, p.end,
+                p.text.state, p.text.piece, p.text.size, p.text.worker, p.text.error, p.text.hint, p.text.openLog].join('|');
+            if (sig === item.sig) return;
+            item.sig = sig;
+            // A plan's pieces are thin outlines, its ring (margin) fainter and dotted. A job's
+            // pieces are empty cups that fill from the bottom.
+            // Outside the outline: a plan's piece, greyed, that is not built.
+            // Room to grow (within 5% stretch): grey, dotted, empty.
+            var excluded = p.state === 'excluded';
+            var room = p.state === 'room';
+            var planned = p.state === 'planned' || excluded || room;
+            // A picked cell: the pick colour, a thick line and a fill. A skipped one is hatched.
+            item.rect.setStyle({
+                color: picked ? PIECE_COLORS.picked : color,
+                weight: picked ? 4 : room ? 1.5 : planned ? 1 : p.state === 'failed' ? 3 : 2,
+                fillColor: picked ? PIECE_COLORS.picked : p.state === 'omitted' ? 'url(#arnis-hatch)' : color,
+                opacity: room ? 0.9 : 1,
+                fillOpacity: picked ? 0.3 : p.state === 'omitted' ? 0.9 : excluded ? 0.3 : room ? 0 : planned ? (p.ring ? 0.03 : 0.08) : 0,
+                dashArray: picked ? null : room ? PIECE_DASH.room : planned && p.ring ? PIECE_DASH.ring : PIECE_DASH[p.state] || null
+            });
+            var full = running ? (p.pct || 0) / 100 : PIECE_FULL[p.state] || 0;
+            if (full > 0) {
+                var cup = [[b[0], b[1]], [b[0] + (b[2] - b[0]) * Math.min(1, full), b[3]]];
+                if (!item.fill) item.fill = L.rectangle(cup, { stroke: false, interactive: false, fillOpacity: 0.35, pane: 'arnisCells' }).addTo(pieceLayer);
+                else item.fill.setBounds(cup);
+                item.fill.setStyle({ fillColor: color });
+            } else if (item.fill) {
+                pieceLayer.removeLayer(item.fill);
+                item.fill = null;
+            }
+            var path = item.rect.getElement();
+            if (path) {
+                path.classList.toggle('piece-running', running);
+                path.classList.toggle('piece-retryable', retryable);
+            }
+            item.rect.setTooltipContent(pieceTip(p));
+            item.label.setContent(p.n + (running && p.pct != null ? ' ' + p.pct + '%' : ''));
+            if (item.halo) { pieceLayer.removeLayer(item.halo); item.halo = null; }
+            if (pieceHalo && p.halo) {
+                item.halo = L.rectangle([[p.halo[0], p.halo[1]], [p.halo[2], p.halo[3]]], {
+                    color: color, weight: 1, opacity: 0.4, fill: false, dashArray: PIECE_DASH.halo, interactive: false, pane: 'arnisCells'
+                }).addTo(pieceLayer);
+            }
+        });
+        Object.keys(pieceLayers).forEach(function(i) {
+            if (seen[i]) return;
+            var item = pieceLayers[i];
+            [item.rect, item.label, item.halo, item.fill].forEach(function(l) { if (l) pieceLayer.removeLayer(l); });
+            heldCard = window.arnisCardDrop(item, heldCard);
+            delete pieceLayers[i];
+        });
+        if (moved) updatePieceLabels();
+        applyBalance();
+        updateSliderVisibility();
+    }
+
+    // A label stays out of a piece too small on screen to hold it (its shorter side counts).
+    function updatePieceLabels() {
+        Object.keys(pieceLayers).forEach(function(i) {
+            var item = pieceLayers[i];
+            var sw = map.latLngToContainerPoint(item.rect.getBounds().getSouthWest());
+            var ne = map.latLngToContainerPoint(item.rect.getBounds().getNorthEast());
+            var side = Math.min(Math.abs(ne.x - sw.x), Math.abs(ne.y - sw.y));
+            var el = item.label.getElement();
+            if (!el) return;
+            el.classList.toggle('piece-label-off', side < PIECE_LABEL_MIN_PX || item.p.n === '');
+            // The number grows with the piece on screen.
+            var size = Math.max(14, Math.min(30, Math.round(side / 4))) + 'px';
+            // Re-centred only when the size changes: Leaflet centres by the label's width.
+            if (el.style.fontSize !== size) {
+                el.style.fontSize = size;
+                item.label.update();
+            }
+        });
+    }
+    map.on('zoomend', updatePieceLabels);
+    map.on('moveend', function() { if (lastPieces.length) drawPieceOutlines(lastPieces); });
 
     // Listen for messages from parent window
     window.addEventListener('message', function(event) {
@@ -1555,6 +1979,38 @@ $(document).ready(function () {
             }
         }
 
+        // A job built in pieces: one outline per piece, coloured by its state.
+        // The window could not use the outline: take it off the map.
+        if (event.data && event.data.type === 'planMask' && !event.data.geojson) {
+            setPlanMask(null);
+        }
+
+        if (event.data && event.data.type === 'pieceOutlines') {
+            cellsRunning = Boolean(event.data.running);
+            drawPieceOutlines(event.data.pieces || []);
+        }
+
+        // Esc in the window clears the picked cells too.
+        if (event.data && event.data.type === 'cellsClear') {
+            pickCells(new Set());
+        }
+
+        // A One World's stretch limits: dashed lines across the map at 5% and 10%.
+        if (event.data && event.data.type === 'stretchLines') {
+            stretchLayer.clearLayers();
+            (event.data.lines || []).forEach(function(l) {
+                L.polyline([[l.lat, -180], [l.lat, 180]], { color: l.color, weight: 2, opacity: 0.9, dashArray: PIECE_DASH.stretch, interactive: false }).addTo(stretchLayer);
+                L.tooltip({ permanent: true, direction: 'top', className: 'piece-label', interactive: false })
+                    .setLatLng([l.lat, l.lon]).setContent(l.label).addTo(stretchLayer);
+            });
+        }
+
+        // The faint border around each piece, off until the user asks for it.
+        if (event.data && event.data.type === 'pieceHalo') {
+            pieceHalo = Boolean(event.data.on);
+            drawPieceOutlines(lastPieces);
+        }
+
         // Handle world changed (disable preview)
         if (event.data && event.data.type === 'worldChanged') {
             disableWorldPreview();
@@ -1576,7 +2032,7 @@ $(document).ready(function () {
                 if (worldPreviewAvailable && !oneWorldOverlayHidden) {
                     toggleWorldOverlay();
                 }
-                if (worldPath !== oneWorldFittedPath) {
+                if (globalThis.arnisShouldFit(worldPath, oneWorldFittedPath, event.data.refit)) {
                     var bounds = oneWorldBounds(areas);
                     if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
                 }
@@ -1588,10 +2044,32 @@ $(document).ready(function () {
             setLivePlayers(event.data.active, event.data.canTeleport, event.data.players);
         }
 
-        // One World keeps rotation at 0, and its areas are rectangles.
+        // Advanced features on: a country or region found by the search can be selected whole.
+        if (event.data && event.data.type === 'meldFeatures') {
+            var was = window.arnisMeldOn;
+            window.arnisMeldOn = Boolean(event.data.on);
+            window.arnisWorldScale = Number(event.data.scale) || 1;
+            window.arnisSnapOn = Boolean(event.data.snap);
+            // The map-first page's look (hover font, previews under the selection); Classic keeps its own.
+            window.arnisMapFirst = Boolean(event.data.mapFirst);
+            document.body.classList.toggle('map-first', window.arnisMapFirst);
+            if (!window.arnisMeldOn && planMask) setPlanMask(null);
+            if (was !== window.arnisMeldOn) {
+                refreshBboxHandles();
+                syncSliderMode();
+            }
+        }
+
+        // One World keeps rotation at 0.
         if (event.data && event.data.type === 'setRotationLocked') {
             setRotationLocked(!!event.data.locked);
-            setShapesLocked(!!event.data.locked);
+        }
+        // One World takes rectangles only ('locked'); with Advanced features it builds the
+        // rectangle around the shapes ('rect'), and in pieces keeps them ('pieces').
+        if (event.data && event.data.type === 'setShapesMode') {
+            _shapesMode = event.data.mode || '';
+            setShapesLocked(_shapesMode === 'locked');
+            refreshShapesRect();
         }
 
         // Handle rotation preview angle update (store it for preview-skip logic)
@@ -1680,6 +2158,12 @@ $(document).ready(function () {
         return out;
     }
 
+    // The selection when it is one rectangle, which the Advanced handles work on; else null.
+    function _getBboxRect() {
+        var areas = areaLayers();
+        return areas.length === 1 && areas[0] instanceof L.Rectangle ? areas[0] : null;
+    }
+
     function ringOf(layer) {
         var ll = layer.getLatLngs();
         return L.LineUtil.isFlat(ll) ? ll : ll[0];
@@ -1688,8 +2172,8 @@ $(document).ready(function () {
     // [lat, lng] points on the map copy around longitude 0; null across the 180° meridian.
     function normalizedRing(layer) {
         var ring = ringOf(layer);
-        var west = Infinity, east = -Infinity;
-        ring.forEach(function (p) { west = Math.min(west, p.lng); east = Math.max(east, p.lng); });
+        var box = L.latLngBounds(ring);
+        var west = box.getWest(), east = box.getEast();
         var shift = -360 * Math.round((west + east) / 720);
         if (west + shift < -180 || east + shift > 180) return null;
         return ring.map(function (p) { return [p.lat, p.lng + shift]; });
@@ -1697,13 +2181,13 @@ $(document).ready(function () {
 
     // Whether these areas, moved onto the copy around longitude 0, span at most 180° together.
     function fitOneSide(areas) {
-        var west = Infinity, east = -Infinity;
+        var all = L.latLngBounds([]);
         for (var i = 0; i < areas.length; i++) {
             var ring = normalizedRing(areas[i]);
             if (!ring) return false;
-            ring.forEach(function (p) { west = Math.min(west, p[1]); east = Math.max(east, p[1]); });
+            all.extend(L.latLngBounds(ring));
         }
-        return east - west <= 180;
+        return !all.isValid() || all.getEast() - all.getWest() <= 180;
     }
 
     // Earth's "extensive" size tier at scale 1, in m²: past it, a mostly empty rectangle is refused.
@@ -1714,21 +2198,18 @@ $(document).ready(function () {
     function tooFarApart(areas) {
         if (areas.length < 2 || currentBody !== 'earth') return false;
         var rad = Math.PI / 180, R = 6371000;
-        var size = function (s, w, n, e) {
-            return R * R * (n - s) * rad * (e - w) * rad * Math.cos((s + n) / 2 * rad);
+        var size = function (b) {
+            return R * R * (b.getNorth() - b.getSouth()) * rad * (b.getEast() - b.getWest()) * rad * Math.cos((b.getSouth() + b.getNorth()) / 2 * rad);
         };
-        var own = 0, all = [90, 180, -90, -180];
+        var own = 0, all = L.latLngBounds([]);
         for (var i = 0; i < areas.length; i++) {
             var ring = normalizedRing(areas[i]);
             if (!ring) return false;
-            var b = [90, 180, -90, -180];
-            ring.forEach(function (p) {
-                b = [Math.min(b[0], p[0]), Math.min(b[1], p[1]), Math.max(b[2], p[0]), Math.max(b[3], p[1])];
-            });
-            own += size(b[0], b[1], b[2], b[3]);
-            all = [Math.min(all[0], b[0]), Math.min(all[1], b[1]), Math.max(all[2], b[2]), Math.max(all[3], b[3])];
+            var b = L.latLngBounds(ring);
+            own += size(b);
+            all.extend(b);
         }
-        var total = size(all[0], all[1], all[2], all[3]);
+        var total = size(all);
         return total > FAR_APART_M2 && total > 2 * own;
     }
 
@@ -1789,8 +2270,19 @@ $(document).ready(function () {
         _drawing = false;
         if (_boxZoomWasOn) map.boxZoom.enable();
     });
+    // What the legend (meld-features.js) may show: the selection, a box being drawn, and the boxes of
+    // land the world holds (the One World preview).
+    window.arnisLegendState = function () {
+        return {
+            selection: drawnItems.getLayers().length > 0,
+            drawing: _drawing,
+            rect: Boolean(shapesRectLayer),
+            held: Boolean(worldOverlayEnabled && worldOverlayData && worldOverlayData.areas),
+            picked: cellPick.size > 0
+        };
+    };
 
-    // One World and live mode generate rectangles only.
+    // One World and live mode generate rectangles only (with Advanced features off).
     var _shapesLocked = false;
 
     // Custom icon for drawn markers
@@ -1839,7 +2331,7 @@ $(document).ready(function () {
                     weight: 3,
                     fillColor: '#fecc44',
                     fillOpacity: 0.1,
-                    dashArray: '10, 10',
+                    dashArray: window.arnisPieceStyle.selectionDash,
                     lineCap: 'round',
                     lineJoin: 'round'
                 },
@@ -1856,7 +2348,7 @@ $(document).ready(function () {
                     weight: 3,
                     fillColor: '#fecc44',
                     fillOpacity: 0.1,
-                    dashArray: '10, 10',
+                    dashArray: window.arnisPieceStyle.selectionDash,
                     lineCap: 'round',
                     lineJoin: 'round'
                 },
@@ -1913,19 +2405,21 @@ $(document).ready(function () {
 
     function describeTool(btn) {
         var c = btn.classList;
-        var addHint = mapText('map_tool_add_hint', 'Hold Shift while drawing to add it to the selection.');
+        var addHint = mapText('map_tool_add_hint', 'Hold Shift while drawing to add the shape to the selection.');
         if (c.contains('leaflet-draw-draw-rectangle')) {
             return {
                 name: mapText('map_tool_area', 'Select area'),
-                desc: mapText('map_tool_area_desc', 'Drag over the map to choose what gets generated.') +
-                    (_shapesLocked ? '' : ' ' + addHint)
+                desc: mapText('map_tool_area_desc', 'Drag over the map to choose what gets generated.') + (_shapesLocked ? '' : ' ' + addHint)
             };
         }
         if (c.contains('leaflet-draw-draw-polygon')) {
             return {
                 name: mapText('map_tool_shape', 'Draw a shape'),
-                desc: mapText('map_tool_shape_desc', 'Click around the area to generate exactly that outline.') + ' ' + addHint,
-                note: _shapesLocked ? mapText('map_tool_shape_one_world', 'One World generates rectangles only.') : ''
+                desc: (_shapesMode === 'rect' ? '' : (_shapesMode === 'pieces'
+                    ? mapText('map_tool_shape_pieces_desc', 'A cell the shape touches is built in full.')
+                    : mapText('map_tool_shape_desc', 'Click around the area to generate exactly that outline.')) + ' ') + addHint,
+                note: _shapesLocked ? mapText('map_tool_shape_rectangles_only', 'One World generates rectangles only.')
+                    : _shapesMode === 'rect' ? mapText('map_tool_shape_one_world', 'One World builds the rectangle around the shape. Building in cells keeps the shape itself.') : ''
             };
         }
         if (c.contains('leaflet-draw-draw-polyline')) {
@@ -1933,6 +2427,13 @@ $(document).ready(function () {
                 name: mapText('map_tool_rotation', 'Rotation angle'),
                 desc: mapText('map_tool_rotation_desc', 'Draw a line along a street to line the world up with it.'),
                 note: _rotationLocked ? mapText('map_tool_rotation_one_world', 'Off in One World mode.') : ''
+            };
+        }
+        if (c.contains('leaflet-draw-draw-cells')) {
+            return {
+                name: mapText('map_tool_cells', 'Select cells'),
+                desc: mapText('map_tool_cells_desc', 'Click a cell or drag a box. Shift or Ctrl adds. Right-click for actions. Esc clears.'),
+                note: cellPick.size ? cellCount(cellPick.size) : ''
             };
         }
         if (c.contains('leaflet-draw-draw-marker')) {
@@ -1945,7 +2446,8 @@ $(document).ready(function () {
             return {
                 name: mapText('map_tool_clear', 'Clear selection'),
                 desc: mapText('map_tool_clear_desc', 'Removes the selected area and the spawn point.'),
-                note: drawnItems.getLayers().length ? '' : mapText('map_tool_clear_empty', 'Nothing is selected yet.')
+                note: !drawnItems.getLayers().length ? mapText('map_tool_clear_empty', 'Nothing is selected yet.')
+                    : window.arnisMeldOn ? mapText('map_tool_clear_hold', 'Hold to clear') : ''
             };
         }
         if (btn.id === 'world-preview-btn') {
@@ -2271,6 +2773,90 @@ $(document).ready(function () {
         }
     })();
 
+    // The select tool for cells: in the top toolbar with the draw tools; shown only while the map has cells.
+    (function addCellToolButton() {
+        var drawToolbar = document.querySelector('.leaflet-draw-toolbar.leaflet-draw-toolbar-top');
+        if (!drawToolbar) return;
+        var btn = L.DomUtil.create('a', 'leaflet-draw-draw-cells', drawToolbar);
+        btn.href = '#';
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('aria-pressed', 'false');
+        btn.style.display = 'none';
+        L.DomEvent
+            .on(btn, 'click mousedown dblclick', L.DomEvent.stopPropagation)
+            .on(btn, 'click', L.DomEvent.preventDefault)
+            .on(btn, 'click', function() { setCellTool(!cellTool); });
+        cellBtn = btn;
+        refreshToolLabel(btn);
+    })();
+
+    // Whether the map has cells to pick: the plan's or a job's own, not the grey ones around.
+    function syncCellTool() {
+        if (!cellBtn) return;
+        var any = lastPieces.some(window.arnisCells.pickable);
+        cellBtn.style.display = any ? '' : 'none';
+        if (!any) setCellTool(false);
+        var ids = {};
+        lastPieces.forEach(function(p) { ids[p.i] = true; });
+        var size = cellPick.size;
+        cellPick.forEach(function(i) { if (!ids[i]) cellPick.delete(i); });
+        if (cellPick.size !== size) window.parent.postMessage({ type: 'cellsPicked', n: cellPick.size }, '*');
+    }
+
+    function setCellTool(on) {
+        if (on === cellTool) return;
+        cellTool = on;
+        cellBtn.classList.toggle('leaflet-draw-toolbar-button-enabled', on);
+        cellBtn.setAttribute('aria-pressed', String(on));
+        map.getContainer().classList.toggle('cell-tool', on);
+        if (!on) pickCells(new Set());
+        refreshToolLabel(cellBtn);
+    }
+
+    // The picked cells change: draw them, say so to the window (the legend), refresh the tool's note.
+    function pickCells(set) {
+        if (set.size === cellPick.size && Array.from(set).every(function(i) { return cellPick.has(i); })) return;
+        cellPick = set;
+        drawPieceOutlines(lastPieces);
+        window.parent.postMessage({ type: 'cellsPicked', n: set.size }, '*');
+        refreshToolLabel(cellBtn);
+    }
+
+    // A draw tool and the select tool do not run together.
+    map.on('draw:drawstart', function() { setCellTool(false); });
+
+    // Click picks a cell, a drag a box of cells (by plan geometry, so cells not drawn at this zoom
+    // count); Shift or Ctrl adds. Caught before the map sees the press, so the map does not pan.
+    map.getContainer().addEventListener('mousedown', function(e) {
+        if (!cellTool || e.button !== 0 || e.target.closest('.leaflet-control-container, .map-tool-tip, .piece-tip')) return;
+        e.stopPropagation();
+        e.preventDefault();
+        cellDrag = { x: e.clientX, y: e.clientY, from: map.mouseEventToLatLng(e), add: e.shiftKey || e.ctrlKey || e.metaKey, moved: false };
+    }, true);
+    document.addEventListener('mousemove', function(e) {
+        if (!cellDrag) return;
+        if (!cellDrag.moved && Math.hypot(e.clientX - cellDrag.x, e.clientY - cellDrag.y) < 4) return;
+        cellDrag.moved = true;
+        var box = L.latLngBounds(cellDrag.from, map.mouseEventToLatLng(e));
+        if (cellBoxLayer) cellBoxLayer.setBounds(box);
+        else cellBoxLayer = L.rectangle(box, { color: PIECE_COLORS.picked, weight: 1, dashArray: '4 4', fillOpacity: 0.1, interactive: false }).addTo(map);
+    });
+    document.addEventListener('mouseup', function(e) {
+        if (!cellDrag) return;
+        var drag = cellDrag;
+        cellDrag = null;
+        if (cellBoxLayer) { map.removeLayer(cellBoxLayer); cellBoxLayer = null; }
+        var to = map.mouseEventToLatLng(e);
+        var hits = drag.moved
+            ? window.arnisCells.inBox(lastPieces, [drag.from.lat, drag.from.lng, to.lat, to.lng])
+            : [window.arnisCells.at(lastPieces, drag.from.lat, drag.from.lng)].filter(function(i) { return i >= 0; });
+        pickCells(window.arnisCells.pick(cellPick, hits, drag.add));
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') hideContextMenu();
+        pickCells(window.arnisCells.key(e, cellPick));
+    });
+
     // Hint at the bottom-center of the map, shown until the first area is
     // selected (see areaToolLearned)
     var hintDiv = document.createElement('div');
@@ -2312,17 +2898,23 @@ $(document).ready(function () {
         drawnItems.on('layeradd layerremove', syncState);
         syncState();
 
+        function clearAll() {
+            var removed = L.layerGroup();
+            drawnItems.eachLayer(function (l) { removed.addLayer(l); });
+            if (removed.getLayers().length === 0) return;
+            // The existing draw:deleted handler removes the layers, resets
+            // the bounds, notifies the parent and refreshes the handles.
+            map.fire('draw:deleted', { layers: removed });
+        }
+        // A click clears; with Advanced features the button has to be held (arnisClearHoldMs),
+        // with a fill growing on it, and letting go early cancels.
         L.DomEvent
             .on(btn, 'mousedown dblclick', L.DomEvent.stopPropagation)
             .on(btn, 'click', L.DomEvent.stop)
-            .on(btn, 'click', function () {
-                var removed = L.layerGroup();
-                drawnItems.eachLayer(function (l) { removed.addLayer(l); });
-                if (removed.getLayers().length === 0) return;
-                // The existing draw:deleted handler removes the layers, resets
-                // the bounds, notifies the parent and refreshes the handles.
-                map.fire('draw:deleted', { layers: removed });
-            });
+            .on(btn, 'click', function () { if (!window.arnisMeldOn) clearAll(); });
+        window.arnisHold(btn, clearAll, window.arnisClearHoldMs, function () {
+            return !window.arnisMeldOn || btn.classList.contains('leaflet-disabled');
+        });
     })();
 
     // Terrain preview button: usable once the selected bbox fits the 3D
@@ -2399,6 +2991,8 @@ $(document).ready(function () {
     */
     startBounds = new L.LatLngBounds([0.0, 0.0], [0.0, 0.0]);
     var bounds = new L.Rectangle(startBounds, {
+        // bbox.css fades it while pieces build.
+        className: 'bbox-selection',
         color: '#fecc44',
         opacity: 1.0,
         weight: 3,
@@ -2452,7 +3046,7 @@ $(document).ready(function () {
             showRotationToast(mapText('map_shape_date_line', 'Draw the area on one side of the 180° meridian.'));
         } else if (tooFarApart(areas)) {
             // Moved apart by a handle: kept, but said.
-            showRotationToast(mapText('map_shape_too_far', 'Too far from the other areas: everything between them would be generated too. Make it a world of its own.'));
+            showRotationToast(mapText('map_shape_too_far', 'Too far from the other areas. Everything between them would be generated too. Make it a world of its own.'));
         }
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
@@ -2462,6 +3056,7 @@ $(document).ready(function () {
     function clearBboxHandles() {
         _bboxHandles.forEach(function (h) { map.removeLayer(h); });
         _bboxHandles = [];
+        sizeLabel = null;
     }
 
     function addMoveHandle(layer, center, moveTo) {
@@ -2489,6 +3084,26 @@ $(document).ready(function () {
         _bboxHandles.push(mover);
     }
 
+    // Snap to Pieces on: a dragged selection changes in whole regions (a region is 512 blocks,
+    // 512 / scale metres), so what is drawn is what the build covers.
+    function regionDegrees(lat) {
+        var side = 512 / (window.arnisWorldScale || 1);
+        return [side / map.distance([lat, 0], [lat + 1, 0]), side / map.distance([lat, 0], [lat, 1])];
+    }
+    function snapShift(dLat, dLng, lat) {
+        if (!window.arnisMeldOn || !window.arnisSnapOn) return [dLat, dLng];
+        var r = regionDegrees(lat);
+        return [arnisSnap.shift(dLat, r[0]), arnisSnap.shift(dLng, r[1])];
+    }
+    // `p` dragged against the fixed edge or corner (a null axis is not constrained).
+    function snapPoint(fixedLat, fixedLng, p) {
+        if (!window.arnisMeldOn || !window.arnisSnapOn) return p;
+        var r = regionDegrees(fixedLat === null ? p.lat : fixedLat);
+        return L.latLng(
+            fixedLat === null ? p.lat : fixedLat + arnisSnap.span(p.lat - fixedLat, r[0]),
+            fixedLng === null ? p.lng : fixedLng + arnisSnap.span(p.lng - fixedLng, r[1]));
+    }
+
     function addRectHandles(rect) {
         var b = rect.getBounds();
         var corners = [
@@ -2510,7 +3125,8 @@ $(document).ready(function () {
                 fixedCorner = rect.getBounds()[c.opp]();
             });
             marker.on('drag', function (ev) {
-                rect.setBounds(new L.LatLngBounds(fixedCorner, ev.target.getLatLng()));
+                rect.setBounds(new L.LatLngBounds(fixedCorner, snapPoint(fixedCorner.lat, fixedCorner.lng, ev.target.getLatLng())));
+                liveSelection(rect);
             });
             marker.on('dragend', function () {
                 syncSelection();
@@ -2524,10 +3140,13 @@ $(document).ready(function () {
         addMoveHandle(rect, b.getCenter(), {
             start: function () { startB = rect.getBounds(); },
             by: function (dLat, dLng) {
+                var d = snapShift(dLat, dLng, startB.getCenter().lat);
+                dLat = d[0]; dLng = d[1];
                 rect.setBounds(new L.LatLngBounds(
                     [startB.getSouth() + dLat, startB.getWest() + dLng],
                     [startB.getNorth() + dLat, startB.getEast() + dLng]
                 ));
+                liveSelection(rect);
             },
             end: function () {}
         });
@@ -2562,7 +3181,117 @@ $(document).ready(function () {
             if (layer instanceof L.Rectangle) addRectHandles(layer);
             else addShapeHandles(layer);
         });
+        if (window.arnisMeldOn && _getBboxRect()) meldHandles(_getBboxRect());
     }
+
+    // ---- Advanced features: edge handles, move from inside, a size readout, a live plan ----
+
+    // Each edge's midpoint moves that edge alone.
+    // [edge, the opposite edge, axis]: the axis is the one the edge moves along.
+    var EDGES = [['North', 'South', 'ns'], ['South', 'North', 'ns'], ['East', 'West', 'ew'], ['West', 'East', 'ew']].map(function (d) {
+        var lat = d[2] === 'ns';
+        return {
+            cls: d[2],
+            at: function (b) { var v = b['get' + d[0]](); return lat ? [v, b.getCenter().lng] : [b.getCenter().lat, v]; },
+            set: function (b, p) {
+                var o = { South: b.getSouth(), West: b.getWest(), North: b.getNorth(), East: b.getEast() };
+                o[d[0]] = lat ? p.lat : p.lng;
+                return [[o.South, o.West], [o.North, o.East]];
+            },
+            fix: function (b) { var v = b['get' + d[1]](); return lat ? [v, null] : [null, v]; }
+        };
+    });
+    var sizeLabel = null;
+    var liveSync = 0;
+
+    function meldHandles(rect) {
+        var b = rect.getBounds();
+        EDGES.forEach(function (e) {
+            var icon = L.divIcon({ className: 'bbox-handle bbox-handle-' + e.cls, iconSize: [10, 10], iconAnchor: [5, 5] });
+            var marker = L.marker(e.at(b), { icon: icon, draggable: true, zIndexOffset: 2000 });
+            var start = null;
+            marker.on('dragstart', function () { start = rect.getBounds(); });
+            marker.on('drag', function (ev) {
+                var f = e.fix(start);
+                rect.setBounds(L.latLngBounds(e.set(start, snapPoint(f[0], f[1], ev.target.getLatLng()))));
+                liveSelection(rect);
+            });
+            marker.on('dragend', function () {
+                syncSelection();
+                refreshBboxHandles();
+            });
+            marker.addTo(map);
+            _bboxHandles.push(marker);
+        });
+    }
+
+    // "3.2 × 2.1 km · about 42 regions" at the world scale the window last sent.
+    function sizeText(b) {
+        var mid = b.getCenter().lat;
+        var w = map.distance([mid, b.getWest()], [mid, b.getEast()]);
+        var h = map.distance([b.getSouth(), b.getWest()], [b.getNorth(), b.getWest()]);
+        var side = 512 / (window.arnisWorldScale || 1);
+        return mapText('map_selection_size', '{w} × {h} km · about {r} regions')
+            .replace('{w}', (w / 1000).toFixed(1)).replace('{h}', (h / 1000).toFixed(1))
+            .replace('{r}', Math.ceil(w / side) * Math.ceil(h / side));
+    }
+
+    // While a handle drags: the readout follows, and with Advanced features the window gets the
+    // selection once a second (and at the end), so the planned pieces follow without a plan
+    // request on every move.
+    function liveSelection(rect) {
+        if (!window.arnisMeldOn || _getBboxRect() !== rect) return;
+        var b = rect.getBounds();
+        // Shown while dragging only: at rest it would sit over the ring's piece numbers.
+        if (!sizeLabel) {
+            sizeLabel = L.tooltip({ permanent: true, direction: 'top', className: 'bbox-size', interactive: false, offset: [0, -6] });
+            sizeLabel.setLatLng([b.getNorth(), b.getCenter().lng]).addTo(map);
+            _bboxHandles.push(sizeLabel);
+        }
+        sizeLabel.setLatLng([b.getNorth(), b.getCenter().lng]).setContent(sizeText(b));
+        var now = Date.now();
+        if (now - liveSync < 1000) return;
+        liveSync = now;
+        syncSelection();
+    }
+
+    // Advanced features: a drag that starts inside the selection moves it, while all of it is on
+    // screen; zoomed into a big one, the drag pans the map.
+    var inside = null;
+    map.on('mousedown', function (ev) {
+        var rect = window.arnisMeldOn && _getBboxRect();
+        if (!rect || !rect.getBounds().contains(ev.latlng) || ev.originalEvent.button !== 0) return;
+        if (!map.getBounds().contains(rect.getBounds())) return;
+        if (drawControl && drawControl._toolbars && (drawControl._toolbars.draw || {})._activeMode) return;
+        inside = { from: ev.latlng, b: rect.getBounds(), rect: rect };
+        map.dragging.disable();
+    });
+    map.on('mousemove', function (ev) {
+        if (!inside) return;
+        // The button went up where the map did not see it (another frame, outside the window).
+        if (!(ev.originalEvent.buttons & 1)) return endMove();
+        var b = inside.b;
+        var d = snapShift(ev.latlng.lat - inside.from.lat, ev.latlng.lng - inside.from.lng, b.getCenter().lat);
+        var dLat = d[0], dLng = d[1];
+        inside.rect.setBounds(L.latLngBounds([b.getSouth() + dLat, b.getWest() + dLng], [b.getNorth() + dLat, b.getEast() + dLng]));
+        if (!inside.moved) clearBboxHandles();
+        inside.moved = true;
+        liveSelection(inside.rect);
+    });
+    function endMove() {
+        if (!inside) return;
+        var moved = inside.moved;
+        var rect = inside.rect;
+        inside = null;
+        map.dragging.enable();
+        // A click (say on a failed piece, to retry it) moved nothing.
+        if (!moved) return;
+        syncSelection();
+        refreshBboxHandles();
+    }
+    map.on('mouseup', endMove);
+    document.addEventListener('mouseup', endMove);
+    window.addEventListener('blur', endMove);
 
     // Show a brief toast notification on the map
     function showRotationToast(message) {
@@ -2592,7 +3321,7 @@ $(document).ready(function () {
             return;
         }
         if (adding && tooFarApart(together)) {
-            showRotationToast(mapText('map_shape_too_far', 'Too far from the other areas: everything between them would be generated too. Make it a world of its own.'));
+            showRotationToast(mapText('map_shape_too_far', 'Too far from the other areas. Everything between them would be generated too. Make it a world of its own.'));
             return;
         }
 
@@ -2631,6 +3360,8 @@ $(document).ready(function () {
         }
 
         drawnItems.addLayer(e.layer);
+        // bbox.css fades it while pieces build.
+        if (e.layer.getElement && e.layer.getElement()) e.layer.getElement().classList.add('bbox-selection');
 
         if (area) syncSelection();
 
@@ -2750,19 +3481,42 @@ $(document).ready(function () {
 function notifyBboxUpdate() {
     var shapes = typeof window.arnisSelectionShapes === 'function' ? window.arnisSelectionShapes() : null;
     var bboxText = document.getElementById('boxbounds').textContent;
+    // Moved, resized, redrawn or cleared: the outline belonged to the old selection.
+    if (planMask && planMask.bboxText !== bboxText) setPlanMask(null);
     // Shapes on another map copy move back into range, with their rectangle.
     if (shapes) {
-        var s = 90, w = 180, n = -90, e = -180;
-        shapes.forEach(function (ring) {
-            ring.forEach(function (p) {
-                s = Math.min(s, p[0]); n = Math.max(n, p[0]);
-                w = Math.min(w, p[1]); e = Math.max(e, p[1]);
-            });
-        });
-        bboxText = [s, w, n, e].map(function (v) { return v.toFixed(6); }).join(' ');
+        bboxText = window.arnisShapesRect(shapes).map(function (v) { return v.toFixed(6); }).join(' ');
     }
     window.parent.postMessage({ bboxText: bboxText, shapes: shapes }, '*');
+    refreshShapesRect();
     updateTerrainPreviewButton();
+}
+
+// One World not in pieces builds the rectangle around the shapes: shown dashed while it does.
+var shapesRectLayer = null;
+var _shapesMode = ''; // 'locked' | 'rect' (built as that rectangle) | 'pieces' | '' (One World off)
+function refreshShapesRect() {
+    if (shapesRectLayer) map.removeLayer(shapesRectLayer);
+    shapesRectLayer = null;
+    var shapes = typeof window.arnisSelectionShapes === 'function' ? window.arnisSelectionShapes() : null;
+    if (_shapesMode !== 'rect' || !shapes) return;
+    var r = window.arnisShapesRect(shapes);
+    shapesRectLayer = L.rectangle([[r[0], r[1]], [r[2], r[3]]], {
+        interactive: false, fill: false, weight: 2,
+        color: window.arnisPieceStyle.selection, dashArray: window.arnisPieceStyle.selectionDash
+    }).addTo(map);
+}
+
+// The outline the selection was made from, drawn on the map and sent to the window, which
+// passes it to a job in pieces as --plan-mask. null: none.
+var planMask = null;
+function setPlanMask(geometry) {
+    if (planMask) map.removeLayer(planMask.layer);
+    planMask = geometry ? {
+        bboxText: document.getElementById('boxbounds').textContent,
+        layer: L.geoJSON(geometry, { interactive: false, style: { color: window.arnisPieceStyle.mask, weight: 2, fillOpacity: 0.05 } }).addTo(map)
+    } : null;
+    window.parent.postMessage({ type: 'planMask', geojson: geometry || null }, '*');
 }
 
 // Max bbox area for the 3D terrain preview; mirrors MINI_MAX_AREA_M2 in preview3d.js.

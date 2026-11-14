@@ -61,6 +61,7 @@
 /* Sidebar */
 
 .settings-sidebar {
+  position: relative;
   width: 250px;
   flex-shrink: 0;
   display: flex;
@@ -151,6 +152,59 @@
   color: rgba(28, 28, 28, 0.72);
 }
 
+/* Search field above the sections; a setting or section it does not match is hidden. */
+.settings-search {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.settings-search input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 10px 0 32px;
+  border: 1px solid var(--ui-field-border);
+  border-radius: 8px;
+  background: var(--ui-field);
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-search input::-webkit-search-decoration,
+.settings-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.settings-search input:focus-visible {
+  outline: none;
+  border-color: var(--ui-accent);
+}
+
+.settings-search .icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  transform: translateY(-50%);
+  color: var(--ui-muted);
+  pointer-events: none;
+}
+
+.settings-content .search-miss {
+  display: none !important;
+}
+
+.settings-search-empty {
+  margin: 0;
+  padding: 28px 0;
+  color: var(--ui-muted);
+  text-align: center;
+}
+
 /* Marks a section that holds a setting changed from its default. Out of the
    flow, so it costs the subtitle no width. */
 .settings-nav-dot {
@@ -230,22 +284,6 @@
   flex-shrink: 0;
   padding: 16px 28px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.settings-topbar-icon {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  flex-shrink: 0;
-  border-radius: 10px;
-  background: var(--ui-accent-soft);
-  color: var(--ui-accent);
-}
-
-.settings-topbar-icon .icon {
-  width: 24px;
-  height: 24px;
 }
 
 .settings-topbar-text {
@@ -438,6 +476,31 @@ label[for].setting-label {
   overflow-wrap: anywhere;
 }
 
+/* The icons after a name never wrap alone: the name's last line keeps room for them, and they sit in it. */
+.setting-heading > [data-localize]:has(+ .tooltip-icon) {
+  padding-right: 22px;
+}
+
+.setting-heading > [data-localize]:has(+ .tooltip-icon + .setting-revert) {
+  padding-right: 50px;
+}
+
+.setting-heading > [data-localize]:has(+ .setting-revert) {
+  padding-right: 28px;
+}
+
+.setting-heading > [data-localize]:has(+ .tooltip-icon) + .tooltip-icon {
+  margin-left: -20px;
+}
+
+.setting-heading > [data-localize]:has(+ .tooltip-icon + .setting-revert) + .tooltip-icon {
+  margin-left: -48px;
+}
+
+.setting-heading > [data-localize]:has(+ .setting-revert) + .setting-revert {
+  margin-left: -22px;
+}
+
 .setting-heading > .tooltip-icon,
 .setting-heading > .setting-revert {
   vertical-align: middle;
@@ -507,6 +570,13 @@ label[for].setting-label {
   margin-bottom: 8px;
 }
 
+/* A choice row has no description line, so its reason goes under the title as one */
+.setting-choice.has-reason > .setting-label {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
 /* A row that does not apply to the current world or format */
 .settings-row-unavailable {
   opacity: 0.4;
@@ -515,6 +585,97 @@ label[for].setting-label {
 
 .segmented-disabled {
   pointer-events: none;
+}
+
+/* A greyed row that says why: the reason stands in for the description and stays readable,
+   while the rest of the row stays dim */
+.settings-row-unavailable.has-reason {
+  opacity: 1;
+}
+
+.settings-row-unavailable.has-reason > :not(.setting-label),
+.settings-row-unavailable.has-reason .setting-label > :not(.setting-text):not(.setting-reason),
+.settings-row-unavailable.has-reason .setting-text > :not(.setting-reason) {
+  opacity: 0.4;
+}
+
+.settings-row.has-reason .setting-desc {
+  display: none;
+}
+
+.setting-reason {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ui-muted);
+}
+
+/* A reason that names another setting: a quiet link (yellow stays for what is selected or on) */
+button.setting-reason {
+  display: inline;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--ui-text);
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.35);
+  text-underline-offset: 2px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+button.setting-reason:hover,
+button.setting-reason:focus-visible {
+  text-decoration-color: currentColor;
+}
+
+/* The setting a reason pointed at, for a moment */
+.settings-row.is-pointed {
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  border-radius: 10px;
+  animation: setting-pointed 1.6s ease-out;
+}
+
+@keyframes setting-pointed {
+  0%, 35% { outline-color: var(--ui-accent); }
+  100% { outline-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-row.is-pointed { animation: none; outline-color: var(--ui-accent); }
+}
+
+
+/* "New!" on a feature of this release (new-badges.js); as tall as the icons beside it */
+.new-badge {
+  height: 16px;
+  width: auto;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* The badge takes the place of the revert button while there is nothing to revert (new-badges.js) */
+.settings-row.has-new-badge:not(.is-modified) .setting-heading > .setting-revert {
+  display: none;
+}
+
+/* Clear of the modified dot in the item's corner */
+.settings-nav-item .new-badge {
+  flex-shrink: 0;
+  height: 14px;
+  margin: 0 6px 0 4px;
+}
+
+.settings-page .segmented-control .segment .new-badge {
+  height: 12px;
+  margin-left: 5px;
+  vertical-align: -1px;
 }
 
 /* Notices: status lines and explanations under a setting */
@@ -561,6 +722,49 @@ label[for].setting-label {
 .tooltip-icon:focus-visible {
   background-color: rgba(254, 204, 68, 0.3);
   color: var(--primary-accent);
+}
+
+/* Picture of what a setting does (preview-popover.js): docked at the foot of the sidebar, above Reset
+   (the script sets its bottom). The image box has a fixed 4:3 size, so nothing moves when the picture
+   loads, and the popover ignores the pointer so it never steals the hover from the control. */
+.preview-popover {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 64px;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 8px 8px 6px;
+  background-color: #2a2a2a;
+  border: 1px solid #fecc44;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.preview-popover.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.preview-popover img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  border-radius: 4px;
+}
+
+.preview-popover-caption {
+  margin-top: 6px;
+  color: #fecc44;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: break-word;
 }
 
 /* Per-setting revert button, next to the setting name. Same 16px round box
@@ -612,6 +816,11 @@ label[for].setting-label {
   border: 1px solid var(--ui-field-border);
   border-radius: 9px;
   background: var(--ui-field);
+}
+
+/* Three long names: they wrap in the languages where they do not fit. */
+.settings-page #meld-osm-source-group {
+  flex-wrap: wrap;
 }
 
 .settings-page .segmented-control .segment {
@@ -916,6 +1125,20 @@ label[for].setting-label {
   gap: 10px;
 }
 
+/* Version line with the credit right under it */
+.settings-about-id {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 240px;
+}
+
+.settings-about-credit {
+  color: var(--ui-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
 .settings-about-links {
   flex-basis: 100%;
   padding-top: 14px;
@@ -1004,4 +1227,328 @@ label[for].setting-label {
   .settings-page * {
     transition: none !important;
   }
+}
+
+/* Meld features: everything marked meld-only is hidden while the Advanced switch is off */
+body.meld-off .meld-only {
+  display: none !important;
+}
+
+/* Heading of a group of tiles inside one section */
+.settings-page .settings-group-title {
+  margin: 22px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ui-muted);
+}
+
+.settings-page input.meld-short,
+.settings-page .settings-section.meld-only input[type="number"] {
+  width: 120px;
+  text-align: center;
+}
+
+/* LAT,LON needs room for two signed decimals. */
+.settings-page input.meld-coords {
+  width: 170px;
+}
+
+/* Data panel: Prepare Countries and Download Plan */
+.settings-page .meld-data-row {
+  flex-wrap: wrap;
+}
+
+.settings-page .meld-data-row .settings-control {
+  gap: 8px;
+}
+
+.settings-page .meld-data-row .run-button {
+  flex: none;
+  padding: 0 14px;
+}
+
+.settings-page .meld-data-out {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ui-muted);
+}
+
+.settings-page .meld-data-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ui-muted);
+}
+
+.settings-page .meld-data-line[hidden] {
+  display: none;
+}
+
+/* The Advanced switch stands out by its accent icon; the sections it shows have an accent frame. */
+.settings-page .setting-tile:has(#advanced-meld-features-toggle) .setting-icon {
+  color: var(--ui-accent);
+}
+
+.settings-section.meld-only {
+  border-color: color-mix(in srgb, var(--ui-accent) 55%, transparent);
+}
+
+.settings-nav-item.meld-only:not(.active) .icon {
+  color: var(--primary-accent);
+}
+
+/* Projects: one row per One World in the save folder */
+.settings-page .projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-page .projects-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-tile-border);
+  border-radius: 12px;
+}
+
+.settings-page .projects-title {
+  flex: 1 1 110px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+
+.settings-page .projects-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .projects-name {
+  cursor: text;
+}
+
+.settings-page .projects-pencil {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.settings-page .projects-pencil:hover,
+.settings-page .projects-pencil:focus-visible {
+  opacity: 1;
+}
+
+.settings-page .projects-pencil:disabled {
+  display: none;
+}
+
+.settings-page .projects-pencil svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.settings-page .projects-rename {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--ui-accent);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.settings-page .projects-error {
+  flex: 1 1 100%;
+  font-size: 12.5px;
+  color: #fa7878;
+}
+
+.settings-page .projects-place {
+  flex-basis: 100%;
+  font-size: 12.5px;
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+
+/* List / Grid on the left, New One World on the right */
+.settings-page .projects-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.settings-page .projects-view {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-page .projects-bar .settings-action-button,
+.settings-page .projects-new-row .settings-action-button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+}
+
+.settings-page .projects-bar .projects-new {
+  gap: 6px;
+  margin-left: auto;
+}
+
+.settings-page .projects-new .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.settings-page .projects-bar .projects-new:disabled {
+  border-color: var(--ui-field-border);
+  background: var(--ui-field);
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The name card for a new One World: first in the list, across the grid */
+.settings-page .projects-new-row {
+  grid-column: 1 / -1;
+}
+
+.settings-page .projects-new-row .projects-rename {
+  flex: 1 1 200px;
+  height: 30px;
+}
+
+.settings-page .projects-list .projects-new-row .projects-actions {
+  flex-basis: auto;
+  margin-left: auto;
+}
+
+.settings-page .projects-view .settings-action-button[aria-pressed="true"] {
+  border-color: var(--ui-accent);
+  color: var(--ui-accent);
+}
+
+.settings-page .projects-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--ui-tile-border);
+}
+
+.settings-page .projects-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-page .projects-thumb.is-empty {
+  opacity: 0.35;
+}
+
+/* Grid: cards, thumbnail on top */
+.settings-page .projects-list.is-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+
+.settings-page .is-grid .projects-row {
+  align-content: flex-start;
+  min-width: 0;
+  padding: 10px;
+}
+
+.settings-page .is-grid .projects-thumb {
+  flex-basis: 100%;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+}
+
+.settings-page .is-grid .projects-title {
+  flex: 1 1 100%;
+}
+
+/* A world's buttons stay together: at the row's end in the list, on their own line in the grid. */
+.settings-page .projects-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.settings-page .is-grid .projects-actions {
+  flex-basis: 100%;
+  margin-left: 0;
+}
+
+.settings-page .projects-meta {
+  font-size: 12.5px;
+  opacity: 0.75;
+}
+
+.settings-page .projects-meta.is-warn {
+  color: var(--ui-accent);
+  opacity: 1;
+}
+
+.settings-page .projects-row .settings-action-button {
+  height: 30px;
+  padding: 0 10px;
+}
+
+.settings-page .projects-row .settings-action-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Rebuild fills while held (1.5 s, as the cell menu's hold) */
+.settings-page .projects-row .settings-action-button.projects-hold {
+  background-image: linear-gradient(rgba(254, 204, 68, 0.4), rgba(254, 204, 68, 0.4));
+  background-repeat: no-repeat;
+  background-size: 0 100%;
+  transition: background-size 0.2s;
+  touch-action: none;
+  user-select: none;
+}
+
+.settings-page .projects-row .settings-action-button.projects-hold.is-holding {
+  background-size: 100% 100%;
+  transition: background-size 1.5s linear;
+}
+
+.settings-page .projects-row .settings-action-button.projects-hold.is-armed {
+  background-size: 50% 100%;
+}
+
+.settings-page .projects-row .settings-action-button.projects-delete {
+  background-image: linear-gradient(rgba(250, 120, 120, 0.35), rgba(250, 120, 120, 0.35));
+}
+
+.settings-page .projects-row .settings-action-button.projects-delete:not(:disabled):hover {
+  border-color: #fa7878;
+  color: #fa7878;
+}
+
+.settings-page .projects-empty {
+  opacity: 0.75;
 }

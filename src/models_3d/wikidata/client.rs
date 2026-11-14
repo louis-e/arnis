@@ -1,10 +1,10 @@
 //! HTTP fetcher for model files (STL or GLB) with URL-hash on-disk cache.
 
+use crate::models_3d::{ok_status, read_capped, unless_absent, FetchError};
 use fnv::FnvHasher;
 use reqwest::blocking::{Client, ClientBuilder};
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::Read;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -14,7 +14,7 @@ const MAX_MODEL_BYTES: u64 = 128 * 1024 * 1024;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) fn cache_root() -> PathBuf {
-    if let Some(dir) = dirs::cache_dir() {
+    if let Some(dir) = crate::elevation::cache::user_cache_dir() {
         dir.join(CACHE_SUBDIR)
     } else {
         PathBuf::from("./.arnis_wikidata_cache")
@@ -41,21 +41,6 @@ fn client() -> Result<&'static Client, String> {
         .map_err(Clone::clone)
 }
 
-fn read_capped(mut resp: reqwest::blocking::Response, cap: u64) -> Result<Vec<u8>, String> {
-    if let Some(len) = resp.content_length() {
-        if len > cap {
-            return Err(format!("model exceeds {cap}-byte cap (advertised {len})"));
-        }
-    }
-    let mut buf = Vec::new();
-    let mut taken = (&mut resp).take(cap + 1);
-    taken.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-    if buf.len() as u64 > cap {
-        return Err(format!("model exceeds {cap}-byte cap"));
-    }
-    Ok(buf)
-}
-
 fn url_hash(url: &str) -> String {
     let mut h = FnvHasher::default();
     url.hash(&mut h);
@@ -63,24 +48,25 @@ fn url_hash(url: &str) -> String {
 }
 
 /// Fetches a model file (STL or GLB) by URL with on-disk cache keyed by URL hash.
-pub fn fetch_model(url: &str) -> Result<Vec<u8>, String> {
+pub fn fetch_model(url: &str) -> Result<Vec<u8>, FetchError> {
     let dir = cache_root();
-    let path = dir.join(format!("{}.bin", url_hash(url)));
+    let key = url_hash(url);
+    let path = dir.join(format!("{key}.bin"));
     if let Ok(bytes) = fs::read(&path) {
         if bytes.len() >= 12 {
             return Ok(bytes);
         }
     }
-    let client = client()?;
-    let _permit = crate::net::request_permit();
-    let resp = client.get(url).send().map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("model {url}: HTTP {}", resp.status()));
-    }
-    let bytes = read_capped(resp, MAX_MODEL_BYTES)?;
-    let _ = fs::create_dir_all(&dir);
-    let _ = fs::write(&path, &bytes);
-    Ok(bytes)
+    let what = format!("model {url}");
+    unless_absent(&dir.join(format!("{key}.missing")), &what, || {
+        let client = client()?;
+        crate::net::ensure_online("3D models (Wikimedia)")?;
+        let _permit = crate::net::request_permit();
+        let resp = client.get(url).send().map_err(|e| e.to_string())?;
+        let bytes = read_capped(ok_status(resp, &what)?, MAX_MODEL_BYTES)?;
+        crate::elevation::cache::write_atomic(&path, &bytes);
+        Ok(bytes)
+    })
 }
 
 #[cfg(test)]

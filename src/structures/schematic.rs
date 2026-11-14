@@ -349,6 +349,26 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "coal_block" => COAL_BLOCK,
         "blackstone_slab" => BLACKSTONE_SLAB,
         "iron_door" => IRON_DOOR,
+        // Scattered rocks and bushes. Tuff shapes and the bark-all-round wood
+        // blocks have no block of their own, so the nearest one stands in.
+        "tuff_slab" => ANDESITE_SLAB,
+        "tuff_stairs" => ANDESITE_STAIRS,
+        "acacia_leaves" => ACACIA_LEAVES,
+        "azalea_leaves" | "flowering_azalea_leaves" => AZALEA_LEAVES,
+        "birch_leaves" => BIRCH_LEAVES,
+        "cherry_leaves" => CHERRY_LEAVES,
+        "dark_oak_leaves" => DARK_OAK_LEAVES,
+        "jungle_leaves" => JUNGLE_LEAVES,
+        "mangrove_leaves" => MANGROVE_LEAVES,
+        "spruce_leaves" => SPRUCE_LEAVES,
+        "acacia_wood" => ACACIA_LOG,
+        "birch_wood" => BIRCH_LOG,
+        "cherry_wood" => CHERRY_LOG,
+        "dark_oak_wood" => DARK_OAK_LOG,
+        "jungle_wood" => JUNGLE_LOG,
+        "mangrove_wood" => MANGROVE_LOG,
+        "oak_wood" => OAK_LOG,
+        "spruce_wood" => SPRUCE_LOG,
         _ => return None,
     };
     Some(BlockWithProperties::new(block, parse_state(name)))

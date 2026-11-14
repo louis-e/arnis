@@ -101,6 +101,34 @@ pub fn get_luanti_worlds_directory() -> PathBuf {
     })
 }
 
+/// Hytale's `UserData/Saves` (native, then Flatpak) once the game has run, else Desktop/Arnis Hytale Worlds.
+pub fn get_hytale_saves_directory() -> PathBuf {
+    let native = dirs::data_dir().map(|d| d.join("Hytale"));
+    let flatpak =
+        dirs::home_dir().map(|h| h.join(".var/app/com.hypixel.HytaleLauncher/data/Hytale"));
+    [native, flatpak]
+        .into_iter()
+        .flatten()
+        .map(|game| game.join("UserData"))
+        .find(|user_data| user_data.is_dir())
+        .map(|user_data| user_data.join("Saves"))
+        .unwrap_or_else(|| {
+            dirs::desktop_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("Arnis Hytale Worlds")
+        })
+}
+
+/// The first free "Arnis {game} World N" folder in `base_dir`, for Luanti and Hytale.
+pub fn new_sandbox_world(base_dir: &Path, game: &str) -> (PathBuf, String) {
+    let _ = fs::create_dir_all(base_dir);
+    let name = (1..)
+        .map(|n| format!("Arnis {game} World {n}"))
+        .find(|candidate| !base_dir.join(candidate).exists())
+        .expect("an unused world name");
+    (base_dir.join(&name), name)
+}
+
 /// Gets the area name for a given bounding box using the center point.
 pub fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
     let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
@@ -127,10 +155,9 @@ fn sanitize_chars_and_trim(name: &str) -> String {
 /// these names get wrapped in longer strings (`Arnis {name}.mcworld`).
 const MAX_FILENAME_BYTES: usize = 64;
 
-/// Longest custom world name a user may set, counted in characters (not
-/// bytes) so the limit means the same thing in every script. Mirrored by the
-/// world-name editor's `maxlength` and character counter in the GUI, so what
-/// the user is allowed to type is exactly what lands on disk.
+/// Longest custom world name kept, counted in characters (not bytes) so the
+/// limit means the same thing in every script. The window's name fields take
+/// 32, Minecraft's own limit; 48 here keeps longer names from before working.
 pub const MAX_CUSTOM_WORLD_NAME_CHARS: usize = 48;
 
 /// Byte budget for a custom world name. Sized so the character cap above is
@@ -487,12 +514,13 @@ pub fn check_run_size(
     format: crate::world_editor::WorldFormat,
     dir: &Path,
 ) -> Result<(), RunSizeError> {
-    if args.mapillary_probe {
+    if args.mapillary_probe || args.prewarm {
         return Ok(());
     }
     let from_archive = !args.skip_osm()
         && args.file.is_none()
         && !args.no_tile_archive
+        && args.osm_pbf.is_none()
         && !args.osm_tiles_url.is_empty();
     if from_archive {
         if let Err(e) = crate::osm_tiles::check_size(bbox, args.scale) {
@@ -1183,6 +1211,69 @@ fn write_gzip_nbt(path: &Path, value: &Value) -> Result<(), String> {
         .map_err(|e| format!("Failed to write {}: {e}", path.display()))
 }
 
+/// Centres the world border on `rect`, with its longer side as the border's
+/// size, so players stay inside the generated area. Damage and warnings keep
+/// the world's values.
+pub fn set_world_border(
+    world_path: &Path,
+    rect: &crate::coordinate_system::cartesian::XZBBox,
+) -> Result<(), String> {
+    let (min_x, min_z) = (f64::from(rect.min_x()), f64::from(rect.min_z()));
+    let (max_x, max_z) = (f64::from(rect.max_x()) + 1.0, f64::from(rect.max_z()) + 1.0);
+    let (center_x, center_z) = ((min_x + max_x) / 2.0, (min_z + max_z) / 2.0);
+    let size = (max_x - min_x).max(max_z - min_z);
+    if WorldLayout::of(world_path) == WorldLayout::Dimensions {
+        // 26.1+ keeps the border as the overworld's saved data, which the game writes
+        // when it upgrades the world; the old level.dat fields are no longer read.
+        let path = WorldLayout::Dimensions
+            .overworld_dir(world_path)
+            .join("data")
+            .join("minecraft")
+            .join("world_border.dat");
+        // A new world has no such file until the game saves one: start it with the keys set here.
+        let mut root = if path.is_file() {
+            read_gzip_nbt(&path)?
+        } else {
+            let mut top = std::collections::HashMap::from([(
+                "data".to_string(),
+                Value::Compound(std::collections::HashMap::new()),
+            )]);
+            if let Some(v) = level_data_version(world_path) {
+                top.insert("DataVersion".to_string(), Value::Int(v));
+            }
+            fs::create_dir_all(path.parent().unwrap_or(world_path))
+                .map_err(|e| format!("Failed to create {}: {e}", path.display()))?;
+            Value::Compound(top)
+        };
+        let Value::Compound(ref mut top) = root else {
+            return Err(format!("{} root is not a compound", path.display()));
+        };
+        let Some(Value::Compound(border)) = top.get_mut("data") else {
+            return Err(format!("{} has no data compound", path.display()));
+        };
+        border.insert("center_x".to_string(), Value::Double(center_x));
+        border.insert("center_z".to_string(), Value::Double(center_z));
+        border.insert("size".to_string(), Value::Double(size));
+        border.insert("lerp_target".to_string(), Value::Double(size));
+        border.insert("lerp_time".to_string(), Value::Long(0));
+        return write_gzip_nbt(&path, &root);
+    }
+    let level_path = world_path.join("level.dat");
+    let mut root = read_gzip_nbt(&level_path)?;
+    let Value::Compound(ref mut top) = root else {
+        return Err("level.dat root is not a compound".to_string());
+    };
+    let Some(Value::Compound(data)) = top.get_mut("Data") else {
+        return Err("level.dat missing Data compound".to_string());
+    };
+    data.insert("BorderCenterX".to_string(), Value::Double(center_x));
+    data.insert("BorderCenterZ".to_string(), Value::Double(center_z));
+    data.insert("BorderSize".to_string(), Value::Double(size));
+    data.insert("BorderSizeLerpTarget".to_string(), Value::Double(size));
+    data.insert("BorderSizeLerpTime".to_string(), Value::Long(0));
+    write_gzip_nbt(&level_path, &root)
+}
+
 /// Survival on Normal, for the Zombie Outbreak: the template is Creative on Peaceful, where
 /// zombies despawn. The outbreak's start function sets both again for worlds Minecraft has
 /// already upgraded past these keys.
@@ -1201,6 +1292,120 @@ pub fn start_in_survival(world: &Path) -> Result<(), String> {
         player.insert("playerGameType".to_string(), Value::Int(0));
     }
     write_gzip_nbt(&path, &root)
+}
+
+/// Why `name` cannot name a world folder, if it cannot.
+fn bad_world_name(name: &str) -> Option<&'static str> {
+    const RESERVED: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let stem = name.split('.').next().unwrap_or_default().trim_end();
+    if name.is_empty() {
+        Some("The name is empty.")
+    } else if name.chars().count() > 80 {
+        Some("The name is longer than 80 characters.")
+    } else if name
+        .chars()
+        .any(|c| c.is_control() || r#"<>:"/\|?*"#.contains(c))
+    {
+        Some(r#"The name cannot hold < > : " / \ | ? *"#)
+    } else if name.ends_with(['.', ' ']) || name.starts_with(' ') {
+        Some("The name cannot start with a space or end with a space or dot.")
+    } else if RESERVED.iter().any(|r| r.eq_ignore_ascii_case(stem)) {
+        Some("Windows reserves that name.")
+    } else {
+        None
+    }
+}
+
+/// Renames the world folder `old` in `save` to `new` and sets its `LevelName` to match.
+/// Refused while Minecraft or a run holds the world; returns the new folder name.
+pub fn rename_world(save: &Path, old: &str, new: &str) -> Result<String, String> {
+    let new = new.trim();
+    if let Some(why) = bad_world_name(new) {
+        return Err(why.to_string());
+    }
+    let from = save.join(old);
+    if bad_world_name(old).is_some() || !from.join("level.dat").is_file() {
+        return Err(format!("{old} is not a world in this folder."));
+    }
+    if new == old {
+        return Ok(new.to_string());
+    }
+    let to = save.join(new);
+    // A change of case only is the same folder on Windows and macOS.
+    if to.exists() && new.to_lowercase() != old.to_lowercase() {
+        return Err(format!("A world named {new} already exists."));
+    }
+    drop(SessionLock::acquire(&from).map_err(|_| {
+        "The world is in use; close it in Minecraft or wait for the run.".to_string()
+    })?);
+    let mut level = read_gzip_nbt(&from.join("level.dat"))?;
+    match &mut level {
+        Value::Compound(root) => match root.get_mut("Data") {
+            Some(Value::Compound(data)) => {
+                data.insert("LevelName".to_string(), Value::String(new.to_string()));
+            }
+            _ => return Err("level.dat has no Data compound.".to_string()),
+        },
+        _ => return Err("level.dat root is not a compound.".to_string()),
+    }
+    fs::rename(&from, &to).map_err(|e| format!("Failed to rename the world folder: {e}"))?;
+    if let Err(e) = write_gzip_nbt(&to.join("level.dat"), &level) {
+        // Folder and name change together or not at all.
+        let _ = fs::rename(&to, &from);
+        return Err(e);
+    }
+    Ok(new.to_string())
+}
+
+/// Hands the One World `name` in `save` to `remove`; refused for other folders and while held.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn remove_one_world(
+    save: &Path,
+    name: &str,
+    remove: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let world = save.join(name);
+    if bad_world_name(name).is_some()
+        || !world.join("level.dat").is_file()
+        || !crate::one_world::Manifest::path_in(&world).is_file()
+    {
+        return Err(format!("{name} is not a One World in this folder."));
+    }
+    let lock = SessionLock::acquire(&world).map_err(|_| {
+        "The world is in use; close it in Minecraft or wait for the run.".to_string()
+    })?;
+    // Held through the move so no run starts in it; on Windows an open file would pin the folder.
+    if cfg!(windows) {
+        drop(lock);
+        return remove(&world);
+    }
+    let moved = remove(&world);
+    drop(lock);
+    moved
+}
+
+/// The folder for a new One World typed as `raw`: it must land on disk as typed and be free.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub fn new_world_name(save: &Path, raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if let Some(why) = bad_world_name(name) {
+        return Err(why.to_string());
+    }
+    // Minecraft's own Create World screen takes 32 characters.
+    const LONGEST: usize = 32;
+    if name.chars().count() > LONGEST {
+        return Err(format!("The name is longer than {LONGEST} characters."));
+    }
+    if !save.is_dir() {
+        return Err("The saves folder does not exist.".to_string());
+    }
+    if save.join(name).exists() {
+        return Err(format!("A world named {name} already exists."));
+    }
+    Ok(name.to_string())
 }
 
 /// `Data.LevelName` of a world's `level.dat`.
@@ -1469,6 +1674,99 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_world_name_must_be_free_and_land_as_typed() {
+        let save = tempfile::tempdir().unwrap();
+        fs::create_dir(save.path().join("Paris")).unwrap();
+        assert_eq!(new_world_name(save.path(), "  Tokyo ").unwrap(), "Tokyo");
+        assert!(new_world_name(save.path(), "Paris")
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(new_world_name(save.path(), &"x".repeat(32)).is_ok());
+        let long = "x".repeat(33);
+        for refused in ["", "   ", "a/b", "..", "CON", "Tokyo.", &long] {
+            assert!(
+                new_world_name(save.path(), refused).is_err(),
+                "{refused:?} must be refused"
+            );
+        }
+        assert!(new_world_name(&save.path().join("missing"), "Tokyo").is_err());
+    }
+
+    #[test]
+    fn only_a_one_world_that_is_not_in_use_is_removed() {
+        let save = tempfile::tempdir().unwrap();
+        let make = |name: &str, one_world: bool| {
+            let world = save.path().join(name);
+            fs::create_dir_all(&world).unwrap();
+            fs::write(world.join("level.dat"), b"x").unwrap();
+            if one_world {
+                fs::write(crate::one_world::Manifest::path_in(&world), b"{}").unwrap();
+            }
+            world
+        };
+        let paris = make("Paris", true);
+        make("Plain", false);
+        let mut removed = Vec::new();
+        let mut remove = |name: &str| {
+            remove_one_world(save.path(), name, |w| {
+                removed.push(w.to_path_buf());
+                Ok(())
+            })
+        };
+        for refused in ["Plain", "Missing", "..", "../Paris", "Paris/", ""] {
+            assert!(remove(refused).is_err(), "{refused:?} must be refused");
+        }
+        let held = SessionLock::acquire(&paris).unwrap();
+        assert!(remove("Paris").unwrap_err().contains("in use"));
+        drop(held);
+        remove("Paris").unwrap();
+        assert_eq!(removed, [paris]);
+    }
+
+    /// A rename moves the folder and the LevelName together, and refuses a clash, path
+    /// characters, reserved names and a world in use.
+    #[test]
+    fn a_world_is_renamed_with_its_level_name() {
+        let save = tempfile::tempdir().unwrap();
+        let world = create_new_world_with_name(save.path(), Some("First")).unwrap();
+        create_new_world_with_name(save.path(), Some("Taken")).unwrap();
+        assert_eq!(
+            rename_world(save.path(), "First", " Second ").unwrap(),
+            "Second"
+        );
+        assert!(!Path::new(&world).exists());
+        assert_eq!(
+            super::level_name(&save.path().join("Second")).as_deref(),
+            Some("Second")
+        );
+        for bad in [
+            "Taken",
+            "a/b",
+            r"a\b",
+            "x:y",
+            "",
+            "CON",
+            "nul.txt",
+            "dot.",
+            &"x".repeat(81),
+        ] {
+            assert!(rename_world(save.path(), "Second", bad).is_err(), "{bad:?}");
+        }
+        assert!(rename_world(save.path(), "..", "Third").is_err());
+        let held = SessionLock::acquire(&save.path().join("Second")).unwrap();
+        assert!(rename_world(save.path(), "Second", "Third").is_err());
+        drop(held);
+        assert_eq!(
+            rename_world(save.path(), "Second", "second").unwrap(),
+            "second"
+        );
+        assert_eq!(
+            super::level_name(&save.path().join("second")).as_deref(),
+            Some("second")
+        );
+    }
 
     /// Disk at the peak of real runs, Oct 2026: 9 km² boxes at scale 1 unless the area says.
     #[test]
@@ -1783,8 +2081,7 @@ mod tests {
 
     #[test]
     fn a_full_length_custom_name_survives_in_any_script() {
-        // The editor caps input at MAX_CUSTOM_WORLD_NAME_CHARS characters, so
-        // a name of exactly that many characters must come back untouched -
+        // A name of exactly MAX_CUSTOM_WORLD_NAME_CHARS characters must come back untouched -
         // in every script, not just Latin-1. A byte-based cap would quietly
         // cut a Japanese or Cyrillic name to a third of what was typed.
         let tmp = tempfile::tempdir().unwrap();
@@ -2453,5 +2750,70 @@ mod lock_tests {
         assert!(bare.join("level.dat").is_file());
         assert!(bare.join("region").is_dir());
         assert!(!bare.join("region").join("r.0.0.mca").exists());
+    }
+
+    #[test]
+    fn world_border_is_written_where_the_layout_keeps_it() {
+        use crate::coordinate_system::cartesian::XZBBox;
+        let dir = tempfile::tempdir().unwrap();
+        let area = XZBBox::rect_from_min_max(-50, 10, 49, 49).unwrap();
+        let world = PathBuf::from(create_new_world(dir.path()).unwrap());
+        set_world_border(&world, &area).unwrap();
+        let Value::Compound(root) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
+            panic!("root");
+        };
+        let Some(Value::Compound(data)) = root.get("Data") else {
+            panic!("Data");
+        };
+        assert_eq!(data["BorderCenterX"], Value::Double(0.0));
+        assert_eq!(data["BorderCenterZ"], Value::Double(30.0));
+        assert_eq!(data["BorderSize"], Value::Double(100.0));
+
+        // 26.1: the overworld's saved data, not level.dat.
+        let mut level = read_gzip_nbt(&world.join("level.dat")).unwrap();
+        let Value::Compound(ref mut top) = level else {
+            panic!("root");
+        };
+        let Some(Value::Compound(data)) = top.get_mut("Data") else {
+            panic!("Data");
+        };
+        data.insert(
+            "DataVersion".to_string(),
+            Value::Int(DIMENSION_FOLDERS_DATA_VERSION),
+        );
+        write_gzip_nbt(&world.join("level.dat"), &level).unwrap();
+        let path = world.join("dimensions/minecraft/overworld/data/minecraft/world_border.dat");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let old = Value::Compound(std::collections::HashMap::from([(
+            "data".to_string(),
+            Value::Compound(std::collections::HashMap::from([(
+                "damage_per_block".to_string(),
+                Value::Double(0.2),
+            )])),
+        )]));
+        write_gzip_nbt(&path, &old).unwrap();
+        set_world_border(&world, &area).unwrap();
+        let Value::Compound(root) = read_gzip_nbt(&path).unwrap() else {
+            panic!("root");
+        };
+        let Some(Value::Compound(border)) = root.get("data") else {
+            panic!("data");
+        };
+        assert_eq!(border["center_z"], Value::Double(30.0));
+        assert_eq!(border["size"], Value::Double(100.0));
+        assert_eq!(border["damage_per_block"], Value::Double(0.2));
+
+        // A fresh 26.1 world has no such file yet: it is created.
+        fs::remove_file(&path).unwrap();
+        set_world_border(&world, &area).unwrap();
+        let Value::Compound(root) = read_gzip_nbt(&path).unwrap() else {
+            panic!("root");
+        };
+        let Some(Value::Compound(border)) = root.get("data") else {
+            panic!("data");
+        };
+        assert_eq!(border["center_x"], Value::Double(0.0));
+        assert_eq!(border["lerp_time"], Value::Long(0));
+        assert!(root.contains_key("DataVersion"));
     }
 }

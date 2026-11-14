@@ -38,6 +38,23 @@ var citySearch = {
             }
         });
         
+        // Map-first page: arrows walk the list, Enter picks, Escape closes.
+        $('#city-search').on('keydown', function(e) {
+            if (!window.arnisMapFirst) return;
+            if (e.which === 27) return self.hideResults();
+            var $items = $('#search-results:visible .search-result-item');
+            var i = $items.index($items.filter('.is-active'));
+            if (e.which === 38 || e.which === 40) {
+                if (!$items.length) return;
+                e.preventDefault();
+                i = e.which === 40 ? (i + 1) % $items.length : (i <= 0 ? $items.length : i) - 1;
+                $items.removeClass('is-active').eq(i).addClass('is-active')[0].scrollIntoView({ block: 'nearest' });
+            } else if (e.which === 13 && i >= 0) {
+                e.preventDefault(); // no keypress, so no new search
+                $items.eq(i).click();
+            }
+        });
+
         // Hide results when clicking outside
         $(document).on('click', function(e) {
             if (!$(e.target).closest('#search-container').length) {
@@ -72,6 +89,12 @@ var citySearch = {
             extratags: 1,
             'accept-language': 'en'
         };
+        // Advanced features: each place's outline too (simplified ~500 m), kept on the result as
+        // `geojson` for "Use outline".
+        if (window.arnisMeldOn) {
+            params.polygon_geojson = 1;
+            params.polygon_threshold = 0.005;
+        }
         
         var request = self.activeRequest = $.ajax({
             url: url,
@@ -126,19 +149,49 @@ var citySearch = {
         }
         
         var html = '';
-        results.forEach(function(result) {
+        results.forEach(function(result, index) {
             var displayName = result.display_name;
             var nameParts = displayName.split(',');
             var mainName = nameParts[0];
             var details = nameParts.slice(1, 3).join(',');
+            // Map-first page: "City · Romania" when the kind of place is known.
+            var kind = window.arnisMapFirst && self.placeKind(result);
+            if (kind) {
+                var label = window.mapText('map_place_' + kind, kind.charAt(0).toUpperCase() + kind.slice(1));
+                details = [label, kind !== 'country' && result.address && result.address.country].filter(Boolean).join(' · ');
+            }
             
-            html += '<div class="search-result-item" data-lat="' + result.lat + '" data-lon="' + result.lon + '">';
-            html += '<div class="search-result-name">' + self.escapeHtml(mainName) + '</div>';
-            html += '<div class="search-result-details">' + self.escapeHtml(details) + '</div>';
+            html += '<div class="search-result-item" data-index="' + index + '" data-lat="' + result.lat + '" data-lon="' + result.lon + '">';
+            html += '<div class="search-result-text"><div class="search-result-name">' + self.escapeHtml(mainName) + '</div>';
+            html += '<div class="search-result-details">' + self.escapeHtml(details) + '</div></div>';
+            // Advanced features only: a place's box or outline can be selected (a search box is often a whole
+            // district, far more than a new user means to build); a click on the result only flies there.
+            var acts = '';
+            if (window.arnisMeldOn && self.selectable(result)) {
+                acts += '<button type="button" class="search-select-area" data-index="' + index + '"></button>';
+            }
+            if (window.arnisMeldOn && result.geojson && /^(Multi)?Polygon$/.test(result.geojson.type)) {
+                acts += '<button type="button" class="search-select-area search-use-outline" data-index="' + index + '"></button>';
+            }
+            if (acts) html += '<div class="search-result-actions">' + acts + '</div>';
             html += '</div>';
         });
         
         $results.html(html).show();
+        $results.find('.search-select-area').text(window.mapText('map_select_area', 'Select this area'));
+        $results.find('.search-select-area').not('.search-use-outline').on('click', function(e) {
+            e.stopPropagation();
+            self.selectArea(results[$(this).data('index')]);
+        });
+        // The outline button: an icon (a dashed shape with corner points) and the words, at the right of the name.
+        var outlineIcon = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l6-4 8 5-2 9-9 2z" stroke-dasharray="3 2"/><circle cx="5" cy="8" r="1.6" fill="currentColor"/><circle cx="19" cy="9" r="1.6" fill="currentColor"/><circle cx="17" cy="18" r="1.6" fill="currentColor"/><circle cx="8" cy="20" r="1.6" fill="currentColor"/></svg>';
+        $results.find('.search-use-outline').empty().append(outlineIcon, $('<span>').text(window.mapText('map_use_outline', 'Use outline'))).on('click', function(e) {
+            e.stopPropagation();
+            window.arnisSelectShape(results[$(this).data('index')].geojson);
+            self.notePlace(results[$(this).data('index')]);
+            $('#city-search').val('');
+            self.hideResults();
+        });
         
         // Bind click events to results
         $('.search-result-item').on('click', function() {
@@ -151,6 +204,49 @@ var citySearch = {
         });
     },
     
+    // The place's box becomes the selection: with Advanced features through the window's "Select
+    // this area" (a ring of regions around it), otherwise straight on the map.
+    selectArea: function(result) {
+        // Nominatim's box is south, north, west, east.
+        var b = result.boundingbox.map(Number);
+        var bounds = [b[0], b[2], b[1], b[3]];
+        this.notePlace(result);
+        map.fitBounds([[b[0], b[2]], [b[1], b[3]]]);
+        if (window.arnisMeldOn) {
+            window.parent.postMessage({ type: 'selectArea', bounds: bounds }, '*');
+        } else {
+            window.arnisSelectBounds(bounds);
+        }
+        $('#city-search').val('');
+        this.hideResults();
+    },
+
+    // Whether a result's box is worth selecting: at least 0.05 km² (a park, not a shop or a house).
+    selectable: function(result) {
+        var b = (result.boundingbox || []).map(Number);
+        if (b.length !== 4 || !b.every(isFinite)) return false;
+        var km = 111.32;
+        var h = (b[1] - b[0]) * km;
+        var w = (b[3] - b[2]) * km * Math.cos((b[0] + b[1]) / 2 * Math.PI / 180);
+        return Math.abs(h * w) >= 0.05;
+    },
+
+    // Tells the window which place the selection came from; it keeps the name for the world a build makes.
+    notePlace: function(result) {
+        var name = result.name || String(result.display_name || '').split(',')[0];
+        if (name) window.parent.postMessage({ type: 'searchPlace', name: name, lat: parseFloat(result.lat), lon: parseFloat(result.lon) }, '*');
+    },
+
+    // Nominatim's addresstype folded into the kinds the list names (none: the old details line).
+    placeKind: function(result) {
+        return {
+            country: 'country', state: 'state', region: 'state', province: 'state',
+            county: 'county', state_district: 'county', district: 'county',
+            city: 'city', municipality: 'city', town: 'town', village: 'village', hamlet: 'village',
+            suburb: 'suburb', borough: 'suburb', city_district: 'suburb', neighbourhood: 'suburb', quarter: 'suburb'
+        }[result.addresstype] || '';
+    },
+
     goToLocation: function(lat, lon, name) {
         if (typeof map !== 'undefined' && map) {
             // Clear existing bbox selection and spawn points

@@ -195,7 +195,10 @@ fn species_at(editor: &WorldEditor, x: i32, z: i32, kind: BushKind) -> Block {
     let flora = editor
         .ecoregion(x, z)
         .map(|eco| flora_for_ecoregion(eco.biome))
-        .unwrap_or_else(|| flora_for_climate(editor.climate()));
+        .unwrap_or_else(|| {
+            // Per-position climate (--climate-mode per-position) when it is on.
+            flora_for_climate(editor.local_climate(x, z).unwrap_or(editor.climate()))
+        });
     let weights = species_weights(flora);
     let own = hash(x, z, SALT_DRIFT);
     let roll = if own.is_multiple_of(4) {

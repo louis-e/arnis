@@ -1,6 +1,8 @@
 pub mod advertising;
 pub mod aerialways;
+pub mod allotments;
 pub mod amenities;
+pub(crate) mod area_layout;
 pub mod attractions;
 pub mod barriers;
 pub mod blueprint;
@@ -14,7 +16,9 @@ pub mod building_facade;
 pub mod building_test_support;
 pub mod buildings;
 pub mod bush;
+pub mod camp_sites;
 pub mod cars;
+pub mod cemetery;
 pub(crate) mod connected_blocks;
 pub mod construction_site;
 pub mod doors;
@@ -22,18 +26,22 @@ pub mod emergency;
 pub mod field_texture;
 pub mod fuel_stations;
 pub mod golf;
+pub mod greenhouses;
 pub mod highways;
 pub mod historic;
+pub mod ice_rinks;
 pub mod landuse;
 pub mod leisure;
 pub mod man_made;
 pub mod natural;
 pub mod parking_garage;
 pub mod pedestrians;
+pub mod plantations;
 pub mod power;
 pub mod raceways;
 pub mod rail_track;
 pub mod railways;
+pub mod road_detail;
 pub mod road_markings;
 pub mod rooftops;
 pub mod ship_bodies;
@@ -45,7 +53,7 @@ pub mod stations;
 pub mod street_furniture;
 pub(crate) mod structure_kit;
 pub mod subprocessor;
-mod surfaces;
+pub(crate) mod surfaces;
 pub mod swimming_pools;
 pub mod tourisms;
 pub mod traffic_lights;
@@ -72,6 +80,8 @@ pub enum RelationArea {
     Leisure,
     /// Fairways, greens and the rest of a golf course's turf.
     Golf,
+    /// Camp sites, churchyards and grave fields, laid out ring by ring.
+    Grounds,
     ManMade,
     Pool,
 }
@@ -90,6 +100,10 @@ impl RelationArea {
             Some(Self::Water)
         } else if golf::claims(tags) {
             Some(Self::Golf)
+        } else if camp_sites::claims(tags)
+            || (cemetery::claims(tags) && !tags.contains_key("landuse"))
+        {
+            Some(Self::Grounds)
         } else if natural.is_some() {
             Some(Self::Natural)
         } else if tags.contains_key("landuse") {
@@ -108,7 +122,7 @@ impl RelationArea {
     /// groynes are areas.
     pub fn fills_members(self, tags: &HashMap<String, String>) -> bool {
         match self {
-            Self::Natural | Self::Leisure | Self::Golf | Self::Pool => true,
+            Self::Natural | Self::Leisure | Self::Golf | Self::Grounds | Self::Pool => true,
             Self::Landuse => landuse_paints_ground(tags),
             Self::ManMade => matches!(
                 tags.get("man_made").map(String::as_str),

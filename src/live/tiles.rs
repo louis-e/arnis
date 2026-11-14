@@ -47,6 +47,8 @@ pub fn tile_flags(a: &Args, manifest: &crate::one_world::Manifest) -> Vec<String
         flag("interior", a.interior),
         flag("canopy-height", a.canopy_height),
         flag("overture", a.overture),
+        flag("rocks", a.scatter.rocks),
+        flag("bushes", a.scatter.bushes),
         format!("--overture-source={}", value_name(&a.overture_source)),
         format!("--fields={}", value_name(&a.fields)),
         format!("--max-tree-size={}", value_name(&a.max_tree_size)),

@@ -467,6 +467,28 @@ body,
   cursor: move;
 }
 
+/* Meld features: an edge's midpoint moves that edge; the selection's size above it */
+.bbox-handle-ns {
+  cursor: ns-resize;
+}
+
+.bbox-handle-ew {
+  cursor: ew-resize;
+}
+
+.leaflet-tooltip.bbox-size {
+  background: rgba(28, 28, 28, 0.85);
+  border: 0;
+  color: #fecc44;
+  font-weight: 600;
+  padding: 2px 6px;
+  box-shadow: none;
+}
+
+.leaflet-tooltip-top.bbox-size::before {
+  display: none;
+}
+
 /* Live mode: where each player is */
 .live-player-marker {
   position: relative;
@@ -506,3 +528,127 @@ body,
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* A job built in pieces: the running piece's outline marches; its number sits at its centre */
+.piece-running {
+  animation: piece-march 1s linear infinite;
+}
+
+@keyframes piece-march {
+  to { stroke-dashoffset: -16; }
+}
+
+.piece-retryable {
+  cursor: pointer;
+}
+
+/* The piece's number (and percent) centred inside it; bbox.js sizes it to the piece */
+.leaflet-tooltip.piece-label {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 4px;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 1px #000;
+  pointer-events: none;
+}
+
+.leaflet-tooltip-left.piece-label::before,
+.leaflet-tooltip-right.piece-label::before,
+.leaflet-tooltip-top.piece-label::before,
+.leaflet-tooltip-bottom.piece-label::before {
+  display: none;
+}
+
+.leaflet-tooltip.piece-label.piece-label-off {
+  display: none;
+}
+
+/* While pieces build, the selection, its handles and size fade: the pieces are what changes */
+.bbox-selection,
+.bbox-handle {
+  transition: opacity 0.3s;
+}
+
+.pieces-building .bbox-selection,
+.pieces-building .bbox-handle,
+.pieces-building .leaflet-tooltip.bbox-size {
+  opacity: 0.15;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .piece-running {
+    animation: none;
+  }
+}
+
+/* The map-first page: the map's hovers in the window's UI font (the map page itself is
+   monospace; Classic keeps it) */
+.map-first .leaflet-tooltip,
+.map-first .leaflet-draw-tooltip {
+  font-family: var(--map-font, "Segoe UI", Arial, sans-serif);
+}
+
+/* A piece's hover card, dark like the main page's cards: the state's dot and word, then its size */
+.leaflet-tooltip.piece-tip {
+  max-width: 360px;
+  padding: 8px 12px;
+  background: rgba(30, 30, 30, 0.94);
+  border: 1px solid #4d4d4d;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  color: #b8b8b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.leaflet-tooltip.piece-tip > div > div {
+  white-space: nowrap;
+}
+
+.piece-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #f2f2f2;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.piece-tip-log {
+  margin-top: 4px;
+  color: #5aa9ff;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.piece-tip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.piece-tip-head span {
+  margin-left: 4px;
+  color: #8f8f8f;
+  font-weight: 400;
+}
+
+.leaflet-tooltip-top.piece-tip::before {
+  border-top-color: rgba(30, 30, 30, 0.94);
+}
+
+.leaflet-tooltip-bottom.piece-tip::before {
+  border-bottom-color: rgba(30, 30, 30, 0.94);
+}
+
+.leaflet-tooltip-left.piece-tip::before {
+  border-left-color: rgba(30, 30, 30, 0.94);
+}
+
+.leaflet-tooltip-right.piece-tip::before {
+  border-right-color: rgba(30, 30, 30, 0.94);
+}
+

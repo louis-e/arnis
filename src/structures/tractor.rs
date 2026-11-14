@@ -27,7 +27,7 @@ fn tractor() -> Option<&'static StructureSchematic> {
 
 /// Rarely drop one tractor on a farmland field at a random rotation; seeded by cells for tile-seam determinism.
 pub fn maybe_place_tractor(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
-    if !editor.place_schematics() {
+    if !editor.place_prop(super::Prop::Tractor) {
         return;
     }
     let n = cells.len();

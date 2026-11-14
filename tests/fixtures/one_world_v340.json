@@ -1,0 +1,38 @@
+{
+  "version": 3,
+  "created_with": "arnis 3.4.0",
+  "created_at": 1794172602,
+  "origin_lat": 44.4465,
+  "origin_lon": 26.099,
+  "scale": 1.0,
+  "ground_level": -62,
+  "terrain": true,
+  "disable_height_limit": true,
+  "aws_only_elevation": false,
+  "elevation": {
+    "min_height_m": -430.0,
+    "blocks_per_meter": 1.0,
+    "ground_level": -2014,
+    "soft_top": {
+      "knee_m": 2800.0,
+      "width_blocks": 193.413215
+    }
+  },
+  "next_area_id": 3,
+  "areas": [
+    {
+      "id": 2,
+      "generated_at": 1794172605,
+      "arnis_version": "3.4.0",
+      "min_x": -320,
+      "min_z": -176,
+      "max_x": 319,
+      "max_z": 175,
+      "min_lat": 44.4449171725293,
+      "min_lon": 26.094968888438697,
+      "max_lat": 44.44808278458211,
+      "max_lon": 26.103031111561304,
+      "preview": "arnis_one_world/previews/area-2.png"
+    }
+  ]
+}

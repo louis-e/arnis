@@ -2,7 +2,7 @@
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases) [![Download here](https://img.shields.io/badge/Download-here-green)](https://github.com/louis-e/arnis/releases) [![Discord](https://img.shields.io/discord/1326192999738249267?label=Discord&color=%237289da)](https://discord.gg/mA2g69Fhxq)
 
-Arnis creates complex and accurate Minecraft Java Edition (1.21.4+), Bedrock Edition, and Luanti (Minetest) worlds that reflect real-world geography, topography, and architecture.
+Arnis creates complex and accurate Minecraft Java Edition (1.21.4+), Bedrock Edition, and Luanti (Minetest) worlds that reflect real-world geography, topography, and architecture. Hytale worlds are available as an experimental output (`--hytale`).
 
 This free and open source project is designed to handle large-scale geographic data from the real world and generate detailed Minecraft worlds. The algorithm processes geospatial data from OpenStreetMap as well as elevation data to create an accurate Minecraft representation of terrain and architecture.
 Generate your hometown, big cities, and natural landscapes with ease!
@@ -124,6 +124,8 @@ See the License for the specific language governing permissions and
 limitations under the License.[^3]
 
 The Luanti block-name mapping in `src/luanti_block_map.rs` is derived from [MC2MT](https://github.com/rollerozxa/MC2MT) by rollerozxa and is licensed under the GNU Lesser General Public License v2.1 or later. The full attribution and license header are preserved in that file.
+
+Hytale is a trademark of Hypixel Studios. Arnis is not affiliated with or endorsed by Hypixel Studios.
 
 Download Arnis only from the official source https://arnismc.com or https://github.com/louis-e/arnis/. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.
 

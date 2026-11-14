@@ -4064,11 +4064,7 @@ pub(crate) fn is_underground_building(tags: &HashMap<String, String>) -> bool {
     }
 
     // Check building:levels:underground, if this is the only levels tag, it's underground
-    if tags.contains_key("building:levels:underground") && !tags.contains_key("building:levels") {
-        return true;
-    }
-
-    false
+    tags.contains_key("building:levels:underground") && !tags.contains_key("building:levels")
 }
 
 /// Calculates the starting Y offset based on terrain and min_level
@@ -6104,6 +6100,9 @@ fn infer_building_height(
             (true, &[(5, 20), (7, 50), (9, 30)])
         }
         "garage" | "garages" | "carport" | "shed" | "hut" => (true, &[(3, 100)]),
+        // A garden glasshouse, else a commercial one about 6.5 m to the gutter.
+        "greenhouse" | "glasshouse" if area_m2 < 200 => (true, &[(3, 100)]),
+        "greenhouse" | "glasshouse" => (true, &[(6, 50), (7, 50)]),
         "cabin" => (false, &[(1, 80), (2, 20)]),
         // building=yes and unrecognised types: infer from footprint size.
         _ => match area_m2 {
@@ -8452,6 +8451,36 @@ const ZINC: Block = POLISHED_ANDESITE;
 const COPPER_ROOF: Block = WAXED_OXIDIZED_COPPER;
 const METAL_GREEN: Block = DARK_PRISMARINE;
 const METAL_RED: Block = RED_NETHER_BRICKS;
+
+/// For `--surface-patches`: the full block in the colour of a family's stairs and
+/// slabs, so a ridge or hip block left showing does not read as a dot.
+fn full_block_like_its_stairs(roof: Block) -> Block {
+    match roof {
+        TILE_RED | ORANGE_TERRACOTTA => BRICK,
+        TILE_ORANGE => GRANITE,
+        _ => roof,
+    }
+}
+
+/// The roof block under `--surface-patches`: stair-built roofs that are not mapped
+/// take [`full_block_like_its_stairs`]; domes, cones and mapped roofs keep theirs.
+fn patched_roof_block(roof: Block, roof_type: RoofType, mapped: bool) -> Block {
+    let stair_built = matches!(
+        roof_type,
+        RoofType::Gabled
+            | RoofType::Hipped
+            | RoofType::HalfHipped
+            | RoofType::Gambrel
+            | RoofType::Mansard
+            | RoofType::Skillion
+            | RoofType::Pyramidal
+    );
+    if stair_built && !mapped {
+        full_block_like_its_stairs(roof)
+    } else {
+        roof
+    }
+}
 
 /// The clay tile families, which `roof:material=tile` and warm `roof:colour`
 /// values choose among.
@@ -12060,11 +12089,10 @@ fn generate_floors_and_ceilings(
     };
     // An empty shell is lit by invisible light hung under each slab, so no
     // lamp grid shows through the windows; furnished interiors keep their
-    // glowstone, which the furnishing plans around. Luanti games have no
-    // invisible light node, so there the lamps stay flush in the ceiling.
-    let hidden_lights = !furnished
-        && !config.is_abandoned_building
-        && editor.format() != crate::world_editor::WorldFormat::LuantiWorld;
+    // glowstone, which the furnishing plans around. Luanti and Hytale have no
+    // invisible light block, so there the lamps stay flush in the ceiling.
+    let hidden_lights =
+        !furnished && !config.is_abandoned_building && !editor.format().is_sandbox();
 
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
@@ -12664,7 +12692,21 @@ pub fn generate_buildings(
     // Resolve style with deterministic RNG
     let mut rng = element_rng(group_seed);
     let has_multiple_floors = building_height > floor_cycle + 2;
-    let climate = editor.climate();
+    // Parts of one building take the district and climate at the centre of the whole
+    // group, so a cell seam never splits one building's materials.
+    let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    let group_cells = group_other_cells.iter().copied();
+    for (x, z) in element.nodes.iter().map(|n| (n.x, n.z)).chain(group_cells) {
+        (min_x, max_x) = (min_x.min(x), max_x.max(x));
+        (min_z, max_z) = (min_z.min(z), max_z.max(z));
+    }
+    let (centre_x, centre_z) = (
+        min_x.saturating_add(max_x) / 2,
+        min_z.saturating_add(max_z) / 2,
+    );
+    let climate = editor
+        .local_climate(centre_x, centre_z)
+        .unwrap_or_else(|| editor.climate());
     let roof_ctx = {
         let (lat, lon) = editor.geo_anchor();
         let (mut party, mut total) = (0, 0);
@@ -12673,14 +12715,6 @@ pub fn generate_buildings(
             if seg.class == FacadeClass::Party {
                 party += seg.len;
             }
-        }
-        // Parts of one building take the district at the centre of the whole
-        // group, so a cell seam never splits one building's materials.
-        let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
-        let group_cells = group_other_cells.iter().copied();
-        for (x, z) in element.nodes.iter().map(|n| (n.x, n.z)).chain(group_cells) {
-            (min_x, max_x) = (min_x.min(x), max_x.max(x));
-            (min_z, max_z) = (min_z.min(z), max_z.max(z));
         }
         let (mut ring, mut walled) = (0usize, 0usize);
         for &(x, z) in cached_floor_area.iter() {
@@ -12699,11 +12733,7 @@ pub fn generate_buildings(
             attached: party >= 4 && party * 100 >= total * 15,
             scale: scale_factor,
             materials: MaterialRegion::at(lat, lon),
-            district: district_seed(
-                min_x.saturating_add(max_x) / 2,
-                min_z.saturating_add(max_z) / 2,
-                scale_factor,
-            ),
+            district: district_seed(centre_x, centre_z, scale_factor),
         }
     };
     let style = BuildingStyle::resolve(
@@ -13401,7 +13431,9 @@ pub fn generate_buildings(
             &config,
             style.generate_roof,
             effective_passages,
-            open_hall || config.shell_glass == ShellGlass::Hall,
+            open_hall
+                || config.shell_glass == ShellGlass::Hall
+                || config.category == BuildingCategory::Greenhouse,
             interior_plan.is_some(),
             &roof_cover,
         );
@@ -17859,6 +17891,10 @@ fn generate_roof(
     } else if let Some(override_block) = roof_block_override {
         config.roof_block = override_block;
     }
+    if crate::element_processing::surfaces::patches() {
+        config.roof_block =
+            patched_roof_block(config.roof_block, roof_type, osm_roof_block.is_some());
+    }
 
     config.add_dormers = add_dormers;
     config.trim = trim;
@@ -17901,6 +17937,12 @@ fn generate_roof(
     let mut surface = RoofSurface::default();
     match roof_type {
         // The cover already ranks OSM tags over the preset over the membrane.
+        RoofType::Flat
+            if osm_roof_block.is_none() && super::greenhouses::wants_venlo_roof(&element.tags) =>
+        {
+            let roof_y = config.base_height + abs_terrain_offset;
+            super::greenhouses::venlo_roof(editor, roof_area, ridge.along_x, roof_y);
+        }
         RoofType::Flat => {
             generate_flat_roof(
                 editor,
@@ -17988,6 +18030,11 @@ fn generate_roof(
         RoofType::Onion => {
             generate_onion_roof(editor, roof_area, &config);
         }
+    }
+    // Rows of plants under whatever roof a greenhouse carries.
+    if super::greenhouses::is_greenhouse(&element.tags) {
+        let floor_y = start_y_offset + abs_terrain_offset;
+        super::greenhouses::plant_rows(editor, roof_area, ridge.along_x, floor_y, element.id);
     }
     surface
 }
@@ -22211,6 +22258,38 @@ mod style_tests {
         ] {
             assert_eq!(roof_slab_for_stair(stairs), Some(slab), "{}", stairs.name());
         }
+    }
+
+    #[test]
+    fn surface_patches_roof_full_block_shares_its_stairs() {
+        for family in TILE_FAMILIES
+            .iter()
+            .chain(&[ORANGE_TERRACOTTA, SLATE, ZINC])
+        {
+            let full = full_block_like_its_stairs(*family);
+            assert_eq!(
+                get_stair_block_for_material(full),
+                get_stair_block_for_material(*family),
+                "{family:?}"
+            );
+            assert_eq!(
+                roof_slab_for_stair(get_stair_block_for_material(full)),
+                roof_slab_for_stair(get_stair_block_for_material(*family))
+            );
+        }
+        assert_eq!(full_block_like_its_stairs(TILE_RED), BRICK);
+        assert_eq!(full_block_like_its_stairs(TILE_ORANGE), GRANITE);
+        assert_eq!(patched_roof_block(TILE_RED, RoofType::Gabled, false), BRICK);
+        // Domes and mapped roofs keep their block.
+        assert_eq!(
+            patched_roof_block(TILE_RED, RoofType::Dome, false),
+            TILE_RED
+        );
+        assert_eq!(
+            patched_roof_block(TILE_ORANGE, RoofType::Gabled, true),
+            TILE_ORANGE
+        );
+        assert_eq!(patched_roof_block(TILE_RED, RoofType::Dome, true), TILE_RED);
     }
 
     #[test]

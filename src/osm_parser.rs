@@ -130,14 +130,14 @@ fn is_landform(natural: &str) -> bool {
 
 // Raw data from OSM
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OsmMember {
     pub r#type: String,
     pub r#ref: u64,
     pub r#role: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OsmElement {
     pub r#type: String,
     pub id: u64,
@@ -2636,6 +2636,8 @@ fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
         || tags.contains_key("landuse")
         || tags.contains_key("leisure")
         || crate::element_processing::golf::claims(tags)
+        || crate::element_processing::camp_sites::claims(tags)
+        || crate::element_processing::cemetery::claims(tags)
         || matches!(
             tags.get("man_made").map(String::as_str),
             Some("pier" | "breakwater" | "groyne")

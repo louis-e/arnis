@@ -282,8 +282,8 @@ impl CoordinateBitmap {
                 urban_count += (first_byte & first_mask).count_ones() as usize;
 
                 // Full bytes in between
-                for byte_idx in (start_byte + 1)..end_byte {
-                    urban_count += self.bits[byte_idx].count_ones() as usize;
+                for byte in self.bits.iter().take(end_byte).skip(start_byte + 1) {
+                    urban_count += byte.count_ones() as usize;
                 }
 
                 // Last partial byte
@@ -694,6 +694,10 @@ impl FloodFillCache {
             || Self::is_waterfront(&way.tags)
             // Golf turf -> golf::generate_golf
             || crate::element_processing::golf::claims(&way.tags)
+            // Grave fields -> cemetery::generate_cemetery
+            || crate::element_processing::cemetery::claims(&way.tags)
+            // Camp sites -> camp_sites::generate_camp_site
+            || crate::element_processing::camp_sites::claims(&way.tags)
             // Solar farm areas -> power::generate_solar_farm
             || (way.tags.get("power").map(String::as_str) == Some("generator")
                 && way.tags.get("generator:source").map(String::as_str) == Some("solar")))
@@ -723,7 +727,7 @@ impl FloodFillCache {
         tags.get("amenity").is_some_and(|amenity| {
             !matches!(
                 amenity.as_str(),
-                "bicycle_parking" | "shelter" | "fountain" | "parking"
+                "bicycle_parking" | "shelter" | "fountain" | "parking" | "grave_yard"
             )
         })
     }
@@ -836,15 +840,19 @@ impl FloodFillCache {
     ) -> Option<SealedSurfaceBitmap> {
         let mut planted_ids: Vec<u64> = Vec::new();
         let mut sealed_ids: Vec<(u64, bool)> = Vec::new();
+        // Turf multipolygons seal their outers, reopen their own holes, then golf ways seal theirs.
+        let mut turf_outers: fnv::FnvHashSet<u64> = Default::default();
+        let mut turf_holes: Vec<u64> = Vec::new();
         for element in elements {
-            // Fairways are often multipolygons: the outer rings keep the turf clear, and the
-            // inner ones give their holes (rough, a copse) back to whatever grows there.
             if let ProcessedElement::Relation(r) = element {
                 if crate::element_processing::golf::is_managed(&r.tags) {
                     for m in r.members.iter().filter(|m| self.contains(m.way.id)) {
                         match m.role {
-                            ProcessedMemberRole::Outer => sealed_ids.push((m.way.id, true)),
-                            ProcessedMemberRole::Inner => planted_ids.push(m.way.id),
+                            ProcessedMemberRole::Outer => {
+                                sealed_ids.push((m.way.id, false));
+                                turf_outers.insert(m.way.id);
+                            }
+                            ProcessedMemberRole::Inner => turf_holes.push(m.way.id),
                             ProcessedMemberRole::Part => {}
                         }
                     }
@@ -886,9 +894,11 @@ impl FloodFillCache {
         // (cells, paved, way id)
         let mut layers: Vec<(usize, bool, u64)> = Vec::new();
         let mut managed: Vec<(usize, bool, u64)> = Vec::new();
+        let mut turf: Vec<(usize, bool, u64)> = Vec::new();
         for (&(id, yields), len) in sealed_ids.iter().zip(sealed_lens) {
             match len {
                 Some(len) if yields => layers.push((len, true, id)),
+                Some(len) if turf_outers.contains(&id) => turf.push((len, true, id)),
                 Some(len) => managed.push((len, true, id)),
                 None => {}
             }
@@ -915,6 +925,8 @@ impl FloodFillCache {
         // Largest first, so each column takes the state of the smallest area over it; paving
         // wins a tie. The other sealed areas pave their whole footprint after that.
         layers.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        layers.extend(turf);
+        layers.extend(turf_holes.iter().map(|&id| (0, false, id)));
         layers.extend(managed);
 
         let mut mask = roads.clone();
@@ -1163,6 +1175,13 @@ fn relation_rings(
     closed
 }
 
+/// `--threads`: the global Rayon pool with exactly `threads` workers, over RAYON_NUM_THREADS.
+pub fn configure_rayon_threads(threads: usize) {
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.max(1))
+        .build_global();
+}
+
 /// Configures the global Rayon thread pool with a CPU usage cap.
 ///
 /// Call this once at startup before any parallel operations.
@@ -1304,6 +1323,54 @@ mod tests {
         assert!(sealed.contains(20, 17), "the pitch interior is sealed");
         assert!(!sealed.contains(60, 60), "a meadow is not a sealed surface");
         assert!(!sealed.contains(5, 5), "untouched ground stays open");
+    }
+
+    #[test]
+    fn a_fairway_multipolygon_reopens_only_its_holes() {
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation};
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let ring = |id, (x0, z0): (i32, i32), side: i32, tags: &[(&str, &str)]| {
+            let (x1, z1) = (x0 + side, z0 + side);
+            tagged_way(
+                id,
+                &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)],
+                tags,
+            )
+        };
+        let member = |role, way| ProcessedMember {
+            role,
+            way: Arc::new(way),
+        };
+        let fairway = ProcessedRelation {
+            id: 9,
+            tags: [("golf".to_string(), "fairway".to_string())].into(),
+            members: vec![
+                member(ProcessedMemberRole::Outer, ring(1, (0, 0), 80, &[])),
+                member(ProcessedMemberRole::Inner, ring(2, (10, 10), 10, &[])),
+                // A green mapped as its own way and used as the fairway's hole.
+                member(
+                    ProcessedMemberRole::Inner,
+                    ring(3, (40, 40), 10, &[("golf", "green")]),
+                ),
+            ],
+        };
+        let elements = vec![
+            ProcessedElement::Relation(fairway.clone()),
+            ProcessedElement::Way(fairway.members[2].way.as_ref().clone()),
+            // Turf mapped over the fairway as landuse does not open it.
+            ProcessedElement::Way(ring(4, (60, 10), 10, &[("landuse", "grass")])),
+        ];
+        let cache = FloodFillCache::precompute(&elements, None);
+        let roads = RoadMaskBitmap::new(&xzbbox);
+        let sealed = cache.collect_sealed_surfaces(&elements, &roads).unwrap();
+
+        assert!(sealed.contains(30, 30), "the fairway is sealed");
+        assert!(!sealed.contains(15, 15), "its hole is given back");
+        assert!(sealed.contains(45, 45), "a green in a hole stays sealed");
+        assert!(
+            sealed.contains(65, 15),
+            "a lawn on the fairway stays sealed"
+        );
     }
 
     #[test]

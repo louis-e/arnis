@@ -58,6 +58,9 @@ fn build_client() -> reqwest::Result<Client> {
 }
 
 pub fn fetch_latest_release() -> Result<ReleaseInfo, Box<dyn Error>> {
+    if crate::net::offline_mode() {
+        return Err("Offline Mode is on".into());
+    }
     let client = build_client()?;
     let res = client
         .get(LATEST_RELEASE_API_URL)

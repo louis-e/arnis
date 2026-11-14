@@ -12,20 +12,23 @@
   <!-- Not deferred: the map iframe starts posting log messages as soon as it
        parses, so the bridge has to be listening before that element exists. -->
   <script src="./js/logging.js"></script>
+  <script src="./js/piece-style.js"></script>
   <script src="./js/preview3d.js" defer></script>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>
   <script type="module" src="./js/language-selector.js" defer></script>
 </head>
 
-<body>
+<body class="meld-off">
   <!-- Icon sprite for the settings page and the dialogs, drawn in the same
        24px stroke style as the gear and map toolbar icons. Referenced with
        <svg class="icon"><use href="#i-..."></use></svg>; stroke and colour
        come from the .icon rule. -->
   <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
     <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
     <symbol id="i-earth" viewBox="0 0 24 24"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></symbol>
@@ -101,7 +104,7 @@
     <div class="flex-container">
       <!-- Left Box: Map -->
       <section class="section map-box">
-        <iframe src="maps.html" width="100%" height="100%" class="map-container" title="Map Picker"></iframe>
+        <iframe src="maps.html" width="100%" height="100%" class="map-container" title="Map Picker" data-localize-title="map_picker_title"></iframe>
       </section>
 
       <!-- Right Box: Directory Selection, Start Button, and Progress Bar -->
@@ -127,13 +130,13 @@
                          characters too - so nothing typed here is ever silently truncated
                          on the way to disk. main.js reads the limit off this attribute to
                          colour the field red once it's reached. -->
-                    <input type="text" id="world-name-input" class="world-name-input" style="display: none;" maxlength="48" autocomplete="off" spellcheck="false">
+                    <input type="text" id="world-name-input" class="world-name-input" style="display: none;" maxlength="32" autocomplete="off" spellcheck="false">
                     <button type="button" id="world-name-edit-button" class="world-name-edit-button" title="Set a custom world name" aria-label="Set a custom world name" style="display: none;">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zm17.71-10.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75z"/></svg>
                     </button>
                   </div>
                 </div>
-                <button type="button" class="settings-button" onclick="openSettings()" aria-label="Settings">
+                <button type="button" class="settings-button" onclick="openSettings()" aria-label="Settings" data-localize-aria-label="customization_settings">
                     <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 </button>
               </div>
@@ -147,15 +150,21 @@
                 <button type="button" id="format-luanti" class="format-toggle-btn" onclick="setWorldFormat('luanti')" style="display: none;">
                   Luanti
                 </button>
+                <button type="button" id="format-hytale" class="format-toggle-btn" onclick="setWorldFormat('hytale')" style="display: none;">
+                  Hytale
+                </button>
               </div>
               <!-- One World: which persistent world the next area joins (hidden unless the mode is on) -->
               <div id="one-world-status" class="one-world-status" style="display: none;" aria-live="polite"></div>
             </div>
             <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
+            <!-- Under a size warning: the way to build it in pieces (Meld features) -->
+            <button type="button" id="bbox-features-cta" hidden data-localize="meld_use_pieces">Use Advanced features to build it in cells</button>
 
             <!-- Mini 3D terrain preview (rendered via the map's terrain button, click to expand) -->
-            <div id="preview3d-mini" class="preview3d-mini" style="display: none;" title="Click to expand 3D preview">
+            <div id="preview3d-mini" class="preview3d-mini" style="display: none;" title="Click to expand 3D preview" data-localize-title="preview3d_expand">
               <div id="preview3d-mini-map"></div>
+              <button type="button" id="preview3d-grip" class="preview3d-grip" aria-label="Resize the 3D preview" data-localize-aria-label="preview3d_resize"></button>
               <div id="preview3d-mini-loader" class="preview3d-mini-loader" style="display: none;">
                 <span id="preview3d-mini-loader-text">Rendering terrain preview…</span>
                 <div class="preview3d-mini-loader-bar"></div>
@@ -166,12 +175,41 @@
           <div class="progress-section">
             <img src="" alt="" class="secret-parrot" id="secret-parrot">
             <span id="progress-info" class="progress-info-text"></span>
+            <!-- The plan of a job in pieces before it runs (above the bar), and the ring around a One World's built land. -->
+            <div id="job-plan" class="job-plan meld-only" hidden></div>
+            <!-- Before a job in pieces starts: what it asks of the computer, and a hold to start it (main.js) -->
+            <div id="run-confirm" class="run-confirm meld-only" role="alertdialog" aria-labelledby="run-confirm-warn" aria-describedby="run-confirm-overlap" hidden>
+              <p id="run-confirm-warn" data-localize="plan_confirm_warn">This build takes a long time and uses most of the CPU and memory until it ends. Leave other heavy work for later and check there is enough free disk space.</p>
+              <p id="run-confirm-overlap" hidden></p>
+              <a id="run-confirm-docs" href="https://github.com/louis-e/arnis/wiki/Advanced-Features" data-localize="plan_confirm_docs">Read the docs</a>
+              <div class="run-confirm-row">
+                <button type="button" id="run-confirm-cancel" class="run-button" data-localize="one_world_confirm_cancel">Cancel</button>
+                <button type="button" id="run-confirm-hold" class="run-button run-hold" disabled data-localize="plan_confirm_hold">Hold to start</button>
+              </div>
+            </div>
+            <!-- Before the cell menu rebuilds or removes built cells: what it does, and a hold to confirm (meld-features.js) -->
+            <div id="cells-confirm" class="run-confirm meld-only" role="alertdialog" aria-labelledby="cells-confirm-text" hidden>
+              <p id="cells-confirm-text"></p>
+              <div class="run-confirm-row">
+                <button type="button" id="cells-confirm-cancel" class="run-button" data-localize="one_world_confirm_cancel">Cancel</button>
+                <button type="button" id="cells-confirm-hold" class="run-button run-hold" data-localize="cell_hold">Hold to confirm</button>
+              </div>
+            </div>
             <div class="progress-row">
               <div class="progress-bar-container">
                 <div class="progress-bar" id="progress-bar"></div>
-                <span id="progress-eta" class="progress-eta-overlay" dir="ltr"></span>
+                <span id="progress-eta" class="progress-eta-overlay" dir="ltr"><span class="eta-on" aria-hidden="true"></span><span class="eta-off"></span></span>
               </div>
               <span id="progress-detail">0%</span>
+            </div>
+            <button type="button" id="plan-expand-button" class="run-button plan-expand meld-only" hidden data-localize="plan_expand">Expand around the built land</button>
+            <!-- A job built in pieces: Pause, Stop and Retry. Hidden unless Meld features is on. -->
+            <div id="run-controls" class="run-controls meld-only" hidden>
+              <div id="run-failed" class="run-failed" role="status" aria-live="polite"></div>
+              <button type="button" id="run-pause-button" class="run-button" data-localize="run_pause">Pause</button>
+              <button type="button" id="run-stop-button" class="run-button" data-localize="run_stop">Stop</button>
+              <button type="button" id="run-halo-toggle" class="run-button run-toggle" aria-pressed="false" data-localize="run_halo">Show overlap</button>
+              <button type="button" id="run-retry-button" class="run-button" hidden data-localize="run_retry">Retry cells</button>
             </div>
           </div>
         </div>
@@ -188,7 +226,12 @@
           <img src="./images/logo.png" alt="Arnis">
         </div>
 
-        <nav class="settings-nav" aria-label="Settings sections">
+        <div class="settings-search">
+          <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+          <input type="search" id="settings-search" placeholder="Search settings" data-localize="placeholder_settings_search" autocomplete="off" spellcheck="false">
+        </div>
+
+        <nav class="settings-nav" aria-label="Settings sections" data-localize-aria-label="settings_sections_label">
           <button type="button" class="settings-nav-item" data-target="settings-section-world">
             <svg class="icon" aria-hidden="true"><use href="#i-globe"></use></svg>
             <span class="settings-nav-text">
@@ -229,6 +272,46 @@
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
+          <button type="button" class="settings-nav-item" data-target="settings-section-advanced">
+            <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_advanced">Advanced</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_advanced">Build height, lighting, mods</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="settings-nav-item meld-only" data-target="settings-section-projects">
+            <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_projects">Projects</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_projects">Worlds you have built</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="settings-nav-item meld-only" data-target="settings-section-scale">
+            <svg class="icon" aria-hidden="true"><use href="#i-map-plus"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_scale">Large Worlds</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_scale">Parallel cells, memory, origin</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="settings-nav-item meld-only" data-target="settings-section-data">
+            <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_data">Data Sources</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_data">OSM source, offline, downloads</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="settings-nav-item meld-only" data-target="settings-section-tuning">
+            <svg class="icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_tuning">Fine Tuning</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_tuning">Seed, roads, rocks, caves, water</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
           <button type="button" class="settings-nav-item" data-target="settings-section-map">
             <svg class="icon" aria-hidden="true"><use href="#i-map"></use></svg>
             <span class="settings-nav-text">
@@ -242,14 +325,6 @@
             <span class="settings-nav-text">
               <span class="settings-nav-title" data-localize="settings_section_application">Application</span>
               <span class="settings-nav-sub" data-localize="settings_nav_application">Language, folders, cache</span>
-            </span>
-            <span class="settings-nav-dot" aria-hidden="true"></span>
-          </button>
-          <button type="button" class="settings-nav-item" data-target="settings-section-advanced">
-            <svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
-            <span class="settings-nav-text">
-              <span class="settings-nav-title" data-localize="settings_section_advanced">Advanced</span>
-              <span class="settings-nav-sub" data-localize="settings_nav_advanced">Build height, lighting, mods</span>
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
@@ -273,18 +348,18 @@
 
       <div class="settings-main">
         <header class="settings-topbar">
-          <span class="settings-topbar-icon" aria-hidden="true"><svg class="icon"><use href="#i-settings"></use></svg></span>
           <div class="settings-topbar-text">
             <h2 id="settings-title" data-localize="customization_settings">Settings</h2>
             <p data-localize="settings_subtitle">Configure how your Minecraft world should look and behave.</p>
           </div>
-          <button type="button" class="settings-close" onclick="closeSettings()" aria-label="Close" title="Close (Esc)">
+          <button type="button" class="settings-close" onclick="closeSettings()" aria-label="Close" title="Close (Esc)" data-localize-aria-label="close_label" data-localize-title="close_esc">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>
 
         <div class="settings-scrollable">
           <div class="settings-content">
+            <p id="settings-search-empty" class="settings-search-empty" hidden data-localize="settings_search_empty">No setting matches.</p>
 
             <!-- World -->
             <section class="settings-section" id="settings-section-world">
@@ -300,7 +375,7 @@
                 <label class="setting-label">
                   <span class="setting-heading">
                     <span data-localize="gamemode">Game Mode</span>
-                    <span class="tooltip-icon" data-tooltip="The game mode the world starts in. On Luanti, Spectator becomes Creative.">?</span>
+                    <span class="tooltip-icon" data-tooltip-key="gamemode_tip" data-tooltip="The game mode the world starts in. On Luanti and Hytale, Spectator becomes Creative.">?</span>
                   </span>
                 </label>
                 <div class="segmented-control choice-cards" id="gamemode-group">
@@ -344,9 +419,9 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="world_type">World Type</span>
-                        <span class="tooltip-icon" data-tooltip="What Minecraft generates past the edge of the area: empty void, so the area is an island, or a flat grass plain. Java only.">?</span>
+                        <span class="tooltip-icon" data-preview-seg="world-type" data-preview-key="worldType" data-preview-group="world-type-group" data-tooltip-key="world_type_tip" data-tooltip="What Minecraft generates past the edge of the area: empty void, so the area is an island, or a flat grass plain. Java only.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="world_type_desc">What lies past the edge of the area. Java only.</span>
+                      <span class="setting-desc" data-localize="world_type_desc">What lies past the edge of the area.</span>
                     </span>
                   </label>
                   <div class="settings-control">
@@ -363,9 +438,9 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="mob_spawning">Mob Spawning</span>
-                        <span class="tooltip-icon" data-tooltip="Animals puts the world on Peaceful: animals turn up over time on lawns and in parks, and fish in the water. Animals &amp; Monsters puts it on Normal, so monsters come out at night and in dark buildings, with mob griefing off so creepers and endermen leave the city standing. Not with Zombie Outbreak or Disasters.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="mob_spawning_tip" data-tooltip="Animals puts the world on Peaceful: animals turn up over time on lawns and in parks, and fish in the water. Animals &amp; Monsters puts it on Normal, so monsters come out at night and in dark buildings, with mob griefing off so creepers and endermen leave the city standing. Not with Zombie Outbreak or Disasters.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="mob_spawning_desc">Let animals, and monsters too if you like, spawn on their own. Java and Bedrock.</span>
+                      <span class="setting-desc" data-localize="mob_spawning_desc">Let animals, and monsters too if you like, spawn on their own.</span>
                     </span>
                   </label>
                   <div class="settings-control">
@@ -397,9 +472,9 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="custom_world_name">Custom World Name</span>
-                        <span class="tooltip-icon" data-tooltip="Adds a pencil icon to the Start button so you can name each new world yourself instead of 'Arnis World N'. Java only.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="custom_world_name_tip" data-tooltip="Adds a pencil icon to the Start button so you can name each new world yourself instead of 'Arnis World N'. Java only.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="custom_world_name_desc">Name new worlds yourself instead of "Arnis World N". Java only.</span>
+                      <span class="setting-desc" data-localize="custom_world_name_desc">Name new worlds yourself instead of "Arnis World N".</span>
                     </span>
                   </label>
                   <div class="settings-control">
@@ -415,9 +490,9 @@
                       <span class="setting-text">
                         <span class="setting-heading">
                           <span data-localize="one_world">One World</span>
-                          <span class="tooltip-icon" data-tooltip="With On, every area you generate joins one shared world instead of becoming a new world. With Live, you play that world on a Minecraft server on this computer while Arnis generates the land around you. Some settings are then fixed by the world. Java only.">?</span>
+                          <span class="tooltip-icon" data-tooltip-key="one_world_tip" data-tooltip="With On, every area you generate joins one shared world instead of becoming a new world. With Live, you play that world on a Minecraft server on this computer while Arnis generates the land around you. Some settings are then fixed by the world. Java only.">?</span>
                         </span>
-                        <span class="setting-desc" id="one-world-desc" data-localize="one_world_desc_off">Every area becomes a world of its own. Java only.</span>
+                        <span class="setting-desc" id="one-world-desc" data-localize="one_world_desc_off">Every area becomes a world of its own.</span>
                       </span>
                     </label>
                     <div class="settings-control">
@@ -425,7 +500,7 @@
                         <!-- data-default marks the shipped default; the active class is moved by JS -->
                         <button type="button" class="segment active" data-default data-one-world="off" data-localize="one_world_off">Off</button>
                         <button type="button" class="segment" data-one-world="on" data-localize="one_world_on">On</button>
-                        <button type="button" class="segment" data-one-world="live" data-localize="one_world_live">Live</button>
+                        <button type="button" class="segment" data-one-world="live"><span data-localize="one_world_live">Live</span><img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="live" data-new-when="#one-world-group .segment.active[data-one-world=&quot;live&quot;]"></button>
                       </div>
                     </div>
                   </div>
@@ -553,7 +628,7 @@
               <!-- The select stays the source of truth (generation, the settings
                    store and the Earth-only gate all read it); the cards are a view
                    of it, kept in step by settings-layout.js. -->
-              <div class="settings-row setting-choice">
+              <div data-preview-seg="generation-mode" data-preview-key="value" data-preview-group="generation-mode-cards" class="settings-row setting-choice">
                 <label for="generation-mode-select" class="setting-label">
                   <span class="setting-heading"><span data-localize="generation_mode">Generation Mode</span></span>
                 </label>
@@ -595,7 +670,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="overture">Additional Buildings</span>
-                        <span class="tooltip-icon" data-tooltip="Adds buildings that are missing from OpenStreetMap, using Overture Maps footprints. Helps most in rural areas. They are detected from satellite imagery, so a few may be wrong.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="overture_tip" data-tooltip="Adds buildings that are missing from OpenStreetMap, using Overture Maps footprints. Helps most in rural areas. They are detected from satellite imagery, so a few may be wrong.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="overture_desc">Fills gaps in OpenStreetMap with satellite-detected footprints.</span>
                     </span>
@@ -612,7 +687,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="three_dmr">3D Models &amp; Props</span>
-                        <span class="tooltip-icon" data-tooltip="Adds 3D models of famous landmarks such as the Eiffel Tower, and props like cars, boats, cranes, planes and wind turbines.">?</span>
+                        <span class="tooltip-icon" data-preview-on="props-all" data-preview-off="props-none" data-tooltip-key="three_dmr_tip" data-tooltip="Adds 3D models of famous landmarks such as the Eiffel Tower, and props like cars, boats, cranes, planes and wind turbines.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="three_dmr_desc">Famous landmarks plus cars, boats, cranes and wind turbines.</span>
                     </span>
@@ -641,9 +716,9 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="signage">Signage</span>
-                        <span class="tooltip-icon" data-tooltip="Readable image signs. Basic covers street names, traffic signs, transit stops and billboards. Full adds shop names, house numbers and crossing signs. Java only.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="signage_tip" data-tooltip="Readable image signs. Basic covers street names, traffic signs, transit stops and billboards. Full adds shop names, house numbers and crossing signs. Java only.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="signage_desc">Readable street names, traffic signs and shop plates. Java only.</span>
+                      <span class="setting-desc" data-localize="signage_desc">Readable street names, traffic signs and shop plates.</span>
                     </span>
                   </label>
                   <div class="settings-control">
@@ -661,7 +736,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="winter">Winter</span>
-                        <span class="tooltip-icon" data-tooltip="Covers the ground, roofs and trees in snow, freezes rivers and lakes and makes every biome snowy, so it keeps snowing in game. Roads stay clear.">?</span>
+                        <span class="tooltip-icon" data-preview-on="winter-on" data-preview-off="buildings-on" data-preview-off-caption="preview_winter_off" data-tooltip-key="winter_tip" data-tooltip="Covers the ground, roofs and trees in snow, freezes rivers and lakes and makes every biome snowy, so it keeps snowing in game. Roads stay clear.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="winter_desc">Snow on the ground, roofs and trees, frozen rivers and lakes.</span>
                     </span>
@@ -677,7 +752,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="post_apocalyptic">Post-Apocalyptic</span>
-                        <span class="tooltip-icon" data-tooltip="Turns the city into ruins: partly collapsed buildings, broken windows, cracked roads with grass, rubble, moss and vines, and every light off. Goes well with Zombie Outbreak.">?</span>
+                        <span class="tooltip-icon" data-preview-on="post-apocalyptic-on" data-preview-off="buildings-on" data-preview-off-caption="preview_post_apocalyptic_off" data-tooltip-key="post_apocalyptic_tip" data-tooltip="Turns the city into ruins: partly collapsed buildings, broken windows, cracked roads with grass, rubble, moss and vines, and every light off. Goes well with Zombie Outbreak.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="post_apocalyptic_desc">Collapsed, overgrown buildings, cracked roads and no lights.</span>
                     </span>
@@ -706,7 +781,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="height_multiplier">Terrain Height</span>
-                        <span class="tooltip-icon" data-tooltip="Makes the terrain taller or flatter. Buildings and trees keep their size. Terrain that would pass the build limit is compressed, unless Extend build height is on.">?</span>
+                        <span class="tooltip-icon" data-preview-num="height-multiplier" data-preview-steps="0.5,1,2" data-tooltip-key="height_multiplier_tip" data-tooltip="Makes the terrain taller or flatter. Buildings and trees keep their size. Terrain that would pass the build limit is compressed, unless Extend build height is on.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="height_multiplier_desc">1.00 is real height. Higher values make hills and mountains taller.</span>
                     </span>
@@ -723,7 +798,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="fillground">Fill Ground</span>
-                        <span class="tooltip-icon" data-tooltip="Fills the ground under the surface with stone and ores for survival mining. Takes longer and makes the world bigger on disk.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="fillground_tip" data-tooltip="Fills the ground under the surface with stone and ores for survival mining. Takes longer and makes the world bigger on disk.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="fillground_desc">Stone and ores below the surface for survival mining.</span>
                     </span>
@@ -739,7 +814,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="caves">Caves</span>
-                        <span class="tooltip-icon" data-tooltip="Carves caves, underground rivers and cave biomes under hills and mountains. Turns on Fill Ground and takes longer.">?</span>
+                        <span class="tooltip-icon" data-preview-on="caves-on" data-preview-off="caves-off" data-tooltip-key="caves_tip" data-tooltip="Carves caves, underground rivers and cave biomes under hills and mountains. Turns on Fill Ground and takes longer.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="caves_desc">Caves, underground rivers and cave biomes under hills.</span>
                     </span>
@@ -756,7 +831,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="canopy_height">Real Tree Cover</span>
-                        <span class="tooltip-icon" data-tooltip="Places trees where real ones stand, at about their real height, using a global canopy height map. Off uses land cover, which fills every wooded area with dense forest.">?</span>
+                        <span class="tooltip-icon" data-preview-on="canopy-height-on" data-preview-off="canopy-height-off" data-tooltip-key="canopy_height_tip" data-tooltip="Places trees where real ones stand, at about their real height, using a global canopy height map. Off uses land cover, which fills every wooded area with dense forest.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="canopy_height_desc">Trees stand where real ones do, at roughly their height.</span>
                     </span>
@@ -770,7 +845,10 @@
                   <label for="legacy-trees-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tree"></use></svg>
                     <span class="setting-text">
-                      <span class="setting-heading"><span data-localize="legacy_trees">Legacy trees</span></span>
+                      <span class="setting-heading">
+                        <span data-localize="legacy_trees">Legacy trees</span>
+                        <span class="tooltip-icon" data-preview-on="legacy-trees-on" data-preview-off="legacy-trees-off" data-tooltip-key="legacy_trees_tip" data-tooltip="Simple procedural trees instead of the bundled tree models. Quicker, blockier.">?</span>
+                      </span>
                       <span class="setting-desc" data-localize="legacy_trees_desc">Simple procedural trees instead of detailed models.</span>
                     </span>
                   </label>
@@ -785,7 +863,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="max_tree_size">Max Tree Size</span>
-                        <span class="tooltip-icon" data-tooltip="Tallest tree allowed: Small 6, Medium 12, Big 20 and Tall 28 blocks; Giant has no cap. Taller trees become a smaller species where one exists.">?</span>
+                        <span class="tooltip-icon" data-preview-seg="max-tree-size" data-preview-key="maxTreeSize" data-preview-group="max-tree-size-group" data-tooltip-key="max_tree_size_tip" data-tooltip="Tallest tree allowed: Small 6, Medium 12, Big 20 and Tall 28 blocks; Giant has no cap. Taller trees become a smaller species where one exists.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="max_tree_size_desc">Taller trees are swapped for a smaller species.</span>
                     </span>
@@ -802,13 +880,43 @@
                   </div>
                 </div>
 
+                <div class="settings-row setting-tile">
+                  <label for="meld-rocks-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-mountain"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_rocks">Rocks</span>
+                        <span class="tooltip-icon" data-preview-on="rock-density-0.2" data-preview-on-caption="preview_rocks_on" data-preview-off="rocks-off" data-tooltip-key="meld_rocks_tip" data-tooltip="Scatters rocks and boulders on open ground.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_rocks_desc">Scatter rocks and boulders over open land.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-rocks-toggle" name="meld-rocks-toggle" checked>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-bushes-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tree"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_bushes">Bushes</span>
+                        <span class="tooltip-icon" data-preview-on="bush-density-0.2" data-preview-on-caption="preview_bushes_on" data-preview-off="rocks-off" data-preview-off-caption="preview_bushes_off" data-tooltip-key="meld_bushes_tip" data-tooltip="Scatters small bushes of ten species over open grassland and cropland.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_bushes_desc">Scatter small bushes over open land.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-bushes-toggle" name="meld-bushes-toggle" checked>
+                  </div>
+                </div>
                 <div class="settings-row setting-tile is-wide">
                   <label class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-wheat"></use></svg>
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="field_preset">Farmland Style</span>
-                        <span class="tooltip-icon" data-tooltip="Classic mixes crops block by block. The others give each field one crop and split large fields into strips: narrow for Smallholding, medium for Patchwork, wide and mostly wheat for Prairie.">?</span>
+                        <span class="tooltip-icon" data-preview-seg="farmland" data-preview-key="fieldPreset" data-preview-group="field-preset-group" data-tooltip-key="field_preset_tip" data-tooltip="Classic mixes crops block by block. The others give each field one crop and split large fields into strips: narrow for Smallholding, medium for Patchwork, wide and mostly wheat for Prairie.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="field_preset_desc">Each field grows its own crop instead of a mixed sheet.</span>
                     </span>
@@ -844,7 +952,7 @@
                 <label class="setting-label">
                   <span class="setting-heading">
                     <span data-localize="facade_source">Facade Source</span>
-                    <span class="tooltip-icon" data-tooltip="Preset uses bundled photos picked by building type, Mapillary real street photos where available. Photo walls need Java 1.21.4+ and the world's resources.zip. On a server, host it and set resource-pack in server.properties.">?</span>
+                    <span class="tooltip-icon" data-tooltip-key="facade_source_tip" data-tooltip="Preset uses bundled photos picked by building type, Mapillary real street photos where available. Photo walls need Java 1.21.4+ and the world's resources.zip. On a server, host it and set resource-pack in server.properties.">?</span>
                   </span>
                 </label>
                 <div class="segmented-control choice-cards" id="facade-source-group">
@@ -874,7 +982,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="mapillary_token">Mapillary Token</span>
-                        <span class="tooltip-icon" data-tooltip="Free: register an app at mapillary.com/developer and copy its Client Token (starts with MLY|). It stays on this computer and is only sent to Mapillary.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="mapillary_token_tip" data-tooltip="Free: register an app at mapillary.com/developer and copy its Client Token (starts with MLY|). It stays on this computer and is only sent to Mapillary.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="mapillary_token_desc">Free from mapillary.com/developer. Stays on this computer.</span>
                     </span>
@@ -890,7 +998,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="facade_mode">Facade Mode</span>
-                        <span class="tooltip-icon" data-tooltip="Photos hangs the photo itself on the wall (Java 1.21.4+). Blocks builds walls in matching colours and works on every world format.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="facade_mode_tip" data-tooltip="Photos hangs the photo itself on the wall (Java 1.21.4+). Blocks builds walls in matching colours and works on every world format.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="facade_mode_desc">Hang the photos themselves, or match wall blocks to them.</span>
                     </span>
@@ -910,7 +1018,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="facade_detail">Facade Detail</span>
-                        <span class="tooltip-icon" data-tooltip="Standard works on any graphics card. High is sharper but needs a recent graphics card on every computer that opens the world.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="facade_detail_tip" data-tooltip="Standard works on any graphics card. High is sharper but needs a recent graphics card on every computer that opens the world.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="facade_detail_desc">Higher detail is sharper but needs a modern graphics card.</span>
                     </span>
@@ -930,7 +1038,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="facade_precompute">Precompute Area</span>
-                        <span class="tooltip-icon" data-tooltip="Builds the facades for the selected area ahead of time, so generating there is quick and the 3D preview shows them. Up to 0.1 km²; a city block takes about 20 minutes. Check coverage on mapillary.com first.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="facade_precompute_tip" data-tooltip="Builds the facades for the selected area ahead of time, so generating there is quick and the 3D preview shows them. Up to 0.1 km²; a city block takes about 20 minutes. Check coverage on mapillary.com first.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="facade_precompute_desc">Build the selected area's facades ahead of generating.</span>
                     </span>
@@ -943,10 +1051,6 @@
                 <!-- What the precompute is doing, what it did, or why it cannot run -->
                 <div id="facade-precompute-status" class="settings-notice" style="display: none;"></div>
 
-                <!-- Why the panel modes are greyed out on a non-Java world -->
-                <div id="facade-java-only-notice" class="settings-notice" style="display: none;" data-localize="facade_mode_java_only">
-                  Photo panels are Java entities, so only the block facades are built on Bedrock and Luanti.
-                </div>
               </div>
             </section>
 
@@ -956,7 +1060,7 @@
                 <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-gamepad"></use></svg></span>
                 <div>
                   <h3 data-localize="settings_section_gameplay">Gameplay</h3>
-                  <p data-localize="settings_section_gameplay_desc">Extras that run from a data pack inside the world. Java only (Moving Vehicles also runs on Bedrock), not in One World mode. All off unless you turn them on.</p>
+                  <p data-localize="settings_section_gameplay_desc">Extras that run from a data pack inside the world. All off unless you turn them on.</p>
                 </div>
               </header>
 
@@ -967,7 +1071,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="pause_menu">Arnis Pause Menu</span>
-                        <span class="tooltip-icon" data-tooltip="Adds an Arnis button to the pause menu for travelling to landmarks, seeing discoveries and the map credits. Java 1.21.6+; on 1.21.4 and 1.21.5 the credits go to chat.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="pause_menu_tip" data-tooltip="Adds an Arnis button to the pause menu for travelling to landmarks, seeing discoveries and the map credits. Java 1.21.6+; on 1.21.4 and 1.21.5 the credits go to chat.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="pause_menu_desc">Travel, discoveries and credits from the pause menu.</span>
                     </span>
@@ -982,7 +1086,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="discoveries">Discoveries</span>
-                        <span class="tooltip-icon" data-tooltip="Adds an advancement tab with the area's landmarks, museums, parks, stations and more. Each one unlocks when you get there. Java 1.21.4+.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="discoveries_tip" data-tooltip="Adds an advancement tab with the area's landmarks, museums, parks, stations and more. Each one unlocks when you get there. Java 1.21.4+.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="discoveries_desc">Walk to real landmarks to unlock them as advancements.</span>
                     </span>
@@ -997,7 +1101,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="traffic_lights">Working Traffic Lights</span>
-                        <span class="tooltip-icon" data-tooltip="Traffic lights cycle through red, amber and green, with pedestrian and bike lights at crossings. Crossing roads take turns. Java 1.21.4+.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="traffic_lights_tip" data-tooltip="Traffic lights cycle through red, amber and green, with pedestrian and bike lights at crossings. Crossing roads take turns. Java 1.21.4+.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="traffic_lights_desc">Traffic lights that actually switch.</span>
                     </span>
@@ -1012,7 +1116,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="moving_vehicles">Moving Vehicles</span>
-                        <span class="tooltip-icon" data-tooltip="Cars drive the mapped streets at the speed limit and, on Java, stop at red lights. Trains and trams run the tracks and stop at stations. Ferries cross on their mapped lines, ships sail the navigable rivers and canals, and boats cruise on open lakes and along the coast. Only vehicles near a player move. Java 1.21.4+ or Bedrock 1.21.120+.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="moving_vehicles_tip" data-tooltip="Cars drive the mapped streets at the speed limit and, on Java, stop at red lights. Trains and trams run the tracks and stop at stations. Ferries cross on their mapped lines, ships sail the navigable rivers and canals, and boats cruise on open lakes and along the coast. Only vehicles near a player move. Java 1.21.4+ or Bedrock 1.21.120+.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="moving_vehicles_desc">Cars, trains, ferries and ships that run your streets, tracks and water.</span>
                     </span>
@@ -1027,7 +1131,8 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="pedestrians">Pedestrians</span>
-                        <span class="tooltip-icon" data-tooltip="People walk the mapped footways, sidewalks, squares and pedestrian streets, busier by day and near shops and sights. They wait at kerbs and, with Working Traffic Lights, for the green man, and cars stop for them. Only people near a player walk. Java 1.21.9+ shows them in the game's own skins; older versions use villagers.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="pedestrians_tip" data-tooltip="People walk the mapped footways, sidewalks, squares and pedestrian streets, busier by day and near shops and sights. They wait at kerbs and, with Working Traffic Lights, for the green man, and cars stop for them. Only people near a player walk. Java 1.21.9+ shows them in the game's own skins; older versions use villagers.">?</span>
+                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="pedestrians" data-new-when="#pedestrians-toggle:checked">
                       </span>
                       <span class="setting-desc" data-localize="pedestrians_desc">People who walk your sidewalks and pedestrian streets.</span>
                     </span>
@@ -1043,7 +1148,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="zombie_outbreak">Zombie Outbreak</span>
-                        <span class="tooltip-icon" data-tooltip="Survive five nights as bigger zombie waves hunt you through the streets, until Patient Zero rises on the fifth. Supply drops land each morning. Starts in Survival on Normal. Java 1.21.6+.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="zombie_outbreak_tip" data-tooltip="Survive five nights as bigger zombie waves hunt you through the streets, until Patient Zero rises on the fifth. Supply drops land each morning. Starts in Survival on Normal. Java 1.21.6+.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="zombie_outbreak_desc">Five nights of zombie waves through your streets, with a boss.</span>
                     </span>
@@ -1058,7 +1163,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="disasters">Disasters</span>
-                        <span class="tooltip-icon" data-tooltip="Disasters strike one after another, each with a short warning: storms, meteors, tornadoes, floods, wildfires and more. The damage stays. Turns on Fill Ground and interiors and starts in Survival. Java 1.21.6+.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="disasters_tip" data-tooltip="Disasters strike one after another, each with a short warning: storms, meteors, tornadoes, floods, wildfires and more. The damage stays. Turns on Fill Ground and interiors and starts in Survival. Java 1.21.6+.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="disasters_desc">A disaster every few minutes: floods, tornadoes, earthquakes and more.</span>
                     </span>
@@ -1073,13 +1178,807 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="body_gravity">Moon &amp; Mars Gravity</span>
-                        <span class="tooltip-icon" data-tooltip="Players and mobs fall with real surface gravity: about 1/6 of Earth's on the Moon and 3/8 on Mars. Fall damage scales to match. Java 1.21.4+.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="body_gravity_tip" data-tooltip="Players and mobs fall with real surface gravity: about 1/6 of Earth's on the Moon and 3/8 on Mars. Fall damage scales to match. Java 1.21.4+.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="body_gravity_desc">Real low gravity on Moon and Mars worlds.</span>
                     </span>
                   </label>
                   <div class="settings-control">
                     <input type="checkbox" class="switch" id="body-gravity-toggle" name="body-gravity-toggle">
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Advanced -->
+            <section class="settings-section" id="settings-section-advanced">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-sliders"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_advanced">Advanced</h3>
+                  <p data-localize="settings_section_advanced_desc">Options for mods, compatibility and experiments. Most worlds never need them.</p>
+                </div>
+              </header>
+
+              <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide">
+                  <label for="advanced-meld-features-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-flask"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="advanced_meld_features">Advanced features</span>
+                        <span class="tooltip-icon" data-tooltip-key="advanced_meld_features_tip" data-tooltip="Shows the Projects, Large Worlds, Data Sources and Fine Tuning sections. Turning it off hides them and uses none of their settings. Experimental.">?</span>
+                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="advanced" data-new-when="#advanced-meld-features-toggle:checked">
+                      </span>
+                      <span class="setting-desc" data-localize="advanced_meld_features_desc">Extra settings for large worlds and finer control.</span>
+                      <span class="setting-desc"><span data-localize="advanced_meld_credit_pre">Ported from the </span><strong>Meld</strong><span data-localize="advanced_meld_credit_post"> project.</span></span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="advanced-meld-features-toggle" name="advanced-meld-features-toggle">
+                  </div>
+                </div>
+
+
+                <div class="settings-row setting-tile">
+                  <label for="disable-height-limit-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-arrow-up"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="disable_height_limit">Extend build height</span>
+                        <span class="tooltip-icon" data-tooltip-key="disable_height_limit_tip" data-tooltip="Raises the build height only where the terrain or buildings would not fit, and on Java only as far as they reach. Off compresses tall terrain instead. Java 1.21.4+ and Bedrock 1.21.120+, not for Realms.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="disable_height_limit_desc">Raises the height limit when an area needs it. Not for Realms.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="disable-height-limit-toggle" name="disable-height-limit-toggle" checked>
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="aws-only-elevation-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-history"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="aws_only_elevation">Legacy Terrain</span>
+                        <span class="tooltip-icon" data-tooltip-key="aws_only_elevation_tip" data-tooltip="Uses the older AWS terrain tiles (about 30 m) instead of Mapterhorn. Less detailed; only useful if Mapterhorn can't be reached.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="aws_only_elevation_desc">Older, coarser elevation source for when the default fails.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="aws-only-elevation-toggle" name="aws-only-elevation-toggle">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="bake-lighting-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-lightbulb"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="bake_lighting">Bake lighting</span>
+                        <span class="tooltip-icon" data-tooltip-key="bake_lighting_tip" data-tooltip="Precomputes lighting so LOD mods like Voxy show distant chunks lit before you visit them. Not needed in vanilla; takes longer.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="bake_lighting_desc">Precomputed light for LOD mods like Voxy. Slower.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="bake-lighting-toggle" name="bake-lighting-toggle">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="voxy-lod-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="voxy_lod">Pre-generate Voxy LOD</span>
+                        <span class="tooltip-icon" data-tooltip-key="voxy_lod_tip" data-tooltip="Writes Voxy's LOD cache with the world, so distant terrain shows on first join without /voxy import. Turns on Bake lighting and takes longer. Java only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="voxy_lod_desc">Distant terrain renders on first join.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="voxy-lod-toggle" name="voxy-lod-toggle">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="dh-lod-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-eye"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="dh_lod">Pre-generate Distant Horizons LOD</span>
+                        <span class="tooltip-icon" data-tooltip-key="dh_lod_tip" data-tooltip="Writes the Distant Horizons LOD database with the world, so distant terrain shows on first join instead of loading chunk by chunk. Turns on Bake lighting and takes longer. Java only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="dh_lod_desc">Distant terrain renders on first join.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="dh-lod-toggle" name="dh-lod-toggle">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="enable-luanti-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-flask"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading"><span data-localize="enable_luanti">Luanti</span></span>
+                      <span class="setting-desc" data-localize="enable_luanti_desc">Adds Luanti (Mineclonia) as an output format. Experimental.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="enable-luanti-toggle" name="enable-luanti-toggle">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile">
+                  <label for="enable-hytale-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-flask"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="enable_hytale">Hytale</span>
+                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="hytale" data-new-when="#enable-hytale-toggle:checked">
+                      </span>
+                      <span class="setting-desc" data-localize="enable_hytale_desc">Adds Hytale as an output format. Experimental.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="enable-hytale-toggle" name="enable-hytale-toggle">
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Projects -->
+            <section class="settings-section meld-only" id="settings-section-projects">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-folder-open"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_projects">Projects</h3>
+                  <p data-localize="settings_section_projects_desc">The worlds built with One World in your save folder.</p>
+                </div>
+              </header>
+              <div class="projects-bar">
+                <div class="projects-view" role="group" data-localize-aria-label="projects_view">
+                  <button type="button" id="projects-view-list" class="settings-action-button" aria-pressed="true" data-localize="projects_view_list">List</button>
+                  <button type="button" id="projects-view-grid" class="settings-action-button" aria-pressed="false" data-localize="projects_view_grid">Grid</button>
+                </div>
+                <button type="button" id="projects-new" class="settings-action-button projects-new"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg><span data-localize="projects_new">New One World</span></button>
+              </div>
+              <div id="projects-list" class="projects-list"></div>
+            </section>
+
+            <!-- Large Worlds -->
+            <section class="settings-section meld-only" id="settings-section-scale">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-map-plus"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_scale">Large Worlds</h3>
+                  <p data-localize="settings_section_scale_desc">Build a big One World area as several cells at once.</p>
+                </div>
+              </header>
+
+              <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-workers-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_workers">Parallel cells</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_workers_tip" data-tooltip="Splits a One World selection into cells of up to 8 × 8 regions and builds several at once, each in its own process. Auto picks 1 to 6 from free RAM and cores. Generating the same area again resumes it. One World only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_workers_desc">Build a One World in cells, several at a time.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <select id="meld-workers-select" name="meld-workers-select" class="settings-select"><option value="" selected data-localize="meld_workers_off">Off</option><option value="auto" data-localize="meld_workers_auto">Auto (recommended)</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-blocks"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_piece_size">Cell Size</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_piece_size_tip" data-tooltip="Largest cell, in regions per side. Auto mixes 16 × 16, 12 × 12, 8 × 8, 4 × 4 and 2 × 2 cells, as large as fit the selection and the memory. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_piece_size_desc">Regions per side of each cell.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-piece-size-group"><button type="button" class="segment" data-v="auto" data-localize="meld_piece_size_auto">Auto (recommended)</button><button type="button" class="segment" data-v="2">2</button><button type="button" class="segment" data-v="4">4</button><button type="button" class="segment active" data-default data-v="8">8</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-frame"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_snap">Snap to Cells</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_snap_tip" data-tooltip="Off builds the selection as drawn. Cover grows it to whole cells, Fit shrinks it to the whole cells inside, Merge keeps its edges but folds a strip thinner than a quarter region into its neighbour. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_snap_desc">How the selection meets the cell grid.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-snap-group"><button type="button" class="segment active" data-default data-v="off" data-localize="meld_snap_off">Off</button><button type="button" class="segment" data-v="cover" data-localize="meld_snap_cover">Cover</button><button type="button" class="segment" data-v="fit" data-localize="meld_snap_fit">Fit</button><button type="button" class="segment" data-v="merge" data-localize="meld_snap_merge">Merge</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-margin-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map-plus"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_margin">Margin Regions</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_margin_tip" data-tooltip="Regions of 512 × 512 blocks added on every side of the selection, after snapping. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_margin_desc">A ring of regions around the selection, from 0 to 4.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="number" id="meld-margin-input" min="0" max="4" step="1" value="0">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-piece-order-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-compass"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_piece_order">Build Order</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_piece_order_tip" data-tooltip="Which cells are built first. Cell numbers stay the same, so a retry still names the same cells. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_piece_order_desc">Where the job starts building.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <select id="meld-piece-order-select" name="meld-piece-order-select" class="settings-select"><option value="centre" selected data-localize="meld_piece_order_centre">Centre out</option><option value="west" data-localize="meld_piece_order_west">West to east</option><option value="east" data-localize="meld_piece_order_east">East to west</option><option value="north" data-localize="meld_piece_order_north">North to south</option><option value="south" data-localize="meld_piece_order_south">South to north</option></select>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-skip-built-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-history"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_skip_built">Skip Built Cells</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_skip_built_tip" data-tooltip="Leaves out the cells whose every chunk is already in the world, say from an earlier job over part of this one. Off rebuilds them. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_skip_built_desc">Build only what the world is missing.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-skip-built-toggle" name="meld-skip-built-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-stitch-map-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-map"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_stitch_map">Stitch Map Item</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_stitch_map_tip" data-tooltip="Once every cell is built, redraws the map item in the hotbar over all of them. Off, it shows the first cell only. Needs the map item. Parallel cells only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_stitch_map_desc">One map item over the whole job.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-stitch-map-toggle" name="meld-stitch-map-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-ram-budget-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_ram_budget">Memory budget</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_ram_budget_tip" data-tooltip="Sizes parallel work to this much memory instead of the free RAM measured, so several runs can share a machine. Empty measures free RAM.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_ram_budget_desc">How much memory a run may use, in MB.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-ram-budget-input" name="meld-ram-budget-input" class="meld-short" placeholder="Auto" data-localize="placeholder_meld_ram_budget" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="meld-threads-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-sliders"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_threads">Threads</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_threads_tip" data-tooltip="Left empty, it uses 90% of the cores.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_threads_desc">Exact number of worker threads.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-threads-input" name="meld-threads-input" class="meld-short" placeholder="Auto" data-localize="placeholder_meld_threads" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-origin-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-compass"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_origin">World Origin</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_origin_tip" data-tooltip="LAT,LON for the origin of a One World this run creates, instead of the centre of the selection. One World only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_origin_desc">Latitude and longitude of block (0, 0).</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-origin-input" name="meld-origin-input" class="meld-short meld-coords" placeholder="LAT,LON" data-localize="placeholder_meld_origin" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide">
+                  <label for="meld-stretch-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-ruler"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_stretch">Show Map Stretch</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_stretch_tip" data-tooltip="How much the map is stretched at this latitude against the One World's origin: the ground is wider (+) or narrower (−) than it is tall. Shows a line in the plan, and the 5% and 10% lines on the map. One World only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_stretch_desc">Show the stretch of a One World selection.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-stretch-toggle" name="meld-stretch-toggle">
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Data Sources -->
+            <section class="settings-section meld-only" id="settings-section-data">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-download"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_data">Data Sources</h3>
+                  <p data-localize="settings_section_data_desc">Where the map data comes from, and fetching it ahead of a run.</p>
+                </div>
+              </header>
+
+              <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-download"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_osm_source">OSM Data Source</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_osm_source_tip" data-tooltip="Default reads Arnis&#x27;s tile archive. Local Archive reads a folder of tiles baked on this computer (Experimental: the bake makes an older archive format, so it is sparser than the public tiles; needs arnis-tiles). Region Download fetches the smallest Geofabrik extract holding the area and cuts it locally.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_osm_source_desc">Where the map data comes from.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-osm-source-group"><button type="button" class="segment active" data-default data-v="default" data-localize="meld_osm_source_default">Default</button><button type="button" class="segment" data-v="archive" data-localize="meld_osm_source_archive">Local Archive (Experimental)</button><button type="button" class="segment" data-v="region" data-localize="meld_osm_source_region">Region Download (Experimental)</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-archive-folder-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_archive_folder">Archive Folder</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_archive_folder_tip" data-tooltip="Experimental. Where Download &amp; Bake writes and Local Archive reads. Empty uses the default folder in the cache.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_archive_folder_desc">Folder of the local tile archive. Experimental.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-archive-folder-input" name="meld-archive-folder-input" placeholder="Default folder" data-localize="placeholder_meld_archive_folder" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-pbf-url-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-link"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_pbf_url">Extract URL</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_pbf_url_tip" data-tooltip="A .osm.pbf URL for Region Download, instead of the smallest region holding the area.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_pbf_url_desc">Pick the Geofabrik extract yourself. Experimental.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-pbf-url-input" name="meld-pbf-url-input" placeholder="Chosen for you" data-localize="placeholder_meld_pbf_url" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-overpass-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-link"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_overpass">Overpass Server</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_overpass_tip" data-tooltip="URL of a self-hosted Overpass server. Arnis&#x27;s tile archive is read first; this server is asked where the archive has no data. Separate several with commas.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_overpass_desc">Your own Overpass instance.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-overpass-input" name="meld-overpass-input" placeholder="Arnis&#x27;s own" data-localize="placeholder_meld_overpass" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-offline-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-off"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_offline">Offline Mode</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_offline_tip" data-tooltip="Never uses the network. A run the caches cannot serve stops and lists what is missing.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_offline_desc">Build only from what is already downloaded.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-offline-toggle" name="meld-offline-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only meld-data-row">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-globe"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_prepare">Prepare Countries</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_prepare_tip" data-tooltip="Experimental. Lists the Geofabrik countries that cover the selected area, then downloads and bakes them into the archive folder with arnis-tiles. The bake makes an older archive format, so it is sparser than the public tiles. Needs arnis-tiles next to Arnis or on PATH.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_prepare_desc">Download and bake the countries your area covers. Experimental.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <button type="button" id="meld-prepare-check" class="run-button" data-localize="meld_prepare_check">Check</button>
+                    <button type="button" id="meld-prepare-bake" class="run-button" data-localize="meld_prepare_bake">Download &amp; Bake</button>
+                    <button type="button" id="meld-prepare-stop" class="run-button" hidden data-localize="meld_prepare_stop">Stop</button>
+                  </div>
+                  <div id="meld-prepare-list" class="meld-data-out" hidden></div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only meld-data-row">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_plan">Download Plan</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_plan_tip" data-tooltip="Shows, for the selected area and the current settings, which data a run reads and how much of it the caches already hold. Only reads the disk.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_plan_desc">What this area needs and what is already downloaded.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <button type="button" id="meld-plan-show" class="run-button" data-localize="meld_prepare_check">Check</button>
+                    <button type="button" id="meld-plan-download" class="run-button" data-localize="meld_plan_download">Download now</button>
+                  </div>
+                  <div id="meld-plan-out" class="meld-data-out" hidden></div>
+                  <div id="meld-plan-where" class="meld-data-line" hidden>
+                    <span id="meld-plan-path"></span>
+                    <button type="button" id="meld-plan-open" class="run-button" data-localize="meld_open_folder">Open folder</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Fine Tuning -->
+            <section class="settings-section meld-only" id="settings-section-tuning">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-sparkles"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_tuning">Fine Tuning</h3>
+                  <p data-localize="settings_section_tuning_desc">Finer control over how the world is built.</p>
+                </div>
+              </header>
+
+              <h4 class="settings-group-title" data-localize="tuning_group_world">World</h4>
+              <div class="setting-grid">
+                <div class="settings-row setting-tile meld-only">
+                  <label for="meld-seed-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_seed">World Seed</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_seed_tip" data-tooltip="Mixed into every random choice: trees, rocks, flowers and building variety. Empty or 0 keeps the default look. A One World keeps the seed its first area used. Experimental.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_seed_desc">Rebuild the same area with a different, repeatable look.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-seed-input" name="meld-seed-input" class="meld-short" placeholder="Default" data-localize="placeholder_meld_seed" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile meld-only">
+                  <label for="meld-world-border-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-frame"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_world_border">World Border</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_world_border_tip" data-tooltip="Sets the border after the run; in a One World, around all its areas. Java only.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_world_border_desc">Put the world border around the generated area.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-world-border-toggle" name="meld-world-border-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile meld-only">
+                  <label for="meld-min-y-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-cave"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_min_y">Lowest Y</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_min_y_tip" data-tooltip="A multiple of 16 from -2032 to -64. Needs Extend build height, a new Java world and no One World. Empty keeps -2032. Java 1.21.4+.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_min_y_desc">Bottom of the extended-height world.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-min-y-input" name="meld-min-y-input" class="meld-short" placeholder="-2032" data-localize="placeholder_meld_min_y" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile meld-only">
+                  <label for="meld-max-y-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-arrow-up"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_max_y">Highest Y</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_max_y_tip" data-tooltip="One less than a multiple of 16, from 319 to 2031. Needs Extend build height, a new Java world and no One World. Empty keeps 2031. Java 1.21.4+.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_max_y_desc">Top of the extended-height world.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-max-y-input" name="meld-max-y-input" class="meld-short" placeholder="2031" data-localize="placeholder_meld_max_y" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_region_format">Region Format</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_region_format_tip" data-tooltip="Experimental. B_Linear writes Leaf 1.21.11+ and 26.x regions. Java only; not with One World, Voxy LOD or Distant Horizons LOD.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_region_format_desc">File format for Java region files.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-region-format-group"><button type="button" class="segment active" data-default data-v="mca" data-localize="meld_region_format_mca">Anvil (.mca)</button><button type="button" class="segment" data-v="blinear" data-localize="meld_region_format_blinear">B_Linear</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-blinear-level-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_blinear_level">B_Linear Level</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_blinear_level_tip" data-tooltip="zstd level from 1 to 22; Leaf&#x27;s own default is 6. Only with the B_Linear region format.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_blinear_level_desc">Compression level of B_Linear regions.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="number" id="meld-blinear-level-input" min="1" max="22" step="1" value="6">
+                  </div>
+                </div>
+              </div>
+              <h4 class="settings-group-title" data-localize="tuning_group_build">Buildings &amp; Roads</h4>
+              <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-signpost"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_road_detail">Road Detail</span>
+                        <span class="tooltip-icon" data-preview-seg="road-detail" data-tooltip-key="meld_road_detail_tip" data-tooltip="Max builds every marking and way as mapped. Clean removes lane dividers except on one-way roads wider than 5 blocks, every line on service and pedestrian ways and roads under 4 blocks wide, and paints crossing bars 2 blocks apart. Compact is Clean with longer dashes, and also leaves out footways, paths, cycleways, steps, tracks, crossings and minor service roads such as parking aisles and driveways.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_road_detail_desc">How many road markings and minor roads to build.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-road-detail-group"><button type="button" class="segment active" data-default data-v="max" data-localize="meld_road_detail_max">Max</button><button type="button" class="segment" data-v="clean" data-localize="meld_road_detail_clean">Clean</button><button type="button" class="segment" data-v="compact" data-localize="meld_road_detail_compact">Compact</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile meld-only">
+                  <label for="meld-surface-patches-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_surface_patches">Surface Patches</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_surface_patches_tip" data-tooltip="Lays asphalt, concrete, paving and built-up stone ground in patches a few blocks across instead of a per-block speckle, and gives pitched clay roofs a full block in their stairs' colour.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_surface_patches_desc">Lay road and paving blocks in patches, not single-block dots.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-surface-patches-toggle" name="meld-surface-patches-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile meld-only">
+                  <label for="meld-buildings-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-building"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_buildings">Buildings</span>
+                        <span class="tooltip-icon" data-preview-on="buildings-on" data-preview-off="buildings-off" data-tooltip-key="meld_buildings_tip" data-tooltip="Off leaves out buildings, building parts, doors, entrances and Overture footprints. Roads, rail, water, land cover and terrain are built as usual.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_buildings_desc">Turn off to leave out every building.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="meld-buildings-toggle" name="meld-buildings-toggle" checked>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-car"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_props">Props Override</span>
+                        <span class="tooltip-icon" data-preview-seg="props" data-preview-key="previewV" data-tooltip-key="meld_props_tip" data-tooltip="Auto follows the 3D Models &amp; Props setting. All places every prop and None places none, whatever that setting says.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_props_desc">Overrides which 3D props are placed.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-props-group"><button type="button" class="segment active" data-default data-v="auto" data-preview-v="all" data-localize="meld_props_auto">Auto</button><button type="button" class="segment" data-v="all" data-preview-v="all" data-localize="meld_props_all">All</button><button type="button" class="segment" data-v="none" data-preview-v="none" data-localize="meld_props_none">None</button></div>
+                  </div>
+                </div>
+              </div>
+              <h4 class="settings-group-title" data-localize="tuning_group_vegetation">Vegetation</h4>
+              <div class="setting-grid">
+                <div data-preview-num="rock-density" data-preview-steps="0.02,0.2,1" class="settings-row setting-tile meld-only">
+                  <label for="meld-rock-density-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-mountain"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_rock_density">Rock Density</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_rock_density_tip" data-tooltip="From 0 to 1; the default is 0.02. Only with Rocks.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_rock_density_desc">Share of chunks that get a rock.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="number" id="meld-rock-density-input" class="meld-short" min="0" max="1" step="0.01" value="0.02">
+                  </div>
+                </div>
+                <div data-preview-num="bush-density" data-preview-steps="0.05,0.2,1" class="settings-row setting-tile meld-only">
+                  <label for="meld-bush-density-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tree"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_bush_density">Bush Density</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_bush_density_tip" data-tooltip="From 0 to 1; the default is 0.05. Where a chunk rolls both, the rock wins. Only with Bushes.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_bush_density_desc">Share of chunks that get a bush.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="number" id="meld-bush-density-input" class="meld-short" min="0" max="1" step="0.01" value="0.05">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-tree-realm-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-trees"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_tree_realm">Tree Realm</span>
+                        <span class="tooltip-icon" data-preview-sel="tree-realm" data-tooltip-key="meld_tree_realm_tip" data-tooltip="Auto picks the tree pack from the area&#x27;s location. A forced realm skips the local ecoregion mixes and keeps its palms.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_tree_realm_desc">Force one region&#x27;s trees instead of picking by location.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <select id="meld-tree-realm-select" name="meld-tree-realm-select" class="settings-select"><option value="auto" selected data-localize="meld_tree_realm_auto">Auto</option><option value="afr" data-localize="meld_tree_realm_afr">Africa</option><option value="asn" data-localize="meld_tree_realm_asn">Northern Asia</option><option value="aus" data-localize="meld_tree_realm_aus">Australasia</option><option value="ena" data-localize="meld_tree_realm_ena">Eastern North America</option><option value="eur" data-localize="meld_tree_realm_eur">Europe</option><option value="fl" data-localize="meld_tree_realm_fl">Florida &amp; Caribbean</option><option value="ind" data-localize="meld_tree_realm_ind">India &amp; Southeast Asia</option><option value="sam" data-localize="meld_tree_realm_sam">South America</option><option value="wna" data-localize="meld_tree_realm_wna">Western North America</option><option value="vanilla-plus" data-localize="meld_tree_realm_vanilla_plus">Vanilla+</option></select>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-tree-pack-dir-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-folder"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_tree_pack_dir">Custom Tree Folder</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_tree_pack_dir_tip" data-tooltip="Laid out like the bundled packs: realm / community / tree type / size / any name.schem. A file that does not load is skipped with a warning. Experimental.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_tree_pack_dir_desc">A folder of your own tree schematics.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-tree-pack-dir-input" name="meld-tree-pack-dir-input" placeholder="No folder" data-localize="placeholder_meld_tree_pack_dir" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tree"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_tree_pack_mode">Custom Trees</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_tree_pack_mode_tip" data-tooltip="Add mixes the folder&#x27;s trees in. Replace swaps a realm&#x27;s built-in trees wherever the folder has any. Needs a folder.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_tree_pack_mode_desc">Add your trees to the built-in ones, or replace them.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-tree-pack-mode-group"><button type="button" class="segment active" data-default data-v="add" data-localize="meld_tree_pack_mode_add">Add</button><button type="button" class="segment" data-v="replace" data-localize="meld_tree_pack_mode_replace">Replace</button></div>
+                  </div>
+                </div>
+              </div>
+              <h4 class="settings-group-title" data-localize="tuning_group_caves">Caves</h4>
+              <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-cave-style-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-cave"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_cave_style">Cave Style</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_cave_style_tip" data-tooltip="Vanilla keeps plain caves. More vanilla is about 30% themed, All mix about 77% and More mix about 89%. Needs Caves.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_cave_style_desc">How much of the underground gets themed caves.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <select id="meld-cave-style-select" name="meld-cave-style-select" class="settings-select"><option value="vanilla" data-localize="meld_cave_style_vanilla">Vanilla</option><option value="more-vanilla" data-localize="meld_cave_style_more_vanilla">More vanilla</option><option value="all-mix" selected data-localize="meld_cave_style_all_mix">All mix</option><option value="more-mix" data-localize="meld_cave_style_more_mix">More mix</option></select>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-pickaxe"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_cave_ores">Cave Ores</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_cave_ores_tip" data-tooltip="Normal is vanilla&#x27;s ore table. More doubles the veins of every metal and gem ore, at vanilla&#x27;s heights. Needs Caves.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_cave_ores_desc">How many ore veins the caves hold.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-cave-ores-group"><button type="button" class="segment active" data-default data-v="normal" data-localize="meld_cave_ores_normal">Normal</button><button type="button" class="segment" data-v="more" data-localize="meld_cave_ores_more">More</button></div>
+                  </div>
+                </div>
+              </div>
+              <h4 class="settings-group-title" data-localize="tuning_group_water">Water &amp; Climate</h4>
+              <div class="setting-grid">
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-earth"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_river_bed">River Bed</span>
+                        <span class="tooltip-icon" data-preview-seg="river-bed" data-tooltip-key="meld_river_bed_tip" data-tooltip="Smooth gives rivers, canals and streams a U-shaped bed that deepens with their width. Lakes and the sea keep their bed.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_river_bed_desc">Shape the bed of mapped rivers.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-river-bed-group"><button type="button" class="segment active" data-default data-v="off" data-localize="meld_river_bed_off">Off</button><button type="button" class="segment" data-v="v1" data-localize="meld_river_bed_v1">Smooth</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_water_detail">Water Detail</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_water_detail_tip" data-tooltip="Scaled rounds bed depths instead of flooring them. On small maps it also carves narrow bodies of water as bowls, narrows streams, and lets water run over roads that are not bridges.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_water_detail_desc">How water beds are rounded and narrowed.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-water-detail-group"><button type="button" class="segment active" data-default data-v="default" data-localize="meld_water_detail_default">Default</button><button type="button" class="segment" data-v="scaled" data-localize="meld_water_detail_scaled">Scaled</button></div>
+                  </div>
+                </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-sun"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="meld_climate_mode">Climate</span>
+                        <span class="tooltip-icon" data-tooltip-key="meld_climate_mode_tip" data-tooltip="Origin reads it once, at the centre of the area. Per position reads it at every block, so a large world crosses climate zones. Experimental, not with rotation.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="meld_climate_mode_desc">Where the climate for surfaces and biomes is sampled.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="meld-climate-mode-group"><button type="button" class="segment active" data-default data-v="origin" data-localize="meld_climate_mode_origin">Origin</button><button type="button" class="segment" data-v="per-position" data-localize="meld_climate_mode_per_position">Per position</button></div>
                   </div>
                 </div>
               </div>
@@ -1109,7 +2008,7 @@
                   </div>
                 </div>
 
-                <div class="settings-row setting-tile is-wide">
+                <div data-preview-num="scale" data-preview-steps="0.5,1,2" class="settings-row setting-tile is-wide">
                   <label for="scale-value-slider" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-scale"></use></svg>
                     <span class="setting-text">
@@ -1132,7 +2031,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="rotation_angle">Rotation Angle</span>
-                        <span class="tooltip-icon" data-tooltip="Rotates the area so its streets line up with Minecraft's axes. Use the line tool to draw a reference line.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="rotation_angle_tip" data-tooltip="Rotates the area so its streets line up with Minecraft's axes. Use the line tool to draw a reference line.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="rotation_angle_desc">Turn the area so streets line up with the block grid.</span>
                     </span>
@@ -1154,12 +2053,12 @@
                   <div class="settings-control">
                     <select id="tile-theme-select" name="tile-theme-select" class="settings-select">
                       <option value="osm">Standard</option>
-                      <option value="esri-imagery">Satellite</option>
-                      <option value="opentopomap">Topographic</option>
-                      <option value="stadia-bright">Smooth Bright</option>
-                      <option value="stadia-dark">Smooth Dark</option>
-                      <option value="openfreemap-liberty">Modern</option>
-                      <option value="custom">Custom</option>
+                      <option value="esri-imagery" data-localize="map_theme_satellite">Satellite</option>
+                      <option value="opentopomap" data-localize="map_theme_topographic">Topographic</option>
+                      <option value="stadia-bright" data-localize="map_theme_smooth_bright">Smooth Bright</option>
+                      <option value="stadia-dark" data-localize="map_theme_smooth_dark">Smooth Dark</option>
+                      <option value="openfreemap-liberty" data-localize="map_theme_modern">Modern</option>
+                      <option value="custom" data-localize="map_theme_custom">Custom</option>
                     </select>
                   </div>
                 </div>
@@ -1171,7 +2070,7 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="custom_map_source">Custom Map Source</span>
-                        <span class="tooltip-icon" data-tooltip="Tile URL with {z}, {x} and {y}. Must be WGS-84; GCJ-02 sources (most Chinese ones) show up shifted.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="custom_map_source_tip" data-tooltip="Tile URL with {z}, {x} and {y}. Must be WGS-84; GCJ-02 sources (most Chinese ones) show up shifted.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="custom_map_source_desc">Your own tile server, as a URL with {z}, {x} and {y}.</span>
                     </span>
@@ -1224,7 +2123,21 @@
                       <option value="ja">日本語</option>
                       <option value="ro">Română</option>
                       <option value="ka-GE">ქართული</option>
+                      <option value="vi">Tiếng Việt</option>
                     </select>
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile is-wide">
+                  <label for="layout-select" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading"><span data-localize="layout_mode">Main Page Layout</span></span>
+                      <span class="setting-desc" data-localize="layout_mode_desc">The map-first page or the classic one. Auto shows the map first for a build in cells.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <select id="layout-select" name="layout-select" class="settings-select"><option value="auto" selected data-localize="layout_mode_auto">Auto</option><option value="map" data-localize="layout_mode_map">Map first</option><option value="classic" data-localize="layout_mode_classic">Classic</option></select>
                   </div>
                 </div>
 
@@ -1237,8 +2150,8 @@
                     </span>
                   </label>
                   <div class="settings-control save-path-control">
-                    <input type="text" id="save-path-input" name="save-path-input" class="save-path-input" placeholder="Minecraft saves directory" spellcheck="false">
-                    <button type="button" id="save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse">
+                    <input type="text" id="save-path-input" name="save-path-input" class="save-path-input" placeholder="Minecraft saves directory" data-localize="placeholder_save_path" spellcheck="false">
+                    <button type="button" id="save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse" data-localize-title="browse_title" data-localize-aria-label="browse_label">
                       <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
                     </button>
                   </div>
@@ -1250,14 +2163,14 @@
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="bedrock_save_path">Bedrock Save Path</span>
-                        <span class="tooltip-icon" data-tooltip="Folder the Bedrock .mcworld file is saved to. Open the file to import the world into Minecraft.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="bedrock_save_path_tip" data-tooltip="Folder the Bedrock .mcworld file is saved to. Open the file to import the world into Minecraft.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="bedrock_save_path_desc">Folder the .mcworld file is saved to.</span>
                     </span>
                   </label>
                   <div class="settings-control save-path-control">
-                    <input type="text" id="bedrock-save-path-input" name="bedrock-save-path-input" class="save-path-input" placeholder="Bedrock .mcworld directory" spellcheck="false">
-                    <button type="button" id="bedrock-save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse">
+                    <input type="text" id="bedrock-save-path-input" name="bedrock-save-path-input" class="save-path-input" placeholder="Bedrock .mcworld directory" data-localize="placeholder_bedrock_save_path" spellcheck="false">
+                    <button type="button" id="bedrock-save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse" data-localize-title="browse_title" data-localize-aria-label="browse_label">
                       <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
                     </button>
                   </div>
@@ -1273,8 +2186,25 @@
                     </span>
                   </label>
                   <div class="settings-control save-path-control">
-                    <input type="text" id="luanti-save-path-input" name="luanti-save-path-input" class="save-path-input" placeholder="Luanti worlds directory" spellcheck="false">
-                    <button type="button" id="luanti-save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse">
+                    <input type="text" id="luanti-save-path-input" name="luanti-save-path-input" class="save-path-input" placeholder="Luanti worlds directory" data-localize="placeholder_luanti_save_path" spellcheck="false">
+                    <button type="button" id="luanti-save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse" data-localize-title="browse_title" data-localize-aria-label="browse_label">
+                      <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Only shown while Hytale is enabled under Advanced -->
+                <div class="settings-row setting-tile is-wide" id="hytale-save-path-row">
+                  <label for="hytale-save-path-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-folder"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading"><span data-localize="hytale_save_path">Hytale Save Path</span></span>
+                      <span class="setting-desc" data-localize="hytale_save_path_desc">Folder new Hytale worlds are created in.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control save-path-control">
+                    <input type="text" id="hytale-save-path-input" name="hytale-save-path-input" class="save-path-input" placeholder="Hytale saves directory" data-localize="placeholder_hytale_save_path" spellcheck="false">
+                    <button type="button" id="hytale-save-path-browse" class="save-path-browse" title="Browse..." aria-label="Browse" data-localize-title="browse_title" data-localize-aria-label="browse_label">
                       <svg class="icon" aria-hidden="true"><use href="#i-folder-open"></use></svg>
                     </button>
                   </div>
@@ -1310,13 +2240,13 @@
                 </div>
 
                 <!-- Tile and facade cache, with how much disk it holds -->
-                <div class="settings-row setting-tile">
+                <div class="settings-row setting-tile is-wide">
                   <label for="clear-cache-button" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-hard-drive"></use></svg>
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="clear_tile_cache">Clear Cache</span>
-                        <span class="tooltip-icon" data-tooltip="Deletes all cached map tiles and facade textures to free the space shown. They are downloaded again when needed.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="clear_tile_cache_tip" data-tooltip="Deletes all cached map tiles and facade textures to free the space shown. They are downloaded again when needed.">?</span>
                       </span>
                       <span class="setting-desc" data-localize="clear_tile_cache_desc">Delete cached map tiles and facade textures.</span>
                     </span>
@@ -1324,112 +2254,6 @@
                   <div class="settings-control cache-control">
                     <span id="cache-size" class="cache-size"></span>
                     <button type="button" id="clear-cache-button" class="clear-cache-button" data-localize="clear_tile_cache_button">Clear</button>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <!-- Advanced -->
-            <section class="settings-section" id="settings-section-advanced">
-              <header class="settings-section-head">
-                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-sliders"></use></svg></span>
-                <div>
-                  <h3 data-localize="settings_section_advanced">Advanced</h3>
-                  <p data-localize="settings_section_advanced_desc">Options for mods, compatibility and experiments. Most worlds never need them.</p>
-                </div>
-              </header>
-
-              <div class="setting-grid">
-                <div class="settings-row setting-tile">
-                  <label for="disable-height-limit-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-arrow-up"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="disable_height_limit">Extend build height</span>
-                        <span class="tooltip-icon" data-tooltip="Raises the build height only where the terrain or buildings would not fit, and on Java only as far as they reach. Off compresses tall terrain instead. Java 1.21.4+ and Bedrock 1.21.120+, not for Realms.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="disable_height_limit_desc">Raises the height limit when an area needs it. Not for Realms.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="disable-height-limit-toggle" name="disable-height-limit-toggle" checked>
-                  </div>
-                </div>
-
-                <div class="settings-row setting-tile">
-                  <label for="aws-only-elevation-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-history"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="aws_only_elevation">Legacy Terrain</span>
-                        <span class="tooltip-icon" data-tooltip="Uses the older AWS terrain tiles (about 30 m) instead of Mapterhorn. Less detailed; only useful if Mapterhorn can't be reached.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="aws_only_elevation_desc">Older, coarser elevation source for when the default fails.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="aws-only-elevation-toggle" name="aws-only-elevation-toggle">
-                  </div>
-                </div>
-
-                <div class="settings-row setting-tile">
-                  <label for="bake-lighting-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-lightbulb"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="bake_lighting">Bake lighting</span>
-                        <span class="tooltip-icon" data-tooltip="Precomputes lighting so LOD mods like Voxy show distant chunks lit before you visit them. Not needed in vanilla; takes longer.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="bake_lighting_desc">Precomputed light for LOD mods like Voxy. Slower.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="bake-lighting-toggle" name="bake-lighting-toggle">
-                  </div>
-                </div>
-
-                <div class="settings-row setting-tile">
-                  <label for="voxy-lod-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="voxy_lod">Pre-generate Voxy LOD</span>
-                        <span class="tooltip-icon" data-tooltip="Writes Voxy's LOD cache with the world, so distant terrain shows on first join without /voxy import. Turns on Bake lighting and takes longer. Java only.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="voxy_lod_desc">Distant terrain renders on first join. Java only.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="voxy-lod-toggle" name="voxy-lod-toggle">
-                  </div>
-                </div>
-
-                <div class="settings-row setting-tile">
-                  <label for="dh-lod-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-eye"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="dh_lod">Pre-generate Distant Horizons LOD</span>
-                        <span class="tooltip-icon" data-tooltip="Writes the Distant Horizons LOD database with the world, so distant terrain shows on first join instead of loading chunk by chunk. Turns on Bake lighting and takes longer. Java only.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="dh_lod_desc">Distant terrain renders on first join. Java only.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="dh-lod-toggle" name="dh-lod-toggle">
-                  </div>
-                </div>
-
-                <div class="settings-row setting-tile">
-                  <label for="enable-luanti-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-flask"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading"><span data-localize="enable_luanti">Luanti</span></span>
-                      <span class="setting-desc" data-localize="enable_luanti_desc">Adds Luanti (Mineclonia) as an output format. Experimental.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="enable-luanti-toggle" name="enable-luanti-toggle">
                   </div>
                 </div>
               </div>
@@ -1446,7 +2270,10 @@
               </header>
 
               <div class="settings-about">
-                <span id="about-version" class="settings-about-version"></span>
+                <div class="settings-about-id">
+                  <span id="about-version" class="settings-about-version"></span>
+                  <span class="settings-about-credit" data-localize="about_meld_credit">Advanced features are ported from the Meld project by Teddy563.</span>
+                </div>
                 <div class="settings-about-actions">
                   <button type="button" id="license-button" class="settings-action-button" onclick="openLicense()">
                     <svg class="icon" aria-hidden="true"><use href="#i-file-text"></use></svg>
@@ -1501,7 +2328,7 @@
               <span data-localize="preview3d_buildings">Buildings</span>
             </label>
           </div>
-          <button type="button" class="dialog-close" onclick="closePreview3D()" aria-label="Close" title="Close (Esc)">
+          <button type="button" class="dialog-close" onclick="closePreview3D()" aria-label="Close" title="Close (Esc)" data-localize-aria-label="close_label" data-localize-title="close_esc">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>
@@ -1525,21 +2352,21 @@
       <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="telemetry-title" tabindex="-1">
         <header class="dialog-header">
           <div class="dialog-heading">
-            <h2 id="telemetry-title">Help improve Arnis</h2>
+            <h2 id="telemetry-title" data-localize="telemetry_title">Help improve Arnis</h2>
           </div>
-          <button type="button" class="dialog-close" onclick="rejectTelemetry()" aria-label="Close">
+          <button type="button" class="dialog-close" onclick="rejectTelemetry()" aria-label="Close" data-localize-aria-label="close_label">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>
         <div class="dialog-body">
           <p>
-            We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
-            <a href="https://arnismc.com/privacypolicy.html" target="_blank" rel="noopener noreferrer">No personal data or world contents are collected.</a>
+            <span data-localize="telemetry_body">We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.</span>
+            <a href="https://arnismc.com/privacypolicy.html" target="_blank" rel="noopener noreferrer" data-localize="telemetry_privacy_link">No personal data or world contents are collected.</a>
           </p>
         </div>
         <footer class="dialog-footer">
-          <button type="button" class="dialog-button" onclick="rejectTelemetry()">No thanks</button>
-          <button type="button" class="dialog-button is-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
+          <button type="button" class="dialog-button" onclick="rejectTelemetry()" data-localize="telemetry_decline">No thanks</button>
+          <button type="button" class="dialog-button is-primary" onclick="acceptTelemetry()" data-localize="telemetry_accept">Allow anonymous data</button>
         </footer>
       </div>
     </div>
@@ -1551,7 +2378,7 @@
           <div class="dialog-heading">
             <h2 id="discord-modal-title" data-localize="discord_modal_title">Join the Arnis Discord</h2>
           </div>
-          <button type="button" class="dialog-close" onclick="closeDiscordModal()" aria-label="Close" title="Close (Esc)">
+          <button type="button" class="dialog-close" onclick="closeDiscordModal()" aria-label="Close" title="Close (Esc)" data-localize-aria-label="close_label" data-localize-title="close_esc">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>
@@ -1575,7 +2402,7 @@
           <div class="dialog-heading">
             <h2 id="one-world-confirm-title" data-localize="one_world_confirm_title">Replace existing chunks?</h2>
           </div>
-          <button type="button" class="dialog-close" id="one-world-confirm-close" aria-label="Close" title="Close (Esc)">
+          <button type="button" class="dialog-close" id="one-world-confirm-close" aria-label="Close" title="Close (Esc)" data-localize-aria-label="close_label" data-localize-title="close_esc">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>
@@ -1596,7 +2423,7 @@
           <div class="dialog-heading">
             <h2 id="live-title" data-localize="live_eula_title">Minecraft EULA</h2>
           </div>
-          <button type="button" class="dialog-close" id="live-close" aria-label="Close" title="Close (Esc)">
+          <button type="button" class="dialog-close" id="live-close" aria-label="Close" title="Close (Esc)" data-localize-aria-label="close_label" data-localize-title="close_esc">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>
@@ -1621,7 +2448,7 @@
           <div class="dialog-heading">
             <h2 id="license-title" data-localize="license_and_credits">License and Credits</h2>
           </div>
-          <button type="button" class="dialog-close" onclick="closeLicense()" aria-label="Close" title="Close (Esc)">
+          <button type="button" class="dialog-close" onclick="closeLicense()" aria-label="Close" title="Close (Esc)" data-localize-aria-label="close_label" data-localize-title="close_esc">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>
@@ -1640,7 +2467,7 @@
             <h2 id="update-modal-title" data-localize="update_modal_title">What's new in Arnis</h2>
             <div id="update-modal-meta" class="dialog-meta"></div>
           </div>
-          <button type="button" class="dialog-close" onclick="closeUpdateModal()" aria-label="Close" title="Close (Esc)">
+          <button type="button" class="dialog-close" onclick="closeUpdateModal()" aria-label="Close" title="Close (Esc)" data-localize-aria-label="close_label" data-localize-title="close_esc">
             <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </header>

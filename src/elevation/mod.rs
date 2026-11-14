@@ -769,7 +769,11 @@ fn fetch_raw_with_fallback(
     let last = chain.len() - 1;
     for (i, provider) in chain.iter().enumerate() {
         let name = provider.name();
-        match provider.fetch_raw(bbox, grid_width, grid_height) {
+        let fetched = provider.fetch_raw(bbox, grid_width, grid_height);
+        if fetched.is_err() {
+            crate::net::note_uncached(&format!("elevation ({name})"));
+        }
+        match fetched {
             Ok(raw) => {
                 if i < last {
                     let nan_ratio = compute_nan_ratio(&raw.heights_meters);

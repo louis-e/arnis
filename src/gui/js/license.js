@@ -2,7 +2,7 @@ export const licenseText = `
 <header class="credits-about">
 <img src="./images/logo.png" alt="Arnis" class="credits-logo">
 <p class="credits-made">Made with ♥️ in Munich by Louis Erbkamm</p>
-<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis/graphs/contributors" target="_blank" rel="noopener noreferrer">Github contributors page</a>. Logo made by nxfx21.</p>
+<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis/graphs/contributors" target="_blank" rel="noopener noreferrer">Github contributors page</a>.<br>Logo made by nxfx21. The Advanced features were ported from the Meld project by Teddy563.</p>
 </header>
 
 <p class="credits-warning"><b>Download Arnis only from the official source:</b> <a href="https://arnismc.com" target="_blank" rel="noopener noreferrer">https://arnismc.com</a> or <a href="https://github.com/louis-e/arnis" target="_blank" rel="noopener noreferrer">https://github.com/louis-e/arnis/</a>. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.</p>
@@ -135,6 +135,10 @@ Aeroplanes and jet bridge by French_Prod</p>
 <div class="credit">
 <h4>Luanti (formerly Minetest)</h4>
 <p>Luanti world export targets the <a href="https://www.luanti.org" target="_blank" rel="noopener noreferrer">Luanti</a> engine, licensed under <a href="https://github.com/luanti-org/luanti/blob/master/LICENSE.txt" target="_blank" rel="noopener noreferrer">LGPL-2.1+</a>.</p>
+</div>
+<div class="credit">
+<h4>Hytale</h4>
+<p>The experimental Hytale export writes the save format of <a href="https://hytale.com" target="_blank" rel="noopener noreferrer">Hytale</a>. Hytale is a trademark of Hypixel Studios; Arnis is not affiliated with or endorsed by Hypixel Studios.</p>
 </div>
 </div>
 </section>

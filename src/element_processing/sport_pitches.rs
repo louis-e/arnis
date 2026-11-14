@@ -54,7 +54,7 @@ fn pitch_kind(way: &ProcessedWay) -> Option<PitchKind> {
     }
     for s in codes {
         match s {
-            "soccer" | "football" => return Some(PitchKind::Soccer),
+            "soccer" | "football" | "association_football" => return Some(PitchKind::Soccer),
             "american_football" | "canadian_football" => return Some(PitchKind::AmericanFootball),
             "rugby" | "rugby_union" | "rugby_league" => return Some(PitchKind::Rugby),
             "baseball" | "softball" => return Some(PitchKind::Baseball),
@@ -395,6 +395,21 @@ fn home_plate(way: &ProcessedWay, filled_area: &[(i32, i32)]) -> Option<((f64, f
             }
         }
         runs.push((dir, p, len));
+    }
+    // The hull starts at its leftmost point, which can fall midway along a foul line.
+    if runs.len() > 2 {
+        let (d0, _, l0) = runs[0];
+        let (dl, pl, ll) = runs[runs.len() - 1];
+        if d0.0 * dl.0 + d0.1 * dl.1 > 0.985 {
+            let total = l0 + ll;
+            let blended = (
+                (d0.0 * l0 + dl.0 * ll) / total,
+                (d0.1 * l0 + dl.1 * ll) / total,
+            );
+            let norm = blended.0.hypot(blended.1);
+            runs[0] = ((blended.0 / norm, blended.1 / norm), pl, total);
+            runs.pop();
+        }
     }
     let n = filled_area.len() as f64;
     let centroid = (
@@ -817,6 +832,38 @@ mod tests {
         assert!(
             (ux - s2).abs() < 0.15 && (uz - s2).abs() < 0.15,
             "{ux},{uz}"
+        );
+    }
+
+    #[test]
+    fn home_plate_joins_a_foul_line_split_where_the_hull_starts() {
+        // The left foul line bends out at (9, 60), the hull's first point, halving it.
+        let mut pts = vec![(10, 10), (160, 10)];
+        for i in 1..12 {
+            let a = std::f64::consts::FRAC_PI_2 * i as f64 / 12.0;
+            pts.push((10 + (150.0 * a.cos()) as i32, 10 + (100.0 * a.sin()) as i32));
+        }
+        pts.extend([(10, 110), (9, 60), (10, 10)]);
+        let (mut way, _) = fan(10.0);
+        // The fallback corner would then be the hull's first point, not home plate.
+        way.id = 0;
+        way.nodes = pts
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, z))| ProcessedNode {
+                id: i as u64,
+                tags: HashMap::new(),
+                x,
+                z,
+            })
+            .collect();
+        let fill: Vec<(i32, i32)> = (10..150)
+            .flat_map(|x| (10..100).map(move |z| (x, z)))
+            .collect();
+        let ((hx, hz), _) = home_plate(&way, &fill).expect("a home plate");
+        assert!(
+            (hx - 10.0).abs() < 2.0 && (hz - 10.0).abs() < 2.0,
+            "{hx},{hz}"
         );
     }
 

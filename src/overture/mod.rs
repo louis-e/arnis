@@ -29,6 +29,7 @@ mod cache;
 mod mvt;
 pub(crate) mod pmtiles;
 mod tiles;
+pub(crate) use tiles::cache_files as tile_cache_files;
 
 pub use cache::{cache_root, clear_overture_cache};
 
@@ -615,6 +616,7 @@ pub fn fetch_overture_buildings(
     match fetch_overture_buildings_inner(bbox, projection, source, debug) {
         Ok(data) => data,
         Err(e) => {
+            crate::net::note_uncached("Overture Maps buildings");
             eprintln!(
                 "{} Failed to fetch Overture Maps data: {e}",
                 "Warning:".yellow().bold()
@@ -863,8 +865,12 @@ fn drop_where_wet(
 
 /// Shared HTTP client for Overture fetches (generation and 3D preview paths).
 pub(crate) fn overture_client() -> Result<Client, Box<dyn std::error::Error>> {
+    client_waiting(HTTP_TIMEOUT_SECS)
+}
+
+fn client_waiting(secs: u64) -> Result<Client, Box<dyn std::error::Error>> {
     Ok(Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(secs))
         .user_agent(concat!(
             "Arnis/",
             env!("CARGO_PKG_VERSION"),
@@ -1300,6 +1306,13 @@ fn parse_release_listing(body: &str) -> Result<Vec<String>, Box<dyn std::error::
 
 /// Release names currently published in the bucket, newest first.
 fn discover_releases(client: &Client) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    // Offline the remembered release is the answer; not data the run is missing.
+    if crate::net::offline() {
+        return Err("offline".into());
+    }
+    if let Some(releases) = shared_listing(std::env::var(SHARED_RELEASES_ENV).ok().as_deref()) {
+        return Ok(releases);
+    }
     stats::record_request();
     let body = client
         .get(OVERTURE_RELEASE_LIST_URL)
@@ -1308,6 +1321,27 @@ fn discover_releases(client: &Client) -> Result<Vec<String>, Box<dyn std::error:
         .text()?;
     stats::record_network(body.len() as u64);
     parse_release_listing(&body)
+}
+
+/// Set by a One World coordinator so its pieces skip the listing request.
+const SHARED_RELEASES_ENV: &str = "ARNIS_OVERTURE_RELEASES";
+
+/// The listing a coordinator handed down, or `None` to discover as usual.
+fn shared_listing(value: Option<&str>) -> Option<Vec<String>> {
+    let releases: Vec<String> = value?
+        .split(',')
+        .filter(|r| !r.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!releases.is_empty()).then_some(releases)
+}
+
+/// Discovers the releases once for a job's pieces, as an environment entry.
+/// `None` when discovery fails, which leaves each piece to discover for itself. It waits
+/// 10 s at most, since nothing shows while the job's start waits on it.
+pub(crate) fn shared_releases_env() -> Option<(&'static str, String)> {
+    let releases = discover_releases(&client_waiting(10).ok()?).ok()?;
+    (!releases.is_empty()).then(|| (SHARED_RELEASES_ENV, releases.join(",")))
 }
 
 /// Releases to try, in order, newest first.
@@ -1367,7 +1401,9 @@ fn build_release_candidates(discovered: Vec<String>, last_good: Option<String>) 
 /// Record `release` as usable and drop cached data from older ones.
 fn accept_release(release: &str) {
     cache::set_last_good_release(release);
-    cache::prune_releases_older_than(release);
+    if !crate::net::offline() {
+        cache::prune_releases_older_than(release);
+    }
 }
 
 /// The STAC index for one release, from disk if it has been read before.
@@ -1393,6 +1429,7 @@ fn stac_index_for(
     }
 
     let url = format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet");
+    crate::net::ensure_online("Overture STAC index")?;
     stats::record_request();
     let response = client.get(&url).send()?;
     if !response.status().is_success() {
@@ -2554,6 +2591,7 @@ fn partition_size_cached(
         return Ok(size);
     }
 
+    crate::net::ensure_online("Overture GeoParquet")?;
     stats::record_request();
     let head_resp = client.head(url).send()?;
     if !head_resp.status().is_success() {
@@ -2629,6 +2667,7 @@ fn fetch_range_with_attempts(
     if length == 0 {
         return Err("fetch_range called with length 0".into());
     }
+    crate::net::ensure_online("Overture GeoParquet")?;
     // Row-group offsets and lengths come from the partition footer, which is
     // network data. Wrapping would turn a bad range into a plausible small one.
     let end = start
@@ -3171,6 +3210,19 @@ mod tests {
         );
 
         assert!(partition_cache_dir("../evil", "https://host/a/part-0.parquet").is_none());
+    }
+
+    #[test]
+    fn shared_listing_round_trips_and_falls_back_when_empty() {
+        let releases = vec!["2026-09-16.0".to_string(), "2026-08-19.0".to_string()];
+        assert_eq!(
+            shared_listing(Some(&releases.join(","))),
+            Some(releases.clone())
+        );
+        // Unset or empty: the piece discovers for itself.
+        assert_eq!(shared_listing(None), None);
+        assert_eq!(shared_listing(Some("")), None);
+        assert_eq!(shared_listing(Some(",")), None);
     }
 
     #[test]

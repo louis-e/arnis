@@ -1423,7 +1423,7 @@ pub fn install(dir: &Path, elements: &[ProcessedElement], args: &Args, xzbbox: &
         );
     }
     // The photo panels are Java entities; other formats build the blocks only.
-    let java = !(args.bedrock || args.luanti);
+    let java = args.java();
     let displays = args.mapillary_facade_mode.places_displays() && java;
     println!(
         "  Facade textures: {} walls on {loaded_buildings} buildings loaded, {matched} buildings matched in this area, {columns} wall columns{}{}",

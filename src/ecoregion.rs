@@ -295,18 +295,19 @@ impl EcoMap {
     }
 }
 
-fn warped_cell(grid: &TiledGrid, lat: f64, lon: f64) -> (usize, usize) {
+pub(crate) fn warped_cell(grid: &TiledGrid, lat: f64, lon: f64) -> (usize, usize) {
     let (col, row) = grid.position(lat, lon);
     let (dc, dr) = warp(col, row);
     grid.cell(col + dc, row + dr)
 }
 
 /// Geographic noise offset in source cells, so borders wander instead of tracing raster steps.
+/// Unseeded: `--seed` changes the look, not where climates and ecoregions meet.
 fn warp(col: f64, row: f64) -> (f64, f64) {
     const SUB: f64 = 64.0;
     let (x, z) = ((col * SUB).floor() as i32, (row * SUB).floor() as i32);
     let octave = |salt: u32, period: i32, amp: f64| {
-        (crate::ground_generation::value_noise_salted(x, z, period, salt) - 0.5) * 2.0 * amp
+        (crate::ground_generation::geo_noise_salted(x, z, period, salt) - 0.5) * 2.0 * amp
     };
     (
         octave(0xEC0_0001, 384, 0.9) + octave(0xEC0_0002, 96, 0.35) + octave(0xEC0_0005, 16, 0.12),
@@ -363,6 +364,18 @@ mod tests {
         for i in 0..2000 {
             let (dc, dr) = warp(f64::from(i) * 0.37, f64::from(i) * 0.61);
             assert!(dc.abs() <= 1.4 && dr.abs() <= 1.4);
+        }
+    }
+
+    #[test]
+    fn unseeded_warp_is_the_default_one() {
+        // The seed is 0 under test, so the seed-free noise must match the seeded one.
+        for i in -300..300 {
+            let (x, z) = (i * 37, i * -53 + 11);
+            assert_eq!(
+                crate::ground_generation::geo_noise_salted(x, z, 96, 0xEC0_0002),
+                crate::ground_generation::value_noise_salted(x, z, 96, 0xEC0_0002)
+            );
         }
     }
 
