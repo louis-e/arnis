@@ -3575,21 +3575,8 @@ pub(crate) fn highway_block_range(
     block_range
 }
 
-/// Collect all (x, z) coordinates that are covered by any rendered road or path
-/// surface. The returned bitmap has 1 for every block that the highway renderer
-/// places as a road/path surface and 0 everywhere else.
-///
-/// Geometry is computed identically to `generate_highways_internal`:
-/// - Bresenham line between each consecutive pair of OSM nodes
-/// - Expanded by `block_range` in both axes (same value as the renderer uses)
-/// - `area=yes` ways, indoor ways, negative-level ways, and pure node types
-///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
-///   early-return guards.
-///
-/// This lets `get_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
-/// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
-///
-/// `water_detail` drops the water cells of short crossings, which the renderer then skips.
+/// The road half of `collect_road_and_carriageway_coords`.
+#[cfg(test)]
 pub fn collect_road_surface_coords(
     elements: &[ProcessedElement],
     editor: &WorldEditor,
@@ -3691,6 +3678,63 @@ fn collect_highway_surface_coords(
     include: impl Fn(&str) -> bool,
 ) -> CoordinateBitmap {
     let mut bitmap = CoordinateBitmap::new(xzbbox);
+    stamp_highway_surfaces(elements, editor, scale, water_detail, include, |_, x, z| {
+        bitmap.set(x, z)
+    });
+    bitmap
+}
+
+/// Collect all (x, z) coordinates that are covered by any rendered road or path
+/// surface, and in a second bitmap the carriageways among them, in one pass over the
+/// roads. The first bitmap has 1 for every block that the highway renderer
+/// places as a road/path surface and 0 everywhere else.
+///
+/// Geometry is computed identically to `generate_highways_internal`:
+/// - Bresenham line between each consecutive pair of OSM nodes
+/// - Expanded by `block_range` in both axes (same value as the renderer uses)
+/// - `area=yes` ways, indoor ways, negative-level ways, and pure node types
+///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
+///   early-return guards.
+///
+/// This lets `get_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
+/// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
+///
+/// `water_detail` drops the water cells of short crossings, which the renderer then skips.
+pub fn collect_road_and_carriageway_coords(
+    elements: &[ProcessedElement],
+    editor: &WorldEditor,
+    xzbbox: &XZBBox,
+    scale: f64,
+    water_detail: crate::water_detail::WaterDetail,
+) -> (CoordinateBitmap, CoordinateBitmap) {
+    let mut roads = CoordinateBitmap::new(xzbbox);
+    let mut carriageways = CoordinateBitmap::new(xzbbox);
+    stamp_highway_surfaces(
+        elements,
+        Some(editor),
+        scale,
+        water_detail,
+        |_| true,
+        |carriageway, x, z| {
+            roads.set(x, z);
+            if carriageway {
+                carriageways.set(x, z);
+            }
+        },
+    );
+    (roads, carriageways)
+}
+
+/// Hands `stamp` every surface cell of the highways `include` takes, with whether the
+/// way carries vehicles.
+fn stamp_highway_surfaces(
+    elements: &[ProcessedElement],
+    editor: Option<&WorldEditor>,
+    scale: f64,
+    water_detail: crate::water_detail::WaterDetail,
+    include: impl Fn(&str) -> bool,
+    mut stamp: impl FnMut(bool, i32, i32),
+) {
     // A way that meets a bridge is its ramp or its approach, and keeps its surface.
     let drowning = editor.filter(|_| water_detail.drowns_crossing(scale, &HashMap::new()));
     let bridge_nodes: HashSet<(i32, i32)> = match drowning {
@@ -3724,6 +3768,7 @@ fn collect_highway_surface_coords(
 
         // Use the same block_range the renderer uses for this highway type
         let block_range = highway_block_range(highway_type, &way.tags, scale);
+        let carriageway = is_carriageway(highway_type);
         let drowned = drowning.filter(|_| {
             water_detail.drowns_crossing(scale, &way.tags)
                 && !way.nodes.iter().any(|n| bridge_nodes.contains(&(n.x, n.z)))
@@ -3753,13 +3798,11 @@ fn collect_highway_surface_coords(
                     if skip_water && drowned.is_some_and(|e| fills(e, bx + dx, bz + dz)) {
                         continue;
                     }
-                    bitmap.set(bx + dx, bz + dz);
+                    stamp(carriageway, bx + dx, bz + dz);
                 }
             }
         }
     }
-
-    bitmap
 }
 
 /// Collect all (x, z) coordinates covered by highways tagged

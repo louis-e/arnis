@@ -1321,14 +1321,22 @@ pub fn generate_world_with_options(
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
-    // Amenity processors use this for O(1) nearest-road-block lookups.
-    let road_mask = Arc::new(highways::collect_road_surface_coords(
+    // Amenity processors use this for O(1) nearest-road-block lookups. The carriageways
+    // among them come in the same pass: trees keep their trunks out of them, mapped
+    // street trees included, and leave more headroom over them than over a footway.
+    let (road_mask, carriageway) = highways::collect_road_and_carriageway_coords(
         &elements,
         &editor,
         &clip_bbox,
         args.scale,
         args.water.water_detail,
-    ));
+    );
+    let road_mask = Arc::new(road_mask);
+    let carriageway = Arc::new(if carriageway.is_empty() {
+        CoordinateBitmap::new_empty()
+    } else {
+        carriageway
+    });
     let barrier_clearance =
         barriers::RoadClearance::build(&elements, &editor, args.scale, Arc::clone(&road_mask));
 
@@ -1342,6 +1350,8 @@ pub fn generate_world_with_options(
         None => Arc::clone(&road_mask),
     };
     editor.set_sealed_surface(Arc::clone(&sealed_surface));
+
+    editor.set_carriageway(Arc::clone(&carriageway));
 
     let mut mapped_trunks = crate::trees::mapped::MappedTrunks::collect(&elements, args.scale);
     let crown_r = crate::element_processing::tree::crown_probe_blocks(args.scale);
@@ -1873,6 +1883,7 @@ pub fn generate_world_with_options(
                 tile_editor.set_tree_pack(Arc::clone(tp));
             }
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
+            tile_editor.set_carriageway(Arc::clone(&carriageway));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));
@@ -2458,6 +2469,7 @@ pub fn generate_world_with_options(
         editor.release_sealed_surface();
     }
     drop(sealed_surface);
+    drop(carriageway);
     // The barrier clearance shares the road mask, so it goes first.
     drop(barrier_clearance);
     drop(road_mask);

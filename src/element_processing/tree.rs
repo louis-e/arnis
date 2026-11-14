@@ -289,6 +289,63 @@ const YOUNG_TREE_M: (f64, f64) = (4.0, 8.0);
 const MAPPED_TREE_M: f64 = 9.0;
 // Sentinel for a canopy column with no building under it.
 const NO_ROOF: i32 = i32::MIN;
+/// Clear height a tree leaves over a road for vehicles, as street trees are pruned.
+const CARRIAGEWAY_HEADROOM_M: f64 = 4.0;
+/// Clear height over a footway, path, square, pitch or other paving.
+const FOOTWAY_HEADROOM_M: f64 = 2.5;
+/// Furthest a mapped tree moves to get its trunk out of the road as the model picked for it.
+const MAPPED_SHIFT_M: f64 = 4.0;
+/// Furthest it moves as any model that fits, as when the road reaches a tram line beside it.
+const MAPPED_FAR_SHIFT_M: f64 = 8.0;
+
+/// Blocks of clear air a tree leaves above this column's surface, or `None` on open ground.
+pub(crate) fn headroom(editor: &WorldEditor, x: i32, z: i32) -> Option<i32> {
+    if !editor.surface_is_sealed(x, z) {
+        return None;
+    }
+    let m = if editor.on_carriageway(x, z) {
+        CARRIAGEWAY_HEADROOM_M
+    } else {
+        FOOTWAY_HEADROOM_M
+    };
+    Some(((m * editor.scale()).round() as i32).max(2))
+}
+
+/// True if a tree block at this height would stand in the clear space over a road or paving.
+pub(crate) fn in_headroom(editor: &WorldEditor, x: i32, y: i32, z: i32) -> bool {
+    headroom(editor, x, z).is_some_and(|h| y <= editor.get_ground_level(x, z) + h)
+}
+
+/// The nearest spot to (x, z), at most `reach` blocks off, where `fits` finds something.
+/// Open ground wins over paving at the same distance, so a street tree moved out of the
+/// road lands on the verge where there is one and on the sidewalk otherwise.
+fn nearest_fit<T>(
+    editor: &WorldEditor,
+    x: i32,
+    z: i32,
+    reach: i32,
+    mut fits: impl FnMut(i32, i32) -> Option<T>,
+) -> Option<(i32, i32, T)> {
+    // Most trees fit where they are asked for, and need no list of spots around it.
+    if let Some(t) = fits(x, z) {
+        return Some((x, z, t));
+    }
+    let mut offsets: Vec<(i32, i32)> = (-reach..=reach)
+        .flat_map(|dx| (-reach..=reach).map(move |dz| (dx, dz)))
+        .filter(|&(dx, dz)| (dx, dz) != (0, 0) && dx * dx + dz * dz <= reach * reach)
+        .collect();
+    offsets.sort_by_key(|&(dx, dz)| {
+        (
+            dx * dx + dz * dz,
+            editor.surface_is_sealed(x + dx, z + dz),
+            dx,
+            dz,
+        )
+    });
+    offsets
+        .into_iter()
+        .find_map(|(dx, dz)| fits(x + dx, z + dz).map(|t| (x + dx, z + dz, t)))
+}
 
 #[derive(Clone, Copy)]
 pub enum TreeType {
@@ -397,7 +454,7 @@ impl LeafPlacer<'_> {
     // Apex cap: the lone center-column cover over the trunk; skips the organic
     // gap (but not the footprint gate) so the log is never left exposed.
     fn place_apex_cap(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
-        if self.blocked(x, y, z) {
+        if self.blocked(x, y, z) || in_headroom(editor, x, y, z) {
             return;
         }
         editor.set_block_absolute(self.leaves_block, x, y, z, None, None);
@@ -410,6 +467,7 @@ impl LeafPlacer<'_> {
     fn place_with(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32, allow_accent: bool) {
         // A leaf resting right on water reads as floating.
         if self.blocked(x, y, z)
+            || in_headroom(editor, x, y, z)
             || editor.check_for_block_absolute(x, y - 1, z, Some(&[WATER]), None)
         {
             return;
@@ -524,6 +582,54 @@ impl Tree {
         }
 
         false
+    }
+
+    /// `m` metres in blocks, for how far a mapped tree moves to get out of the road.
+    fn mapped_reach(editor: &WorldEditor, m: f64) -> i32 {
+        ((m * editor.scale()).round() as i32).max(1)
+    }
+
+    /// Base row of a model anchored at (x, z): at most 2 above the lowest ground under
+    /// it, so it doesn't hover on a cliff.
+    fn schem_base(
+        editor: &WorldEditor,
+        schem: &crate::trees::schematic::Schematic,
+        x: i32,
+        z: i32,
+        y: i32,
+    ) -> i32 {
+        let half = (schem.width.max(schem.length) / 2).clamp(1, 6);
+        let center = editor.get_absolute_y(x, y, z);
+        let mut fpmin = center;
+        for (dx, dz) in [
+            (-half, 0),
+            (half, 0),
+            (0, -half),
+            (0, half),
+            (-half, -half),
+            (half, half),
+            (-half, half),
+            (half, -half),
+        ] {
+            fpmin = fpmin.min(editor.get_absolute_y(x + dx, y, z + dz));
+        }
+        center.min(fpmin + 2)
+    }
+
+    /// The checks a request's own column passes, run again where a mapped tree moves to.
+    fn trunk_spot_ok(
+        editor: &WorldEditor,
+        x: i32,
+        z: i32,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+        bridge_surface: Option<&BridgeSurfaceMap>,
+    ) -> bool {
+        editor.owns(x, z)
+            && !building_footprints.is_some_and(|f| f.contains(x, z))
+            && !bridge_surface.is_some_and(|b| b.contains(x, z))
+            && !editor.in_clear_corridor(x, z)
+            && !editor.is_lc_water(x, z)
+            && !editor.check_for_block(x, 0, z, Some(&[WATER]))
     }
 
     /// The species mix for a scattered tree, keyed on the column.
@@ -698,6 +804,25 @@ impl Tree {
             return;
         }
 
+        // A mapped street tree may stand on the sidewalk but not in the road, where a road
+        // drawn wider than the real one often puts it. A one-block trunk moves out here; a
+        // model moves further down, once its whole trunk and roots are known.
+        let pack = editor.tree_pack();
+        let one_block_trunk = editor.scale() < MICRO_TREE_MAX_SCALE || pack.is_none();
+        let (x, z) = if allow_on_paved && one_block_trunk && editor.on_carriageway(x, z) {
+            let reach = Self::mapped_reach(editor, MAPPED_FAR_SHIFT_M);
+            match nearest_fit(editor, x, z, reach, |ax, az| {
+                (!editor.on_carriageway(ax, az)
+                    && Self::trunk_spot_ok(editor, ax, az, building_footprints, bridge_surface))
+                .then_some(())
+            }) {
+                Some((ax, az, ())) => (ax, az),
+                None => return,
+            }
+        } else {
+            (x, z)
+        };
+
         let mut blacklist: Vec<Block> = Vec::new();
         blacklist.extend(Self::get_building_wall_blocks());
         blacklist.extend(Self::get_building_floor_blocks());
@@ -729,7 +854,7 @@ impl Tree {
         }
 
         // Schematic pack active: stamp a model instead of the procedural tree (checks above still apply).
-        if let Some(region) = editor.tree_pack() {
+        if let Some(region) = pack {
             // same paving rule as above; is_lc_water still blocks water
             let road_water: &[Block] = if allow_on_paved {
                 &[WATER]
@@ -747,8 +872,39 @@ impl Tree {
             };
             let hint = habitat_for_tree_type(tree_type);
             let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
-            let picked = match mapped {
+            // The slot can be a few blocks off (x,z), so every check that rejected
+            // the request has to run again on the moved trunk. Without the footprint
+            // one a tree asked for beside a building gets snapped onto its roof.
+            let spot_ok = |sx: i32, sz: i32| {
+                !(editor.is_lc_water(sx, sz)
+                    || editor.in_clear_corridor(sx, sz)
+                    || building_footprints.is_some_and(|f| f.contains(sx, sz))
+                    || editor.check_for_block(sx, 0, sz, Some(road_water))
+                    || bridge_surface.is_some_and(|b| b.contains(sx, sz))
+                    || (!allow_on_paved && editor.surface_is_sealed(sx, sz)))
+            };
+            // The anchor is the model's middle, and its trunk may be wide, off to one
+            // side or flared at the roots, so all of its wood low enough to stand in a
+            // road's headroom has to keep off the road: off any paving for a scattered
+            // tree, off the carriageway for a mapped one. A model that does not fit
+            // gives way to one that does, as the data says a tree stands there.
+            let keep_off = |wx: i32, wz: i32| {
+                if allow_on_paved {
+                    editor.on_carriageway(wx, wz)
+                } else {
+                    editor.surface_is_sealed(wx, wz)
+                }
+            };
+            let fits_at = |ax: i32, az: i32, idx: usize, rot: u8| {
+                let schem = region.schem(idx);
+                let base = Self::schem_base(editor, schem, ax, az, y);
+                crate::trees::schematic::low_wood_clear(editor, schem, rot, ax, az, base, keep_off)
+            };
+            let planted = match mapped {
                 Some(m) => {
+                    if !spot_ok(x, z) {
+                        return;
+                    }
                     let eco = editor.ecoregion(x, z);
                     let req = crate::trees::region::MappedRequest {
                         genus: m.genus.as_deref(),
@@ -756,8 +912,50 @@ impl Tree {
                         want_height: wanted_height_m(editor, x, z, Some(m)).map(blocks),
                         eco,
                         beach: eco.is_some() && beside_beach(editor, x, z),
+                        fits: None,
                     };
-                    region.pick_mapped(x, z, hint, elev_y, req)
+                    let moved_ok = |ax: i32, az: i32| {
+                        (ax, az) == (x, z)
+                            || Self::trunk_spot_ok(
+                                editor,
+                                ax,
+                                az,
+                                building_footprints,
+                                bridge_surface,
+                            )
+                    };
+                    let Some((_, _, idx, rot)) = region.pick_mapped(x, z, hint, elev_y, req) else {
+                        return;
+                    };
+                    // The model picked for it, turned or moved a few blocks out of the road;
+                    // else whichever model fits nearest, a slimmer one of its species first.
+                    let near = Self::mapped_reach(editor, MAPPED_SHIFT_M);
+                    nearest_fit(editor, x, z, near, |ax, az| {
+                        if !moved_ok(ax, az) {
+                            return None;
+                        }
+                        (0..4)
+                            .map(|k| (rot + k) % 4)
+                            .find(|&r| fits_at(ax, az, idx, r))
+                            .map(|r| (idx, r))
+                    })
+                    .or_else(|| {
+                        let far = Self::mapped_reach(editor, MAPPED_FAR_SHIFT_M);
+                        nearest_fit(editor, x, z, far, |ax, az| {
+                            if !moved_ok(ax, az) || editor.on_carriageway(ax, az) {
+                                return None;
+                            }
+                            let fits = |i: usize, r: u8| fits_at(ax, az, i, r);
+                            let req = crate::trees::region::MappedRequest {
+                                fits: Some(&fits),
+                                ..req
+                            };
+                            region
+                                .pick_mapped(x, z, hint, elev_y, req)
+                                .map(|(_, _, i, r)| (i, r))
+                        })
+                    })
+                    .map(|(ax, az, (idx, rot))| (ax, az, idx, rot))
                 }
                 None => {
                     // Read at the slot, not the request, so the hint describes the
@@ -767,7 +965,18 @@ impl Tree {
                         z,
                         region.slot_spacing(density_decided),
                     );
+                    // A slot across a tile seam would put this tile's trunk on the
+                    // neighbour's undergrowth, so the tree keeps to the requested cell.
+                    let (sx, sz) = if editor.owns(hx, hz) {
+                        (hx, hz)
+                    } else {
+                        (x, z)
+                    };
+                    if !spot_ok(sx, sz) {
+                        return;
+                    }
                     let eco = editor.ecoregion(hx, hz);
+                    let fits = |i: usize, r: u8| fits_at(sx, sz, i, r);
                     let req = crate::trees::region::SlotRequest {
                         want_height: wanted_height_m(editor, hx, hz, None).map(blocks),
                         density_decided,
@@ -778,49 +987,16 @@ impl Tree {
                             editor.cover_class(hx, hz),
                             crate::land_cover::LC_WETLAND | crate::land_cover::LC_MANGROVES
                         ),
+                        fits: Some(&fits),
                     };
-                    region.pick_slot(x, z, hint, elev_y, req)
+                    region
+                        .pick_slot(x, z, hint, elev_y, req)
+                        .map(|(_, _, idx, rot)| (sx, sz, idx, rot))
                 }
             };
-            if let Some((sx, sz, idx, rot)) = picked {
-                // A slot across a tile seam would put this tile's trunk on the
-                // neighbour's undergrowth, so the tree keeps to the requested cell.
-                let (sx, sz) = if editor.owns(sx, sz) {
-                    (sx, sz)
-                } else {
-                    (x, z)
-                };
-                // The slot can be a few blocks off (x,z), so every check that
-                // rejected the request has to run again on the moved trunk.
-                // Without the footprint one a tree asked for beside a building
-                // gets snapped onto its roof.
-                if editor.is_lc_water(sx, sz)
-                    || editor.in_clear_corridor(sx, sz)
-                    || building_footprints.is_some_and(|f| f.contains(sx, sz))
-                    || editor.check_for_block(sx, 0, sz, Some(road_water))
-                    || bridge_surface.is_some_and(|b| b.contains(sx, sz))
-                    || (!allow_on_paved && editor.surface_is_sealed(sx, sz))
-                {
-                    return;
-                }
-                // Clamp the base to <=2 above the lowest footprint ground so it doesn't hover on a cliff.
+            if let Some((sx, sz, idx, rot)) = planted {
                 let schem = region.schem(idx);
-                let half = (schem.width.max(schem.length) / 2).clamp(1, 6);
-                let center = editor.get_absolute_y(sx, y, sz);
-                let mut fpmin = center;
-                for (dx, dz) in [
-                    (-half, 0),
-                    (half, 0),
-                    (0, -half),
-                    (0, half),
-                    (-half, -half),
-                    (half, half),
-                    (-half, half),
-                    (half, -half),
-                ] {
-                    fpmin = fpmin.min(editor.get_absolute_y(sx + dx, y, sz + dz));
-                }
-                let slot_base_y = center.min(fpmin + 2);
+                let slot_base_y = Self::schem_base(editor, schem, sx, sz, y);
                 // Requests from several cells snap to one slot: its first tree stands,
                 // and a later one would only stamp itself into that trunk.
                 let trunk_taken = (slot_base_y..=slot_base_y + 2).any(|wy| {
@@ -951,24 +1127,34 @@ impl Tree {
             };
             let branch_y_off = trunk_height - 2 - ((variant_idx >> 12) & 0x1) as i32;
             let branch_y = base_y + branch_y_off;
-            for step in 1..=2 {
-                editor.set_block_absolute(
-                    tree.log_block,
-                    x + dx * step,
-                    branch_y,
-                    z + dz * step,
-                    None,
-                    Some(&blacklist),
-                );
-            }
-            // Tapered cluster (Manhattan <= 2): rounder than a 3x3x3 cube.
-            let tip_x = x + dx * 2;
-            let tip_z = z + dz * 2;
-            for ddx in -1i32..=1 {
-                for ddy in -1i32..=1 {
-                    for ddz in -1i32..=1 {
-                        if ddx.abs() + ddy.abs() + ddz.abs() <= 2 {
-                            placer.place_surface(editor, tip_x + ddx, branch_y + ddy, tip_z + ddz);
+            // A branch reaching low over a road is pruned off whole.
+            let pruned =
+                (1..=2).any(|step| in_headroom(editor, x + dx * step, branch_y, z + dz * step));
+            if !pruned {
+                for step in 1..=2 {
+                    editor.set_block_absolute(
+                        tree.log_block,
+                        x + dx * step,
+                        branch_y,
+                        z + dz * step,
+                        None,
+                        Some(&blacklist),
+                    );
+                }
+                // Tapered cluster (Manhattan <= 2): rounder than a 3x3x3 cube.
+                let tip_x = x + dx * 2;
+                let tip_z = z + dz * 2;
+                for ddx in -1i32..=1 {
+                    for ddy in -1i32..=1 {
+                        for ddz in -1i32..=1 {
+                            if ddx.abs() + ddy.abs() + ddz.abs() <= 2 {
+                                placer.place_surface(
+                                    editor,
+                                    tip_x + ddx,
+                                    branch_y + ddy,
+                                    tip_z + ddz,
+                                );
+                            }
                         }
                     }
                 }
@@ -1016,21 +1202,19 @@ impl Tree {
             editor.set_block_absolute(tree.log_block, x, base_y + dy, z, None, Some(blacklist));
         }
         let top = base_y + trunk;
-        editor.set_block_absolute(tree.leaves_block, x, top, z, None, Some(blacklist));
+        let leaf = |editor: &mut WorldEditor, lx: i32, ly: i32, lz: i32| {
+            if !in_headroom(editor, lx, ly, lz) {
+                editor.set_block_absolute(tree.leaves_block, lx, ly, lz, None, Some(blacklist));
+            }
+        };
+        leaf(editor, x, top, z);
         if height >= 3 {
             for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                editor.set_block_absolute(
-                    tree.leaves_block,
-                    x + dx,
-                    top,
-                    z + dz,
-                    None,
-                    Some(blacklist),
-                );
+                leaf(editor, x + dx, top, z + dz);
             }
         }
         if height >= 5 {
-            editor.set_block_absolute(tree.leaves_block, x, top + 1, z, None, Some(blacklist));
+            leaf(editor, x, top + 1, z);
         }
     }
 
@@ -2081,5 +2265,215 @@ mod height_tests {
         let half = planted_height(0.5);
         assert!((16..=24).contains(&full), "1:1 gave {full}");
         assert!((7..=13).contains(&half), "1:2 gave {half}");
+    }
+}
+
+#[cfg(test)]
+mod road_clearance_tests {
+    use super::*;
+    use crate::canopy::{CanopyData, CANOPY_NODATA};
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::floodfill_cache::{CoordinateBitmap, SealedSurfaceBitmap};
+    use crate::ground::Ground;
+    use crate::trees::mapped::MappedTree;
+    use crate::trees::tree_library::SizeFilter;
+    use crate::trees::tree_pack::TreePackSource;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    const SIZE: i32 = 96;
+    /// A road across the world: carriageway on z 44..=51, a footway beside it on 52..=53.
+    const ROAD: std::ops::RangeInclusive<i32> = 44..=51;
+    const FOOTWAY: std::ops::RangeInclusive<i32> = 52..=53;
+
+    fn editor_with_road(xzbbox: &XZBBox, pack: bool) -> WorldEditor<'_> {
+        editor_with(xzbbox, pack, true)
+    }
+
+    fn editor_with(xzbbox: &XZBBox, pack: bool, road: bool) -> WorldEditor<'_> {
+        let n = SIZE as usize;
+        let canopy = CanopyData::from_grid(vec![CANOPY_NODATA; n * n], n, n);
+        let llbbox = LLBBox::new(48.0, 11.0, 48.001, 11.001).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), xzbbox, llbbox);
+        editor.set_ground(Arc::new(Ground::new_flat_canopy_test(canopy, n, n)));
+        editor.set_ground_origin(0, 0);
+        editor.set_projection_info("local", 1.0);
+        let mut sealed = SealedSurfaceBitmap::new(xzbbox);
+        let mut carriageway = CoordinateBitmap::new(xzbbox);
+        for x in 0..SIZE {
+            for z in ROAD {
+                sealed.set(x, z);
+                carriageway.set(x, z);
+            }
+            for z in FOOTWAY {
+                sealed.set(x, z);
+            }
+        }
+        if road {
+            editor.set_sealed_surface(Arc::new(sealed));
+            editor.set_carriageway(Arc::new(carriageway));
+        }
+        if pack {
+            let src = TreePackSource::embedded("eur");
+            let lib = crate::trees::region::RegionLibrary::load(
+                &src,
+                1.0,
+                0,
+                1.0,
+                SizeFilter::default(),
+                false,
+            )
+            .unwrap();
+            editor.set_tree_pack(Arc::new(lib));
+        }
+        editor
+    }
+
+    fn is_wood(b: Block) -> bool {
+        crate::ground_decoration::WOOD.contains(&b)
+    }
+
+    /// Tree blocks standing in the headroom over the columns `over` picks.
+    fn in_the_way(editor: &WorldEditor, over: impl Fn(i32, i32) -> bool) -> Vec<(i32, i32, i32)> {
+        let mut found = Vec::new();
+        for x in 0..SIZE {
+            for z in 0..SIZE {
+                let Some(h) = headroom(editor, x, z).filter(|_| over(x, z)) else {
+                    continue;
+                };
+                let ground = editor.get_ground_level(x, z);
+                for y in ground + 1..=ground + h {
+                    if editor.get_block_absolute(x, y, z).is_some() {
+                        found.push((x, y, z));
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    fn wood_count(editor: &WorldEditor) -> usize {
+        (0..SIZE)
+            .flat_map(|x| (0..SIZE).map(move |z| (x, z)))
+            .flat_map(|(x, z)| (-4..40).map(move |y| (x, y, z)))
+            .filter(|&(x, y, z)| editor.get_block_absolute(x, y, z).is_some_and(is_wood))
+            .count()
+    }
+
+    #[test]
+    fn scattered_trees_leave_the_road_and_footway_clear() {
+        for pack in [false, true] {
+            let xzbbox = XZBBox::rect_from_min_max(0, 0, SIZE - 1, SIZE - 1).unwrap();
+            let mut editor = editor_with_road(&xzbbox, pack);
+            for x in (2..SIZE - 2).step_by(3) {
+                for z in (2..SIZE - 2).step_by(3) {
+                    Tree::create_from_canopy(&mut editor, (x, 1, z), None, None);
+                }
+            }
+            assert!(
+                wood_count(&editor) > 0,
+                "pack {pack}: the verges still get trees"
+            );
+            let blocked = in_the_way(&editor, |_, _| true);
+            assert!(
+                blocked.is_empty(),
+                "pack {pack}: tree blocks in the headroom at {:?}",
+                &blocked[..blocked.len().min(8)]
+            );
+        }
+    }
+
+    /// Blocks standing within `r` of (x, z).
+    fn blocks_near(editor: &WorldEditor, x: i32, z: i32, r: i32) -> usize {
+        (x - r..=x + r)
+            .flat_map(|bx| (z - r..=z + r).map(move |bz| (bx, bz)))
+            .flat_map(|(bx, bz)| (-4..40).map(move |y| (bx, y, bz)))
+            .filter(|&(bx, y, bz)| editor.get_block_absolute(bx, y, bz).is_some())
+            .count()
+    }
+
+    /// Where the model a slot picks would put wood in the road, the slot still holds a
+    /// tree: the model turns or gives way to one that keeps off.
+    #[test]
+    fn a_tree_whose_model_reaches_into_the_road_still_stands() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, SIZE - 1, SIZE - 1).unwrap();
+        let mut open = editor_with(&xzbbox, true, false);
+        let mut beside = editor_with_road(&xzbbox, true);
+        let requests: Vec<(i32, i32)> = (4..SIZE - 4)
+            .step_by(5)
+            .flat_map(|x| [(x, *ROAD.start() - 3), (x, *FOOTWAY.end() + 3)])
+            .collect();
+        let (mut planted_open, mut planted_beside) = (0, 0);
+        for &(x, z) in &requests {
+            let before = blocks_near(&open, x, z, 16);
+            Tree::create_from_canopy(&mut open, (x, 1, z), None, None);
+            planted_open += usize::from(blocks_near(&open, x, z, 16) > before);
+            let before = blocks_near(&beside, x, z, 16);
+            Tree::create_from_canopy(&mut beside, (x, 1, z), None, None);
+            planted_beside += usize::from(blocks_near(&beside, x, z, 16) > before);
+        }
+        let spilled = (0..SIZE)
+            .flat_map(|x| ROAD.chain(FOOTWAY).map(move |z| (x, z)))
+            .filter(|&(x, z)| {
+                (1..=4).any(|y| open.get_block_absolute(x, y, z).is_some_and(is_wood))
+            })
+            .count();
+        assert!(spilled > 0, "some models picked here reach into the road");
+        assert!(planted_open > 0);
+        // Slimmer stand-ins can leave a neighbour's slot free, so there may be more.
+        assert!(
+            planted_beside >= planted_open,
+            "{planted_beside} trees beside the road, {planted_open} without it"
+        );
+        let blocked = in_the_way(&beside, |_, _| true);
+        assert!(
+            blocked.is_empty(),
+            "tree blocks in the headroom at {blocked:?}"
+        );
+    }
+
+    #[test]
+    fn a_mapped_tree_in_the_road_moves_out_of_it() {
+        for pack in [false, true] {
+            let xzbbox = XZBBox::rect_from_min_max(0, 0, SIZE - 1, SIZE - 1).unwrap();
+            let mut editor = editor_with_road(&xzbbox, pack);
+            let mapped = MappedTree::from_tags(&HashMap::new(), 1);
+            // Two blocks in from the road's edge, as a street tree on a road drawn too wide.
+            for x in (10..SIZE - 10).step_by(12) {
+                Tree::create_mapped(&mut editor, (x, 1, 50), &mapped, None, None);
+            }
+            let in_road = in_the_way(&editor, |x, z| editor.on_carriageway(x, z));
+            let wood_in_road: Vec<_> = in_road
+                .iter()
+                .filter(|&&(x, y, z)| editor.get_block_absolute(x, y, z).is_some_and(is_wood))
+                .collect();
+            assert!(
+                wood_in_road.is_empty(),
+                "pack {pack}: wood in the road at {:?}",
+                &wood_in_road[..wood_in_road.len().min(8)]
+            );
+            assert!(
+                in_road.is_empty(),
+                "pack {pack}: leaves low over the road at {:?}",
+                &in_road[..in_road.len().min(8)]
+            );
+            assert!(wood_count(&editor) > 0, "pack {pack}: the trees were kept");
+        }
+    }
+
+    #[test]
+    fn a_one_block_trunk_moves_to_the_nearest_column_off_the_road() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, SIZE - 1, SIZE - 1).unwrap();
+        let mut editor = editor_with_road(&xzbbox, false);
+        let mapped = MappedTree::from_tags(&HashMap::new(), 1);
+        Tree::create_mapped(&mut editor, (40, 1, 50), &mapped, None, None);
+        let trunk = (*ROAD.end() + 1, editor.get_absolute_y(40, 1, 52));
+        assert!(
+            editor
+                .get_block_absolute(40, trunk.1, trunk.0)
+                .is_some_and(is_wood),
+            "the trunk stands on the footway beside the road"
+        );
     }
 }
