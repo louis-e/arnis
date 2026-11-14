@@ -305,26 +305,26 @@ pub fn place_arch_below_deck(
     use_absolute_y: bool,
     is_centerline: bool,
 ) {
-    // Too low over water for an arch to clear it: the deck spans it alone, or it dams it.
-    if editor.is_mapped_water(set_x, set_z)
-        && cell_y - editor.get_water_level(set_x, set_z) < ARCH_WATER_ROOM
-    {
-        return;
+    // Too low over water for an arch to clear it, the deck spans it from pier to pier.
+    let low_over_water = editor.is_mapped_water(set_x, set_z)
+        && cell_y - editor.get_water_level(set_x, set_z) < ARCH_WATER_ROOM;
+    if !low_over_water {
+        place_arch_spandrel_cell(
+            editor,
+            set_x,
+            cell_y,
+            set_z,
+            centerline_ground_y,
+            tds,
+            total,
+            use_absolute_y,
+        );
     }
-    place_arch_spandrel_cell(
-        editor,
-        set_x,
-        cell_y,
-        set_z,
-        centerline_ground_y,
-        tds,
-        total,
-        use_absolute_y,
-    );
-    if is_centerline {
+    // Springers stand on the centerline; low over water a pier wall spans the deck there.
+    if is_centerline || low_over_water {
         let (start, span) = arch_segment(tds, total);
         if tds == start || tds + 1 == start + span {
-            place_pillar(editor, set_x, cell_y, set_z, STONE_BRICKS, true);
+            place_pillar(editor, set_x, cell_y, set_z, STONE_BRICKS, is_centerline);
         }
     }
 }

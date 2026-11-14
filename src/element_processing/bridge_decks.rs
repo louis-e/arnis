@@ -21,6 +21,8 @@ const PIER_MIN_HEIGHT: i32 = 3;
 const LOW_WATER_PIER: i32 = 6;
 /// Cells between lamps along a lit bridge.
 const LAMP_SPACING: usize = 16;
+/// Least distance between two lamps of one structure.
+const LAMP_CLEARANCE: i32 = 8;
 /// Bucket side of the index over at-grade ways.
 const ROAD_GRID: i32 = 32;
 /// Longest way of a structure that may still be varied in look.
@@ -72,6 +74,17 @@ impl DeckDesign {
                 .get("highway")
                 .is_some_and(|h| is_non_vehicular_bridge_highway(h))
         });
+        // A steel structure carries a steel railing, whatever its road, age or material.
+        if matches!(
+            style,
+            BridgeStyle::Suspension | BridgeStyle::CableStayed | BridgeStyle::Truss
+        ) {
+            return if vehicular {
+                DeckDesign::Road
+            } else {
+                DeckDesign::Foot
+            };
+        }
         let road = || {
             let major = ways.iter().any(|w| {
                 matches!(
@@ -441,12 +454,32 @@ pub(crate) fn plan(
         return out;
     }
     let roads = GradeRoads::build(elements, structures, scale);
+    // Street lamps mapped on the bridges, which the generated ones keep clear of.
+    let mapped_lamps: Vec<(i32, i32)> = elements
+        .iter()
+        .filter_map(|e| match e {
+            ProcessedElement::Node(n)
+                if n.tags.get("highway").map(String::as_str) == Some("street_lamp") =>
+            {
+                Some((n.x, n.z))
+            }
+            _ => None,
+        })
+        .collect();
     let mut order: Vec<usize> = by_structure.keys().copied().collect();
     order.sort_unstable();
     for s in order {
         let mut paths = by_structure.remove(&s).unwrap_or_default();
         paths.sort_by_key(|p| p.way.id);
-        plan_structure(&paths, structures, surface, &roads, editor, &mut out);
+        plan_structure(
+            &paths,
+            structures,
+            surface,
+            &roads,
+            &mapped_lamps,
+            editor,
+            &mut out,
+        );
     }
     out
 }
@@ -456,6 +489,7 @@ fn plan_structure(
     structures: &BridgeStructureMap,
     surface: &BridgeSurfaceMap,
     roads: &GradeRoads,
+    mapped_lamps: &[(i32, i32)],
     editor: &WorldEditor,
     out: &mut HashMap<u64, DeckParts>,
 ) {
@@ -593,27 +627,46 @@ fn plan_structure(
         rails.insert((x, z), c);
     }
 
-    // Lamps on both edges of a lit deck, at even steps along each member.
-    let mut lamps: HashSet<(i32, i32)> = HashSet::new();
+    // Lamps on the edges of a lit deck at even steps, each clear of the rest, so a narrow
+    // deck takes them on alternate sides and two ways of one bridge never pair them up.
+    let mut lamps: Vec<(i32, i32)> = Vec::new();
     if info.lit && design.lamps() {
+        let (lo, hi) = all.keys().fold(
+            ((i32::MAX, i32::MAX), (i32::MIN, i32::MIN)),
+            |(lo, hi), &(x, z)| ((lo.0.min(x), lo.1.min(z)), (hi.0.max(x), hi.1.max(z))),
+        );
+        let r = LAMP_CLEARANCE;
+        let mapped: Vec<(i32, i32)> = mapped_lamps
+            .iter()
+            .filter(|&&(x, z)| x >= lo.0 - r && x <= hi.0 + r && z >= lo.1 - r && z <= hi.1 + r)
+            .copied()
+            .collect();
         for p in paths {
-            for i in (LAMP_SPACING / 2..p.cells.len()).step_by(LAMP_SPACING) {
+            for (k, i) in (LAMP_SPACING / 2..p.cells.len())
+                .step_by(LAMP_SPACING)
+                .enumerate()
+            {
                 let (hx, hz) = p.heading(i);
                 let (px, pz) = (-hz, hx);
                 let reach = p.half as f32 * (px.abs() + pz.abs()) + 1.0;
                 let (cx, cz) = p.cells[i];
-                for sign in [1.0f32, -1.0] {
+                let first = if k % 2 == 0 { 1.0f32 } else { -1.0 };
+                for sign in [first, -first] {
                     let cell = (
                         (cx as f32 + px * reach * sign).round() as i32,
                         (cz as f32 + pz * reach * sign).round() as i32,
                     );
-                    if rails.contains_key(&cell) {
-                        lamps.insert(cell);
+                    let clear = lamps.iter().chain(&mapped).all(|&(x, z)| {
+                        (x - cell.0).pow(2) + (z - cell.1).pow(2) >= LAMP_CLEARANCE.pow(2)
+                    });
+                    if rails.contains_key(&cell) && clear {
+                        lamps.push(cell);
                     }
                 }
             }
         }
     }
+    let lamps: HashSet<(i32, i32)> = lamps.into_iter().collect();
 
     for (&(x, z), &c) in &rails {
         let parts = out.entry(c.way).or_default();
@@ -1004,6 +1057,72 @@ mod tests {
         assert_eq!(looks("footway", 30), HashSet::from([Foot, Glass]));
         assert_eq!(looks("primary", 30), HashSet::from([Road]));
         assert_eq!(looks("residential", 90), HashSet::from([Road]));
+    }
+
+    #[test]
+    fn steel_structures_keep_a_steel_railing_whatever_their_age() {
+        let old = [("start_date", "1937"), ("surface", "sett")];
+        let pick = |style, highway| {
+            let tags = [("highway", highway), old[0], old[1]];
+            DeckDesign::pick(style, [way(7, &tags, &[(0, 0), (20, 0)])].iter())
+        };
+        for style in [
+            BridgeStyle::Suspension,
+            BridgeStyle::CableStayed,
+            BridgeStyle::Truss,
+        ] {
+            assert_eq!(pick(style, "motorway"), DeckDesign::Road);
+            assert_eq!(pick(style, "cycleway"), DeckDesign::Foot);
+        }
+        assert_eq!(pick(BridgeStyle::Beam, "residential"), DeckDesign::Stone);
+    }
+
+    /// Every pair of `lamps` stands at least `LAMP_CLEARANCE` apart.
+    fn assert_lamps_clear(lamps: &[(i32, i32, i32)]) {
+        for (i, a) in lamps.iter().enumerate() {
+            for b in &lamps[i + 1..] {
+                let d = (a.0 - b.0).pow(2) + (a.1 - b.1).pow(2);
+                assert!(d >= LAMP_CLEARANCE.pow(2), "{a:?} by {b:?}: {lamps:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn lamps_on_a_narrow_lit_deck_take_alternate_sides() {
+        let tags = &[("highway", "footway"), ("bridge", "yes"), ("lit", "yes")];
+        let (_, surface) = build(&[way(1, tags, &[(10, 50), (90, 50)])], VALLEY, &[]);
+        let lamps = &surface.parts_of(1).expect("parts").lamps;
+        assert!(lamps.len() >= 3, "{lamps:?}");
+        assert_lamps_clear(lamps);
+        assert!(lamps.iter().any(|l| l.1 > 50) && lamps.iter().any(|l| l.1 < 50));
+    }
+
+    #[test]
+    fn a_road_and_its_sidewalk_never_pair_their_lamps() {
+        let lit = |highway| [("highway", highway), ("bridge", "yes"), ("lit", "yes")];
+        let road = way(1, &lit("residential"), &[(10, 50), (90, 50)]);
+        let walk = way(2, &lit("footway"), &[(10, 56), (90, 56)]);
+        let (_, surface) = build(&[road, walk], VALLEY, &[]);
+        let lamps: Vec<(i32, i32, i32)> = [1, 2]
+            .iter()
+            .filter_map(|&id| surface.parts_of(id))
+            .flat_map(|p| p.lamps.iter().copied())
+            .collect();
+        assert!(lamps.len() >= 3, "{lamps:?}");
+        assert_lamps_clear(&lamps);
+    }
+
+    #[test]
+    fn a_lamp_mapped_beside_a_deck_finds_its_railing() {
+        let tags = &[("highway", "footway"), ("bridge", "yes")];
+        let (_, surface) = build(&[way(1, tags, &[(10, 50), (90, 50)])], VALLEY, &[]);
+        let ((x, z), y) = surface
+            .nearest_railing(50, 55, 4)
+            .expect("a railing in reach");
+        assert_eq!((x, z), (50, 52));
+        let rail = &surface.parts_of(1).expect("parts").rails;
+        assert!(rail.contains(&(x, z, y)), "{rail:?}");
+        assert_eq!(surface.nearest_railing(50, 58, 4), None);
     }
 
     #[test]

@@ -159,17 +159,20 @@ pub(crate) fn road_profile(
 }
 
 /// The profile an at-grade road is laid on. A tunnel portal keeps the ground at its mouth,
-/// which the bore starts from.
+/// which the bore starts from, and a bridge the level its deck lands at.
 fn at_grade_profile(
     editor: &WorldEditor,
     way: &ProcessedWay,
     block_range: i32,
     connectivity: &HighwayConnectivityMap,
     tunnel_portals: &TunnelPortalMap,
+    bridges: &BridgeStructureMap,
 ) -> Vec<i32> {
     road_profile(editor, way, block_range, connectivity, |x, z| {
         connectivity.is_shared(x, z).then(|| {
-            if tunnel_portals.is_open_end((x, z)) {
+            if let Some(y) = bridges.landing_y(x, z) {
+                y
+            } else if tunnel_portals.is_open_end((x, z)) {
                 editor
                     .terrain_level(x, z)
                     .unwrap_or_else(|| editor.get_ground_level(x, z))
@@ -285,6 +288,7 @@ impl<'a> RoadSurfaces<'a> {
                 half,
                 self.connectivity,
                 self.tunnel_portals,
+                self.bridges,
             );
             // The road dips into a tunnel portal it leads to.
             if let Some(approach) = self.tunnel_portals.approach(way.id) {
@@ -1468,7 +1472,21 @@ pub fn collect_tunnel_footprint(
     bitmap
 }
 
+/// Columns around a lamp no second one stands in, as on a road and its sidewalk both lit.
+const LAMP_NEIGHBOUR_REACH: i32 = 3;
+
 fn place_street_lamp(editor: &mut WorldEditor, x: i32, z: i32, base: i32) {
+    let r = LAMP_NEIGHBOUR_REACH;
+    let crowded = (-r..=r).any(|dx| {
+        (-r..=r).any(|dz| {
+            (base + 2..=base + 9).any(|y| {
+                editor.check_for_block_absolute(x + dx, y, z + dz, Some(&[REDSTONE_LAMP]), None)
+            })
+        })
+    });
+    if crowded {
+        return;
+    }
     editor.register_lamp(x, z);
     editor.set_block_absolute(SMOOTH_STONE, x, base + 1, z, None, None);
     for dy in 2..=4 {
@@ -1650,14 +1668,22 @@ fn generate_highways_internal(
             if let ProcessedElement::Node(first_node) = element {
                 let mut x: i32 = first_node.x;
                 let mut z: i32 = first_node.z;
-                if layered {
-                    if let Some((cell, _)) =
+                let mut curb: Option<i32> = None;
+                // One mapped off the deck, on a sidewalk it leaves out, stands on its railing.
+                if !bridge_surface.contains(x, z) && (layered || editor.is_mapped_water(x, z)) {
+                    if let Some((cell, y)) =
+                        bridge_surface.nearest_railing(x, z, LAYERED_LAMP_DECK_REACH)
+                    {
+                        ((x, z), curb) = (cell, Some(y));
+                    } else if let Some((cell, _)) =
                         bridge_surface.nearest_deck_cell(x, z, LAYERED_LAMP_DECK_REACH)
                     {
                         (x, z) = cell;
                     }
                 }
-                let base = node_feature_base_y(editor, bridge_surface, x, z, layered, 0);
+                let base = curb.unwrap_or_else(|| {
+                    node_feature_base_y(editor, bridge_surface, x, z, layered, 0)
+                });
                 place_street_lamp(editor, x, z, base);
             }
         } else if highway_type == "crossing" || highway_type == "traffic_signals" {
@@ -2022,6 +2048,7 @@ fn generate_highways_internal(
                     block_range,
                     highway_connectivity,
                     tunnel_portals,
+                    bridge_structures,
                 )
             };
             let road_ys: &[i32] = bridge_ramp.map_or(&own_profile, |ramp| ramp.ys());

@@ -13107,6 +13107,21 @@ pub fn generate_buildings(
         // `building_facades::collect` will be given.
         preset_shell: Arc::default(),
     };
+    // Over water a building stands on its plinth down to the bed, a houseboat on its hull;
+    // a boathouse keeps the water it shelters.
+    if config.is_ground_level && building_type != "boathouse" {
+        let base = if element.tags.get("building").map(String::as_str) == Some("houseboat") {
+            DARK_OAK_PLANKS
+        } else {
+            base_course_for_wall(config.wall_block)
+        };
+        for &(x, z) in &cached_floor_area {
+            if editor.is_mapped_water(x, z) {
+                editor.register_support_column(x, z, base);
+            }
+        }
+    }
+
     // A department store's sales floors want wall, not daylight.
     let config = match closed_retail_bays(element, &config, cached_footprint_size, scale_factor) {
         Some(bays) => BuildingConfig { bays, ..config },

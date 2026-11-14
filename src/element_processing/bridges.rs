@@ -164,6 +164,10 @@ const SHORT_WATER_RUN: f32 = 2.0;
 const WATER_CROSSING_CELLS: usize = 2;
 /// Cells off a landing where a way crossing the deck meets it at grade instead.
 const LANDING_CELLS: usize = 2;
+/// Most a landing rises off its junction to meet the road beyond it.
+const LANDING_LIFT: i32 = 2;
+/// Cells out along a road where its own level beyond a junction is read.
+const ROAD_BEYOND_CELLS: usize = 3;
 /// Cells per block an approach road climbs at most, onto a lifted deck end.
 const APPROACH_GENTLE_RUN: f32 = 8.0;
 
@@ -272,9 +276,16 @@ pub struct BridgeStructureMap {
     ramps: HashMap<u64, BridgeRampInfo>,
     rail_decks: HashMap<u64, RailDeck>,
     structures: Vec<StructureInfo>,
+    // The level decks land at the junctions they meet roads at.
+    landings: HashMap<(i32, i32), i32>,
 }
 
 impl BridgeStructureMap {
+    /// The level a deck lands at the junction at (x, z), which the roads there meet it at.
+    pub fn landing_y(&self, x: i32, z: i32) -> Option<i32> {
+        self.landings.get(&(x, z)).copied()
+    }
+
     pub fn lookup_member(&self, way_id: u64) -> Option<&BridgeMemberInfo> {
         self.members.get(&way_id)
     }
@@ -331,6 +342,7 @@ impl BridgeStructureMap {
                 ramps,
                 rail_decks,
                 structures,
+                landings: HashMap::new(),
             };
         }
 
@@ -509,6 +521,7 @@ impl BridgeStructureMap {
 
         // Track ramp ways to make sure each ramp attaches to only one structure.
         let mut claimed_ramp_ways: HashSet<u64> = HashSet::new();
+        let mut landings: HashMap<(i32, i32), i32> = HashMap::new();
         // Deck cells of structures already resolved: (deck Y, layer), for decks crossing above.
         let mut resolved_decks: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
         // Deck Y at the member ends of structures already resolved, for joints to meet.
@@ -629,6 +642,8 @@ impl BridgeStructureMap {
 
             // Tagged ramps carry the deck down; their start Y is filled in once known.
             let mut external_ramp_ends: HashSet<(i32, i32)> = HashSet::new();
+            // Ends a raised way links to another deck, as a road through a bridge tower.
+            let mut linked_ends: HashSet<(i32, i32)> = HashSet::new();
             let mut pending_ramps: Vec<(&ProcessedWay, bool, (i32, i32))> = Vec::new();
             for &idx in group_indices {
                 let (s, e) = ends(idx);
@@ -655,8 +670,9 @@ impl BridgeStructureMap {
                         } else {
                             &candidate.nodes[0]
                         };
-                        // Reject if the far end is also on this structure (connector between two decks).
-                        if node_members.contains_key(&(far_node.x, far_node.z)) {
+                        // A link to a deck, this one's or another's, carries it on, not down.
+                        if node_to_bridge_indices.contains_key(&(far_node.x, far_node.z)) {
+                            linked_ends.insert(xz);
                             continue;
                         }
                         pending_ramps.push((candidate, bridge_side_at_start, xz));
@@ -670,6 +686,7 @@ impl BridgeStructureMap {
                 (is_boundary(xz) || fork_landings.contains(&xz))
                     && !cut_ends.contains(&xz)
                     && !external_ramp_ends.contains(&xz)
+                    && !linked_ends.contains(&xz)
                     && !joins_other_bridge(xz)
             };
             // A way crossing a deck right where it lands meets it at the junction, at grade.
@@ -679,13 +696,27 @@ impl BridgeStructureMap {
                 (i <= LANDING_CELLS && anchors_end(s))
                     || (last - i <= LANDING_CELLS && anchors_end(e))
             };
-            // A road landing on the deck reaches that node at its junction level.
+            // A road landing on the deck reaches that node at its junction level, lifted to the
+            // road where it runs on a little higher, or the deck would land in a dip.
             for (m, &idx) in group_indices.iter().enumerate() {
                 let (s, e) = ends(idx);
                 let last = cells[m].len().saturating_sub(1);
                 for (xz, i) in [(s, 0), (e, last)] {
                     if anchors_end(xz) && connectivity.is_shared(xz.0, xz.1) {
-                        terrain[m][i] = junction_level(editor, xz.0, xz.1);
+                        let junction = junction_level(editor, xz.0, xz.1);
+                        let beyond = node_to_other_highways
+                            .get(&xz)
+                            .into_iter()
+                            .flatten()
+                            .map(|&oi| other_highway_ways[oi])
+                            .filter(|w| !is_ramp_candidate(w) && meets_a_deck(w))
+                            .filter_map(|w| road_level_beyond(editor, w, xz, connectivity, scale))
+                            .max();
+                        let level = beyond
+                            .map_or(junction, |b| junction.max(b.min(junction + LANDING_LIFT)));
+                        terrain[m][i] = level;
+                        let landing = landings.entry(xz).or_insert(level);
+                        *landing = (*landing).max(level);
                     }
                 }
             }
@@ -1374,6 +1405,34 @@ impl BridgeStructureMap {
             }
         }
 
+        // A raised way between two decks runs straight from one to the other.
+        for way in other_highway_ways.iter().filter(|w| is_ramp_candidate(w)) {
+            let (Some(a), Some(b)) = (way.nodes.first(), way.nodes.last()) else {
+                continue;
+            };
+            let (Some(&ya), Some(&yb)) = (
+                resolved_joints.get(&(a.x, a.z)),
+                resolved_joints.get(&(b.x, b.z)),
+            ) else {
+                continue;
+            };
+            if claimed_ramp_ways.contains(&way.id) || ramps.contains_key(&way.id) {
+                continue;
+            }
+            let Some(design) = node_to_bridge_indices
+                .get(&(a.x, a.z))
+                .and_then(|ids| members.get(&bridge_ways[ids[0]].id))
+                .map(|m| structures[m.structure].design)
+            else {
+                continue;
+            };
+            let n = way_cells(way).len();
+            let ys = (0..n)
+                .map(|i| ya + ((yb - ya) as f32 * i as f32 / (n - 1).max(1) as f32).round() as i32)
+                .collect();
+            ramps.insert(way.id, BridgeRampInfo { ys, design });
+        }
+
         // Rail decks: one level per viaduct, clear of its layer and what it crosses.
         let mut rail_uf = UnionFind::new(rail_bridge_ways.len());
         let mut rail_ends: HashMap<((i32, i32), i32), usize> = HashMap::new();
@@ -1562,6 +1621,7 @@ impl BridgeStructureMap {
             ramps,
             rail_decks,
             structures,
+            landings,
         }
     }
 }
@@ -1617,14 +1677,31 @@ pub struct BridgeSurfaceMap {
     rail_tracks: HashMap<(i32, i32), (u64, i32)>,
     // Railings, fills and piers of each structure, by the member way that draws them.
     parts: HashMap<u64, DeckParts>,
-    // Cells the railings round the decks stand on.
-    railings: HashSet<(i32, i32)>,
+    // Cells the railings round the decks stand on, with their curb Y.
+    railings: HashMap<(i32, i32), i32>,
 }
 
 impl BridgeSurfaceMap {
     /// Whether (x, z) is a deck or the railing round it, which a mapped barrier leaves alone.
     pub fn keeps_clear(&self, x: i32, z: i32) -> bool {
-        self.cells.contains_key(&(x, z)) || self.railings.contains(&(x, z))
+        self.cells.contains_key(&(x, z)) || self.railings.contains_key(&(x, z))
+    }
+
+    /// The railing cell nearest (x, z) within `radius`, and its curb Y.
+    pub fn nearest_railing(&self, x: i32, z: i32, radius: i32) -> Option<((i32, i32), i32)> {
+        let mut best: Option<(i32, (i32, i32), i32)> = None;
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                let cell = (x + dx, z + dz);
+                let d = dx * dx + dz * dz;
+                if let Some(&y) = self.railings.get(&cell) {
+                    if best.is_none_or(|(b, _, _)| d < b) {
+                        best = Some((d, cell, y));
+                    }
+                }
+            }
+        }
+        best.map(|(_, cell, y)| (cell, y))
     }
 
     /// The railings, fills and piers member `way_id` draws.
@@ -1674,7 +1751,7 @@ impl BridgeSurfaceMap {
             rail_decks: HashMap::new(),
             rail_tracks: HashMap::new(),
             parts: HashMap::new(),
-            railings: HashSet::new(),
+            railings: HashMap::new(),
         }
     }
 
@@ -1823,7 +1900,7 @@ impl BridgeSurfaceMap {
             rail_decks: HashMap::new(),
             rail_tracks,
             parts: HashMap::new(),
-            railings: HashSet::new(),
+            railings: HashMap::new(),
         };
         // The footprint the renderer lays, gaps to joined tracks included.
         let mut rail_decks: HashMap<(i32, i32), i32> = HashMap::new();
@@ -1909,7 +1986,7 @@ impl BridgeSurfaceMap {
         let parts = bridge_decks::plan(elements, structures, &self, editor, scale);
         for p in parts.values() {
             self.railings
-                .extend(p.rails.iter().chain(&p.lamps).map(|&(x, z, _)| (x, z)));
+                .extend(p.rails.iter().chain(&p.lamps).map(|&(x, z, y)| ((x, z), y)));
             for &(x, z, y) in &p.fills {
                 self.cells
                     .entry((x, z))
@@ -1973,6 +2050,26 @@ fn meets_a_deck(way: &ProcessedWay) -> bool {
             | "razed"
     ) && way.tags.get("tunnel").is_none_or(|t| t == "no")
         && way.tags.get("indoor").is_none_or(|t| t == "no")
+}
+
+/// The level `road` runs at a few cells out from its end at `xz`, on its own ground.
+fn road_level_beyond(
+    editor: &WorldEditor,
+    road: &ProcessedWay,
+    xz: (i32, i32),
+    connectivity: &HighwayConnectivityMap,
+    scale: f64,
+) -> Option<i32> {
+    let half = way_half_width(road, scale);
+    let profile = road_profile(editor, road, half, connectivity, |_, _| None);
+    let last = profile.len().checked_sub(1)?;
+    let first = road.nodes.first().map(|n| (n.x, n.z));
+    let i = if first == Some(xz) {
+        ROAD_BEYOND_CELLS.min(last)
+    } else {
+        last - ROAD_BEYOND_CELLS.min(last)
+    };
+    Some(profile[i])
 }
 
 /// Whether the decks at a node all leave within a narrow fan and a road leaves well outside it.
@@ -3418,6 +3515,29 @@ mod tests {
     }
 
     #[test]
+    fn a_raised_way_between_two_decks_carries_them_over_level() {
+        // As between the towers of a bascule bridge: deck, way on the pier, deck.
+        let tags = &[("highway", "trunk"), ("bridge", "yes"), ("layer", "1")];
+        let north = way_with(1, tags, &[(5, 40), (40, 40)]);
+        let link = way_with(
+            2,
+            &[("highway", "trunk"), ("layer", "1")],
+            &[(40, 40), (60, 40)],
+        );
+        let south = way_with(3, tags, &[(60, 40), (95, 40)]);
+        let under_n = way_with(4, &[("highway", "residential")], &[(25, 0), (25, 99)]);
+        let under_s = way_with(5, &[("highway", "residential")], &[(75, 0), (75, 99)]);
+        let (structures, _) = structures_over(&[north, link, south, under_n, under_s], |_| 0.0);
+        let (n, s) = (ys(&structures, 1), ys(&structures, 3));
+        let link = structures.lookup_ramp(2).expect("linking way").ys();
+        assert!(*n.last().unwrap() > 0 && s[0] > 0, "{n:?} {s:?}");
+        assert_eq!(link.first(), n.last(), "{link:?}");
+        assert_eq!(link.last(), s.first(), "{link:?}");
+        let (lo, hi) = (n.last().unwrap().min(&s[0]), n.last().unwrap().max(&s[0]));
+        assert!(link.iter().all(|y| (lo..=hi).contains(&y)), "{link:?}");
+    }
+
+    #[test]
     fn ramp_profile_rides_over_ground_above_its_grade() {
         let mut ground = vec![0; 31];
         ground[10..14].fill(5);
@@ -3442,14 +3562,13 @@ mod tests {
         assert!(ys[landed..].iter().all(|&y| y == 0));
     }
 
-    #[test]
-    fn a_road_reaches_an_anchored_bridge_end_at_its_junction_level() {
-        // The deck starts at the lip of a drop, where the cell and the ground around it differ.
+    /// The deck and the at-grade road reaching its end at (40, 40), over terrain `height(x)`.
+    fn deck_and_road_at_a_landing(height: impl Fn(usize) -> f32) -> (Vec<i32>, Vec<i32>, i32) {
         let bridge = way_with(1, ROAD_BRIDGE, &[(40, 40), (70, 40)]);
         let road = way_with(2, &[("highway", "residential")], &[(10, 40), (40, 40)]);
         let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
         let mut editor = test_editor(&xzbbox);
-        let row: Vec<f32> = (0..100).map(|x| if x < 40 { 20.0 } else { 10.0 }).collect();
+        let row: Vec<f32> = (0..100).map(height).collect();
         let ground = crate::ground::Ground::new_elevation_test(vec![row; 100], 100, 100);
         editor.set_ground(Arc::new(ground));
         let elements = [
@@ -3461,12 +3580,37 @@ mod tests {
         let structures =
             BridgeStructureMap::build(&elements, &editor, &connectivity, &outlines, 1.0);
         let block_range = highway_block_range("residential", &road.tags, 1.0);
+        // Pinned as `at_grade_profile` pins a road's shared nodes.
         let road_ys = road_profile(&editor, &road, block_range, &connectivity, |x, z| {
-            connectivity
-                .is_shared(x, z)
-                .then(|| junction_level(&editor, x, z))
+            connectivity.is_shared(x, z).then(|| {
+                structures
+                    .landing_y(x, z)
+                    .unwrap_or_else(|| junction_level(&editor, x, z))
+            })
         });
-        assert_eq!(Some(&ys(&structures, 1)[0]), road_ys.last());
+        (ys(&structures, 1), road_ys, junction_level(&editor, 40, 40))
+    }
+
+    #[test]
+    fn a_road_reaches_an_anchored_bridge_end_at_its_landing() {
+        // The deck starts at the lip of a drop, where the cell and the ground around it differ.
+        let (deck, road, junction) =
+            deck_and_road_at_a_landing(|x| if x < 40 { 20.0 } else { 10.0 });
+        assert_eq!(Some(&deck[0]), road.last());
+        assert!(
+            (junction..=junction + LANDING_LIFT).contains(&deck[0]),
+            "lifted toward the road, but only so far: {deck:?}"
+        );
+    }
+
+    #[test]
+    fn a_deck_landing_on_a_bank_meets_the_road_beyond_without_a_dip() {
+        // Half the junction's ground is the bank a block under the road it carries on.
+        let (deck, road, junction) =
+            deck_and_road_at_a_landing(|x| if x < 40 { 11.0 } else { 10.0 });
+        assert_eq!(junction, 10);
+        assert_eq!(deck[0], 11, "{deck:?}");
+        assert!(road[road.len() - 6..].iter().all(|&y| y == 11), "{road:?}");
     }
 
     fn assert_no_jumps(profile: &[i32]) {

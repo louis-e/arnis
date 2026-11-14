@@ -465,7 +465,14 @@ fn process_element(
                     bridge_surface,
                 );
             } else if way.tags.contains_key("amenity") {
-                amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
+                amenities::generate_amenities(
+                    editor,
+                    element,
+                    args,
+                    flood_fill_cache,
+                    road_mask,
+                    bridge_surface,
+                );
                 if signage && way.tags.get("amenity").map(String::as_str) == Some("parking") {
                     signage::generate_parking_signage(editor, way, road_mask);
                 }
@@ -604,7 +611,14 @@ fn process_element(
                     args.timeout.as_ref(),
                 );
             } else if node.tags.contains_key("amenity") {
-                amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
+                amenities::generate_amenities(
+                    editor,
+                    element,
+                    args,
+                    flood_fill_cache,
+                    road_mask,
+                    bridge_surface,
+                );
             } else if node.tags.contains_key("barrier") {
                 barriers::generate_barrier_nodes(editor, node, bridge_surface);
             } else if node.tags.contains_key("highway") || traffic_lights::is_signal(&node.tags) {
@@ -1997,7 +2011,9 @@ pub fn generate_world_with_options(
                 g_min_z,
                 g_max_z,
             );
+            crate::water_depth::pierce_support_columns(&mut tile_editor);
             highways::drop_lamps_in_water(&mut tile_editor);
+            amenities::drop_furniture_in_water(&mut tile_editor);
 
             // Under eviction the post-merge rail-tunnel carve can't run (regions get freed),
             // so carve in-tile now, after ground/fill so the interior isn't refilled.
@@ -2431,7 +2447,9 @@ pub fn generate_world_with_options(
             &tunnel_footprint,
             &bridge_surface,
         );
+        crate::water_depth::pierce_support_columns(&mut editor);
         highways::drop_lamps_in_water(&mut editor);
+        amenities::drop_furniture_in_water(&mut editor);
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.
