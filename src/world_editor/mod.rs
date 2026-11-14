@@ -241,6 +241,9 @@ pub struct WorldEditor<'a> {
     /// Columns owned by a man-made ground cover (roads, paths, pitches, courts,
     /// parking); vegetation stays off them. Shared via Arc with the tile editors.
     sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
+    /// The vehicular part of the roads, where trees keep their trunks out and leave
+    /// more headroom than over a footway. Shared via Arc with the tile editors.
+    carriageway: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     /// Where `man_made=crane` stands, shared via Arc with the tile editors.
@@ -366,6 +369,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            carriageway: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -440,6 +444,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            carriageway: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -514,6 +519,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            carriageway: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -663,10 +669,16 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface = Some(mask);
     }
 
-    /// Drops the sealed-surface mask and the mapped trunks once every vegetation
-    /// pass is done, so neither is carried into the save phase.
+    /// Sets the carriageway mask (shared across the main and tile editors).
+    pub fn set_carriageway(&mut self, mask: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.carriageway = Some(mask);
+    }
+
+    /// Drops the sealed-surface and carriageway masks and the mapped trunks once
+    /// every vegetation pass is done, so none is carried into the save phase.
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
+        self.carriageway = None;
         self.mapped_trunks = None;
     }
 
@@ -805,6 +817,18 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface
             .as_ref()
             .is_some_and(|m| m.contains(x, z))
+    }
+
+    /// True if a road for vehicles runs over this column (footways, paths and tracks
+    /// are not counted).
+    #[inline]
+    pub fn on_carriageway(&self, x: i32, z: i32) -> bool {
+        self.carriageway.as_ref().is_some_and(|m| m.contains(x, z))
+    }
+
+    /// The carriageway mask, while vegetation and signs are placed.
+    pub fn carriageway(&self) -> Option<&crate::floodfill_cache::CoordinateBitmap> {
+        self.carriageway.as_deref()
     }
 
     /// ESA land-cover class at (x, z), or 0 where there is no land cover.
@@ -986,6 +1010,11 @@ impl<'a> WorldEditor<'a> {
     /// Attach the signage context (decal registry, styles, intersections).
     pub fn set_signage(&mut self, ctx: Arc<crate::element_processing::signage::SignageContext>) {
         self.signage = Some(ctx);
+    }
+
+    /// Whether a tree already stands in the slot at (x, z).
+    pub fn tree_slot_taken(&self, x: i32, z: i32) -> bool {
+        self.tree_slots.contains(&(x, z))
     }
 
     /// Claims the trunk slot (x, z); false when a tree already stands in it.

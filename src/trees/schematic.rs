@@ -26,6 +26,8 @@ pub struct Schematic {
     pub min_log_vy: i32,
     /// Columns with a leaf in them, what the crown covers seen from above.
     pub leaf_columns: u32,
+    /// Every column with wood in it, as (x, z, lowest log y), what has to keep off a road.
+    pub wood_columns: Vec<(i16, i16, i16)>,
 }
 
 /// Map a Minecraft block-state string to one of our blocks, or `None` for anything we
@@ -258,10 +260,28 @@ pub fn load_schem_within(
         width,
         height,
         length,
+        wood_columns: lowest_wood(&voxels),
         voxels,
         min_log_vy,
         leaf_columns: crown.len() as u32,
     })
+}
+
+/// The lowest log in each column with wood in it, as (x, z, y).
+fn lowest_wood(voxels: &[(i16, i16, i16, Block)]) -> Vec<(i16, i16, i16)> {
+    let mut lowest: HashMap<(i16, i16), i16> = HashMap::new();
+    for &(x, y, z, block) in voxels {
+        if is_log(block) {
+            lowest
+                .entry((x, z))
+                .and_modify(|v| *v = (*v).min(y))
+                .or_insert(y);
+        }
+    }
+    let mut columns: Vec<(i16, i16, i16)> =
+        lowest.into_iter().map(|((x, z), y)| (x, z, y)).collect();
+    columns.sort_unstable();
+    columns
 }
 
 /// Furthest apart, per axis, two voxels of one tree may be: one air block between still
@@ -364,6 +384,44 @@ fn is_log(b: Block) -> bool {
     crate::ground_decoration::WOOD.contains(&b)
 }
 
+/// True if no wood of the model, anchored at (ax, az) with its base row at `base_y()`,
+/// stands in the headroom over a column `keep_off` names. Leaves are trimmed there instead,
+/// but a trunk, a root flare or a low branch cut off at the kerb would read as broken.
+/// The base is only worked out once some wood stands over such a column.
+pub fn low_wood_clear(
+    editor: &WorldEditor,
+    schem: &Schematic,
+    rot: u8,
+    ax: i32,
+    az: i32,
+    keep_off: impl Fn(i32, i32) -> bool,
+    base_y: impl Fn() -> i32,
+) -> bool {
+    let mut base = None;
+    let (fw, fl) = if rot & 1 == 0 {
+        (schem.width, schem.length)
+    } else {
+        (schem.length, schem.width)
+    };
+    let (cx, cz) = ((fw - 1) / 2, (fl - 1) / 2);
+    schem.wood_columns.iter().all(|&(vx, vz, vy)| {
+        let (rx, rz) = rotate_xz(vx.into(), vz.into(), schem.width, schem.length, rot);
+        let (wx, wz) = (ax + rx - cx, az + rz - cz);
+        if !keep_off(wx, wz) {
+            return true;
+        }
+        // A trunk or root column is drawn down to its own ground, wherever the base sits;
+        // a branch keeps its height. Wood higher in the column is higher still.
+        let vy = i32::from(vy);
+        let bottom = if vy <= schem.min_log_vy + ROOT_BASE_VY {
+            i32::MIN
+        } else {
+            *base.get_or_insert_with(&base_y) + vy
+        };
+        !crate::element_processing::tree::in_headroom(editor, wx, bottom, wz)
+    })
+}
+
 /// Max blocks above the schem floor for a log column to count as a ground-rooted trunk base.
 const ROOT_BASE_VY: i32 = 2;
 /// Safety bound on how far a real trunk root may reach down (only bites tile-seam deltas).
@@ -430,9 +488,11 @@ pub fn place_schematic_tree(
             }
         }
         // Logs over water are skipped (only root-level logs for predicted ESA water); leaves
-        // overhang, but not one resting on the surface, which reads as floating.
+        // overhang, but not one resting on the surface, which reads as floating. Over a
+        // road or paving they keep above the headroom, as on a pruned street tree.
         if !is_log(block)
-            && editor.check_for_block_absolute(wx, base_y + vy - 1, wz, Some(&[WATER]), None)
+            && (editor.check_for_block_absolute(wx, base_y + vy - 1, wz, Some(&[WATER]), None)
+                || crate::element_processing::tree::in_headroom(editor, wx, base_y + vy, wz))
         {
             continue;
         }
@@ -533,6 +593,56 @@ pub fn place_schematic_tree(
 mod tests {
     use super::*;
 
+    /// A wide trunk is judged by all its columns, not the model's middle; a leaf is not wood.
+    #[test]
+    fn low_wood_is_checked_on_every_trunk_column() {
+        use crate::block_definitions::{OAK_LEAVES, OAK_LOG};
+        use crate::coordinate_system::cartesian::XZBBox;
+        use crate::coordinate_system::geographic::LLBBox;
+        use crate::floodfill_cache::SealedSurfaceBitmap;
+        use std::sync::Arc;
+
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+        let mut sealed = SealedSurfaceBitmap::new(&xzbbox);
+        sealed.set(17, 16);
+        sealed.set(16, 18);
+        editor.set_sealed_surface(Arc::new(sealed));
+        // 3 x 3 model: a two-column trunk in the middle and on its east side, a leaf to the south.
+        let voxels = vec![
+            (1, 0, 1, OAK_LOG),
+            (2, 0, 1, OAK_LOG),
+            (1, 1, 1, OAK_LOG),
+            (1, 0, 2, OAK_LEAVES),
+        ];
+        let schem = Schematic {
+            width: 3,
+            height: 4,
+            length: 3,
+            wood_columns: lowest_wood(&voxels),
+            voxels,
+            min_log_vy: 0,
+            leaf_columns: 1,
+        };
+        let paved = |x: i32, z: i32| editor.surface_is_sealed(x, z);
+        // Anchored at (16, 16) the east trunk column lands on the paving at (17, 16).
+        assert!(!low_wood_clear(&editor, &schem, 0, 16, 16, paved, || 1));
+        // Turned twice, the second trunk column stands west of the middle, on open ground.
+        assert!(low_wood_clear(&editor, &schem, 2, 16, 16, paved, || 1));
+        // Anchored one row south, the leaf sits over the paving at (16, 18) but no wood does.
+        let under_the_leaf = |x: i32, z: i32| (x, z) == (16, 18);
+        assert!(low_wood_clear(
+            &editor,
+            &schem,
+            0,
+            16,
+            17,
+            under_the_leaf,
+            || 1
+        ));
+    }
+
     /// A trunk base left hanging above lower ground goes down to it, even when
     /// roots below the base hid it from the root pass; a low branch stays a
     /// branch, and undergrowth under it is cleared.
@@ -559,6 +669,7 @@ mod tests {
             ],
             min_log_vy: -3,
             leaf_columns: 0,
+            wood_columns: Vec::new(),
         };
         editor.set_block_absolute(GRASS, 10, 1, 10, None, None);
         editor.set_block_absolute(RED_FLOWER, 12, 4, 10, None, None);
@@ -711,6 +822,7 @@ mod tests {
             voxels: vec![(0, 0, 0, JUNGLE_LOG), (0, 1, 0, JUNGLE_LOG)],
             min_log_vy: 0,
             leaf_columns: 0,
+            wood_columns: Vec::new(),
         };
         assert!(!cactus.has_leaves());
         let tree = Schematic {
@@ -720,6 +832,7 @@ mod tests {
             voxels: vec![(0, 0, 0, OAK_LOG), (0, 1, 0, OAK_LEAVES)],
             min_log_vy: 0,
             leaf_columns: 0,
+            wood_columns: Vec::new(),
         };
         assert!(tree.has_leaves());
     }
