@@ -3231,6 +3231,8 @@ struct BuildingConfig {
     low_pitch_roof: bool,
     /// Timber frame standing in the reveals of its wide windows, if any.
     window_reveal: Option<Block>,
+    /// Fascia band along the top of a plain shop or hall: block and rows.
+    top_band: Option<(Block, i32)>,
     /// Flush trim-stone frames around the windows of historic European
     /// stucco (Faschen).
     surrounds: bool,
@@ -3973,6 +3975,61 @@ fn pick_ground_floor(
     } else {
         GroundFloor::Plain
     }
+}
+
+/// The fascia band of a plain low shop or hall, which doubles as its sign
+/// zone: two rows of a tone set off against the wall, three on a tall hall.
+fn top_band_for(
+    category: BuildingCategory,
+    wall_block: Block,
+    wall_height: i32,
+    floor_cycle: i32,
+    footprint_cells: usize,
+    group_seed: u64,
+) -> Option<(Block, i32)> {
+    let hall = matches!(
+        category,
+        BuildingCategory::Industrial | BuildingCategory::Warehouse
+    );
+    // An untyped building this large and low is a shop or a hall too.
+    let big_box = category == BuildingCategory::Default && footprint_cells >= 1000;
+    if !(hall || big_box || category == BuildingCategory::Commercial)
+        || footprint_cells < 150
+        || wall_height > 3 * floor_cycle + GROUND_FLOOR_BONUS
+        || wall_height < 5
+        || is_glass_wall(wall_block)
+    {
+        return None;
+    }
+    let light = matches!(
+        wall_block,
+        WHITE_CONCRETE
+            | LIGHT_GRAY_CONCRETE
+            | LIGHT_GRAY_CONCRETE_POWDER
+            | SMOOTH_STONE
+            | CALCITE
+            | QUARTZ_BLOCK
+            | QUARTZ_BRICKS
+            | WHITE_TERRACOTTA
+            | MUSHROOM_STEM
+            | SMOOTH_SANDSTONE
+            | POLISHED_DIORITE
+            | POLISHED_ANDESITE
+    );
+    let bands: &[Block] = if light {
+        &[
+            GRAY_CONCRETE,
+            GRAY_TERRACOTTA,
+            CYAN_TERRACOTTA,
+            BROWN_TERRACOTTA,
+            RED_TERRACOTTA,
+        ]
+    } else {
+        &[LIGHT_GRAY_CONCRETE, SMOOTH_STONE, WHITE_CONCRETE]
+    };
+    let band = bands[element_rng(group_seed ^ 0x70FB_A4D0_0000_0001).random_range(0..bands.len())];
+    let rows = if hall && wall_height >= 8 { 3 } else { 2 };
+    (band != wall_block).then_some((band, rows))
 }
 
 /// Trapdoor of the timber frame in the window reveals of dressed brick and
@@ -4898,7 +4955,7 @@ fn pick_window_archetype(
     let undated_masonry = era == ArchEra::Unknown
         && region != BuildingRegion::Other
         && (cues.old_row_fabric || is_masonry_wall(wall_block));
-    match (era, picked) {
+    let picked = match (era, picked) {
         (ArchEra::HistoricOrnate, Portrait) if era_rng.random_bool(0.6) => Hooded,
         (ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar, Ribbon | Wide) => Portrait,
         (ArchEra::Unknown, Ribbon | Wide) if undated_masonry => Portrait,
@@ -4909,6 +4966,17 @@ fn pick_window_archetype(
                 Wide
             }
         }
+        _ => picked,
+    };
+    // Single sashes suit a house or a narrow old front; on a big block they
+    // read as slits in a blank wall.
+    let narrow_front = cues.old_row_fabric
+        || matches!(
+            category,
+            BuildingCategory::House | BuildingCategory::Farm | BuildingCategory::Historic
+        );
+    match picked {
+        Sash | Spaced if !narrow_front => Portrait,
         _ => picked,
     }
 }
@@ -9650,6 +9718,11 @@ fn determine_wall_block_at_position_pristine(
     col: ColumnFacade,
 ) -> Block {
     let block = unzoned_wall_block(h, config, col);
+    if let Some((band, rows)) = config.top_band {
+        if block == config.wall_block && h > config.start_y_offset + config.building_height - rows {
+            return band;
+        }
+    }
     // A masonry tower's base and capital are stone where the shaft is wall.
     match config.zoning {
         Some(zoning) if block == config.wall_block && !col.party => {
@@ -11137,8 +11210,11 @@ fn generate_window_frames(
         return;
     }
     let top_h = config.start_y_offset + config.building_height;
-    // Elsewhere brick frames its windows in the opening instead.
-    let sills = config.dressed && config.region == BuildingRegion::Europe;
+    // Elsewhere brick frames its windows in the opening instead, and on a
+    // tall front a sill per window is a grid of dots.
+    let sills = config.dressed
+        && config.region == BuildingRegion::Europe
+        && config.building_height <= 6 * config.floor_cycle + GROUND_FLOOR_BONUS;
     let sill = make_top_slab(trim_slab(config.trim_block));
     let hood_stair = trim_stair(config.trim_block);
     // Houses carry shutters; city walk-ups and stucco blocks rarely do.
@@ -13281,6 +13357,22 @@ pub fn generate_buildings(
         dressed,
         low_pitch_roof,
         window_reveal: window_reveal_for(dressed, roof_ctx, wall_block, group_seed),
+        top_band: (!dressed
+            && style.roof_type == RoofType::Flat
+            && min_level_offset == 0
+            && condition == BuildingCondition::Normal
+            && !element.tags.contains_key("building:part"))
+        .then(|| {
+            top_band_for(
+                category,
+                wall_block,
+                effective_building_height,
+                floor_cycle,
+                cached_footprint_size,
+                group_seed,
+            )
+        })
+        .flatten(),
         surrounds,
         shop_frame: {
             let options = shop_frame_options(roof_ctx.region);
@@ -14010,7 +14102,8 @@ fn generate_parapet(
         if party && neighbour_reaches_roof(editor, &dist, x, z, surface_y) {
             continue;
         }
-        editor.set_block_absolute(config.wall_block, x, course_y, z, Some(&[AIR]), None);
+        let course = config.top_band.map_or(config.wall_block, |(band, _)| band);
+        editor.set_block_absolute(course, x, course_y, z, Some(&[AIR]), None);
         if party {
             continue;
         }
@@ -20215,6 +20308,7 @@ mod style_tests {
             dressed: true,
             low_pitch_roof: false,
             window_reveal: None,
+            top_band: None,
             surrounds: false,
             shop_frame: BLACK_CONCRETE,
             recess_windows: true,
@@ -21248,6 +21342,8 @@ mod style_tests {
         blocks.extend_from_slice(&[SPRUCE_SLAB, DARK_OAK_SLAB, SMOOTH_STONE_SLAB]);
         // Window reveals.
         blocks.extend_from_slice(&[DARK_OAK_TRAPDOOR, SPRUCE_TRAPDOOR, BIRCH_TRAPDOOR]);
+        // Top bands.
+        blocks.extend_from_slice(&[GRAY_CONCRETE, GRAY_TERRACOTTA, CYAN_TERRACOTTA]);
         for pool in ROOF_POOLS.iter() {
             blocks.extend(pool.iter().map(|&(b, _)| full_block_like_its_stairs(b)));
         }
@@ -24244,6 +24340,46 @@ mod facade_integration_tests {
             );
             assert_eq!(glass_at(4), 0, "way {id}: glass up to the storey above");
         }
+    }
+
+    #[test]
+    fn plain_shops_and_halls_carry_a_top_band() {
+        let band =
+            |category, wall, height, cells| top_band_for(category, wall, height, 4, cells, 7);
+        let shop = band(BuildingCategory::Commercial, WHITE_CONCRETE, 6, 900);
+        assert!(
+            matches!(shop, Some((b, 2)) if b != WHITE_CONCRETE),
+            "{shop:?}"
+        );
+        let hall = band(BuildingCategory::Warehouse, BRICK, 9, 4000);
+        assert!(matches!(hall, Some((_, 3))), "{hall:?}");
+        // Not on a kiosk, a tall block or housing.
+        assert_eq!(
+            band(BuildingCategory::Commercial, WHITE_CONCRETE, 6, 60),
+            None
+        );
+        assert_eq!(
+            band(BuildingCategory::Commercial, WHITE_CONCRETE, 22, 900),
+            None
+        );
+        assert_eq!(
+            band(BuildingCategory::Residential, WHITE_CONCRETE, 6, 900),
+            None
+        );
+    }
+
+    #[test]
+    fn a_retail_box_wears_its_band_along_the_top() {
+        let shop: &[(&str, &str)] = &[("building", "retail"), ("building:levels", "1")];
+        let mut banded = 0;
+        for id in 820..826u64 {
+            let world = dwelling_world(nyc(), id, shop);
+            // The side wall at x = 10: its top rows against the row below them.
+            let at = |y: i32| world.get(&(10, y, 28)).copied();
+            let top = (1..20).rev().find(|&y| at(y).is_some()).unwrap();
+            banded += i32::from(at(top - 1) != at(top - 3));
+        }
+        assert!(banded >= 4, "{banded} of six retail boxes carry a top band");
     }
 
     #[test]
