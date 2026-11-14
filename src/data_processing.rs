@@ -465,7 +465,14 @@ fn process_element(
                     bridge_surface,
                 );
             } else if way.tags.contains_key("amenity") {
-                amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
+                amenities::generate_amenities(
+                    editor,
+                    element,
+                    args,
+                    flood_fill_cache,
+                    road_mask,
+                    bridge_surface,
+                );
                 if signage && way.tags.get("amenity").map(String::as_str) == Some("parking") {
                     signage::generate_parking_signage(editor, way, road_mask);
                 }
@@ -507,6 +514,7 @@ fn process_element(
                             field: big_water_field,
                             road_mask,
                             tunnel_footprint,
+                            decks: bridge_surface,
                             piped_under_roads: (args.water.river_bed != Default::default()
                                 || args.water.water_detail != Default::default())
                             .then_some(bridge_surface),
@@ -603,7 +611,14 @@ fn process_element(
                     args.timeout.as_ref(),
                 );
             } else if node.tags.contains_key("amenity") {
-                amenities::generate_amenities(editor, element, args, flood_fill_cache, road_mask);
+                amenities::generate_amenities(
+                    editor,
+                    element,
+                    args,
+                    flood_fill_cache,
+                    road_mask,
+                    bridge_surface,
+                );
             } else if node.tags.contains_key("barrier") {
                 barriers::generate_barrier_nodes(editor, node, bridge_surface);
             } else if node.tags.contains_key("highway") || traffic_lights::is_signal(&node.tags) {
@@ -1396,8 +1411,12 @@ pub fn generate_world_with_options(
         &bridge_outlines,
         args.scale,
     );
-    let bridge_surface =
-        bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
+    let bridge_surface = bridges::BridgeSurfaceMap::build(
+        &elements,
+        &bridge_structures,
+        args.scale,
+    )
+    .with_parts(&elements, &bridge_structures, &editor, args.scale);
 
     // Rail centerlines, used to keep catenary masts off neighbouring tracks.
     let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
@@ -2011,7 +2030,9 @@ pub fn generate_world_with_options(
                 g_min_z,
                 g_max_z,
             );
+            crate::water_depth::pierce_support_columns(&mut tile_editor);
             highways::drop_lamps_in_water(&mut tile_editor);
+            amenities::drop_furniture_in_water(&mut tile_editor);
 
             // Under eviction the post-merge rail-tunnel carve can't run (regions get freed),
             // so carve in-tile now, after ground/fill so the interior isn't refilled.
@@ -2445,7 +2466,9 @@ pub fn generate_world_with_options(
             &tunnel_footprint,
             &bridge_surface,
         );
+        crate::water_depth::pierce_support_columns(&mut editor);
         highways::drop_lamps_in_water(&mut editor);
+        amenities::drop_furniture_in_water(&mut editor);
     }
 
     // Free everything the save phase doesn't need; it often sits at the process peak.

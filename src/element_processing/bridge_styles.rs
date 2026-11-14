@@ -27,13 +27,6 @@ impl BridgeStyle {
         }
     }
 
-    pub fn rail_block(self) -> Block {
-        match self {
-            BridgeStyle::Boardwalk => OAK_FENCE,
-            _ => LIGHT_GRAY_CONCRETE,
-        }
-    }
-
     /// Centerline cells between pier bents; 0 when the style carries its deck otherwise.
     pub fn pier_interval(self, half_width: i32) -> usize {
         match self {
@@ -61,30 +54,6 @@ impl BridgeStyle {
         end_is_boundary: bool,
     ) -> bool {
         !default_pylons(self, path_len, start_is_boundary, end_is_boundary).is_empty()
-    }
-}
-
-impl BridgeStyle {
-    pub fn has_side_railing(self) -> bool {
-        self != BridgeStyle::Boardwalk
-    }
-
-    pub fn parapet_block(self) -> Option<Block> {
-        match self {
-            BridgeStyle::Boardwalk => None,
-            BridgeStyle::Covered => None,
-            BridgeStyle::Truss | BridgeStyle::Suspension | BridgeStyle::CableStayed => {
-                Some(IRON_BARS)
-            }
-            _ => Some(BRICK_WALL),
-        }
-    }
-
-    pub fn rail_foundation_block(self) -> Block {
-        match self {
-            BridgeStyle::Boardwalk => OAK_PLANKS,
-            _ => STONE_BRICKS,
-        }
     }
 }
 
@@ -274,6 +243,8 @@ const CABLE_FALLBACK_PIER_INTERVAL: usize = 24;
 const BOARDWALK_POST_INTERVAL: usize = 4;
 const ARCH_SPAN: usize = 20;
 const ARCH_RISE_FRACTION: f32 = 0.85;
+/// Least deck height over water that leaves an arch under it room to clear the water.
+const ARCH_WATER_ROOM: i32 = 6;
 const TRUSS_TOP_HEIGHT: i32 = 5;
 const TRUSS_DIAGONAL_PERIOD: usize = 8;
 const TRUSS_POST_INTERVAL: usize = 4;
@@ -334,20 +305,26 @@ pub fn place_arch_below_deck(
     use_absolute_y: bool,
     is_centerline: bool,
 ) {
-    place_arch_spandrel_cell(
-        editor,
-        set_x,
-        cell_y,
-        set_z,
-        centerline_ground_y,
-        tds,
-        total,
-        use_absolute_y,
-    );
-    if is_centerline {
+    // Too low over water for an arch to clear it, the deck spans it from pier to pier.
+    let low_over_water = editor.is_mapped_water(set_x, set_z)
+        && cell_y - editor.get_water_level(set_x, set_z) < ARCH_WATER_ROOM;
+    if !low_over_water {
+        place_arch_spandrel_cell(
+            editor,
+            set_x,
+            cell_y,
+            set_z,
+            centerline_ground_y,
+            tds,
+            total,
+            use_absolute_y,
+        );
+    }
+    // Springers stand on the centerline; low over water a pier wall spans the deck there.
+    if is_centerline || low_over_water {
         let (start, span) = arch_segment(tds, total);
         if tds == start || tds + 1 == start + span {
-            place_pillar(editor, set_x, cell_y, set_z, STONE_BRICKS, true);
+            place_pillar(editor, set_x, cell_y, set_z, STONE_BRICKS, is_centerline);
         }
     }
 }

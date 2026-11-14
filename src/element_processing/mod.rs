@@ -6,7 +6,7 @@ pub(crate) mod area_layout;
 pub mod attractions;
 pub mod barriers;
 pub mod blueprint;
-pub mod bridge_modules;
+pub mod bridge_decks;
 pub mod bridge_styles;
 pub mod bridge_towers;
 pub mod bridges;

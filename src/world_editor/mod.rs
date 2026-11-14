@@ -271,6 +271,8 @@ pub struct WorldEditor<'a> {
     hedge_columns: FnvHashSet<(i32, i32)>,
     /// Street lamp columns, checked for water once the fill is done.
     lamp_columns: Vec<(i32, i32)>,
+    /// Benches and bins as their cells, checked for water once the fill is done.
+    furniture: Vec<Vec<(i32, i32, i32)>>,
     /// The block each way's rails lie in, by way and column, shared with the tile editors
     /// so the trains can ride them; None when there are no trains.
     rail_heights: Option<RailHeights>,
@@ -376,6 +378,7 @@ impl<'a> WorldEditor<'a> {
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
+            furniture: Vec::new(),
             rail_heights: None,
             water_probe: None,
             walk_probe: None,
@@ -449,6 +452,7 @@ impl<'a> WorldEditor<'a> {
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
+            furniture: Vec::new(),
             rail_heights: None,
             water_probe: None,
             walk_probe: None,
@@ -522,6 +526,7 @@ impl<'a> WorldEditor<'a> {
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
+            furniture: Vec::new(),
             rail_heights: None,
             water_probe: None,
             walk_probe: None,
@@ -841,6 +846,15 @@ impl<'a> WorldEditor<'a> {
                 z - self.ground_origin_z,
             )) == crate::land_cover::LC_WATER
         })
+    }
+
+    /// Land-cover water, or a lake, river or canal OSM maps where the land cover missed it.
+    pub fn is_mapped_water(&self, x: i32, z: i32) -> bool {
+        self.is_lc_water(x, z)
+            || self
+                .ground
+                .as_ref()
+                .is_some_and(|g| g.inland_water_mapped(self.ground_point(x, z)))
     }
 
     /// Whether land cover backs a speculative tree at (x, z), one no tag claims.
@@ -1756,6 +1770,16 @@ impl<'a> WorldEditor<'a> {
         std::mem::take(&mut self.lamp_columns)
     }
 
+    /// Record a bench or bin by its cells.
+    pub fn register_furniture(&mut self, cells: Vec<(i32, i32, i32)>) {
+        self.furniture.push(cells);
+    }
+
+    /// Every bench and bin recorded so far, clearing the record.
+    pub fn take_furniture(&mut self) -> Vec<Vec<(i32, i32, i32)>> {
+        std::mem::take(&mut self.furniture)
+    }
+
     /// Whether a hedge stands at (x, z).
     #[inline]
     pub fn is_hedge(&self, x: i32, z: i32) -> bool {
@@ -1769,6 +1793,14 @@ impl<'a> WorldEditor<'a> {
             return None;
         }
         self.support_columns.get(&(x, z)).copied()
+    }
+
+    /// Every support column standing in this editor, with its material.
+    pub fn support_columns(&self) -> Vec<((i32, i32), Block)> {
+        self.support_columns
+            .iter()
+            .map(|(&xz, &b)| (xz, b))
+            .collect()
     }
 
     /// Take this editor's road-surface overrides (tile editors hand theirs to the main editor).
