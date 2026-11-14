@@ -337,9 +337,14 @@ fn unit(dx: f32, dz: f32) -> Option<(f32, f32)> {
 
 /// Direction of `cells` around index `s`, looking a couple of cells either way.
 fn local_dir(cells: &[ArmCell], s: usize, fallback: (f32, f32)) -> (f32, f32) {
-    let a = cells[s.saturating_sub(2)];
-    let b = cells[(s + 2).min(cells.len() - 1)];
+    let (a, b) = around(cells.len(), s);
+    let (a, b) = (cells[a], cells[b]);
     unit((b.x - a.x) as f32, (b.z - a.z) as f32).unwrap_or(fallback)
+}
+
+/// The cells a direction at index `s` of a run of `len` is taken between: a couple either way.
+fn around(len: usize, s: usize) -> (usize, usize) {
+    (s.saturating_sub(2), (s + 2).min(len - 1))
 }
 
 /// Every centreline cell of a way, rasterised as the renderer does.
@@ -898,8 +903,8 @@ impl RoadMarkingIndex {
                 .filter_map(|m| {
                     let t = m.t as usize;
                     let &(x, z) = cells.get(t)?;
-                    let a = cells[t.saturating_sub(2)];
-                    let b = cells[(t + 2).min(cells.len() - 1)];
+                    let (a, b) = around(cells.len(), t);
+                    let (a, b) = (cells[a], cells[b]);
                     let dir = unit((b.0 - a.0) as f32, (b.1 - a.1) as f32)?;
                     Some(StopLine {
                         x,

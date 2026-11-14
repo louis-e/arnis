@@ -271,8 +271,9 @@ impl Path {
         (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
     }
 
-    /// The distance along the path nearest to `p`, and how far off to its right `p` is.
-    fn project(&self, p: (f64, f64)) -> Option<(f64, f64)> {
+    /// The distance along the path nearest to `p`, how far off to its right `p` is, and how
+    /// far off at all.
+    fn project(&self, p: (f64, f64)) -> Option<(f64, f64, f64)> {
         let mut best: Option<(f64, f64, f64)> = None;
         for (k, w) in self.points.windows(2).enumerate() {
             let (a, b) = (w[0], w[1]);
@@ -290,19 +291,31 @@ impl Path {
                 best = Some((self.at[k] + t, right, off));
             }
         }
-        best.map(|(s, right, _)| (s, right))
+        // Off either end, `p` is beside some other stretch of road.
+        best.filter(|&(s, _, _)| s > 0.0 && s < self.length())
     }
 
-    /// Where along the path the painted stop line for a signal at `node` lies, the nearest
-    /// one short of it that spans this lane and is past `from`, where the lane starts, from
-    /// among a way's `lines`.
-    fn painted_line(&self, lines: &[StopLine], from: f64, node: f64, reach: f64) -> Option<f64> {
+    /// Where along the path the painted stop line for a signal at `node` lies: the nearest
+    /// one short of it, past `from` where the lane starts, across this lane, its middle at
+    /// most `off` aside.
+    fn painted_line(
+        &self,
+        lines: &[StopLine],
+        (from, node): (f64, f64),
+        reach: f64,
+        off: f64,
+    ) -> Option<f64> {
+        // Only lines near the signal are worth measuring along the whole path.
+        let (nx, nz) = self.point_at(node);
         lines
             .iter()
+            .filter(|line| {
+                (line.x as f64 + 0.5 - nx).hypot(line.z as f64 + 0.5 - nz) <= reach + off + 1.0
+            })
             .filter_map(|line| {
                 let (cx, cz) = (line.x as f64 + 0.5, line.z as f64 + 0.5);
-                let (s, right) = self.project((cx, cz))?;
-                if !((node - reach).max(from)..=node + 1.0).contains(&s) {
+                let (s, right, aside) = self.project((cx, cz))?;
+                if aside > off || !((node - reach).max(from)..=node + 1.0).contains(&s) {
                     return None;
                 }
                 // Across this lane: the line's way runs along it here.
@@ -791,6 +804,16 @@ impl CarNetwork {
             .collect();
         // Blocks per metre the cars are built at.
         let size = scale.clamp(0.4, 3.0);
+        // Every stop line painted across the roads, found by where it lies: an approach split
+        // into more than one way has its line on whichever the paint fell on.
+        let lines: Vec<StopLine> = painted.map_or_else(Vec::new, |p| {
+            let mut ids: Vec<u64> = roads.iter().map(|&(w, _, _)| w.id).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            ids.iter()
+                .flat_map(|&id| p.stop_lines(id).to_vec())
+                .collect()
+        });
         let junctions = Junctions::build(roads.iter().map(|&(w, half, _)| (w, half)), scale);
         let arms = |id: u64| junctions.arms(id);
         let junction = |id: u64| junctions.is_junction(id);
@@ -960,14 +983,13 @@ impl CarNetwork {
                         let group = if group_of(dir) == 'a' { 1 } else { 2 };
                         // Where the front of a car stops, and so where its middle does: short
                         // of the line painted for the signal, else just short of the signal.
-                        let painted = painted.and_then(|p| {
-                            path.painted_line(
-                                p.stop_lines(piece.way.id),
-                                from,
-                                path.at[k],
-                                LINE_REACH * scale.max(0.5),
-                            )
-                        });
+                        let painted = path.painted_line(
+                            &lines,
+                            (from, path.at[k]),
+                            LINE_REACH * scale.max(0.5),
+                            // The line's middle is on the centreline, this lane within the road.
+                            piece.half as f64 + 1.0,
+                        );
                         let front = if let Some(line) = painted {
                             line - LINE_GAP * scale.max(0.5)
                         } else if k == lane.nodes.len() - 1 {
@@ -983,10 +1005,12 @@ impl CarNetwork {
                 }
                 marks.sort_by(|a, b| a.0.total_cmp(&b.0));
                 // One point per spot, keeping the stop and the lowest cap any of its marks had.
+                // Stops for two signal groups keep a point each, however close.
                 let mut merged: Vec<(f64, Stop, Option<i32>)> = Vec::new();
                 for (s, stop, cap) in marks {
+                    let apart = matches!((merged.last().and_then(|l| l.1), stop), (Some((a, _)), Some((b, _))) if a != b);
                     match merged.last_mut() {
-                        Some(last) if s - last.0 < 0.5 => {
+                        Some(last) if s - last.0 < 0.5 && !apart => {
                             last.1 = match (last.1, stop) {
                                 (Some((g, a)), Some((_, b))) => Some((g, a.and(b))),
                                 (a, b) => a.or(b),
@@ -1302,28 +1326,6 @@ impl CarNetwork {
                 ));
             }
         }
-        // Standing in a lane rather than crossing a junction itself: the end of a queue past
-        // the junction, as one at a red line is.
-        conflict.push_str(
-            "# One standing in a lane, not crossing a junction itself, is the end of a queue there:\n\
-             # wait behind it too.\n",
-        );
-        for (own, extra) in [
-            ("tag=!arnis.car.long", 0.0),
-            ("tag=arnis.car.long", LONG_EXTRA),
-        ] {
-            for &(at, r, _) in LOOK.iter().filter(|&&(_, _, c)| c == 3) {
-                for (more, tag) in [
-                    (0.0, "tag=arnis.car.still,tag=!arnis.car.cross"),
-                    (
-                        LONG_EXTRA,
-                        "tag=arnis.car.still,tag=!arnis.car.cross,tag=arnis.car.long",
-                    ),
-                ] {
-                    conflict.push_str(&held(own, at + extra + more, r, tag));
-                }
-            }
-        }
         // On the same way through, by heading: a queue too. Only from where look's own spots
         // start, beyond the spot two cars share, so two never wait for each other. The car's
         // own heading, in sixteenths of a turn, picks the range of headings that count.
@@ -1348,22 +1350,34 @@ impl CarNetwork {
                 wrap(centre - SAME_PATH_DEG),
                 wrap(centre + SAME_PATH_DEG)
             );
+            // Anyone standing in the lane past the junction, rather than crossing it, heading
+            // much the way this car goes: the end of a queue there, as at a red line.
+            let lane_way = format!(
+                "{:.1}..{:.1}",
+                wrap(centre - SAME_WAY_DEG),
+                wrap(centre + SAME_WAY_DEG)
+            );
             let mut path = String::from(
-                "# Ahead on the same way through the junction: wait behind it. Else a conflict.\n",
+                "# Ahead on the same way through the junction, or standing in the lane past it: wait\n\
+                 # behind it. Else a conflict.\n",
             );
             for (own, extra) in [
                 ("tag=!arnis.car.long", 0.0),
                 ("tag=arnis.car.long", LONG_EXTRA),
             ] {
                 for &(at, r, _) in LOOK.iter().filter(|&&(_, _, c)| c == 3) {
-                    for (more, tag) in [(0.0, "tag=arnis.car"), (LONG_EXTRA, "tag=arnis.car.long")]
-                    {
-                        let _ = writeln!(
-                            path,
-                            "execute if entity @s[{own}] rotated as @s positioned ^ ^ ^{} if entity @e[type=marker,{tag},distance=..{},y_rotation={range}] run return run scoreboard players set #t arnis.car 0",
-                            d(at + extra + more),
-                            d(r)
-                        );
+                    for (more, long) in [(0.0, ""), (LONG_EXTRA, ",tag=arnis.car.long")] {
+                        for (who, range) in [
+                            ("tag=arnis.car", &range),
+                            ("tag=arnis.car.still,tag=!arnis.car.cross", &lane_way),
+                        ] {
+                            let _ = writeln!(
+                                path,
+                                "execute if entity @s[{own}] rotated as @s positioned ^ ^ ^{} if entity @e[type=marker,{who}{long},distance=..{},y_rotation={range}] run return run scoreboard players set #t arnis.car 0",
+                                d(at + extra + more),
+                                d(r)
+                            );
+                        }
                     }
                 }
             }
@@ -1377,7 +1391,6 @@ impl CarNetwork {
                 "execute if score #p arnis.car matches {b} run return run function arnis:cars/path/p{b}"
             );
         }
-        conflict.push_str("scoreboard players set #jam arnis.car 1\n");
         out.push((
             "data/arnis/function/cars/conflict.mcfunction".to_string(),
             conflict,
@@ -1410,12 +1423,16 @@ impl CarNetwork {
                 let (own, held) = (Holds::from_long(own), Holds::from_long(held_long));
                 let on = 2.0 * own.reach() + held.reach() + GATE_SPARE;
                 let back = own.reach() + held.reach();
-                for (reach, sign) in [(on, ""), (back, "-")] {
+                // Back over where it joins only partway along the lane: at its start, behind is
+                // the junction itself.
+                for (reach, sign, only) in
+                    [(on, "", ""), (back, "-", "if data entity @s data{gb:1b} ")]
+                {
                     let mut at = round;
                     while at - round < reach {
                         let _ = writeln!(
                             gate,
-                            "execute if entity @s[{who}] positioned ^ ^ ^{sign}{} if entity @e[type=marker,{tag},distance=..{}] run return run function arnis:cars/gated",
+                            "execute {only}if entity @s[{who}] positioned ^ ^ ^{sign}{} if entity @e[type=marker,{tag},distance=..{}] run return run function arnis:cars/gated",
                             d(at),
                             d(round)
                         );
@@ -1434,11 +1451,11 @@ impl CarNetwork {
             format!(
                 "# The cars standing about the lane out of the junction and heading its way, this one\n\
                  # left out: those gate_queue looks for.\n\
-                 $execute positioned $(x) $(y) $(z) as @e[type=marker,tag=arnis.car.still,distance=..{},y_rotation=$(gy)] run tag @s add arnis.car.way\n\
+                 $execute positioned $(x) $(y) $(z) as @e[type=marker,tag=arnis.car.still,distance=..{reach},y_rotation=$(gy)] run tag @s add arnis.car.way\n\
                  tag @s remove arnis.car.way\n\
                  $execute positioned $(x) $(y) $(z) rotated $(gr) 0 run function arnis:cars/gate_queue\n\
-                 tag @e[type=marker,tag=arnis.car.way] remove arnis.car.way\n",
-                d(furthest)
+                 $execute positioned $(x) $(y) $(z) run tag @e[type=marker,tag=arnis.car.way,distance=..{reach}] remove arnis.car.way\n",
+                reach = d(furthest),
             ),
         ));
 
@@ -1566,6 +1583,9 @@ impl CarNetwork {
                 wrap(yaw - SAME_WAY_DEG),
                 wrap(yaw + SAME_WAY_DEG)
             );
+            if t.entry > 0 {
+                out.push_str(",gb:1b");
+            }
         }
         for (field, long) in [("gc", false), ("gl", true)] {
             let room = (Holds::from_long(long).reach() + GATE_SPARE) * self.size;
@@ -3695,6 +3715,45 @@ mod tests {
         }
     }
 
+    /// A stop line counts only across this lane, between its start and the signal: not one
+    /// on the far side of the road, further along the way past the lane's end, or before it.
+    #[test]
+    fn a_stop_line_is_taken_only_where_it_crosses_this_lane() {
+        // A lane heading south down x = 3, right of a way along x = 0.
+        let path = Path::new(vec![(3.0, 0.0), (3.0, 50.0)]);
+        let line = |z: i32, side: i8| StopLine {
+            x: -1,
+            z,
+            dir: (0.0, 1.0),
+            side,
+        };
+        let find = |lines: &[StopLine]| path.painted_line(lines, (5.0, 40.0), 40.0, 4.0);
+        // On the lane's half of the road: facing south, east is the way's left.
+        assert_eq!(find(&[line(30, -1)]), Some(30.5));
+        assert_eq!(find(&[line(30, 1)]), None);
+        assert_eq!(find(&[line(30, 0)]), Some(30.5));
+        // The nearest short of the signal wins; past it, before the lane, or off it, none.
+        assert_eq!(find(&[line(20, -1), line(30, -1)]), Some(30.5));
+        assert_eq!(find(&[line(45, -1)]), None);
+        assert_eq!(find(&[line(2, -1)]), None);
+        assert_eq!(find(&[line(70, -1)]), None);
+        assert_eq!(
+            find(&[StopLine {
+                x: 20,
+                ..line(30, -1)
+            }]),
+            None
+        );
+        // A line across the road the other way is a crossing road's.
+        assert_eq!(
+            find(&[StopLine {
+                dir: (1.0, 0.0),
+                ..line(30, -1)
+            }]),
+            None
+        );
+    }
+
     /// One lane across a junction into another: a car about to cross checks which way the
     /// lane out runs, and whether a stop on it is too close past the junction to wait at.
     fn gate_for(stop_at: f64) -> String {
@@ -3804,10 +3863,15 @@ mod tests {
         assert!(covered(n) >= long.reach() * 2.0);
         let n = spots("@s[tag=!arnis.car.long]", "tag=arnis.car.way", true);
         assert!(covered(n) >= car.reach() * 2.0);
-        // Joined at its last point, the lane runs the way it comes in.
+        // Joined at its last point, the lane runs the way it comes in, and the car looks back
+        // over where it joins too, as it does only where it joins partway along.
         let mut net = gate_net(30.0);
         net.segments[0].next[0].entry = net.segments[1].points.len() - 1;
-        assert_eq!(net.gate(&net.segments[0].next[0]), way);
+        assert_eq!(net.gate(&net.segments[0].next[0]), format!("{way},gb:1b"));
+        assert!(gate
+            .lines()
+            .filter(|l| l.contains("^ ^ ^-"))
+            .all(|l| l.starts_with("execute if data entity @s data{gb:1b} ")));
         assert!(gate.lines().skip(3).all(|l| l.starts_with("execute ")
             && l.ends_with("run return run function arnis:cars/gated")));
         // The cars it looks for are marked first, as far out as its furthest spot, and never
@@ -4096,12 +4160,12 @@ mod tests {
             conflict.contains("^ ^ ^6.00") && conflict.contains("^ ^ ^12.00"),
             "{conflict}"
         );
-        assert!(conflict.ends_with("scoreboard players set #jam arnis.car 1\n"));
-        // Anyone standing in the lane past the junction is a queue too, from look's spots on.
-        assert!(
-            conflict.contains("execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^6.00 if entity @e[type=marker,tag=arnis.car.still,tag=!arnis.car.cross,distance=..3.40] run return run scoreboard players set #t arnis.car 0"),
-            "{conflict}"
-        );
+        // Every slice of a turn has its own way through, which ends in the conflict.
+        assert!(conflict.ends_with(&format!(
+            "matches {} run return run function arnis:cars/path/p{}\n",
+            PATH_SLICES - 1,
+            PATH_SLICES - 1
+        )));
         // On the same way through by heading, a queue: the first slice points north, and
         // its range wraps round the half turn.
         let p0 = &looks
@@ -4114,6 +4178,12 @@ mod tests {
             "{p0}"
         );
         assert!(p0.ends_with("scoreboard players set #jam arnis.car 1\n"));
+        // Anyone standing in the lane past the junction heading much this car's way is a
+        // queue too, from look's spots on.
+        assert!(
+            p0.contains("execute if entity @s[tag=!arnis.car.long] rotated as @s positioned ^ ^ ^6.00 if entity @e[type=marker,tag=arnis.car.still,tag=!arnis.car.cross,distance=..3.40,y_rotation=112.5..-112.5]"),
+            "{p0}"
+        );
         // A heading of -349 degrees is 11, in the slice round 0, which points south.
         let slice = |yaw: f64| {
             let p = (yaw * 10.0).floor() as i32 + 1913;
