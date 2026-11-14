@@ -21177,6 +21177,8 @@ mod style_tests {
         blocks.extend(ROOF_SHADES.iter().map(|&(b, _)| b));
         // Fascia boards, and the full blocks laid among roof slabs.
         blocks.extend_from_slice(&[SPRUCE_SLAB, DARK_OAK_SLAB, SMOOTH_STONE_SLAB]);
+        // Window reveals.
+        blocks.extend_from_slice(&[DARK_OAK_TRAPDOOR, SPRUCE_TRAPDOOR, BIRCH_TRAPDOOR]);
         for pool in ROOF_POOLS.iter() {
             blocks.extend(pool.iter().map(|&(b, _)| full_block_like_its_stairs(b)));
         }
