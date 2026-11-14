@@ -52,6 +52,16 @@ impl TransverseMark {
     }
 }
 
+/// A stop line as painted: the centreline cell it crosses the road on, the way's direction
+/// there, and the half of the road it spans (+1 right of that direction, -1 left, 0 both).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StopLine {
+    pub x: i32,
+    pub z: i32,
+    pub dir: (f32, f32),
+    pub side: i8,
+}
+
 /// Paint decisions for one way.
 #[derive(Default, Debug)]
 pub struct WayMarks {
@@ -130,6 +140,8 @@ pub struct RoadMarkingIndex {
     /// Nodes where a crossing way meets a road.
     crossing_road_nodes: FnvHashSet<u64>,
     raceways: RacewayPaint,
+    /// Where each way's stop lines lie, for the cars that stop at them.
+    stop_lines: FnvHashMap<u64, Vec<StopLine>>,
 }
 
 /// Vehicular carriageway attributes the junction rules need.
@@ -442,6 +454,11 @@ impl LocalGrid {
 impl RoadMarkingIndex {
     pub fn way(&self, id: u64) -> Option<&WayMarks> {
         self.ways.get(&id)
+    }
+
+    /// The stop lines painted across a way.
+    pub fn stop_lines(&self, id: u64) -> &[StopLine] {
+        self.stop_lines.get(&id).map_or(&[], Vec::as_slice)
     }
 
     pub fn raceway_paint(&self) -> &RacewayPaint {
@@ -865,6 +882,38 @@ impl RoadMarkingIndex {
                 kept.push(*m);
                 new
             });
+        }
+        for road in &roads {
+            let Some(marks) = index.ways.get(&road.way.id) else {
+                continue;
+            };
+            if !marks.marks.iter().any(|m| m.kind == CrossMark::Stop) {
+                continue;
+            }
+            let cells = way_cells(road.way);
+            let lines: Vec<StopLine> = marks
+                .marks
+                .iter()
+                .filter(|m| m.kind == CrossMark::Stop)
+                .filter_map(|m| {
+                    let t = m.t as usize;
+                    let &(x, z) = cells.get(t)?;
+                    let a = cells[t.saturating_sub(2)];
+                    let b = cells[(t + 2).min(cells.len() - 1)];
+                    let dir = unit((b.0 - a.0) as f32, (b.1 - a.1) as f32)?;
+                    Some(StopLine {
+                        x,
+                        z,
+                        dir,
+                        side: m.side,
+                    })
+                })
+                .collect();
+            index
+                .stop_lines
+                .entry(road.way.id)
+                .or_default()
+                .extend(lines);
         }
         index
     }

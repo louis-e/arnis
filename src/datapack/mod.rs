@@ -102,6 +102,8 @@ const CARS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/cars/despawn.mcfunction",
     "data/arnis/function/cars/cap.mcfunction",
     "data/arnis/function/cars/light.mcfunction",
+    "data/arnis/function/cars/gate.mcfunction",
+    "data/arnis/function/cars/gated.mcfunction",
     "data/arnis/function/cars/brake_lights.mcfunction",
     "data/arnis/function/cars/brake_switch.mcfunction",
     "data/arnis/function/cars/enter.mcfunction",
@@ -1197,6 +1199,9 @@ mod tests {
                     let networked = [
                         "clear",
                         "conflict",
+                        "gate_at",
+                        "gate_queue",
+                        "path/",
                         "ease",
                         "look",
                         "network",

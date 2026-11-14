@@ -1385,6 +1385,7 @@ pub fn generate_world_with_options(
             sign_region.drives_on_left(),
             extras.traffic_lights,
             traffic_signals.as_deref(),
+            Some(&road_markings),
             &xzbbox,
             |way, x, z| surfaces.y_at(way, x, z),
             |x, z| building_footprints.contains(x, z),

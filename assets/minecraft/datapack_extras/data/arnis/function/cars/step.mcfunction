@@ -1,6 +1,7 @@
 execute unless score @s arnis.car matches 1.. run function arnis:cars/claim
 scoreboard players operation #id arnis.car = @s arnis.car
 scoreboard players set #red arnis.car 0
+scoreboard players set #gated arnis.car 0
 # The speed to aim for: the lane's at this driver's pace, held to the bend or junction ahead.
 execute store result score #v arnis.car run data get entity @s data.v
 scoreboard players operation #t arnis.car = #v arnis.car
@@ -21,6 +22,7 @@ execute if score #ahead arnis.car matches 1 run scoreboard players operation #t 
 execute if score #ahead arnis.car matches 3 unless data entity @s data.j run scoreboard players set #t arnis.car 0
 execute if score #ahead arnis.car matches 3 if data entity @s data.j run function arnis:cars/conflict
 function arnis:cars/clear
+execute if entity @s[tag=arnis.car.gate] run function arnis:cars/gate
 # Gentle on the throttle, firm on the brake.
 execute store result score #c arnis.car run data get entity @s data.c
 scoreboard players operation #was arnis.car = #c arnis.car
@@ -28,10 +30,13 @@ scoreboard players operation #c arnis.car += #accel arnis
 scoreboard players operation #c arnis.car < #t arnis.car
 execute store result entity @s data.c int 1 run scoreboard players get #c arnis.car
 execute store result entity @s data.w int 1 run scoreboard players get #w arnis.car
+# Off across the junction: the room past it was checked.
+execute if score #c arnis.car matches 1.. run tag @s remove arnis.car.gate
 # Standing for a minute with no red light to blame is stuck: it leaves and another car comes.
 execute store result score #q arnis.car run data get entity @s data.q
 execute if score #c arnis.car matches 1.. run scoreboard players set #q arnis.car 0
 execute if score #c arnis.car matches ..0 unless score #red arnis.car matches 1 run scoreboard players add #q arnis.car 1
+execute if score #c arnis.car matches ..0 if score #gated arnis.car matches 1 run scoreboard players add #q arnis.car 1
 execute if score #q arnis.car matches 600.. run return run function arnis:cars/despawn
 execute store result entity @s data.q int 1 run scoreboard players get #q arnis.car
 function arnis:cars/brake_lights
