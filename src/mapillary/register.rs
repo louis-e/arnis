@@ -354,7 +354,7 @@ fn clip_line(w: i64, h: i64, p1: &mut [i64; 2], p2: &mut [i64; 2]) -> bool {
 /// Felzenszwalb and Huttenlocher's lower envelope of parabolas, one pass down
 /// the columns and one along the rows. Exact, so it agrees with scipy's own
 /// exact transform cell for cell.
-fn edt(mask: &[bool], n: usize) -> Vec<f64> {
+pub(crate) fn edt(mask: &[bool], n: usize) -> Vec<f64> {
     let inf = f64::INFINITY;
     let mut f = vec![0.0f64; n * n];
     for (k, m) in mask.iter().enumerate() {
