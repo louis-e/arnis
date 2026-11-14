@@ -214,7 +214,7 @@ impl RegionWriteMode {
     /// neighbour's region and must not open its file.
     fn touches_region(&self, rx: i32, rz: i32) -> bool {
         match *self {
-            RegionWriteMode::Fresh => true,
+            RegionWriteMode::Fresh | RegionWriteMode::SparseFeatures => true,
             RegionWriteMode::Merge {
                 min_x,
                 min_z,
@@ -3106,5 +3106,6 @@ mod write_bounds_tests {
         assert!(!mode.touches_region(-1, -1));
         assert!(!mode.touches_region(0, 0));
         assert!(RegionWriteMode::Fresh.touches_region(7, 7));
+        assert!(RegionWriteMode::SparseFeatures.touches_region(7, 7));
     }
 }
