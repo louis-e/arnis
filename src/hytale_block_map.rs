@@ -673,7 +673,7 @@ fn special(name: &str, props: Option<&Value>) -> Option<HytaleCell> {
         "chain" => HytaleCell::of("Deco_Iron_Chains_Vertical"),
         "lantern" | "soul_lantern" => HytaleCell::of("Deco_Lantern"),
         // No invisible light: buildings get the ceiling lamps they use on Luanti.
-        "light" => HytaleCell::of(EMPTY),
+        "light" | "barrier" => HytaleCell::of(EMPTY),
         "glowstone" => HytaleCell::of("Build_Lightsource_YellowLight"),
         "sea_lantern" | "end_rod" => HytaleCell::of("Build_Lightsource_White"),
         "redstone_lamp" => HytaleCell::of("Build_Lightsource_Yellow"),

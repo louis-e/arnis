@@ -484,17 +484,7 @@ pub fn furniture_pictogram(tags: &HashMap<String, String>) -> Option<DecalKey> {
             "recycling"
         }
         Some("waste_basket") | Some("waste_disposal") => "recycling",
-        _ => match tags.get("emergency").map(String::as_str) {
-            Some("fire_hydrant")
-                if !matches!(
-                    tags.get("fire_hydrant:type").map(String::as_str),
-                    Some("underground") | Some("wall") | Some("pond")
-                ) =>
-            {
-                "hydrant"
-            }
-            _ => return None,
-        },
+        _ => return None,
     };
     Some(DecalKey::Pictogram(icon))
 }
@@ -2847,15 +2837,9 @@ mod tests {
 
     #[test]
     fn furniture_and_info_keys() {
+        // A hydrant is built as one, with no pictogram on it.
         assert_eq!(
             furniture_pictogram(&tags(&[("emergency", "fire_hydrant")])),
-            Some(DecalKey::Pictogram("hydrant"))
-        );
-        assert_eq!(
-            furniture_pictogram(&tags(&[
-                ("emergency", "fire_hydrant"),
-                ("fire_hydrant:type", "underground")
-            ])),
             None
         );
         assert_eq!(

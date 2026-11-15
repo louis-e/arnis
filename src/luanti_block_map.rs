@@ -911,6 +911,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         524 => "mcl_redstone_torch:redstoneblock",
         525 => "mcl_trees:stripped_warped",
         526 => "mcl_trees:bark_stripped_warped",
+        // Only Java worlds hold a hydrant's invisible cell; Luanti has no barrier node.
+        527 => "air",
         _ => "mcl_core:stone",
     };
     LuantiNode {
