@@ -654,7 +654,7 @@ fn process_element(
             } else if node.tags.contains_key("historic") {
                 historic::generate_historic(editor, node);
             } else if node.tags.contains_key("emergency") {
-                emergency::generate_emergency(editor, node);
+                emergency::generate_emergency(editor, node, road_mask);
             } else if node.tags.contains_key("advertising") {
                 advertising::generate_advertising(editor, node, road_mask);
             }
