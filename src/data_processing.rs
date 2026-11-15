@@ -272,6 +272,7 @@ fn process_element(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &CoordinateBitmap,
     building_passages: &CoordinateBitmap,
+    rail_passages: &railways::RailPassages,
     road_mask: &CoordinateBitmap,
     rail_mask: &CoordinateBitmap,
     rail_joins: &railways::RailJoins,
@@ -357,6 +358,7 @@ fn process_element(
                 let ctx = BuildingContext {
                     flood_fill_cache,
                     building_passages,
+                    rail_passages,
                     road_mask,
                     building_footprints,
                     group_members,
@@ -670,6 +672,7 @@ fn process_element(
                 let ctx = BuildingContext {
                     flood_fill_cache,
                     building_passages,
+                    rail_passages,
                     road_mask,
                     building_footprints,
                     group_members,
@@ -1335,8 +1338,12 @@ pub fn generate_world_with_options(
 
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
-    let building_passages =
+    let mut building_passages =
         highways::collect_building_passage_coords(&elements, &clip_bbox, args.scale);
+    // Track at ground level opens the buildings it runs into the same way, as tall as a train.
+    let rail_passages =
+        railways::collect_rail_passages(&elements, &clip_bbox, args.scale, &building_footprints);
+    building_passages.union_with(&rail_passages.cells);
 
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
@@ -2042,6 +2049,7 @@ pub fn generate_world_with_options(
                     &flood_fill_cache,
                     &building_footprints,
                     &building_passages,
+                    &rail_passages,
                     &road_mask,
                     &rail_mask,
                     &rail_joins,
@@ -2489,6 +2497,7 @@ pub fn generate_world_with_options(
                 &flood_fill_cache,
                 &building_footprints,
                 &building_passages,
+                &rail_passages,
                 &road_mask,
                 &rail_mask,
                 &rail_joins,
@@ -2607,6 +2616,7 @@ pub fn generate_world_with_options(
     // The ruins break buildings open where these say they stand.
     let building_footprints = args.post_apocalyptic.then_some(building_footprints);
     drop(building_passages);
+    drop(rail_passages);
     drop(bridge_structures);
     drop(bridge_surface);
     drop(bridge_outlines);

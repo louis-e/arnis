@@ -10,6 +10,7 @@ use crate::element_processing::building_facade::{
     FacadePlan, MIN_FACADE_FOOTPRINT,
 };
 use crate::element_processing::historic;
+use crate::element_processing::railways::RailThrough;
 use crate::element_processing::rooftops::{self, RoofDeck, RoofMembrane, RooftopBrief};
 use crate::element_processing::subprocessor::interior::{
     generate_building_interior, plan_interior, Entry, InteriorRequest, PlanInputs,
@@ -931,6 +932,30 @@ pub(crate) struct HolePolygon {
 /// Walls and floors below this height are removed at tunnel=building_passage
 /// highway coordinates, creating a ground-level opening through the building.
 pub(crate) const BUILDING_PASSAGE_HEIGHT: i32 = 4;
+
+/// Buildings track runs into as one hall whatever their height: sheds, depots, stations.
+fn rail_hall_type(building_type: &str) -> bool {
+    matches!(
+        building_type,
+        "train_station"
+            | "transportation"
+            | "train_shed"
+            | "depot"
+            | "industrial"
+            | "manufacture"
+            | "factory"
+            | "warehouse"
+            | "storage"
+            | "hangar"
+            | "service"
+            | "shed"
+            | "barn"
+            | "farm_auxiliary"
+            | "garage"
+            | "garages"
+            | "roof"
+    )
+}
 
 /// Smallest footprint, in cells, that gets an interior.
 const MIN_INTERIOR_CELLS: usize = 24;
@@ -3280,6 +3305,11 @@ struct BuildingConfig {
     /// already owns, and a column flattened for a photograph that never comes
     /// loses its window, its plinth and its accent line for nothing.
     preset_shell: Arc<FnvHashSet<(i32, i32)>>,
+    /// Rows a road or a train passing through is open for over the floor.
+    passage_height: i32,
+    /// Track runs into it at ground level: one hall over the tracks, with no storeys
+    /// and no passage walls inside.
+    rail_hall: bool,
 }
 
 /// Base, shaft and capital of a masonry tower: a stone base of one to four
@@ -8228,7 +8258,7 @@ fn build_wall_ring(
     let mut segments: Vec<WallSegmentKind> =
         vec![WallSegmentKind::default(); nodes.len().saturating_sub(1)];
 
-    let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
+    let passage_height = config.passage_height.min(config.building_height);
     let columns = facade_columns(nodes, config);
     let ring_cells: FnvHashSet<(i32, i32)> = columns.iter().map(|c| (c.x, c.z)).collect();
 
@@ -11431,7 +11461,7 @@ fn generate_corner_quoins(
     }
 
     let top_h = config.start_y_offset + config.building_height;
-    let passage_h = config.start_y_offset + BUILDING_PASSAGE_HEIGHT.min(config.building_height);
+    let passage_h = config.start_y_offset + config.passage_height.min(config.building_height);
 
     for &(cx, cz) in &corners {
         // Party-wall vertices sit against the neighbor and get no framing.
@@ -13124,6 +13154,7 @@ fn generate_floors_and_ceilings(
     config: &BuildingConfig,
     generate_non_flat_roof: bool,
     building_passages: &CoordinateBitmap,
+    rail_cells: &CoordinateBitmap,
     open_hall: bool,
     furnished: bool,
     lid: &RoofMembrane,
@@ -13140,14 +13171,14 @@ fn generate_floors_and_ceilings(
     let hidden_lights =
         !furnished && !config.is_abandoned_building && !editor.format().is_sandbox();
 
-    let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
+    let passage_height = config.passage_height.min(config.building_height);
 
     for &(x, z) in cached_floor_area {
         let is_passage = building_passages.contains(x, z);
 
-        // Set ground floor - skip in passage zones (the road surface is placed
-        // by the highway processor instead).
-        if !is_passage {
+        // Set ground floor - skip in a road's passage (the road surface is placed
+        // by the highway processor instead); track is laid on the floor.
+        if !is_passage || rail_cells.contains(x, z) {
             editor.set_block_absolute(
                 config.floor_block,
                 x,
@@ -13212,8 +13243,9 @@ fn generate_floors_and_ceilings(
             );
         }
 
-        // Place passage ceiling lintel at the top of the archway
-        if is_passage && passage_height < config.building_height {
+        // Place passage ceiling lintel at the top of the archway; a hall over the
+        // tracks is open above them.
+        if is_passage && passage_height < config.building_height && !config.rail_hall {
             editor.set_block_absolute(
                 config.floor_block,
                 x,
@@ -13489,6 +13521,13 @@ pub fn generate_buildings(
     if cached_footprint_size == 0 {
         return None;
     }
+    // Where track runs through at ground level, the passage is as tall as a train.
+    let rail = ctx.rail_passages.through(&cached_floor_area);
+    let passage_height = if rail == RailThrough::None {
+        BUILDING_PASSAGE_HEIGHT
+    } else {
+        ctx.rail_passages.height
+    };
 
     // Calculate start Y offset
     let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
@@ -13677,7 +13716,7 @@ pub fn generate_buildings(
             scale_factor,
             ctx.building_footprints,
             building_passages,
-            BUILDING_PASSAGE_HEIGHT,
+            passage_height,
         );
         return None;
     }
@@ -14290,6 +14329,11 @@ pub fn generate_buildings(
         // Filled in below, once the podium massing has settled the wall height
         // `building_facades::collect` will be given.
         preset_shell: Arc::default(),
+        passage_height,
+        rail_hall: min_level_offset == 0
+            && rail == RailThrough::Into
+            && (rail_hall_type(building_type)
+                || effective_building_height <= 2 * floor_cycle + GROUND_FLOOR_BONUS),
     };
     // Over water a building stands on its plinth down to the bed, a houseboat on its hull;
     // a boathouse keeps the water it shelters.
@@ -14666,7 +14710,9 @@ pub fn generate_buildings(
             &config,
             style.generate_roof,
             effective_passages,
+            &ctx.rail_passages.cells,
             open_hall
+                || config.rail_hall
                 || config.shell_glass == ShellGlass::Hall
                 || config.category == BuildingCategory::Greenhouse,
             interior_plan.is_some(),
@@ -14678,8 +14724,8 @@ pub fn generate_buildings(
         // This creates the left/right corridor walls inside the archway.
         // Only applies to ground-level buildings (elevated building:parts are
         // above the passage and should not get corridor walls).
-        if !effective_passages.is_empty() {
-            let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
+        if !effective_passages.is_empty() && !config.rail_hall {
+            let passage_height = config.passage_height.min(config.building_height);
             let abs = config.abs_terrain_offset;
             for &(x, z) in &cached_floor_area {
                 if effective_passages.contains(x, z) {
@@ -14701,7 +14747,7 @@ pub fn generate_buildings(
 
         // Generate interior features
         if let Some(plan) = &interior_plan {
-            let floor_levels = if open_hall {
+            let floor_levels = if open_hall || config.rail_hall {
                 vec![start_y_offset]
             } else {
                 storey_levels
@@ -14736,6 +14782,7 @@ pub fn generate_buildings(
                     plan,
                     abandoned: is_abandoned_building,
                     passages: effective_passages,
+                    passage_height: config.passage_height,
                     entrances: &entrances,
                     bounds: ((bounds.min_x, bounds.min_z), (bounds.max_x, bounds.max_z)),
                     claims: ctx.interior_uses.claims(element.id),
@@ -21357,7 +21404,15 @@ mod style_tests {
 
         let mut java = test_editor(&xz);
         generate_floors_and_ceilings(
-            &mut java, &cells, &config, false, &passages, false, false, &lid,
+            &mut java,
+            &cells,
+            &config,
+            false,
+            &passages,
+            &CoordinateBitmap::new_empty(),
+            false,
+            false,
+            &lid,
         );
         assert!(count(&java, LIGHT) > 0);
         assert_eq!(count(&java, GLOWSTONE), 0);
@@ -21378,6 +21433,7 @@ mod style_tests {
             &config,
             false,
             &passages,
+            &CoordinateBitmap::new_empty(),
             false,
             false,
             &lid,
@@ -21451,6 +21507,8 @@ mod style_tests {
             window_frame: None,
             facade_shell: Arc::default(),
             preset_shell: Arc::default(),
+            passage_height: BUILDING_PASSAGE_HEIGHT,
+            rail_hall: false,
         }
     }
 
@@ -24233,6 +24291,7 @@ mod facade_integration_tests {
         let ctx = BuildingContext {
             flood_fill_cache: &cache,
             building_passages: &passages,
+            rail_passages: crate::element_processing::railways::RailPassages::none(),
             road_mask: road,
             building_footprints: footprints,
             group_members: &groups,
@@ -24241,6 +24300,120 @@ mod facade_integration_tests {
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
         generate_buildings(editor, way, args, None, None, &ctx, way.id);
+    }
+
+    /// A building over cells x 20..=50, z 20..=40, with `track` (if any) along z = 30 from
+    /// x = 0 to 79, tagged `railway=rail` and the given tags.
+    fn built_over_track<'a>(
+        xz: &'a XZBBox,
+        building: &[(&str, &str)],
+        track: Option<&[(&str, &str)]>,
+    ) -> WorldEditor<'a> {
+        use crate::element_processing::building_test_support::{bitmap_with_rect, tag_map};
+        use crate::element_processing::railways::collect_rail_passages;
+        use crate::osm_parser::{ProcessedElement, ProcessedNode};
+        let mut editor = test_editor(xz);
+        let way = rect_way(1, 20, 20, 50, 40, building);
+        // As the generator collects them: the cells inside the walls.
+        let footprints = bitmap_with_rect(xz, 21, 21, 49, 39);
+        let tracks: Vec<ProcessedElement> = track
+            .map(|tags| {
+                let mut tags = tag_map(tags);
+                tags.insert("railway".into(), "rail".into());
+                let node = |id: u64, x: i32| ProcessedNode {
+                    id,
+                    tags: HashMap::new(),
+                    x,
+                    z: 30,
+                };
+                ProcessedElement::Way(ProcessedWay {
+                    id: 9,
+                    nodes: vec![node(90, 0), node(91, 79)],
+                    tags,
+                })
+            })
+            .into_iter()
+            .collect();
+        let rails = collect_rail_passages(&tracks, xz, 1.0, &footprints);
+        let mut passages = CoordinateBitmap::new_empty();
+        passages.union_with(&rails.cells);
+        let road = CoordinateBitmap::new(xz);
+        let cache = FloodFillCache::new();
+        let groups: FnvHashMap<u64, Vec<u64>> = FnvHashMap::default();
+        let ctx = BuildingContext {
+            flood_fill_cache: &cache,
+            building_passages: &passages,
+            rail_passages: &rails,
+            road_mask: &road,
+            building_footprints: &footprints,
+            group_members: &groups,
+            housing_relation_parts: &Default::default(),
+            interior_uses:
+                crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
+        };
+        generate_buildings(&mut editor, &way, &flat_args(), None, None, &ctx, way.id);
+        editor
+    }
+
+    /// Whether anything stands at a block.
+    fn solid(editor: &WorldEditor, x: i32, y: i32, z: i32) -> bool {
+        editor
+            .get_block_absolute(x, y, z)
+            .is_some_and(|b| b != AIR && b != LIGHT)
+    }
+
+    // Track running into a depot opens its end walls as high as a train, and the depot
+    // is one hall over the tracks; without the track it has its storeys.
+    #[test]
+    fn track_into_a_depot_opens_it_and_takes_its_storeys() {
+        let xz = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let depot = [("building", "industrial"), ("building:levels", "2")];
+        let editor = built_over_track(&xz, &depot, Some(&[]));
+        for x in [20, 50] {
+            for z in 28..=32 {
+                for y in 1..=5 {
+                    assert!(
+                        !solid(&editor, x, y, z),
+                        "end wall at x {x}, z {z}, row {y}"
+                    );
+                }
+            }
+            assert!(solid(&editor, x, 6, 30), "lintel over the opening at x {x}");
+            assert!(
+                solid(&editor, x, 1, 26),
+                "plinth beside the opening at x {x}"
+            );
+        }
+        // Inside, nothing over the track and nothing between the floor and the roof.
+        assert!(
+            !solid(&editor, 35, 6, 30),
+            "a lintel along the track inside"
+        );
+        let slab = |editor: &WorldEditor| (4..=8).any(|y| solid(editor, 35, y, 25));
+        assert!(!slab(&editor), "a storey over the depot floor");
+        assert!(
+            slab(&built_over_track(&xz, &depot, None)),
+            "no storeys without track"
+        );
+    }
+
+    // Track mapped as passing under an office block gets its passage, and the floors
+    // above and beside it stay.
+    #[test]
+    fn track_under_an_office_keeps_its_storeys() {
+        let xz = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let office = [("building", "office"), ("building:levels", "6")];
+        let editor = built_over_track(&xz, &office, Some(&[("tunnel", "building_passage")]));
+        for y in 1..=5 {
+            assert!(!solid(&editor, 20, y, 30), "passage at row {y}");
+        }
+        assert!(solid(&editor, 20, 6, 30), "lintel over the passage");
+        // The lintel over the passage, and a storey beside it.
+        assert!(solid(&editor, 35, 6, 30), "no lintel over the track");
+        assert!(
+            (4..=8).any(|y| solid(&editor, 35, y, 25)),
+            "no storey beside it"
+        );
     }
 
     /// Every column's highest block over an 80 x 80 area.
@@ -24280,6 +24453,7 @@ mod facade_integration_tests {
             let ctx = BuildingContext {
                 flood_fill_cache: &cache,
                 building_passages: &passages,
+                rail_passages: crate::element_processing::railways::RailPassages::none(),
                 road_mask: &road,
                 building_footprints: &footprints,
                 group_members: &FnvHashMap::default(),
@@ -24927,6 +25101,7 @@ mod facade_integration_tests {
             let ctx = BuildingContext {
                 flood_fill_cache: &cache,
                 building_passages: &passages,
+                rail_passages: crate::element_processing::railways::RailPassages::none(),
                 road_mask: &road,
                 building_footprints: &footprints,
                 group_members: &groups,
@@ -26060,6 +26235,7 @@ mod facade_dump {
                 let ctx = BuildingContext {
                     flood_fill_cache: &cache,
                     building_passages: &passages,
+                    rail_passages: crate::element_processing::railways::RailPassages::none(),
                     road_mask: &road,
                     building_footprints: &footprints,
                     group_members: &groups,
@@ -26227,6 +26403,7 @@ mod doorstep_tests {
         let ctx = BuildingContext {
             flood_fill_cache: &cache,
             building_passages: &passages,
+            rail_passages: crate::element_processing::railways::RailPassages::none(),
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
