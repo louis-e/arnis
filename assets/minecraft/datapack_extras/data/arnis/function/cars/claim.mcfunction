@@ -1,4 +1,6 @@
-# A car and its parts are placed on one spot; the id keeps them together once they move.
+# A car and its parts are placed on one spot, the model a block over it; the id keeps them
+# together once they move.
 scoreboard players add #next arnis.car 1
 scoreboard players operation @s arnis.car = #next arnis.car
 execute as @e[tag=arnis.car.part,distance=..0.05] unless score @s arnis.car matches 1.. run scoreboard players operation @s arnis.car = #next arnis.car
+execute positioned ~ ~1 ~ as @e[tag=arnis.car.lift,distance=..0.05] unless score @s arnis.car matches 1.. run scoreboard players operation @s arnis.car = #next arnis.car

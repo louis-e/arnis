@@ -283,7 +283,8 @@ fn build(data: &Value, bodies: &[Body], mut uuid: impl FnMut() -> String) -> Add
     }
 }
 
-/// Hangs every bone of an aircraft's geometry from one at its origin, for its pitch to turn.
+/// Hangs every bone of an aircraft's geometry from one at its origin, for its pitch to turn:
+/// the main wheels, let down under the entity with the rest of the model.
 fn hang_from_pitch_bone(geo: &mut Value) {
     if let Some(bones) = geo["minecraft:geometry"][0]["bones"].as_array_mut() {
         for bone in bones.iter_mut() {
@@ -291,7 +292,8 @@ fn hang_from_pitch_bone(geo: &mut Value) {
                 bone["parent"] = json!(PITCH_BONE);
             }
         }
-        bones.insert(0, json!({ "name": PITCH_BONE, "pivot": [0, 0, 0] }));
+        let origin = -vehicle_models::LIFT * 16.0;
+        bones.insert(0, json!({ "name": PITCH_BONE, "pivot": [0, origin, 0] }));
     }
 }
 
@@ -648,6 +650,11 @@ mod tests {
         );
         let bones = geo["minecraft:geometry"][0]["bones"].as_array().unwrap();
         assert_eq!(bones[0]["name"], PITCH_BONE);
+        // It turns about the main wheels, let down under the entity with the model.
+        assert_eq!(
+            bones[0]["pivot"],
+            json!([0, -vehicle_models::LIFT * 16.0, 0])
+        );
         assert!(bones[1..].iter().all(|b| b["parent"] == PITCH_BONE));
         assert!(bones
             .iter()

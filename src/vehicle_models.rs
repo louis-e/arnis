@@ -331,7 +331,8 @@ impl Model {
     }
 
     /// Bedrock geometry named `identifier` at `size` blocks per metre, turned half a
-    /// circle when `backward`.
+    /// circle when `backward`, and let down `LIFT` under the entity, which the script
+    /// keeps that far over the spot the vehicle is drawn at.
     pub fn bedrock_geometry(&self, identifier: &str, size: f64, backward: bool) -> Value {
         let mut geo: Value = serde_json::from_str(self.geo).expect("vehicle geometry is JSON");
         let g = &mut geo["minecraft:geometry"][0];
@@ -341,14 +342,18 @@ impl Model {
             g["description"][key] = json!((v * size).ceil());
         }
         scale_list(&mut g["description"]["visible_bounds_offset"], size);
+        lower(&mut g["description"]["visible_bounds_offset"], LIFT);
         if let Some(bones) = g["bones"].as_array_mut() {
             for bone in bones.iter_mut() {
                 scale_list(&mut bone["pivot"], size);
+                lower(&mut bone["pivot"], LIFT * 16.0);
                 if let Some(cubes) = bone["cubes"].as_array_mut() {
                     for cube in cubes {
                         for key in ["origin", "size", "pivot"] {
                             scale_list(&mut cube[key], size);
                         }
+                        lower(&mut cube["origin"], LIFT * 16.0);
+                        lower(&mut cube["pivot"], LIFT * 16.0);
                     }
                 }
                 if backward {
@@ -363,6 +368,13 @@ impl Model {
             }
         }
         geo
+    }
+}
+
+/// Takes `by` off the height of a point, if there is one.
+fn lower(v: &mut Value, by: f64) {
+    if let Some(y) = v.get(1).and_then(Value::as_f64) {
+        v[1] = json!(((y - by) * 1000.0).round() / 1000.0);
     }
 }
 
@@ -431,6 +443,13 @@ pub fn parked_item_model(look: &Look) -> String {
     format!("{NAMESPACE}:vehicle/{}_parked", look.name())
 }
 
+/// How far a moving vehicle stands above the spot it is drawn at, in blocks, along its own
+/// up, its model let down as far again. The game lights a display, and Bedrock an entity,
+/// by the block its position is in, and a vehicle gliding between two points up a step or
+/// a slope cuts into the road, the track bed or the ground for a moment: the whole model
+/// would go dark. A block up, that position is in the air over it.
+pub const LIFT: f64 = 1.0;
+
 /// How the display has to place the model so that a point of the vehicle at 1:1 lands
 /// `size` times as far out from the entity: (translation, left_rotation, scale).
 ///
@@ -438,15 +457,31 @@ pub fn parked_item_model(look: &Look) -> String {
 /// the model is the vehicle fitted into Java's -16..32: u = (v - centre) * fit + 8. So the
 /// scale is size / fit, and the translation puts the vehicle's own origin back on the
 /// entity: the centre, turned the way the model is.
+#[cfg(test)]
 pub fn display_transform(model: &str, size: f64, backward: bool) -> ([f64; 3], [f64; 4], f64) {
+    lifted_transform(model, size, backward, 0.0)
+}
+
+/// The same for a display standing `lift` blocks above the spot the vehicle is drawn at:
+/// the model is let down that far along the display's own up, so it turns with it.
+pub fn lifted_transform(
+    model: &str,
+    size: f64,
+    backward: bool,
+    lift: f64,
+) -> ([f64; 3], [f64; 4], f64) {
     let frame = &metas()[model].java;
     let c = frame.centre.map(|v| v * size / 16.0);
     if backward {
         // The half turn here undoes the renderer's: the model's front faces the back.
-        (c, [0.0, 1.0, 0.0, 0.0], size / frame.scale)
+        (
+            [c[0], c[1] - lift, c[2]],
+            [0.0, 1.0, 0.0, 0.0],
+            size / frame.scale,
+        )
     } else {
         (
-            [-c[0], c[1], -c[2]],
+            [-c[0], c[1] - lift, -c[2]],
             [0.0, 0.0, 0.0, 1.0],
             size / frame.scale,
         )
@@ -469,15 +504,16 @@ pub fn culling_box(model: &str, size: f64) -> (f64, f64) {
 }
 
 /// The SNBT of a display drawing `item_model` (which may hold macro variables) for
-/// `model`, for a `summon` command; `extra` goes in as it is.
+/// `model`, standing `lift` blocks over it, for a `summon` command; `extra` goes in as it is.
 pub fn display_snbt(
     model: &str,
     item_model: &str,
     size: f64,
     backward: bool,
+    lift: f64,
     extra: &str,
 ) -> String {
-    let (t, q, s) = display_transform(model, size, backward);
+    let (t, q, s) = lifted_transform(model, size, backward, lift);
     let (w, h) = culling_box(model, size);
     format!(
         "item:{{id:\"{CARRIER}\",count:1,components:{{\"minecraft:item_model\":\"{item_model}\"}}}},\
@@ -494,7 +530,18 @@ pub fn display_nbt(
     size: f64,
     backward: bool,
 ) -> HashMap<String, Nbt> {
-    let (t, q, s) = display_transform(model, size, backward);
+    lifted_display_nbt(model, item_model, size, backward, 0.0)
+}
+
+/// The same for a display standing `lift` blocks over the vehicle it draws.
+pub fn lifted_display_nbt(
+    model: &str,
+    item_model: &str,
+    size: f64,
+    backward: bool,
+    lift: f64,
+) -> HashMap<String, Nbt> {
+    let (t, q, s) = lifted_transform(model, size, backward, lift);
     let floats = |v: &[f64]| Nbt::List(v.iter().map(|f| Nbt::Float(*f as f32)).collect());
     let components = HashMap::from([(
         "minecraft:item_model".to_string(),
@@ -696,6 +743,91 @@ mod tests {
         let (t, q, s) = display_transform(model, size, backward);
         let r = unit_quat_turn(q, turned.map(|c| c * s));
         [0, 1, 2].map(|i| t[i] + r[i])
+    }
+
+    /// Lifted and let down as far, a vehicle is drawn just where it was, however it is
+    /// turned: the pack lifts it along its own up, the model comes down along the same.
+    /// The pack's functions and the Bedrock script lift it by as much.
+    #[test]
+    fn a_lifted_display_draws_its_vehicle_where_it_was() {
+        for (model, backward) in [
+            ("car_sedan", false),
+            ("plane_narrow", false),
+            ("plane_light", true),
+        ] {
+            for v in [[0.0, 0.0, 0.0], [12.0, 30.0, -40.0], [-8.0, 4.0, 25.0]] {
+                let flat = drawn(model, v, 1.5, backward);
+                let frame = &metas()[model].java;
+                let u = [0, 1, 2].map(|i| (v[i] - frame.centre[i]) * frame.scale + 8.0);
+                let local = [0, 1, 2].map(|i| (u[i] - 8.0) / 16.0);
+                let turned = [-local[0], local[1], -local[2]];
+                let (t, q, s) = lifted_transform(model, 1.5, backward, LIFT);
+                let r = unit_quat_turn(q, turned.map(|c| c * s));
+                let lifted = [t[0] + r[0], t[1] + r[1] + LIFT, t[2] + r[2]];
+                for i in 0..3 {
+                    assert!((flat[i] - lifted[i]).abs() < 1e-9, "{model} {v:?}");
+                }
+            }
+        }
+        let pack = |path: &str| -> &str {
+            match path {
+                "put" => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/trains/put.mcfunction"
+                ),
+                "air_put" => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/trains/air_put.mcfunction"
+                ),
+                "step" => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/cars/step.mcfunction"
+                ),
+                _ => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/cars/claim.mcfunction"
+                ),
+            }
+        };
+        // The body is found, made and dated where it stands; the doors stay by the track.
+        assert_eq!(
+            pack("put")
+                .matches(&format!("positioned ^ ^{LIFT} ^$(f)"))
+                .count(),
+            3
+        );
+        assert_eq!(
+            pack("put")
+                .matches("positioned ^ ^ ^$(f) if entity @a")
+                .count(),
+            1
+        );
+        let up = format!("rotated $(h) $(p) positioned ^ ^{LIFT} ^");
+        assert_eq!(pack("air_put").matches(&up).count(), 3);
+        assert!(pack("step").contains(&format!(
+            "run tp @e[tag=arnis.car.go,tag=arnis.car.lift,distance=..0.1] ~ ~{LIFT} ~"
+        )));
+        assert!(pack("claim").contains(&format!("positioned ~ ~{LIFT} ~ as @e[tag=arnis.car.lift")));
+        let script = include_str!("../assets/minecraft/bedrock_addon/scripts/util.js");
+        assert!(script.contains(&format!("export const LIFT = {LIFT};")));
+    }
+
+    /// On Bedrock the geometry is let down under the entity, which the script lifts.
+    #[test]
+    fn bedrock_geometry_hangs_under_the_entity() {
+        let m = model("car_sedan");
+        let raw: Value = serde_json::from_str(m.geo).unwrap();
+        let geo = m.bedrock_geometry("geometry.test", 2.0, false);
+        let cubes = |g: &Value| -> Vec<f64> {
+            g["minecraft:geometry"][0]["bones"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|b| b["cubes"].as_array().cloned().unwrap_or_default())
+                .map(|c| c["origin"][1].as_f64().unwrap())
+                .collect()
+        };
+        let (before, after) = (cubes(&raw), cubes(&geo));
+        assert!(!before.is_empty() && before.len() == after.len());
+        for (b, a) in before.iter().zip(&after) {
+            assert!((b * 2.0 - LIFT * 16.0 - a).abs() < 0.002, "{b} {a}");
+        }
     }
 
     #[test]

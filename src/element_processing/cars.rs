@@ -21,7 +21,7 @@ use crate::element_processing::traffic_lights::{
     group_of, is_signal, is_vehicular, signal_upstream, Junctions, SignalIndex, UPSTREAM_M,
 };
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
-use crate::vehicle_models::{self, Look};
+use crate::vehicle_models::{self, Look, LIFT};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use fnv::{FnvHashMap, FnvHashSet};
@@ -1574,8 +1574,10 @@ impl CarNetwork {
     }
 
     /// The functions that build a respawned car's body, as (path in the pack, text): the
-    /// box a player clicks to get in, the model and, on a display of its own so the pack
-    /// can turn them up, the brake lights. The colour comes in as its name, `red`.
+    /// box a player clicks to get in, the model, standing `LIFT` over the road so it is lit
+    /// by the air and not by the road it cuts into up a slope, and, on a display of its own
+    /// so the pack can turn them up, the brake lights, which take no light from where they
+    /// are. The colour comes in as its name, `red`.
     pub fn body_functions(&self) -> Vec<(String, String)> {
         let k = self.size as f32;
         KINDS
@@ -1587,16 +1589,17 @@ impl CarNetwork {
                 let item = vehicle_models::item_model_named(model, "$(colour)");
                 let text = format!(
                     "$summon interaction $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.k_{name}\"],width:{:.2}f,height:{:.2}f}}\n\
-                     $summon item_display $(x) $(y) $(z) {{Tags:[\"arnis.car.part\"],teleport_duration:2,view_range:{VIEW_RANGE}f,{}}}\n\
+                     $execute positioned $(x) $(y) $(z) run summon item_display ~ ~{LIFT} ~ {{Tags:[\"arnis.car.part\",\"arnis.car.lift\"],teleport_duration:2,view_range:{VIEW_RANGE}f,{}}}\n\
                      $summon item_display $(x) $(y) $(z) {{Tags:[\"arnis.car.part\",\"arnis.car.tail\"],teleport_duration:2,view_range:{VIEW_RANGE}f,{}}}\n",
                     width * k,
                     height * k,
-                    vehicle_models::display_snbt(model, &item, self.size, false, ""),
+                    vehicle_models::display_snbt(model, &item, self.size, false, LIFT, ""),
                     vehicle_models::display_snbt(
                         model,
                         &vehicle_models::brake_item_model(model),
                         self.size,
                         false,
+                        0.0,
                         ",brightness:{sky:7,block:7}",
                     ),
                 );
@@ -1908,9 +1911,15 @@ impl CarNetwork {
                 ),
             ];
             for (k, (item, tag)) in shown.into_iter().enumerate() {
-                let mut nbt = vehicle_models::display_nbt(look.model, &item, self.size, false);
+                // The model stands over the road, the brake lights, lit as they are, on it.
+                let lift = if tag.is_some() { 0.0 } else { LIFT };
+                let mut nbt =
+                    vehicle_models::lifted_display_nbt(look.model, &item, self.size, false, lift);
                 let mut tags = vec![Value::String("arnis.car.part".to_string())];
                 tags.extend(tag.clone());
+                if tag.is_none() {
+                    tags.push(Value::String("arnis.car.lift".to_string()));
+                }
                 nbt.insert("Tags".to_string(), Value::List(tags));
                 // Steps come every second tick; the client glides between them.
                 nbt.insert("teleport_duration".to_string(), Value::Int(2));
@@ -1928,7 +1937,7 @@ impl CarNetwork {
                 editor.add_entity_exact(
                     "minecraft:item_display",
                     x,
-                    y,
+                    y + lift,
                     z,
                     seed + 1 + k as i64,
                     nbt,
@@ -1993,8 +2002,9 @@ impl Kind {
         }
     }
 
-    /// Width and height at 1:1 of the box a player can click. A spectator sees from the
-    /// middle of the car at 85% of the height.
+    /// Width and height at 1:1 of the box a player clicks to get in, or as a spectator to
+    /// follow the car: square, so over half the length of a bus or a truck. The spectator
+    /// is then handed on to the car's model, which glides where the box jumps.
     fn hitbox(self) -> (f32, f32) {
         match self {
             Kind::Sedan => (2.4, 1.45),
@@ -2003,9 +2013,9 @@ impl Kind {
             Kind::Suv => (2.5, 1.7),
             Kind::City => (2.4, 1.5),
             Kind::Van => (2.6, 1.8),
-            Kind::Pickup => (2.6, 1.6),
-            Kind::Truck => (3.0, 2.7),
-            Kind::Bus => (3.0, 2.6),
+            Kind::Pickup => (2.8, 1.6),
+            Kind::Truck => (4.2, 2.7),
+            Kind::Bus => (5.2, 2.6),
         }
     }
 
@@ -2120,11 +2130,19 @@ fn refine(
         }
         return;
     }
-    let mid = (a + b) / 2.0;
-    if (y_at(mid) - (y_at(a) + y_at(b)) / 2.0).abs() >= 1.0 {
-        refine(a, mid, y_at, depth + 1, out);
-        out.push((mid, None, None));
-        refine(mid, b, y_at, depth + 1, out);
+    // The ground under the straight line about every block along it, split where it is
+    // furthest off: up a hill that steepens, the middle can be on the line and a car still
+    // cut into the road on either side of it.
+    let (ya, yb) = (y_at(a), y_at(b));
+    let n = (b - a).floor() as usize;
+    let (worst, at) = (1..n)
+        .map(|i| a + (b - a) * i as f64 / n as f64)
+        .map(|s| ((y_at(s) - (ya + (yb - ya) * (s - a) / (b - a))).abs(), s))
+        .fold((0.0, (a + b) / 2.0), |m, d| if d.0 > m.0 { d } else { m });
+    if worst >= 1.0 {
+        refine(a, at, y_at, depth + 1, out);
+        out.push((at, None, None));
+        refine(at, b, y_at, depth + 1, out);
     }
 }
 
@@ -2863,6 +2881,36 @@ const VIEW_RANGE: f32 = 3.0;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Up a road that climbs in two steep pitches with level ground between, the middle of
+    /// the stretch is on the straight line; the waypoints still keep the line within a
+    /// block of the road all along, so a car neither cuts into it nor goes dark there.
+    #[test]
+    fn waypoints_keep_to_a_road_that_climbs_in_pitches() {
+        let y_at = |s: f64| match s {
+            s if s < 6.0 => 65.0,
+            s if s < 14.0 => 70.0,
+            _ => 75.0,
+        };
+        assert_eq!(y_at(10.0), (y_at(0.0) + y_at(20.0)) / 2.0);
+        let mut out = Vec::new();
+        refine(0.0, 20.0, &y_at, 0, &mut out);
+        let mut at = vec![0.0];
+        at.extend(out.iter().map(|o| o.0));
+        at.push(20.0);
+        for pair in at.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            if b - a < 3.0 {
+                continue;
+            }
+            let n = (b - a).floor() as usize;
+            for i in 1..n {
+                let s = a + (b - a) * i as f64 / n as f64;
+                let line = y_at(a) + (y_at(b) - y_at(a)) * (s - a) / (b - a);
+                assert!((y_at(s) - line).abs() < 1.0, "{a}..{b} at {s}: {at:?}");
+            }
+        }
+    }
 
     fn node(id: u64, x: i32, z: i32, tags: &[(&str, &str)]) -> ProcessedNode {
         ProcessedNode {
@@ -4189,7 +4237,7 @@ mod tests {
         let lines: Vec<&str> = sedan.lines().collect();
         assert_eq!(lines.len(), 3);
         assert!(lines[0].starts_with("$summon interaction $(x) $(y) $(z) {Tags:[\"arnis.car.part\",\"arnis.k_sedan\"],width:2.40f,height:1.45f}"));
-        assert!(lines[1].starts_with("$summon item_display $(x) $(y) $(z) {Tags:[\"arnis.car.part\"],teleport_duration:2,view_range:3f,"));
+        assert!(lines[1].starts_with("$execute positioned $(x) $(y) $(z) run summon item_display ~ ~1 ~ {Tags:[\"arnis.car.part\",\"arnis.car.lift\"],teleport_duration:2,view_range:3f,"));
         assert!(lines[1].contains("\"minecraft:item_model\":\"arnis:vehicle/car_sedan_$(colour)\""));
         assert!(lines[2].contains("\"arnis.car.tail\"],teleport_duration:2,view_range:3f"));
         assert!(lines[2].contains("\"minecraft:item_model\":\"arnis:vehicle/car_sedan_brake\""));
@@ -4325,6 +4373,9 @@ mod tests {
         for (kind, _) in KINDS {
             let (width, height) = kind.hitbox();
             assert!(width >= 2.4 && height >= 1.4, "{kind:?}");
+            // A spectator clicks most of the way along a long one.
+            let (length, _) = kind.size_m();
+            assert!(f64::from(width) >= length / 2.0, "{kind:?}");
         }
         for (path, text) in net.body_functions() {
             for line in text.lines().filter(|l| l.contains("item_display")) {

@@ -127,6 +127,7 @@ const CARS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/cars/seat_move.mcfunction",
     "data/arnis/function/cars/seat_free.mcfunction",
     "data/arnis/function/cars/seat_check.mcfunction",
+    "data/arnis/function/cars/watch.mcfunction",
     "data/arnis/advancement/cars/board.json",
 ];
 
@@ -155,6 +156,7 @@ const TRAINS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/trains/air_part.mcfunction",
     "data/arnis/function/trains/air_gear0.mcfunction",
     "data/arnis/function/trains/air_gear1.mcfunction",
+    "data/arnis/function/trains/watch.mcfunction",
 ];
 
 /// The level crossings' functions; `check`, `boom` and one per crossing are generated.

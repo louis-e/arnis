@@ -2,7 +2,7 @@
 // train is where its timetable says it is now, so it keeps no state of its own, and its
 // carriages are set down behind the front. Distances are thousandths of a block.
 import { world } from "@minecraft/server";
-import { distance, mod, number, numbers, warn } from "./util.js";
+import { distance, lowered, mod, number, numbers, raised, warn } from "./util.js";
 
 const FAMILY = "arnis_train";
 const RAD = Math.PI / 180;
@@ -187,10 +187,10 @@ export class Trains {
     let e = this.carriages.get(c);
     if (!e?.isValid) e = this.find(c, at);
     if (e) {
-      this.glide.move(e, e.location, at, yaw);
+      this.glide.move(e, lowered(e.location), at, yaw);
     } else {
       // Not there yet: it has just come into view, or into the area.
-      e = this.dim.spawnEntity(`arnis:${this.bodies[body]}`, at, { initialRotation: yaw });
+      e = this.dim.spawnEntity(`arnis:${this.bodies[body]}`, raised(at), { initialRotation: yaw });
       e.setDynamicProperty("arnis:c", c);
     }
     if (route.air) this.fly(e, route.nose[i], route.gear[i] === 1);

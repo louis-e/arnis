@@ -560,7 +560,7 @@ impl TrainNetwork {
         let mut doors: BTreeMap<String, train_bodies::Doors> = BTreeMap::new();
         doors.insert(
             train_bodies::NO_DOORS.to_string(),
-            train_bodies::doors(Coach::Tank(0)),
+            train_bodies::Doors::none(),
         );
         let mut carriage = 0usize;
         // A route's points are stored once, however many services run on it.

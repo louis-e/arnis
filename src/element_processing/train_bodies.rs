@@ -360,11 +360,19 @@ const RIDER_EYE: f64 = 2.12;
 /// How far over the block a player rides on their eyes are, in blocks at any scale.
 const RIDER_EYE_OVER_SEAT: f64 = 1.02;
 
+/// Boxes along a ship's hull for a spectator to click, every so many metres, kept this far
+/// from a seat's box and from the ends, in metres.
+const HULL_BOX_SPACING: f32 = 12.0;
+const HULL_BOX_CLEAR: f32 = 6.0;
+
 /// Where along a carriage people get on, in metres from its middle, how high their eyes
 /// are over the rail and the box that takes a click there. A click nearly anywhere on a
-/// carriage's side finds one. Freight wagons carry nobody.
+/// carriage's side finds one. Freight wagons carry nobody, but have boxes all the same, as
+/// a ship's hull has between its seats: a spectator clicks one to follow the vehicle.
 pub struct Doors {
     pub spots: Vec<f32>,
+    /// Boxes with no seat, only to be clicked by a spectator.
+    pub view: Vec<f32>,
     eye: f64,
     width: f32,
     height: f32,
@@ -372,12 +380,46 @@ pub struct Doors {
     deck: bool,
 }
 
+impl Doors {
+    /// No doors and no boxes.
+    pub fn none() -> Self {
+        Doors {
+            spots: Vec::new(),
+            view: Vec::new(),
+            eye: RIDER_EYE,
+            width: DOOR_BOX_WIDTH,
+            height: DOOR_BOX_HEIGHT,
+            deck: false,
+        }
+    }
+}
+
+/// Spots every `spacing` metres or less along `len` metres, the first and last half a
+/// spacing in from the ends.
+fn spread(len: f32, spacing: f32) -> Vec<f32> {
+    let n = (len / spacing).ceil().max(1.0) as usize;
+    let step = len / n as f32;
+    (0..n)
+        .map(|i| -len / 2.0 + step * (i as f32 + 0.5))
+        .collect()
+}
+
 pub fn doors(coach: Coach) -> Doors {
     if let Coach::Ship { vessel, .. } = coach {
         let (spots, eye) = vessel.seats_m();
-        let (_, beam) = vessel.size_m();
+        let (len, beam) = vessel.size_m();
+        let hull = len as f32 - 2.0 * HULL_BOX_CLEAR;
+        let view = if hull > 0.0 {
+            spread(hull, HULL_BOX_SPACING)
+                .into_iter()
+                .filter(|v| spots.iter().all(|s| (s - v).abs() >= HULL_BOX_CLEAR))
+                .collect()
+        } else {
+            Vec::new()
+        };
         return Doors {
             spots: spots.to_vec(),
+            view,
             eye,
             width: (beam as f32).max(DOOR_BOX_WIDTH),
             height: eye as f32 + 0.5,
@@ -389,27 +431,25 @@ pub fn doors(coach: Coach) -> Doors {
         let (spots, eye) = frame.seats_m();
         return Doors {
             spots: spots.to_vec(),
+            view: Vec::new(),
             eye,
             width: frame.cabin_m() as f32 + 1.0,
             height: eye as f32 + 0.8,
             deck: true,
         };
     }
-    let spots = if matches!(
+    let along = spread(length_m(coach) as f32, DOOR_SPACING);
+    let (spots, view) = if matches!(
         coach,
         Coach::Container(_) | Coach::Tank(_) | Coach::Boxcar(_)
     ) {
-        Vec::new()
+        (Vec::new(), along)
     } else {
-        let len = length_m(coach) as f32;
-        let n = (len / DOOR_SPACING).ceil().max(1.0) as usize;
-        let spacing = len / n as f32;
-        (0..n)
-            .map(|i| -len / 2.0 + spacing * (i as f32 + 0.5))
-            .collect()
+        (along, Vec::new())
     };
     Doors {
         spots,
+        view,
         eye: RIDER_EYE,
         width: DOOR_BOX_WIDTH,
         height: DOOR_BOX_HEIGHT,
@@ -419,23 +459,31 @@ pub fn doors(coach: Coach) -> Doors {
 
 /// The name of the functions that keep a carriage's doors with it, shared by carriages alike.
 pub fn door_key(coach: Coach) -> String {
+    let doors = doors(coach);
     match coach {
         Coach::Ship { vessel, .. } => format!("w_{}", vessel.name()),
         Coach::Plane(frame) => format!("p_{}", frame.name()),
-        _ if doors(coach).spots.is_empty() => NO_DOORS.to_string(),
+        _ if doors.spots.is_empty() && doors.view.is_empty() => NO_DOORS.to_string(),
+        _ if doors.spots.is_empty() => format!("f{}", (length_m(coach) * 10.0).round() as u32),
         _ => format!("m{}", (length_m(coach) * 10.0).round() as u32),
     }
 }
 
 /// The function that keeps a carriage's doors with it, run at the carriage's middle facing
-/// along it, and the one that makes them. Each door is a box to click and a seat to ride.
+/// along it, and the one that makes them. Each door is a box to click and a seat to ride;
+/// the boxes with no seat are only for a spectator to click.
 pub fn door_functions(key: &str, doors: &Doors, size: f64) -> (String, String) {
     let spots = &doors.spots;
-    if spots.is_empty() {
+    if spots.is_empty() && doors.view.is_empty() {
         return (String::new(), String::new());
     }
     let k = size as f32;
-    let reach = spots.iter().fold(0f32, |a, d| a.max(d.abs())) * k + 12.0;
+    let reach = spots
+        .iter()
+        .chain(&doors.view)
+        .fold(0f32, |a, d| a.max(d.abs()))
+        * k
+        + 12.0;
     let seat = (doors.eye * size - RIDER_EYE_OVER_SEAT).max(0.0) as f32;
     let deck = if doors.deck { ",\"arnis.tdeck\"" } else { "" };
     let mut keep = format!(
@@ -454,6 +502,19 @@ pub fn door_functions(key: &str, doors: &Doors, size: f64) -> (String, String) {
             make,
             "$summon interaction ^ ^ ^{at:.2} {{Tags:[\"arnis.tp\",\"arnis.ts$(c)\",\"arnis.td{i}\"{deck}],width:{:.2}f,height:{:.2}f}}\n\
              $summon block_display ^ ^{seat:.2} ^{at:.2} {{Tags:[\"arnis.tp\",\"arnis.ts$(c)\",\"arnis.td{i}\",\"arnis.seat\"{deck}],teleport_duration:2}}",
+            doors.width * k,
+            doors.height * k,
+        );
+    }
+    for (j, v) in doors.view.iter().enumerate() {
+        let at = v * k;
+        let _ = writeln!(
+            keep,
+            "$tp @e[type=interaction,tag=arnis.ts$(c),tag=arnis.tv{j},distance=..{reach:.1}] ^ ^ ^{at:.2}"
+        );
+        let _ = writeln!(
+            make,
+            "$summon interaction ^ ^ ^{at:.2} {{Tags:[\"arnis.tp\",\"arnis.ts$(c)\",\"arnis.tv{j}\",\"arnis.tview\"],width:{:.2}f,height:{:.2}f}}",
             doors.width * k,
             doors.height * k,
         );
@@ -688,8 +749,9 @@ fn front_of(coach: Coach) -> Option<bool> {
 }
 
 /// The body function of a carriage: a macro taking the carriage id `c` and its heading
-/// `h`, run where the carriage centre goes. One item display draws it. An aircraft is
-/// seen from further off, since it is as far overhead as it is away.
+/// `h`, run `LIFT` over where the carriage centre goes. One item display draws it, the model
+/// let down as far. An aircraft is seen from further off, since it is as far overhead as it
+/// is away.
 pub fn summon_function(look: &Look, size: f64) -> String {
     let view = if vehicle_models::flies(look.model) {
         5
@@ -703,6 +765,7 @@ pub fn summon_function(look: &Look, size: f64) -> String {
             &vehicle_models::item_model(look),
             size,
             look.backward,
+            vehicle_models::LIFT,
             ""
         ),
     )
@@ -725,7 +788,7 @@ mod tests {
     #[test]
     fn passengers_can_get_on_along_a_whole_carriage_but_not_on_a_wagon() {
         assert!(doors(Coach::Container(0)).spots.is_empty());
-        assert_eq!(door_key(Coach::Tank(3)), NO_DOORS);
+        assert_eq!(door_key(Coach::Tank(3)), "f150");
         assert_eq!(doors(Coach::TramShort).spots.len(), 1);
         for coach in [
             Coach::MetroMid,
@@ -783,8 +846,92 @@ mod tests {
         for line in keep.lines().chain(make.lines()) {
             assert!(line.starts_with('$') && line.contains("$(c)"), "{line}");
         }
-        let (keep, make) = door_functions(NO_DOORS, &self::doors(Coach::Tank(0)), 1.0);
+        let (keep, make) = door_functions(NO_DOORS, &Doors::none(), 1.0);
         assert!(keep.is_empty() && make.is_empty());
+    }
+
+    /// A spectator follows any vehicle by clicking it: every one has boxes along its body
+    /// that move with it, those of wagons and between a ship's seats with nothing to board.
+    #[test]
+    fn every_vehicle_has_boxes_along_it_for_a_spectator_to_click() {
+        use crate::element_processing::plane_bodies::Airframe;
+        use crate::element_processing::ship_bodies::Vessel;
+        let mut coaches = vec![
+            Coach::Container(0),
+            Coach::Tank(0),
+            Coach::Boxcar(0),
+            Coach::TramShort,
+            Coach::MetroMid,
+            Coach::Loco,
+            Coach::IceMid,
+        ];
+        coaches.extend(
+            [
+                Airframe::Light,
+                Airframe::Bizjet,
+                Airframe::Regional,
+                Airframe::Narrow,
+                Airframe::Wide,
+            ]
+            .map(Coach::Plane),
+        );
+        coaches.extend(
+            [
+                Vessel::RiverFerry,
+                Vessel::WaterBus,
+                Vessel::CarFerry,
+                Vessel::SeaFerry,
+                Vessel::Barge,
+                Vessel::RiverCruise,
+                Vessel::Peniche,
+                Vessel::TourBoat,
+                Vessel::Sailboat,
+                Vessel::Motorboat,
+            ]
+            .map(|vessel| Coach::Ship { vessel, low: false }),
+        );
+        for coach in coaches {
+            let doors = doors(coach);
+            let mut boxes: Vec<f32> = doors.spots.iter().chain(&doors.view).copied().collect();
+            assert!(!boxes.is_empty(), "{coach:?}");
+            boxes.sort_by(f32::total_cmp);
+            // No long stretch of a carriage or a hull without one, outside an aircraft's
+            // wings and tail.
+            if !matches!(coach, Coach::Plane(_)) {
+                let half = length_m(coach) as f32 / 2.0;
+                let mut edges = vec![-half];
+                edges.extend(&boxes);
+                edges.push(half);
+                for pair in edges.windows(2) {
+                    assert!(
+                        pair[1] - pair[0] <= 2.0 * HULL_BOX_SPACING,
+                        "{coach:?}: {boxes:?}"
+                    );
+                }
+            }
+            let (keep, make) = door_functions(&door_key(coach), &doors, 1.0);
+            assert_eq!(make.matches("summon interaction").count(), boxes.len());
+            assert_eq!(make.matches("arnis.tview").count(), doors.view.len());
+            assert_eq!(make.matches("arnis.seat").count(), doors.spots.len());
+            assert_eq!(keep.matches("$tp @e[type=interaction").count(), boxes.len());
+            for line in keep.lines().chain(make.lines()) {
+                assert!(line.starts_with('$') && line.contains("$(c)"), "{line}");
+            }
+        }
+        // Clicking a box with no seat boards nothing.
+        for path in ["cars/board", "trains/board"] {
+            let text = match path {
+                "cars/board" => include_str!(
+                    "../../assets/minecraft/datapack_extras/data/arnis/function/cars/board.mcfunction"
+                ),
+                _ => include_str!(
+                    "../../assets/minecraft/datapack_extras/data/arnis/function/trains/board.mcfunction"
+                ),
+            };
+            for line in text.lines().filter(|l| l.contains("tag=arnis.tp")) {
+                assert!(line.contains("tag=!arnis.tview"), "{path}: {line}");
+            }
+        }
     }
 
     #[test]
