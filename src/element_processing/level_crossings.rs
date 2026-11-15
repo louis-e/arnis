@@ -10,7 +10,14 @@
 //! own signal group, and cross it as they cross a junction, only with room to stand clear
 //! past it (`cars.rs`). The tags, the scores and the state numbers are the contract with
 //! `assets/minecraft/datapack_extras/data/arnis/function/xing`.
+//!
+//! A crossing no train closes stands open: one on a track without trains, and every one in
+//! a world without the pack. There the masts and booms are built as the traffic lights are
+//! without it, of scaled vanilla blocks on Java and of plain blocks elsewhere.
 
+use crate::block_definitions::{
+    BRICK_WALL, COBBLESTONE_WALL, DIORITE_WALL, IRON_BARS, LIGHT_GRAY_CONCRETE, WHITE_WALL_BANNER,
+};
 use crate::element_processing::cars::drivable;
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::road_markings::oneway_sign;
@@ -75,6 +82,19 @@ const HINGE_FRONT_M: f64 = 15.0 / 32.0;
 const BOOM_MODEL_M: f64 = 4.0;
 /// A boom at rest stands this far up from level, in degrees.
 const BOOM_UP_DEG: f64 = 80.0;
+/// The most stripes a standing boom is built with.
+const MAX_STRIPES: usize = 12;
+
+/// How a plan's masts and booms are built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Draw {
+    /// Models from the world's resource pack, which the data pack switches.
+    Models,
+    /// Scaled vanilla blocks as displays, standing open: Java without the pack.
+    Displays,
+    /// A post with the cross on a banner and the boom up beside it, of plain blocks.
+    Blocks,
+}
 
 /// Where a road's lanes break for a crossing, measured from one of its nodes along the
 /// road's way: how far short of the node the front of a car stops, and how far past it a
@@ -150,6 +170,14 @@ struct Cluster {
     sine: f64,
 }
 
+/// Where walkers wait for a crossing: a spot on its tracks, and the way they run there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WalkStop {
+    pub(crate) crossing: u32,
+    pub(crate) at: (f64, f64),
+    pub(crate) track: (f64, f64),
+}
+
 /// The level crossings of an area.
 pub struct CrossingPlan {
     crossings: Vec<Crossing>,
@@ -165,6 +193,9 @@ pub struct CrossingPlan {
     /// How near a spot on the tracks no car may be left standing, in blocks: anything
     /// nearer than the line cars stop at, which a car in its place never is.
     keep_clear: f64,
+    draw: Draw,
+    /// Where walkers wait, at the crossings trains close.
+    walk_stops: Vec<WalkStop>,
 }
 
 fn is_crossing(tags: &HashMap<String, String>) -> bool {
@@ -178,9 +209,30 @@ fn is_track(way: &ProcessedWay) -> bool {
     )
 }
 
+/// A railway's track, rather than a tramway's or a metro's.
+fn is_heavy(way: &ProcessedWay) -> bool {
+    matches!(
+        way.tags.get("railway").map(String::as_str),
+        Some("rail" | "narrow_gauge" | "preserved")
+    )
+}
+
 fn unit(dx: f64, dz: f64) -> Option<(f64, f64)> {
     let len = dx.hypot(dz);
     (len > 1e-9).then(|| (dx / len, dz / len))
+}
+
+/// Where the lines from `a` to `b` and from `c` to `d` cross, if they do.
+fn meet(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> Option<(f64, f64)> {
+    let (r, s) = ((b.0 - a.0, b.1 - a.1), (d.0 - c.0, d.1 - c.1));
+    let den = r.0 * s.1 - r.1 * s.0;
+    if den.abs() < 1e-9 {
+        return None;
+    }
+    let (qx, qz) = (c.0 - a.0, c.1 - a.1);
+    let t = (qx * s.1 - qz * s.0) / den;
+    let u = (qx * r.1 - qz * r.0) / den;
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some((a.0 + r.0 * t, a.1 + r.1 * t))
 }
 
 /// A way's line through the middles of its nodes' blocks.
@@ -236,14 +288,45 @@ impl Line {
 }
 
 impl CrossingPlan {
-    /// The crossings of the drivable roads with the tracks `trains` run on. `road_mask`
-    /// says where the roads are, so the masts stand beside them.
+    /// The crossings of the drivable roads with the tracks, for the pack to close for the
+    /// trains `trains` runs; those on a track without trains stand open. `road_mask` says
+    /// where the roads are, so the masts stand beside them.
     pub fn build(
         elements: &[ProcessedElement],
         trains: &TrainNetwork,
         scale: f64,
         drives_on_left: bool,
         road_mask: &RoadMaskBitmap,
+    ) -> Self {
+        Self::plan(
+            elements,
+            Some(trains),
+            scale,
+            drives_on_left,
+            road_mask,
+            Draw::Models,
+        )
+    }
+
+    /// The crossings of the drivable roads with the tracks, all standing open, built as
+    /// `draw` says.
+    pub fn standing(
+        elements: &[ProcessedElement],
+        scale: f64,
+        drives_on_left: bool,
+        road_mask: &RoadMaskBitmap,
+        draw: Draw,
+    ) -> Self {
+        Self::plan(elements, None, scale, drives_on_left, road_mask, draw)
+    }
+
+    fn plan(
+        elements: &[ProcessedElement],
+        trains: Option<&TrainNetwork>,
+        scale: f64,
+        drives_on_left: bool,
+        road_mask: &RoadMaskBitmap,
+        draw: Draw,
     ) -> Self {
         let size = scale.clamp(0.6, 2.0);
         let metres = scale.max(0.6);
@@ -253,8 +336,9 @@ impl CrossingPlan {
                 _ => None,
             })
         };
-        // Which way each track runs over its crossing nodes, and what the nodes say.
+        // Which way each track runs over its crossing nodes, and those a railway runs over.
         let mut rails: FnvHashMap<u64, Vec<(f64, f64)>> = FnvHashMap::default();
+        let mut on_railway: FnvHashSet<u64> = FnvHashSet::default();
         for way in ways().filter(|w| is_track(w)) {
             let line = Line::new(&way.nodes);
             for (k, node) in way.nodes.iter().enumerate() {
@@ -263,6 +347,9 @@ impl CrossingPlan {
                         .entry(node.id)
                         .or_default()
                         .push(line.heading(line.arcs[k]));
+                    if is_heavy(way) {
+                        on_railway.insert(node.id);
+                    }
                 }
             }
         }
@@ -290,7 +377,10 @@ impl CrossingPlan {
                 });
             }
         }
-        let served = trains.tracks_at(&spots, NODE_REACH);
+        let served = match trains {
+            Some(trains) => trains.tracks_at(&spots, NODE_REACH),
+            None => vec![Vec::new(); spots.len()],
+        };
         let tracks_of = |id: u64| -> &[TrackAt] { &served[spot_of[&id]] };
 
         let min_sine = MIN_ANGLE_DEG.to_radians().sin();
@@ -309,7 +399,11 @@ impl CrossingPlan {
                 }
             }
             for group in groups {
-                if group.iter().all(|&k| tracks_of(way.nodes[k].id).is_empty()) {
+                // Over a track, with trains on it or without.
+                if group.iter().all(|&k| {
+                    let id = way.nodes[k].id;
+                    tracks_of(id).is_empty() && !rails.contains_key(&id)
+                }) {
                     continue;
                 }
                 let (lo, hi) = (group[0], group[group.len() - 1]);
@@ -472,15 +566,19 @@ impl CrossingPlan {
             signed: FnvHashSet::default(),
             size,
             keep_clear: ((TRACK_HALF_M + BOOM_M + LINE_M) * metres - 0.5).max(2.0),
+            draw,
+            walk_stops: Vec::new(),
         };
-        let mut heavy = vec![false; number.len()];
+        // Whether a railway's trains run over it, and whether a railway's track does.
+        let mut heavy = vec![(false, false); number.len()];
         let mut tagged: Vec<(Option<bool>, Option<bool>)> = vec![(None, None); number.len()];
         for (c, cluster) in clusters.iter().enumerate() {
             let x = crossing_of(&mut root, c);
             let crossing = &mut plan.crossings[x];
             for &id in &cluster.nodes {
+                heavy[x].1 |= on_railway.contains(&id);
                 for t in tracks_of(id) {
-                    heavy[x] |= matches!(t.mode, Mode::Rail | Mode::SBahn);
+                    heavy[x].0 |= matches!(t.mode, Mode::Rail | Mode::SBahn);
                     let known = crossing
                         .tracks
                         .iter()
@@ -505,8 +603,13 @@ impl CrossingPlan {
         for (x, crossing) in plan.crossings.iter_mut().enumerate() {
             // A railway's crossing has booms and a tramway's only lamps, unless mapped
             // otherwise; one mapped with neither is left as it was, though cars still give
-            // its trains the way.
-            crossing.booms = tagged[x].0.unwrap_or(heavy[x]);
+            // its trains the way. Without trains the track says which it is.
+            let railway = if crossing.tracks.is_empty() {
+                heavy[x].1
+            } else {
+                heavy[x].0
+            };
+            crossing.booms = tagged[x].0.unwrap_or(railway);
             crossing.lamps = crossing.booms || tagged[x].1.unwrap_or(true);
         }
         for (c, cluster) in clusters.iter().enumerate() {
@@ -526,11 +629,16 @@ impl CrossingPlan {
                 plan.by_node.entry(cluster.nodes[0]).or_default().push(g);
             }
         }
+        // Lanes break only where trains close the crossing.
         for (key, c, [below_stop, below_exit, above_stop, above_exit]) in breaks {
+            let x = crossing_of(&mut root, c);
+            if plan.crossings[x].tracks.is_empty() {
+                continue;
+            }
             plan.breaks.insert(
                 key,
                 Break {
-                    crossing: crossing_of(&mut root, c) as u32,
+                    crossing: x as u32,
                     below_stop,
                     below_exit,
                     above_stop,
@@ -538,15 +646,193 @@ impl CrossingPlan {
                 },
             );
         }
+        // Walkers on a road wait where its cars do, on every track it crosses.
+        for (c, cluster) in clusters.iter().enumerate() {
+            let x = crossing_of(&mut root, c);
+            if plan.crossings[x].tracks.is_empty() {
+                continue;
+            }
+            for &id in &cluster.nodes {
+                let track = tracks_of(id)
+                    .first()
+                    .map(|t| t.dir)
+                    .or_else(|| rails.get(&id).and_then(|r| r.first().copied()));
+                if let Some(track) = track {
+                    plan.walk_stops.push(WalkStop {
+                        crossing: x as u32,
+                        at: spots[spot_of[&id]],
+                        track,
+                    });
+                }
+            }
+        }
+        if let Some(trains) = trains {
+            plan.add_footpaths(elements, trains, metres);
+        }
         plan
+    }
+
+    /// Where a path crosses a track trains run on: a crossing of its own, with no masts,
+    /// closed for its trains as a road's is so that walkers wait at it.
+    fn add_footpaths(&mut self, elements: &[ProcessedElement], trains: &TrainNetwork, metres: f64) {
+        let ways = || {
+            elements.iter().filter_map(|e| match e {
+                ProcessedElement::Way(w) if w.nodes.len() >= 2 => Some(w),
+                _ => None,
+            })
+        };
+        let level = |w: &ProcessedWay| {
+            w.tags.get("bridge").is_none_or(|v| v == "no")
+                && w.tags.get("tunnel").is_none_or(|v| v == "no")
+        };
+        // The tracks on the ground, piece by piece, by the cells of a coarse grid.
+        const CELL: f64 = 64.0;
+        let cell = |v: f64| (v / CELL).floor() as i32;
+        let mut pieces: Vec<((f64, f64), (f64, f64))> = Vec::new();
+        let mut grid: FnvHashMap<(i32, i32), Vec<usize>> = FnvHashMap::default();
+        let mut on_track: FnvHashMap<u64, (f64, f64)> = FnvHashMap::default();
+        for way in ways()
+            .filter(|w| is_track(w) && crate::element_processing::railways::is_at_grade_track(w))
+        {
+            let line = Line::new(&way.nodes);
+            for (k, node) in way.nodes.iter().enumerate() {
+                on_track.insert(node.id, line.heading(line.arcs[k]));
+            }
+            for w in line.points.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                for gx in cell(a.0.min(b.0))..=cell(a.0.max(b.0)) {
+                    for gz in cell(a.1.min(b.1))..=cell(a.1.max(b.1)) {
+                        grid.entry((gx, gz)).or_default().push(pieces.len());
+                    }
+                }
+                pieces.push((a, b));
+            }
+        }
+        if pieces.is_empty() {
+            return;
+        }
+        // Each spot a path crosses a track at: where it is, the way the track runs and the
+        // sine of the angle they cross at.
+        type Spot = ((f64, f64), (f64, f64), f64);
+        let min_sine = MIN_ANGLE_DEG.to_radians().sin();
+        let mut found: Vec<Spot> = Vec::new();
+        for way in ways().filter(|w| {
+            crate::element_processing::pedestrians::walk_density(&w.tags).is_some()
+                && !drivable(&w.tags)
+                && level(w)
+        }) {
+            let line = Line::new(&way.nodes);
+            let mut add = |at: (f64, f64), path: (f64, f64), track: (f64, f64)| {
+                let sine = (path.0 * track.1 - path.1 * track.0).abs();
+                if sine >= min_sine
+                    && !found
+                        .iter()
+                        .any(|f| (f.0 .0 - at.0).hypot(f.0 .1 - at.1) < 1.0)
+                {
+                    found.push((at, track, sine));
+                }
+            };
+            for (k, node) in way.nodes.iter().enumerate() {
+                if let Some(&track) = on_track.get(&node.id) {
+                    add(line.points[k], line.heading(line.arcs[k]), track);
+                }
+            }
+            for w in line.points.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                let Some(path) = unit(b.0 - a.0, b.1 - a.1) else {
+                    continue;
+                };
+                let mut seen: FnvHashSet<usize> = FnvHashSet::default();
+                for gx in cell(a.0.min(b.0))..=cell(a.0.max(b.0)) {
+                    for gz in cell(a.1.min(b.1))..=cell(a.1.max(b.1)) {
+                        for &t in grid.get(&(gx, gz)).into_iter().flatten() {
+                            if !seen.insert(t) {
+                                continue;
+                            }
+                            let (c, d) = pieces[t];
+                            if let Some(at) = meet(a, b, c, d) {
+                                let track = unit(d.0 - c.0, d.1 - c.1).unwrap_or((1.0, 0.0));
+                                add(at, path, track);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if found.is_empty() {
+            return;
+        }
+        let spots: Vec<(f64, f64)> = found.iter().map(|f| f.0).collect();
+        let served = trains.tracks_at(&spots, NODE_REACH);
+        // Spots close together are one crossing, as a path over a double line is.
+        let reach = CLUSTER_M * metres / 2.0;
+        let mut crossing_at: Vec<Option<usize>> = vec![None; found.len()];
+        for i in 0..found.len() {
+            if served[i].is_empty() {
+                continue;
+            }
+            let near = (0..i).find(|&j| {
+                crossing_at[j].is_some()
+                    && (spots[i].0 - spots[j].0).hypot(spots[i].1 - spots[j].1) <= reach
+            });
+            let x = match near.and_then(|j| crossing_at[j]) {
+                Some(x) => x,
+                None => {
+                    self.crossings.push(Crossing {
+                        tracks: Vec::new(),
+                        gates: Vec::new(),
+                        spots: Vec::new(),
+                        booms: false,
+                        lamps: false,
+                    });
+                    self.crossings.len() - 1
+                }
+            };
+            crossing_at[i] = Some(x);
+            let (at, track, sine) = found[i];
+            let crossing = &mut self.crossings[x];
+            for t in &served[i] {
+                if !crossing
+                    .tracks
+                    .iter()
+                    .any(|k| k.service == t.service && (k.at - t.at).abs() < 1.0)
+                {
+                    crossing.tracks.push(Track {
+                        service: t.service,
+                        at: t.at,
+                        // A path is a couple of blocks across.
+                        half: 3.0 / sine,
+                    });
+                }
+            }
+            self.walk_stops.push(WalkStop {
+                crossing: x as u32,
+                at,
+                track,
+            });
+        }
+    }
+
+    /// Where walkers wait, at the crossings trains close.
+    pub(crate) fn walk_stops(&self) -> &[WalkStop] {
+        &self.walk_stops
     }
 
     pub fn is_empty(&self) -> bool {
         self.crossings.is_empty()
     }
 
+    #[cfg(test)]
     pub fn crossing_count(&self) -> usize {
         self.crossings.len()
+    }
+
+    /// The crossings with trains to close for.
+    pub fn closing_count(&self) -> usize {
+        self.crossings
+            .iter()
+            .filter(|c| !c.tracks.is_empty())
+            .count()
     }
 
     /// Where the lanes of `way` break for a crossing at `node`.
@@ -559,9 +845,10 @@ impl CrossingPlan {
         self.signed.contains(&node)
     }
 
-    /// Every look the masts and booms show: the data pack names the same ids.
+    /// Every look the masts and booms show: the data pack names the same ids. None when
+    /// they are not models.
     pub fn looks(&self) -> Vec<Look> {
-        if self.gates.is_empty() {
+        if self.gates.is_empty() || self.draw != Draw::Models {
             return Vec::new();
         }
         [
@@ -575,8 +862,8 @@ impl CrossingPlan {
         .collect()
     }
 
-    /// Builds the masts and booms that stand for `node`: each a display the pack finds by
-    /// its crossing's tag, the mast dark and the boom up.
+    /// Builds the masts and booms that stand for `node`, the masts dark and the booms up:
+    /// as models, each a display the pack finds by its crossing's tag, or standing open.
     pub fn place(&self, editor: &mut WorldEditor, node: &ProcessedNode) {
         if !editor.owns(node.x, node.z) {
             return;
@@ -584,6 +871,17 @@ impl CrossingPlan {
         for &g in self.by_node.get(&node.id).into_iter().flatten() {
             let gate = &self.gates[g];
             let crossing = &self.crossings[gate.crossing];
+            match self.draw {
+                Draw::Models => {}
+                Draw::Displays => {
+                    self.place_displays(editor, gate, crossing.booms, 0x5A_0000 + g as i64 * 64);
+                    continue;
+                }
+                Draw::Blocks => {
+                    place_blocks(editor, gate, crossing.booms, self.size);
+                    continue;
+                }
+            }
             let (x, z) = gate.post;
             let y = f64::from(editor.get_absolute_y(x, 0, z)) + 1.0;
             let (cx, cz) = (f64::from(x) + 0.5, f64::from(z) + 0.5);
@@ -644,6 +942,68 @@ impl CrossingPlan {
                 seed + 1,
                 boom,
             );
+        }
+    }
+
+    /// One gate standing open, of scaled vanilla blocks: each piece a display at the foot
+    /// of the mast, turned to face its traffic.
+    fn place_displays(&self, editor: &mut WorldEditor, gate: &Gate, booms: bool, seed: i64) {
+        let (x, z) = gate.post;
+        let y = f64::from(editor.get_absolute_y(x, 0, z)) + 1.0;
+        let (cx, cz) = (f64::from(x) + 0.5, f64::from(z) + 0.5);
+        let k = self.size;
+        // The display's +x, to the right of its front, and whether the road is that way.
+        let right = (gate.facing.1, -gate.facing.0);
+        let road_right = gate.reach.0 * right.0 + gate.reach.1 * right.1 > 0.0;
+        let floats = |v: &[f64]| Value::List(v.iter().map(|f| Value::Float(*f as f32)).collect());
+        for (i, piece) in standing_pieces(booms, gate.boom / k, road_right)
+            .iter()
+            .enumerate()
+        {
+            let size = piece.size.map(|s| s * k);
+            let (sin, cos) = (piece.roll.to_radians() / 2.0).sin_cos();
+            // The block spans 0..1 before it is turned, so its middle is turned with it.
+            let (a, b) = piece.roll.to_radians().sin_cos();
+            let half = [size[0] / 2.0, size[1] / 2.0];
+            let middle = [half[0] * b - half[1] * a, half[0] * a + half[1] * b];
+            let translation = [
+                piece.at[0] * k - middle[0],
+                piece.at[1] * k - middle[1],
+                piece.at[2] * k - size[2] / 2.0,
+            ];
+            let mut nbt = HashMap::from([
+                (
+                    "block_state".to_string(),
+                    Value::Compound(HashMap::from([(
+                        "Name".to_string(),
+                        Value::String(piece.block.to_string()),
+                    )])),
+                ),
+                (
+                    "transformation".to_string(),
+                    Value::Compound(HashMap::from([
+                        ("left_rotation".to_string(), floats(&[0.0, 0.0, sin, cos])),
+                        ("right_rotation".to_string(), floats(&[0.0, 0.0, 0.0, 1.0])),
+                        ("translation".to_string(), floats(&translation)),
+                        ("scale".to_string(), floats(&size)),
+                    ])),
+                ),
+                (
+                    "Rotation".to_string(),
+                    Value::List(vec![Value::Float(yaw_of(gate.facing)), Value::Float(0.0)]),
+                ),
+            ]);
+            if piece.dim {
+                // A dark lamp: its red shows by day and fades by night.
+                nbt.insert(
+                    "brightness".to_string(),
+                    Value::Compound(HashMap::from([
+                        ("sky".to_string(), Value::Int(11)),
+                        ("block".to_string(), Value::Int(4)),
+                    ])),
+                );
+            }
+            editor.add_block_display(cx, y, cz, seed + i as i64, nbt);
         }
     }
 
@@ -803,6 +1163,171 @@ fn boom_turn(up: bool) -> [f64; 4] {
         [0.0, 0.0, -half.sin(), half.cos()]
     } else {
         [0.0, 0.0, 0.0, 1.0]
+    }
+}
+
+/// A box of a gate standing open: its middle across, up and towards the traffic from the
+/// foot of the mast, and its size, in metres, turned `roll` degrees about the way the
+/// gate faces.
+#[derive(Clone, Copy, Debug)]
+struct Piece {
+    at: [f64; 3],
+    size: [f64; 3],
+    roll: f64,
+    block: &'static str,
+    /// A lamp, dark.
+    dim: bool,
+}
+
+/// The mast of `models/crossings.py` in vanilla blocks, its lamps dark, and its boom of
+/// `boom_m` metres standing up, leaning to the road on the right or the left. Only the
+/// side facing the traffic has lamps and the cross.
+fn standing_pieces(booms: bool, boom_m: f64, road_right: bool) -> Vec<Piece> {
+    const U: f64 = 1.0 / 32.0;
+    let piece = |at: [f64; 3], size: [f64; 3], block: &'static str| Piece {
+        at: at.map(|v| v * U),
+        size: size.map(|v| v * U),
+        roll: 0.0,
+        block,
+        dim: false,
+    };
+    let mut out = vec![
+        piece([0.0, 2.5, 0.0], [12.0, 5.0, 12.0], "minecraft:smooth_stone"),
+        piece(
+            [0.0, 55.5, 0.0],
+            [4.0, 101.0, 4.0],
+            "minecraft:light_gray_concrete",
+        ),
+        piece(
+            [0.0, 74.0, 0.0],
+            [24.0, 3.0, 3.0],
+            "minecraft:light_gray_concrete",
+        ),
+    ];
+    for x in [-12.0, 12.0] {
+        out.push(piece(
+            [x, 74.0, 2.25],
+            [16.0, 16.0, 1.5],
+            "minecraft:black_concrete",
+        ));
+        out.push(Piece {
+            dim: true,
+            ..piece([x, 74.0, 3.125], [9.0, 9.0, 0.25], "minecraft:red_concrete")
+        });
+    }
+    // The cross: two boards, white with red ends, a hair apart.
+    for (roll, z) in [(45.0f64, 3.0), (-45.0, 3.25)] {
+        let (sin, cos) = roll.to_radians().sin_cos();
+        for (along, len, block) in [
+            (-16.0, 6.0, "minecraft:red_concrete"),
+            (0.0, 26.0, "minecraft:white_concrete"),
+            (16.0, 6.0, "minecraft:red_concrete"),
+        ] {
+            out.push(Piece {
+                roll,
+                ..piece([along * cos, 98.0 + along * sin, z], [len, 6.0, 1.0], block)
+            });
+        }
+    }
+    if !booms {
+        return out;
+    }
+    // The drive, and the boom up from its hinge, red and white with a red tip, its
+    // counterweight behind.
+    out.push(piece(
+        [0.0, 30.0, 7.75],
+        [14.0, 32.0, 11.5],
+        "minecraft:smooth_stone",
+    ));
+    out.push(piece(
+        [0.0, 9.5, 7.5],
+        [10.0, 9.0, 7.0],
+        "minecraft:light_gray_concrete",
+    ));
+    let roll = if road_right {
+        BOOM_UP_DEG
+    } else {
+        180.0 - BOOM_UP_DEG
+    };
+    let (sin, cos) = roll.to_radians().sin_cos();
+    let hinge = [0.0, HINGE_UP_M, HINGE_FRONT_M];
+    let along = |d: f64| [hinge[0] + d * cos, hinge[1] + d * sin, hinge[2]];
+    let stripes = ((boom_m / 0.5).round() as usize).clamp(2, MAX_STRIPES);
+    let stripe = boom_m / stripes as f64;
+    for i in 0..stripes {
+        let red = i % 2 == 1 || i == stripes - 1;
+        out.push(Piece {
+            at: along(stripe * (i as f64 + 0.5)),
+            size: [stripe, 2.5 * U, 1.5 * U],
+            roll,
+            block: if red {
+                "minecraft:red_concrete"
+            } else {
+                "minecraft:white_concrete"
+            },
+            dim: false,
+        });
+    }
+    out.push(Piece {
+        at: along(-12.0 * U),
+        size: [24.0 * U, 5.0 * U, 4.0 * U],
+        roll,
+        block: "minecraft:gray_concrete",
+        dim: false,
+    });
+    out
+}
+
+/// The side of a block that faces most nearly along `dir`, and the step to the next one
+/// that way.
+fn cardinal((dx, dz): (f64, f64)) -> (&'static str, (i32, i32)) {
+    if dx.abs() >= dz.abs() {
+        if dx >= 0.0 {
+            ("east", (1, 0))
+        } else {
+            ("west", (-1, 0))
+        }
+    } else if dz >= 0.0 {
+        ("south", (0, 1))
+    } else {
+        ("north", (0, -1))
+    }
+}
+
+/// One gate standing open, of plain blocks: a post as the traffic lights have, the cross on
+/// a banner facing the traffic, and the boom standing up behind it, white and red walls.
+fn place_blocks(editor: &mut WorldEditor, gate: &Gate, booms: bool, size: f64) {
+    let (x, z) = gate.post;
+    let ground = editor.get_absolute_y(x, 0, z);
+    let head = ground + ((3.3 * size).round() as i32).max(3);
+    editor.set_block_absolute(COBBLESTONE_WALL, x, ground + 1, z, None, None);
+    for y in ground + 2..head {
+        editor.set_block_absolute(IRON_BARS, x, y, z, None, None);
+    }
+    editor.set_block_absolute(LIGHT_GRAY_CONCRETE, x, head, z, None, None);
+    let (face, (fx, fz)) = cardinal(gate.facing);
+    editor.place_wall_banner(
+        WHITE_WALL_BANNER,
+        x + fx,
+        head,
+        z + fz,
+        face,
+        "white",
+        &[("red", "minecraft:cross")],
+    );
+    if !booms {
+        return;
+    }
+    let (bx, bz) = (x - fx, z - fz);
+    if editor.on_carriageway(bx, bz) {
+        return;
+    }
+    let base = editor.get_absolute_y(bx, 0, bz);
+    let rows = (gate.boom.round() as i32).clamp(2, 8);
+    for row in 1..=rows {
+        let red = row % 2 == 0 || row == rows;
+        let block = if red { BRICK_WALL } else { DIORITE_WALL };
+        editor.set_block_absolute(block, bx, base + row, bz, None, None);
     }
 }
 
@@ -992,6 +1517,10 @@ pub(crate) mod scene {
     pub(crate) fn plan(elements: &[ProcessedElement], drives_on_left: bool) -> CrossingPlan {
         CrossingPlan::build(elements, &trains(elements), 1.0, drives_on_left, &mask())
     }
+
+    pub(crate) fn standing(elements: &[ProcessedElement], draw: Draw) -> CrossingPlan {
+        CrossingPlan::standing(elements, 1.0, false, &mask(), draw)
+    }
 }
 
 #[cfg(test)]
@@ -1046,13 +1575,21 @@ mod tests {
     }
 
     #[test]
-    fn only_a_track_with_trains_on_it_that_really_crosses_makes_a_crossing() {
-        // A siding carries no trains.
+    fn only_a_track_that_really_crosses_makes_a_crossing_and_only_trains_close_it() {
+        // A siding carries no trains: its crossing stands open, and cars drive on over it.
         let mut idle = scene::elements(&[], &[]);
         if let ProcessedElement::Way(track) = &mut idle[0] {
             track.tags.insert("service".into(), "siding".into());
         }
-        assert!(scene::plan(&idle, false).is_empty());
+        let open = scene::plan(&idle, false);
+        assert_eq!((open.crossing_count(), open.closing_count()), (1, 0));
+        assert!(open.crossings[0].booms && open.gates.len() == 2 && open.signed(9));
+        assert!(open.break_at(1, 9).is_none());
+        assert!(open
+            .pack_functions(&scene::trains(&idle), |_| true)
+            .is_empty());
+        let closing = scene::plan(&scene::elements(&[], &[]), false);
+        assert_eq!(closing.closing_count(), 1);
         // A road beside the line, sharing a node tagged as a crossing, is not crossed by it.
         let along = vec![
             scene::way(
@@ -1075,9 +1612,226 @@ mod tests {
             ),
         ];
         assert!(scene::plan(&along, false).is_empty());
-        // No trains at all: nothing to plan.
+        // No track at all: nothing to plan.
         let road_only = vec![scene::elements(&[], &[]).remove(1)];
         assert!(scene::plan(&road_only, false).is_empty());
+        assert!(scene::standing(&road_only, Draw::Displays).is_empty());
+    }
+
+    #[test]
+    fn without_the_pack_every_crossing_stands_open() {
+        let elements = scene::elements(&[], &[]);
+        let plan = scene::standing(&elements, Draw::Displays);
+        assert_eq!((plan.crossing_count(), plan.closing_count()), (1, 0));
+        assert!(plan.crossings[0].booms && plan.signed(9));
+        // The masts stand where the pack's would, and cars have nothing to wait for.
+        let models = scene::plan(&elements, false);
+        let posts = |p: &CrossingPlan| p.gates.iter().map(|g| g.post).collect::<Vec<_>>();
+        assert_eq!(posts(&plan), posts(&models));
+        assert!(plan.break_at(1, 9).is_none() && plan.looks().is_empty());
+        // The track says what it is: a tramway's has lamps and no booms.
+        let mut tram = scene::elements(&[], &[]);
+        if let ProcessedElement::Way(track) = &mut tram[0] {
+            track.tags.insert("railway".into(), "tram".into());
+        }
+        let tram = scene::standing(&tram, Draw::Blocks);
+        assert!(!tram.crossings[0].booms && tram.crossings[0].lamps);
+        let barred = scene::standing(
+            &scene::elements(&[], &[("crossing:barrier", "no"), ("crossing:light", "no")]),
+            Draw::Displays,
+        );
+        assert!(barred.gates.is_empty() && !barred.signed(9));
+    }
+
+    #[test]
+    fn a_path_over_the_tracks_is_a_crossing_walkers_wait_at() {
+        let mut elements = scene::elements(&[], &[]);
+        // One path crosses the line between its nodes, one at a node mapped as a crossing,
+        // one on a bridge over it, and one runs along beside it.
+        if let ProcessedElement::Way(track) = &mut elements[0] {
+            let node = scene::node(300, 1500, 1000, &[("railway", "crossing")]);
+            track.nodes.insert(2, node);
+        }
+        let footway = &[("highway", "footway")];
+        elements.extend([
+            scene::way(
+                60,
+                vec![
+                    scene::node(200, 500, 950, &[]),
+                    scene::node(201, 500, 1050, &[]),
+                ],
+                footway,
+            ),
+            scene::way(
+                61,
+                vec![
+                    scene::node(210, 1500, 950, &[]),
+                    scene::node(300, 1500, 1000, &[("railway", "crossing")]),
+                    scene::node(211, 1500, 1050, &[]),
+                ],
+                footway,
+            ),
+            scene::way(
+                62,
+                vec![
+                    scene::node(220, 700, 950, &[]),
+                    scene::node(221, 700, 1050, &[]),
+                ],
+                &[("highway", "footway"), ("bridge", "yes")],
+            ),
+            scene::way(
+                63,
+                vec![
+                    scene::node(230, 200, 1003, &[]),
+                    scene::node(231, 400, 1004, &[]),
+                ],
+                footway,
+            ),
+        ]);
+        let plan = scene::plan(&elements, false);
+        // The road's crossing, and one of its own for each path walkers cross.
+        assert_eq!((plan.crossing_count(), plan.closing_count()), (3, 3));
+        let stop_at = |x: f64| {
+            plan.walk_stops()
+                .iter()
+                .find(|s| (s.at.0 - x).abs() < 1.0)
+                .copied()
+        };
+        assert!(stop_at(700.5).is_none() && stop_at(300.5).is_none());
+        let functions = plan.pack_functions(&scene::trains(&elements), |_| true);
+        for x in [500.5, 1500.5, 1000.5] {
+            let stop = stop_at(x).unwrap_or_else(|| panic!("no stop at {x}"));
+            assert!((stop.at.1 - 1000.5).abs() < 0.6, "{stop:?}");
+            assert!(stop.track.0.abs() > 0.99, "{stop:?}");
+            // Closed for the trains as the road's is, with nothing to build.
+            let c = stop.crossing as usize;
+            assert!(!plan.crossings[c].tracks.is_empty());
+            let path = format!("data/arnis/function/xing/c/{c}.mcfunction");
+            assert!(functions.iter().any(|(p, _)| *p == path), "{path}");
+            if x != 1000.5 {
+                assert!(plan.crossings[c].gates.is_empty());
+                assert!(plan.breaks.values().all(|b| b.crossing as usize != c));
+            }
+        }
+        // Without trains nobody waits.
+        assert!(scene::standing(&elements, Draw::Displays)
+            .walk_stops()
+            .is_empty());
+    }
+
+    #[test]
+    fn standing_open_on_java_is_vanilla_blocks_as_displays() {
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let elements = scene::elements(&[], &[]);
+        let plan = scene::standing(&elements, Draw::Displays);
+        let world = scene::world();
+        let llbbox = LLBBox::new(47.0, 8.0, 47.01, 8.01).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &world, llbbox);
+        plan.place(&mut editor, &scene::crossing(9, 1000, 1000, &[]));
+        assert!(editor.item_displays().is_empty());
+        let parts = editor.entities_of("minecraft:block_display");
+        let per_gate = standing_pieces(true, 2.75, true).len();
+        assert_eq!(parts.len(), 2 * per_gate);
+        let floats = |v: Option<&Value>| match v {
+            Some(Value::List(v)) => v
+                .iter()
+                .map(|f| match f {
+                    Value::Float(f) => f64::from(*f),
+                    Value::Double(d) => *d,
+                    _ => f64::NAN,
+                })
+                .collect::<Vec<f64>>(),
+            _ => Vec::new(),
+        };
+        let mask = scene::mask();
+        let mut boom_tops = Vec::new();
+        for part in &parts {
+            // Nothing the pack would look for.
+            assert!(part.get("Tags").is_none());
+            let pos = floats(part.get("Pos"));
+            let gate = plan
+                .gates
+                .iter()
+                .find(|g| {
+                    (f64::from(g.post.0) + 0.5 - pos[0]).abs() < 1e-6
+                        && (f64::from(g.post.1) + 0.5 - pos[2]).abs() < 1e-6
+                })
+                .expect("every piece stands at a mast");
+            assert_eq!(floats(part.get("Rotation"))[0] as f32, yaw_of(gate.facing));
+            let Some(Value::Compound(t)) = part.get("transformation") else {
+                panic!("no transformation");
+            };
+            let (q, tr, s) = (
+                floats(t.get("left_rotation")),
+                floats(t.get("translation")),
+                floats(t.get("scale")),
+            );
+            // A boom stripe is red or white and turned most: up from level, not the cross's
+            // 45 degrees.
+            let block = match part.get("block_state") {
+                Some(Value::Compound(b)) => match b.get("Name") {
+                    Some(Value::String(name)) => name.clone(),
+                    _ => String::new(),
+                },
+                _ => String::new(),
+            };
+            let striped = matches!(
+                block.as_str(),
+                "minecraft:red_concrete" | "minecraft:white_concrete"
+            );
+            if q[2].abs() < 0.6 || !striped {
+                continue;
+            }
+            // Where its far end is, across from the mast and up.
+            let a = 2.0 * q[2].atan2(q[3]);
+            let end = (tr[0] + s[0] * a.cos(), tr[1] + s[0] * a.sin());
+            let right = (gate.facing.1, -gate.facing.0);
+            let toward_road = gate.reach.0 * right.0 + gate.reach.1 * right.1;
+            assert!(end.0 * toward_road >= 0.0, "a boom leans to the road");
+            let (x, z) = (
+                pos[0] + right.0 * end.0 + gate.facing.0 * tr[2],
+                pos[2] + right.1 * end.0 + gate.facing.1 * tr[2],
+            );
+            boom_tops.push(end.1);
+            // Up, it stays over its own kerb.
+            assert!(!mask.contains(x.floor() as i32, z.floor() as i32));
+        }
+        assert!(!boom_tops.is_empty());
+        assert!(
+            boom_tops.iter().cloned().fold(0.0, f64::max) > 3.0,
+            "{boom_tops:?}"
+        );
+    }
+
+    #[test]
+    fn standing_open_elsewhere_is_a_post_a_banner_and_a_boom_of_walls() {
+        use crate::coordinate_system::geographic::LLBBox;
+
+        let elements = scene::elements(&[], &[]);
+        let plan = scene::standing(&elements, Draw::Blocks);
+        let world = scene::world();
+        let llbbox = LLBBox::new(47.0, 8.0, 47.01, 8.01).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &world, llbbox);
+        plan.place(&mut editor, &scene::crossing(9, 1000, 1000, &[]));
+        assert!(editor.entities_of("minecraft:block_display").is_empty());
+        let mask = scene::mask();
+        for gate in &plan.gates {
+            let (x, z) = gate.post;
+            let ground = editor.get_absolute_y(x, 0, z);
+            let at = |x: i32, y: i32, z: i32| editor.get_block_absolute(x, y, z);
+            assert_eq!(at(x, ground + 1, z), Some(COBBLESTONE_WALL));
+            assert_eq!(at(x, ground + 2, z), Some(IRON_BARS));
+            assert_eq!(at(x, ground + 3, z), Some(LIGHT_GRAY_CONCRETE));
+            let (_, (fx, fz)) = cardinal(gate.facing);
+            assert_eq!(at(x + fx, ground + 3, z + fz), Some(WHITE_WALL_BANNER));
+            // The boom behind the mast, off the road, white at the foot and red at the top.
+            let (bx, bz) = (x - fx, z - fz);
+            assert!(!mask.contains(bx, bz));
+            assert_eq!(at(bx, ground + 1, bz), Some(DIORITE_WALL));
+            let rows = (gate.boom.round() as i32).clamp(2, 8);
+            assert_eq!(at(bx, ground + rows, bz), Some(BRICK_WALL));
+        }
     }
 
     #[test]

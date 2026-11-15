@@ -1497,26 +1497,37 @@ pub fn generate_world_with_options(
     let planned_trains = extras.cars.then(|| {
         crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
     });
-    // Level crossings are the Java pack's to close, like the traffic lights.
-    let crossings = planned_trains
-        .as_ref()
-        .filter(|net| java && !net.is_empty())
-        .map(|net| {
-            crate::element_processing::level_crossings::CrossingPlan::build(
+    // Level crossings are the Java pack's to close, like the traffic lights. Without it they
+    // stand open, built as the traffic lights are then.
+    let crossings = {
+        use crate::element_processing::level_crossings::{CrossingPlan, Draw};
+        let drives_on_left = sign_region.drives_on_left();
+        match planned_trains
+            .as_ref()
+            .filter(|net| java && !net.is_empty())
+        {
+            Some(net) => Some(CrossingPlan::build(
                 &elements,
                 net,
                 args.scale,
-                sign_region.drives_on_left(),
+                drives_on_left,
                 &road_mask,
-            )
-        })
-        .filter(|plan| !plan.is_empty())
-        .map(Arc::new);
+            )),
+            None => (!args.skip_objects()).then(|| {
+                let draw = if java { Draw::Displays } else { Draw::Blocks };
+                CrossingPlan::standing(&elements, args.scale, drives_on_left, &road_mask, draw)
+            }),
+        }
+    }
+    .filter(|plan| !plan.is_empty())
+    .map(Arc::new);
     if let Some(plan) = &crossings {
-        println!(
-            "  Moving vehicles: {} level crossings close for their trains",
-            plan.crossing_count()
-        );
+        if plan.closing_count() > 0 {
+            println!(
+                "  Moving vehicles: {} level crossings close for their trains",
+                plan.closing_count()
+            );
+        }
         editor.set_crossings(Arc::clone(plan));
     }
 
@@ -1561,6 +1572,7 @@ pub fn generate_world_with_options(
                 args.scale,
                 sign_region.drives_on_left(),
                 extras.traffic_lights,
+                crossings.as_deref().map_or(&[], |c| c.walk_stops()),
                 &xzbbox,
                 |way, x, z| surfaces.y_at(way, x, z),
             )
