@@ -1,4 +1,4 @@
-"""Regenerate the setting-preview pictures: python -I scripts/previews3d/previews3d.py [name-prefix] [--exe PATH] [--out DIR] [--manifest FILE] [--keep]
+"""Regenerate the setting-preview pictures: python -I assets/previews3d/previews3d.py [name-prefix] [--exe PATH] [--out DIR] [--manifest FILE] [--keep]
 
 For each {name, bbox, flags, crop} in previews3d.json (next to this file) builds the tiny world with the
 Arnis binary into a temp dir (worlds with the same bbox and flags are built once) and renders

@@ -1,5 +1,5 @@
 // The picture a setting shows while its tile is hovered or one of its controls has focus: a block diorama
-// of what the setting does (images/previews3d, made by scripts/previews3d). It has one fixed place, the
+// of what the setting does (images/previews3d, made by assets/previews3d). It has one fixed place, the
 // foot of the settings sidebar above Reset, so it never covers the setting. Every setting shows its current
 // state, a switch included; changing it shows the new one.
 
