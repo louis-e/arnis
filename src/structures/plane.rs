@@ -134,6 +134,13 @@ pub struct PrescanResult {
 }
 
 impl PrescanResult {
+    /// Without the aeroplanes where `taken` says an airfield has aircraft of its own,
+    /// which they would stand in the way of.
+    pub fn without(mut self, taken: impl Fn(i32, i32) -> bool) -> Self {
+        self.placements.retain(|p| !taken(p.anchor_x, p.anchor_z));
+        self
+    }
+
     pub fn placement_count(&self) -> usize {
         self.placements.len()
     }
@@ -1012,5 +1019,31 @@ mod tests {
             build_placements(&strips, &[], 1.0).is_empty(),
             "a bent taxiway should not park a plane"
         );
+    }
+    /// Where an airfield has aircraft of its own the block-built aeroplanes are left out,
+    /// and only there.
+    #[test]
+    fn aeroplanes_keep_off_the_ground_that_is_taken() {
+        let at = |x: i32| Placement {
+            rep_id: x as u64,
+            kind: PlaneKind::Parked,
+            anchor_x: x,
+            anchor_z: 0,
+            yaw_degrees: 0.0,
+            pitch_degrees: 0.0,
+            elevation_blocks: 0,
+            footprint: Bbox {
+                min_x: x - 20,
+                min_z: -20,
+                max_x: x + 20,
+                max_z: 20,
+            },
+        };
+        let all = PrescanResult {
+            placements: vec![at(100), at(900), at(5000)],
+        };
+        let kept = all.without(|x, _| x < 1000);
+        assert_eq!(kept.placement_count(), 1);
+        assert_eq!(kept.placements[0].anchor_x, 5000);
     }
 }

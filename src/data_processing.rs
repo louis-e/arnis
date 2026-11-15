@@ -579,6 +579,9 @@ fn process_element(
             if signage {
                 signage::generate_node_signage(editor, node, building_footprints, road_mask);
             }
+            if let Some(crossings) = editor.crossings() {
+                crossings.place(editor, node);
+            }
             if node.tags.contains_key("door") || node.tags.contains_key("entrance") {
                 doors::generate_doors(editor, node);
             } else if node.tags.get("natural").map(String::as_str) == Some("tree") {
@@ -1483,6 +1486,33 @@ pub fn generate_world_with_options(
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
 
+    // The trains are planned before the cars, which wait at the level crossings they close.
+    let planned_trains = extras.cars.then(|| {
+        crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
+    });
+    // Level crossings are the Java pack's to close, like the traffic lights.
+    let crossings = planned_trains
+        .as_ref()
+        .filter(|net| java && !net.is_empty())
+        .map(|net| {
+            crate::element_processing::level_crossings::CrossingPlan::build(
+                &elements,
+                net,
+                args.scale,
+                sign_region.drives_on_left(),
+                &road_mask,
+            )
+        })
+        .filter(|plan| !plan.is_empty())
+        .map(Arc::new);
+    if let Some(plan) = &crossings {
+        println!(
+            "  Moving vehicles: {} level crossings close for their trains",
+            plan.crossing_count()
+        );
+        editor.set_crossings(Arc::clone(plan));
+    }
+
     let car_network = extras.cars.then(|| {
         let surfaces = highways::RoadSurfaces::new(
             &editor,
@@ -1498,6 +1528,7 @@ pub fn generate_world_with_options(
             extras.traffic_lights,
             traffic_signals.as_deref().filter(|s| s.cycling()),
             Some(&road_markings),
+            crossings.as_deref(),
             &xzbbox,
             |way, x, z| surfaces.y_at(way, x, z),
             |x, z| building_footprints.contains(x, z),
@@ -1566,19 +1597,65 @@ pub fn generate_world_with_options(
     if let Some(probe) = &water_probe {
         editor.set_water_probe(Arc::clone(probe));
     }
+    // Aircraft taxi and fly over the ground as it is, known before anything is built. They
+    // take what room the trains leave in the pack, and on Bedrock keep under the world's top.
+    let air_plan = planned_trains
+        .as_ref()
+        .filter(|_| args.props().has(crate::structures::Prop::Plane))
+        .map(|net| {
+            let ceiling = if world_format == WorldFormat::BedrockMcWorld {
+                crate::element_processing::aircraft::BEDROCK_CEILING
+            } else {
+                f64::INFINITY
+            };
+            crate::element_processing::aircraft::AirPlan::build(
+                &elements,
+                args.scale,
+                net.room_for_aircraft(),
+                ceiling,
+                |x, z| {
+                    xzbbox
+                        .contains(&crate::coordinate_system::cartesian::XZPoint::new(x, z))
+                        .then(|| {
+                            f64::from(ground.level(
+                                crate::coordinate_system::cartesian::XZPoint::new(
+                                    x - xzbbox.min_x(),
+                                    z - xzbbox.min_z(),
+                                ),
+                            ))
+                        })
+                },
+            )
+        })
+        .filter(|plan| !plan.is_empty());
+    if let Some(plan) = &air_plan {
+        let (flying, parked) = plan.counts();
+        println!(
+            "  Moving vehicles: {flying} aircraft flying and {parked} standing at the airfields"
+        );
+    }
+    // Where an airfield has aircraft of its own, the block-built aeroplanes would stand in
+    // their way; the airfields that got none keep theirs.
+    let airfields: Vec<[f64; 4]> = air_plan
+        .as_ref()
+        .map(|plan| plan.extents().to_vec())
+        .unwrap_or_default();
     // Trains ride the rails as they were laid, so the editors note where each one went.
-    let mut train_network = extras
-        .cars
-        .then(|| {
-            crate::element_processing::trains::TrainNetwork::build(&elements, args.scale, &xzbbox)
+    let mut train_network = planned_trains
+        .map(|mut net| {
+            // After the crossings are planned, which know the trains by their place here.
+            if let Some(plan) = air_plan {
+                net.add_aircraft(plan.into_fields());
+            }
+            net
         })
         .filter(|net| !net.is_empty() || ship_plan.is_some());
     // Only trains need the rails' heights; boats find the water themselves.
     let rail_heights: Option<crate::world_editor::RailHeights> = train_network
         .as_ref()
-        .filter(|net| !net.is_empty())
+        .filter(|net| net.train_count() > 0)
         .map(|_| Arc::new(std::sync::Mutex::new(fnv::FnvHashMap::default())));
-    if let Some(net) = train_network.as_ref().filter(|net| !net.is_empty()) {
+    if let Some(net) = train_network.as_ref().filter(|net| net.train_count() > 0) {
         println!(
             "  Moving vehicles: {} trains on the rail network",
             net.train_count()
@@ -1596,6 +1673,7 @@ pub fn generate_world_with_options(
             car_network.as_deref(),
             train_network.as_ref(),
             extras.traffic_lights,
+            crossings.as_deref(),
         );
         looks.extend(parked_looks(parked_car_models));
         looks.extend(ship_plan.iter().flat_map(|plan| plan.possible_looks()));
@@ -1633,7 +1711,12 @@ pub fn generate_world_with_options(
     let _recording = crate::datapack::disasters::Surface::record(disaster_woods.map(|_| &xzbbox));
 
     // Runway segments merge across ways, so planes prescan here and stamp after the merge.
-    let planes = crate::structures::plane::prescan(&elements, args);
+    let planes = crate::structures::plane::prescan(&elements, args).without(|x, z| {
+        let (x, z) = (f64::from(x), f64::from(z));
+        airfields
+            .iter()
+            .any(|&[x0, z0, x1, z1]| x >= x0 && x <= x1 && z >= z0 && z <= z1)
+    });
 
     // 3D model pipeline pre-scan: elements rendered as 3D models instead of
     // voxels are recorded here and skipped by the element loop below.
@@ -1917,6 +2000,9 @@ pub fn generate_world_with_options(
             }
             if let Some(signals) = &traffic_signals {
                 tile_editor.set_traffic_signals(Arc::clone(signals));
+            }
+            if let Some(plan) = &crossings {
+                tile_editor.set_crossings(Arc::clone(plan));
             }
             if let Some(cars) = &placed_cars {
                 tile_editor.set_car_network(Arc::clone(cars));
@@ -2876,6 +2962,25 @@ pub fn generate_world_with_options(
             println!("  Disasters: {}", plan.summary());
             plan
         });
+        // Every editor is done laying rails, so the record is read in place, by the trains
+        // and by the crossings.
+        let laid = rail_heights.as_ref().and_then(|h| h.lock().ok());
+        let rail_y =
+            |way: u64, x: i32, z: i32| laid.as_ref().and_then(|m| m.get(&(way, x, z)).copied());
+        // Each crossing closes for the trains that turned out to run: their rails were laid.
+        // A service is asked about once, however many roads cross its track.
+        let crossing_functions = match (crossings.as_deref(), train_network.as_ref()) {
+            (Some(plan), Some(net)) => {
+                let ran: std::cell::RefCell<fnv::FnvHashMap<usize, bool>> = Default::default();
+                plan.pack_functions(net, |service| {
+                    *ran.borrow_mut()
+                        .entry(service)
+                        .or_insert_with(|| net.runs(service, rail_y))
+                })
+            }
+            _ => Vec::new(),
+        };
+        extras.crossings = !crossing_functions.is_empty();
         let ctx = crate::datapack::PackContext {
             extras,
             area: extras_area_name(&output_path, args, llbbox, settlement),
@@ -2920,14 +3025,9 @@ pub fn generate_world_with_options(
                 .unwrap_or_default(),
             train_functions: train_network
                 .as_ref()
-                .map(|net| {
-                    let laid = rail_heights
-                        .as_ref()
-                        .and_then(|h| h.lock().ok().map(|m| m.clone()))
-                        .unwrap_or_default();
-                    net.pack_functions(|way, x, z| laid.get(&(way, x, z)).copied())
-                })
+                .map(|net| net.pack_functions(rail_y))
                 .unwrap_or_default(),
+            crossing_functions,
             disasters,
             // The boats are on the train network by now.
             vehicle_pack: crate::vehicle_models::java_pack(
@@ -2935,6 +3035,7 @@ pub fn generate_world_with_options(
                     car_network.as_deref(),
                     train_network.as_ref(),
                     extras.traffic_lights,
+                    crossings.as_deref(),
                 ),
                 &parked_looks(parked_car_models),
             ),
@@ -3010,6 +3111,7 @@ fn pack_looks(
     cars: Option<&crate::element_processing::cars::CarNetwork>,
     trains: Option<&crate::element_processing::trains::TrainNetwork>,
     signals: bool,
+    crossings: Option<&crate::element_processing::level_crossings::CrossingPlan>,
 ) -> Vec<crate::vehicle_models::Look> {
     cars.iter()
         .flat_map(|net| net.java_looks())
@@ -3020,6 +3122,7 @@ fn pack_looks(
                 .into_iter()
                 .flatten(),
         )
+        .chain(crossings.iter().flat_map(|plan| plan.looks()))
         .collect()
 }
 

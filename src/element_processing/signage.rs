@@ -1851,6 +1851,10 @@ pub fn generate_highway_node_signage(
     let Some(ctx) = editor.signage() else {
         return;
     };
+    // A level crossing with masts has its cross on each of them, facing each approach.
+    if editor.crossings().is_some_and(|c| c.signed(node.id)) {
+        return;
+    }
     let Some(key) = highway_node_sign(&node.tags, ctx.level).filter(|k| ctx.has(k)) else {
         return;
     };

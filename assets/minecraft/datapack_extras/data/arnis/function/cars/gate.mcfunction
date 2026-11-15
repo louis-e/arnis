@@ -3,7 +3,10 @@
 # 40 s at most: longer than any red light, and how cars that wait on each other in a ring
 # round a block of short lanes get going again.
 execute store result score #gq arnis.car run data get entity @s data.q
-execute if score #gq arnis.car matches 400.. run return 0
+# Over a level crossing (gk) it never gives up: better stuck before the tracks than on them.
+execute if score #gq arnis.car matches 400.. unless data entity @s data.gk run return 0
+execute if entity @s[tag=!arnis.car.long] if data entity @s data{gc:3b} run function arnis:cars/gate_crossing with entity @s data
+execute if entity @s[tag=arnis.car.long] if data entity @s data{gl:3b} run function arnis:cars/gate_crossing with entity @s data
 execute if entity @s[tag=!arnis.car.long] if data entity @s data{gc:1b} unless score #tl arnis matches 0..239 run return run function arnis:cars/gated
 execute if entity @s[tag=!arnis.car.long] if data entity @s data{gc:2b} unless score #tl arnis matches 340..579 run return run function arnis:cars/gated
 execute if entity @s[tag=arnis.car.long] if data entity @s data{gl:1b} unless score #tl arnis matches 0..239 run return run function arnis:cars/gated

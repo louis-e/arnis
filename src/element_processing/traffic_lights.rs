@@ -722,7 +722,7 @@ impl SignalIndex {
     }
 }
 
-fn kerb_side(travel: (f64, f64), drives_on_left: bool) -> (f64, f64) {
+pub(crate) fn kerb_side(travel: (f64, f64), drives_on_left: bool) -> (f64, f64) {
     if drives_on_left {
         (travel.1, -travel.0)
     } else {
@@ -1062,7 +1062,7 @@ impl Builder<'_, '_> {
 }
 
 /// The yaw that turns an entity's +z, and a vehicle model's front, towards `facing`.
-fn yaw_of(facing: (f64, f64)) -> f32 {
+pub(crate) fn yaw_of(facing: (f64, f64)) -> f32 {
     (-facing.0).atan2(facing.1).to_degrees() as f32
 }
 

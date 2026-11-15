@@ -13,6 +13,7 @@ use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::datapack::macro_coord;
 use crate::element_processing::highways::{highway_block_range, highway_default_lanes};
+use crate::element_processing::level_crossings::{CrossingPlan, STOP_GROUP};
 use crate::element_processing::road_markings::{
     is_roundabout, oneway_sign, RoadMarkingIndex, StopLine,
 };
@@ -75,6 +76,9 @@ const SHORT_LANE: f64 = 3.0;
 /// Furthest a lane's entry point lies across a junction, in blocks, as for a left turn
 /// over a boulevard: beyond it the car is back in a queue.
 const CROSSING_REACH: f64 = 40.0;
+/// And across a level crossing, from the stop before it to clear of the tracks beyond:
+/// further than any junction where the tracks are many, cross askew or the scale is large.
+const LEVEL_CROSSING_REACH: f64 = 120.0;
 /// Drivers keep a little under the limit.
 const LIMIT_SHARE: f64 = 0.92;
 /// 2.5 m/s², a calm start from the lights.
@@ -548,6 +552,8 @@ struct Segment {
     next: Vec<Turn>,
     /// Ends at a junction rather than where the road just goes on or stops.
     into_junction: bool,
+    /// The level crossing it ends at, whose closing its last stop points wait out.
+    crossing: Option<u32>,
     /// A dead end, where the lane bends round into the way back.
     turns_back: bool,
     /// A dead end too short to drive into, which no car starts on either.
@@ -759,6 +765,7 @@ impl CarNetwork {
             stop_at_signals,
             None,
             None,
+            None,
             world,
             surface_y,
             built,
@@ -768,6 +775,8 @@ impl CarNetwork {
     /// As `build`, holding cars only at signals whose `heads` show them a light: where the
     /// heads were planned off the road or merged with another, there is nothing to stop for.
     /// Cars stop short of the stop lines `painted` lays down where it has one for a signal.
+    /// At the level crossings of `crossings` the lanes break as at a junction: cars wait
+    /// short of the booms while a crossing is closed, and cross only with room past it.
     #[allow(clippy::too_many_arguments)]
     pub fn build_with_heads(
         elements: &[ProcessedElement],
@@ -776,6 +785,7 @@ impl CarNetwork {
         stop_at_signals: bool,
         heads: Option<&SignalIndex>,
         painted: Option<&RoadMarkingIndex>,
+        crossings: Option<&CrossingPlan>,
         world: &XZBBox,
         surface_y: impl Fn(&ProcessedWay, i32, i32) -> i32,
         built: impl Fn(i32, i32) -> bool,
@@ -817,12 +827,17 @@ impl CarNetwork {
         let junctions = Junctions::build(roads.iter().map(|&(w, half, _)| (w, half)), scale);
         let arms = |id: u64| junctions.arms(id);
         let junction = |id: u64| junctions.is_junction(id);
+        // Where a way's lanes break for a level crossing.
+        let break_at = |way: u64, node: u64| crossings.and_then(|c| c.break_at(way, node));
 
         let mut pieces: Vec<Piece> = Vec::new();
         for (way, half, oneway) in &roads {
             let mut start = 0;
             for k in 1..way.nodes.len() {
-                if k == way.nodes.len() - 1 || junction(way.nodes[k].id) {
+                if k == way.nodes.len() - 1
+                    || junction(way.nodes[k].id)
+                    || break_at(way.id, way.nodes[k].id).is_some()
+                {
                     pieces.push(Piece {
                         way,
                         nodes: &way.nodes[start..=k],
@@ -904,7 +919,26 @@ impl CarNetwork {
                         0.0
                     }
                 };
+                // A level crossing at either end: the lane begins clear of the tracks, and ends
+                // where a car stands with its front at the line short of the boom.
+                let forward = !lane.backward;
+                let (leaves, meets) = (
+                    break_at(piece.way.id, first),
+                    break_at(piece.way.id, last),
+                );
                 let (mut from, mut to) = (trim(first), path.length() - trim(last));
+                if let Some(b) = leaves {
+                    from = from.max(b.exit(forward));
+                }
+                if let Some(b) = meets {
+                    to = to.min(path.length() - b.stop(forward) - Holds::Cars.reach() * size);
+                    // Where a junction lies close before the tracks the lane begins within
+                    // it, rather than be too short for its two stops, or to count as a lane.
+                    if leaves.is_none() {
+                        let room = (Holds::Long.reach() - Holds::Cars.reach() + 1.0) * size;
+                        from = from.min(to - room).max(0.0);
+                    }
+                }
                 if to - from < 2.0 {
                     // Too short to stop short of both ends: a stub between them, so the lanes
                     // into and out of it still lead forwards.
@@ -917,7 +951,7 @@ impl CarNetwork {
                     (
                         from,
                         None,
-                        if junction(first) {
+                        if junction(first) || leaves.is_some() {
                             capped(JUNCTION_KMH)
                         } else {
                             None
@@ -926,15 +960,26 @@ impl CarNetwork {
                     (
                         to,
                         None,
-                        if junction(last) || turns_back {
+                        if junction(last) || turns_back || meets.is_some() {
                             capped(LANE_END_KMH)
                         } else {
                             None
                         },
                     ),
                 ];
-                if (junction(last) || turns_back) && to - from > LANE_END_REACH + 2.0 {
+                if (junction(last) || turns_back || meets.is_some())
+                    && to - from > LANE_END_REACH + 2.0
+                {
                     marks.push((to - LANE_END_REACH, None, None));
+                }
+                if meets.is_some() {
+                    // A car stands on the lane's end with its front at the line; a bus or a
+                    // truck stops further back, its front there too.
+                    let front = to + Holds::Cars.reach() * size;
+                    for holds in [Holds::Cars, Holds::Long] {
+                        let s = front - holds.reach() * size;
+                        marks.push((s.clamp(from, to), Some((STOP_GROUP, holds)), None));
+                    }
                 }
                 for k in 1..path.points.len().saturating_sub(1) {
                     let s = path.at[k];
@@ -1058,7 +1103,8 @@ impl CarNetwork {
                     points,
                     arcs,
                     next: Vec::new(),
-                    into_junction: junction(last),
+                    into_junction: junction(last) || meets.is_some(),
+                    crossing: meets.map(|b| b.crossing),
                     turns_back,
                     stub: false,
                     speed,
@@ -1153,6 +1199,10 @@ impl CarNetwork {
                     );
                     if let Some(g) = p.stop {
                         let _ = write!(out, ",g:{g}b{}", p.holds.field());
+                        // A level crossing's stop names the crossing it waits out.
+                        if let Some(x) = seg.crossing.filter(|_| g == STOP_GROUP) {
+                            let _ = write!(out, ",lx:{x}");
+                        }
                     }
                     if let Some(m) = p.cap {
                         let _ = write!(out, ",m:{m}");
@@ -1164,7 +1214,10 @@ impl CarNetwork {
                     .iter()
                     .map(|t| {
                         let crossing = if t.crossing {
-                            format!(",j:1b{}", self.gate(t))
+                            // Over a level crossing a car waits for room past it for as
+                            // long as it takes, rather than be left on the tracks.
+                            let keep_clear = if seg.crossing.is_some() { ",gk:1b" } else { "" };
+                            format!(",j:1b{}{keep_clear}", self.gate(t))
                         } else {
                             String::new()
                         };
@@ -1596,6 +1649,13 @@ impl CarNetwork {
                 .find_map(|(p, _)| p.stop.filter(|_| p.holds.holds(long)));
             if let Some(g) = first {
                 let _ = write!(out, ",{field}:{g}b");
+                // A level crossing's stop there: which crossing, once.
+                if let Some(x) = lane
+                    .crossing
+                    .filter(|_| g == STOP_GROUP && !out.contains(",gx:"))
+                {
+                    let _ = write!(out, ",gx:{x}");
+                }
             }
         }
         out
@@ -1803,6 +1863,9 @@ impl CarNetwork {
                 data.insert("g".to_string(), Value::Byte(g as i8));
                 if let Some(k) = t.holds.code() {
                     data.insert("k".to_string(), Value::Byte(k));
+                }
+                if let Some(x) = seg.crossing.filter(|_| g == STOP_GROUP) {
+                    data.insert("lx".to_string(), Value::Int(x as i32));
                 }
             }
             if let Some(m) = t.cap {
@@ -2289,7 +2352,11 @@ fn link(
         })
         .collect();
     let length = |s: &Segment| s.arcs.last().unwrap_or(&0.0) - s.arcs.first().unwrap_or(&0.0);
-    let short: Vec<bool> = segments.iter().map(|s| length(s) < SHORT_LANE).collect();
+    // Never the lane up to a level crossing, however short: its stops are not to be skipped.
+    let short: Vec<bool> = segments
+        .iter()
+        .map(|s| length(s) < SHORT_LANE && s.crossing.is_none())
+        .collect();
     // Measured before any lane is bent round into its way back, which lengthens it.
     for s in segments.iter_mut() {
         s.stub = s.turns_back && length(s) < reach.stub;
@@ -2317,9 +2384,15 @@ fn link(
         if next.iter().any(|&j| !stub[j]) {
             next.retain(|&j| !stub[j]);
         }
+        // How far on the lanes after this one may begin: across a junction, or the tracks.
+        let across = if segments[i].crossing.is_some() {
+            LEVEL_CROSSING_REACH
+        } else {
+            CROSSING_REACH
+        };
         let entries: Vec<(usize, Option<(usize, f64)>)> = next
             .iter()
-            .map(|&j| (j, entry(&segments[i].points, &segments[j].points)))
+            .map(|&j| (j, entry(&segments[i].points, &segments[j].points, across)))
             .collect();
         let forward: Vec<(usize, usize)> = entries
             .iter()
@@ -2329,7 +2402,7 @@ fn link(
             // The only way on, and a sharp one: the lane itself bends round into it.
             &[(j, e)] if e.is_none_or(|(_, turn)| turn > SHARP_DEG) => {
                 if bend_into(segments, i, j, world, reach.turn_round, &speed_at) {
-                    let e = entry(&segments[i].points, &segments[j].points);
+                    let e = entry(&segments[i].points, &segments[j].points, across);
                     vec![(j, e.map_or(0, |(e, _)| e))]
                 } else {
                     forward
@@ -2343,7 +2416,7 @@ fn link(
                 });
                 match gentlest {
                     Some(j) if bend_into(segments, i, j, world, reach.turn_round, &speed_at) => {
-                        let e = entry(&segments[i].points, &segments[j].points);
+                        let e = entry(&segments[i].points, &segments[j].points, across);
                         vec![(j, e.map_or(0, |(e, _)| e))]
                     }
                     _ => entries.iter().map(|&(j, _)| (j, 0)).collect(),
@@ -2356,7 +2429,7 @@ fn link(
             let (a, b) = (seg.points.last(), segments[lane].points.get(entry));
             (seg.into_junction || through_short)
                 && a.zip(b)
-                    .is_some_and(|(a, b)| (b.x - a.x).hypot(b.z - a.z) <= CROSSING_REACH)
+                    .is_some_and(|(a, b)| (b.x - a.x).hypot(b.z - a.z) <= across)
         };
         let turns: Vec<Turn> = turns
             .into_iter()
@@ -2419,9 +2492,9 @@ fn link(
 }
 
 /// The first point of lane `to` a car at the end of `from` can drive to without turning
-/// round: ahead of it, within `CROSSING_REACH`, and not so far round that the lane then
-/// leads back. Also how far the car turns in all, in degrees.
-fn entry(from: &[Waypoint], to: &[Waypoint]) -> Option<(usize, f64)> {
+/// round: ahead of it, within `reach`, and not so far round that the lane then leads
+/// back. Also how far the car turns in all, in degrees.
+fn entry(from: &[Waypoint], to: &[Waypoint], reach: f64) -> Option<(usize, f64)> {
     let (&end, rest) = from.split_last()?;
     let heading = rest
         .iter()
@@ -2432,7 +2505,7 @@ fn entry(from: &[Waypoint], to: &[Waypoint]) -> Option<(usize, f64)> {
     let fits = |e: usize, room: f64| {
         let (dx, dz) = (to[e].x - end.x, to[e].z - end.z);
         let far = dx.hypot(dz);
-        let leg = unit(dx, dz).filter(|_| far >= room && far <= CROSSING_REACH)?;
+        let leg = unit(dx, dz).filter(|_| far >= room && far <= reach)?;
         let onto = turn(heading, leg);
         let on = to
             .get(e + 1)
@@ -3628,6 +3701,7 @@ mod tests {
                 true,
                 Some(&heads),
                 None,
+                None,
                 &world(),
                 flat,
                 open,
@@ -3676,6 +3750,7 @@ mod tests {
                 true,
                 None,
                 Some(&painted),
+                None,
                 &world(),
                 flat,
                 open,
@@ -3776,6 +3851,7 @@ mod tests {
             points,
             next,
             into_junction: false,
+            crossing: None,
             turns_back: false,
             stub: false,
             speed: 500,
@@ -4037,6 +4113,7 @@ mod tests {
                     arcs: vec![0.0, 0.0],
                     next: Vec::new(),
                     into_junction: false,
+                    crossing: None,
                     turns_back: false,
                     stub: false,
                     speed: i as i32,
@@ -5011,6 +5088,247 @@ mod tests {
         assert!((0..net.segments.len()).any(short));
         for seg in &net.segments {
             assert!(seg.next.iter().all(|t| !short(t.lane)));
+        }
+    }
+
+    /// A level crossing breaks the lanes as a junction does: each ends on its stop points,
+    /// a car's and a bus's, with their fronts short of the boom, and goes on past the
+    /// tracks, across which a car sets off only with room to stand clear.
+    #[test]
+    fn cars_wait_short_of_a_level_crossing_and_cross_it_as_a_junction() {
+        use crate::element_processing::level_crossings::scene;
+        let elements = scene::elements(&[], &[]);
+        let plan = scene::plan(&elements, false);
+        let build = |crossings: Option<&CrossingPlan>| {
+            CarNetwork::build_with_heads(
+                &elements,
+                1.0,
+                false,
+                false,
+                None,
+                None,
+                crossings,
+                &scene::world(),
+                flat,
+                open,
+            )
+        };
+        let net = build(Some(&plan));
+        let ending: Vec<&Segment> = net
+            .segments
+            .iter()
+            .filter(|s| s.crossing.is_some())
+            .collect();
+        // One lane each way comes up to the tracks.
+        assert_eq!(ending.len(), 2);
+        // The node's block reaches from 1000 to 1001; the lanes run through its middle.
+        let track = 1000.5;
+        for seg in &ending {
+            assert_eq!(seg.crossing, Some(0));
+            assert!(seg.into_junction);
+            let stops: Vec<&Waypoint> = seg
+                .points
+                .iter()
+                .filter(|p| p.stop == Some(STOP_GROUP))
+                .collect();
+            let [long, car] = stops[..] else {
+                panic!("a stop for buses and one for cars: {:?}", seg.points);
+            };
+            assert_eq!((long.holds, car.holds), (Holds::Long, Holds::Cars));
+            // Each stands with its front 5.5 blocks short of the track's middle, the car on
+            // the last point of the lane.
+            assert_eq!(car, seg.points.last().unwrap());
+            for stop in [long, car] {
+                let front = (stop.z - track).abs() - stop.holds.reach();
+                assert!((front - 5.5).abs() < 0.11, "{stop:?} stops {front} short");
+            }
+            // On over the tracks, as over a junction, to a lane that starts clear of them.
+            let [turn] = seg.next[..] else {
+                panic!("one way on: {:?}", seg.next);
+            };
+            assert!(turn.crossing);
+            let entry = net.segments[turn.lane].points[turn.entry];
+            assert!((entry.z - track) * (car.z - track) < 0.0, "the far side");
+            assert!((entry.z - track).abs() >= 2.5 - 0.11, "{entry:?}");
+        }
+        let text = net.storage_function();
+        // The stops name their crossing, and the way over it never gives up waiting for room.
+        assert_eq!(text.matches(",g:3b,k:1b,lx:0").count(), 2);
+        assert_eq!(text.matches(",g:3b,k:2b,lx:0").count(), 2);
+        assert_eq!(text.matches(",gk:1b}").count(), 2);
+        // Without a plan the street is one lane each way, right through.
+        let plain = build(None);
+        assert!(plain
+            .segments
+            .iter()
+            .all(|s| s.crossing.is_none() && s.points.iter().all(|p| p.stop.is_none())));
+        assert!(plain.segments.len() < net.segments.len());
+        assert!(!plain.storage_function().contains("lx:"));
+    }
+
+    /// Six tracks side by side put the far side of the crossing further from the stop
+    /// than any junction is wide. Cars still wait before the first and cross them all in
+    /// one go, with room beyond, rather than drive on as along one lane and queue on them.
+    #[test]
+    fn a_wide_level_crossing_is_crossed_in_one_go() {
+        use crate::element_processing::level_crossings::scene;
+        let tracks: Vec<i32> = (0..6).map(|i| 1000 + 6 * i).collect();
+        let mut elements: Vec<ProcessedElement> = tracks
+            .iter()
+            .enumerate()
+            .map(|(i, &z)| {
+                let id = 50 + i as u64;
+                scene::way(
+                    id,
+                    vec![
+                        scene::node(100 * id, 0, z, &[]),
+                        scene::crossing(9 + i as u64, 1000, z, &[]),
+                        scene::node(100 * id + 1, 2000, z, &[]),
+                    ],
+                    &[("railway", "rail")],
+                )
+            })
+            .collect();
+        let mut street = vec![scene::node(1, 1000, 880, &[])];
+        street.extend(
+            tracks
+                .iter()
+                .enumerate()
+                .map(|(i, &z)| scene::crossing(9 + i as u64, 1000, z, &[])),
+        );
+        street.push(scene::node(2, 1000, 1150, &[]));
+        elements.push(scene::way(1, street, &[("highway", "residential")]));
+        let plan = scene::plan(&elements, false);
+        assert_eq!(plan.crossing_count(), 1);
+        let net = CarNetwork::build_with_heads(
+            &elements,
+            1.0,
+            false,
+            false,
+            None,
+            None,
+            Some(&plan),
+            &scene::world(),
+            flat,
+            open,
+        );
+        let ending: Vec<&Segment> = net
+            .segments
+            .iter()
+            .filter(|s| s.crossing.is_some())
+            .collect();
+        assert_eq!(ending.len(), 2, "one lane each way comes up to the tracks");
+        let (first, last) = (1000.5, 1030.5);
+        for seg in ending {
+            let stop = seg.points.last().unwrap();
+            let [turn] = seg.next[..] else {
+                panic!("one way on: {:?}", seg.next);
+            };
+            assert!(turn.crossing, "over the tracks as over a junction");
+            let entry = net.segments[turn.lane].points[turn.entry];
+            // From before all the tracks to past all of them, more than a junction's reach.
+            let (near, far) = if stop.z < first {
+                (first - stop.z, entry.z - last)
+            } else {
+                (stop.z - last, first - entry.z)
+            };
+            assert!(near > 5.0 && far > 2.0, "{stop:?} to {entry:?}");
+            assert!((entry.z - stop.z).abs() > CROSSING_REACH);
+        }
+    }
+
+    /// A side street that joins a few blocks before the tracks leaves the lane up to them
+    /// hardly any room, and a lane too short to drive is crossed as part of its junction.
+    /// Not this one: nobody gets over the tracks but from the stop points before them.
+    #[test]
+    fn a_junction_close_before_a_level_crossing_does_not_let_cars_past_its_stops() {
+        use crate::element_processing::level_crossings::scene;
+        // The street from the north meets a side street thirteen blocks short of the tracks.
+        for (oneway, side_ends) in [("no", true), ("yes", true), ("no", false)] {
+            let mut elements = scene::elements(&[("oneway", oneway)], &[]);
+            if let ProcessedElement::Way(street) = &mut elements[1] {
+                street.nodes.insert(1, scene::node(7, 1000, 987, &[]));
+            }
+            let mut side = vec![
+                scene::node(8, 940, 987, &[]),
+                scene::node(7, 1000, 987, &[]),
+            ];
+            if !side_ends {
+                side.push(scene::node(6, 1060, 987, &[]));
+            }
+            elements.push(scene::way(3, side, &[("highway", "residential")]));
+            let plan = scene::plan(&elements, false);
+            let net = CarNetwork::build_with_heads(
+                &elements,
+                1.0,
+                false,
+                false,
+                None,
+                None,
+                Some(&plan),
+                &scene::world(),
+                flat,
+                open,
+            );
+            let track = 1000.5;
+            let north = |p: &Waypoint| p.z < track;
+            let mut over = 0;
+            for seg in &net.segments {
+                // No lane runs over the tracks itself.
+                assert!(
+                    seg.points.windows(2).all(|w| north(&w[0]) == north(&w[1])),
+                    "{oneway} {side_ends}: a lane over the tracks: {:?}",
+                    seg.points
+                );
+                let Some(last) = seg.points.last() else {
+                    continue;
+                };
+                for turn in &seg.next {
+                    let entry = &net.segments[turn.lane].points[turn.entry];
+                    if north(last) == north(entry) {
+                        continue;
+                    }
+                    over += 1;
+                    // The way over the tracks starts on a stop point of the crossing, a
+                    // car's, with a bus's behind it on the same lane.
+                    assert_eq!(
+                        seg.crossing,
+                        Some(0),
+                        "{oneway} {side_ends}: {:?}",
+                        seg.points
+                    );
+                    assert_eq!((last.stop, last.holds), (Some(STOP_GROUP), Holds::Cars));
+                    assert!(seg
+                        .points
+                        .iter()
+                        .any(|p| p.stop == Some(STOP_GROUP) && p.holds == Holds::Long));
+                    let front = (track - last.z).abs() - Holds::Cars.reach();
+                    assert!((front - 5.5).abs() < 0.11, "stops {front} short");
+                    assert!(turn.crossing);
+                }
+            }
+            // Southbound over the tracks, and northbound too unless it is one way.
+            assert_eq!(
+                over,
+                if oneway == "yes" { 1 } else { 2 },
+                "{oneway} {side_ends}"
+            );
+            // Cars from the street and from the side street both get onto the lane up to
+            // the tracks.
+            let up_to = net
+                .segments
+                .iter()
+                .position(|s| s.crossing.is_some() && s.points.iter().all(north))
+                .unwrap();
+            let feeders = net
+                .segments
+                .iter()
+                .filter(|s| s.next.iter().any(|t| t.lane == up_to))
+                .count();
+            assert!(
+                feeders >= 2,
+                "{oneway} {side_ends}: {feeders} lanes lead to the tracks"
+            );
         }
     }
 }

@@ -37,6 +37,8 @@ pub struct Model {
     brake: Option<&'static str>,
     /// A car's body and dim brake lamps, nothing glowing: how it stands parked.
     parked: Option<&'static str>,
+    /// An aircraft without its landing gear: how it flies.
+    up: Option<&'static str>,
     meta: &'static str,
 }
 
@@ -50,7 +52,18 @@ macro_rules! model {
             java: include_str!(concat!("../assets/vehicles/out/", $id, ".java.json")),
             brake: None,
             parked: None,
+            up: None,
             meta: include_str!(concat!("../assets/vehicles/out/", $id, ".meta.json")),
+        }
+    };
+    ($id:literal, gear) => {
+        Model {
+            up: Some(include_str!(concat!(
+                "../assets/vehicles/out/",
+                $id,
+                "_up.java.json"
+            ))),
+            ..model!($id)
         }
     };
     ($id:literal, brake) => {
@@ -126,6 +139,17 @@ static MODELS: &[Model] = &[
     model!("signal_car_red_amber"),
     model!("signal_walk_red"),
     model!("signal_walk_green"),
+    // Level crossing masts, a model per lamp lit, and the boom; at 32 units too.
+    model!("xing_light_off"),
+    model!("xing_light_a"),
+    model!("xing_light_b"),
+    model!("xing_boom"),
+    // Aircraft, their main wheels at the origin; all but the light single fold them away.
+    model!("plane_light"),
+    model!("plane_bizjet", gear),
+    model!("plane_regional", gear),
+    model!("plane_narrow", gear),
+    model!("plane_wide", gear),
 ];
 
 /// The model of that id. The ids are fixed in the code that picks them, and a test
@@ -284,6 +308,12 @@ impl Model {
         self.brake.is_some()
     }
 
+    /// Whether it has a model of its own with the landing gear up.
+    #[cfg(test)]
+    pub fn has_gear_up(&self) -> bool {
+        self.up.is_some()
+    }
+
     /// Height of the model's highest point in metres at 1:1.
     pub fn top_m(&self) -> f64 {
         self.meta().bounds[1][1] / 16.0
@@ -390,6 +420,12 @@ pub fn brake_item_model(model: &str) -> String {
     format!("{NAMESPACE}:vehicle/{model}_brake")
 }
 
+/// Whether a model is an aircraft, which is drawn wheels up as well as down: the pack's
+/// gear functions name the item model of a look wheels up by the suffix `_up`.
+pub(crate) fn flies(model: &str) -> bool {
+    model.starts_with("plane_")
+}
+
 /// The item model id of a look parked: its headlights off.
 pub fn parked_item_model(look: &Look) -> String {
     format!("{NAMESPACE}:vehicle/{}_parked", look.name())
@@ -488,6 +524,8 @@ pub fn display_nbt(
 
 /// The resource pack files that draw `looks` on Java: per model its geometry and, for
 /// cars, its brake lights; per look a texture, a model naming it and an item definition.
+/// An aircraft's look has a second item, wheels up, which for one with fixed wheels is
+/// the same model again.
 pub fn java_pack<'a>(
     looks: impl IntoIterator<Item = &'a Look>,
     parked: &'a [Look],
@@ -516,6 +554,14 @@ pub fn java_pack<'a>(
             v["textures"] = json!({ "t": first, "particle": first });
             out.push((
                 format!("assets/{NAMESPACE}/models/item/vehicle/{id}{suffix}.json"),
+                pretty(&v),
+            ));
+        }
+        if let Some(text) = m.up {
+            let mut v: Value = serde_json::from_str(text).expect("vehicle models are JSON");
+            v["textures"] = json!({ "t": first, "particle": first });
+            out.push((
+                format!("assets/{NAMESPACE}/models/item/vehicle/{id}_up.json"),
                 pretty(&v),
             ));
         }
@@ -558,6 +604,24 @@ pub fn java_pack<'a>(
                     "{NAMESPACE}:item/vehicle/{name}"
                 ))),
             ));
+            if flies(id) {
+                let up = if m.up.is_some() {
+                    out.push((
+                        format!("assets/{NAMESPACE}/models/item/vehicle/{name}_up.json"),
+                        pretty(&json!({
+                            "parent": format!("{NAMESPACE}:item/vehicle/{id}_up"),
+                            "textures": { "t": texture, "particle": texture },
+                        })),
+                    ));
+                    format!("{NAMESPACE}:item/vehicle/{name}_up")
+                } else {
+                    format!("{NAMESPACE}:item/vehicle/{name}")
+                };
+                out.push((
+                    format!("assets/{NAMESPACE}/items/vehicle/{name}_up.json"),
+                    pretty(&item_definition(&up)),
+                ));
+            }
             if parks(look) {
                 out.push((
                     format!("assets/{NAMESPACE}/models/item/vehicle/{name}_parked.json"),
@@ -709,6 +773,48 @@ mod tests {
             one["minecraft:geometry"][0]["description"]["identifier"],
             "geometry.t"
         );
+    }
+
+    /// The pack's gear functions swap an aircraft's item for the one named `_up`: the
+    /// model without its landing gear, or the same model again where the wheels are fixed.
+    #[test]
+    fn an_aircraft_has_an_item_with_its_wheels_up() {
+        let looks = [
+            Look::plain("plane_bizjet", "w", "minecraft:white_concrete"),
+            Look::plain("plane_light", "w", "minecraft:white_concrete"),
+        ];
+        let files = java_pack(&looks, &[]);
+        let file = |p: &str| -> Value {
+            let (_, bytes) = files
+                .iter()
+                .find(|(f, _)| f == p)
+                .unwrap_or_else(|| panic!("{p}"));
+            serde_json::from_slice(bytes).unwrap()
+        };
+        let count = |v: &Value| v["elements"].as_array().unwrap().len();
+        let down = file("assets/arnis/models/item/vehicle/plane_bizjet.json");
+        let up = file("assets/arnis/models/item/vehicle/plane_bizjet_up.json");
+        assert!(count(&up) < count(&down) && count(&up) > count(&down) / 2);
+        let item = file("assets/arnis/items/vehicle/plane_bizjet_w_up.json");
+        assert_eq!(
+            item["model"]["model"],
+            "arnis:item/vehicle/plane_bizjet_w_up"
+        );
+        let child = file("assets/arnis/models/item/vehicle/plane_bizjet_w_up.json");
+        assert_eq!(child["parent"], "arnis:item/vehicle/plane_bizjet_up");
+        assert_eq!(child["textures"]["t"], "arnis:block/vehicle/plane_bizjet_w");
+        // Fixed wheels: the item is there all the same, drawing the one model.
+        let fixed = file("assets/arnis/items/vehicle/plane_light_w_up.json");
+        assert_eq!(fixed["model"]["model"], "arnis:item/vehicle/plane_light_w");
+        assert!(!files
+            .iter()
+            .any(|(f, _)| f.ends_with("plane_light_up.json")));
+        // Nothing but aircraft gets one.
+        let car = java_pack(
+            &[Look::plain("car_sedan", "red", "minecraft:red_concrete")],
+            &[],
+        );
+        assert!(!car.iter().any(|(f, _)| f.contains("_up")));
     }
 
     /// A parked car is the same model with its lamps dark and its brake lamps on it,

@@ -3,6 +3,7 @@
 //! summons a carriage from its body function when it comes into view; `trains.rs`
 //! decides which carriages make a train.
 
+use crate::element_processing::plane_bodies::Airframe;
 use crate::element_processing::ship_bodies::Vessel;
 use crate::vehicle_models::{self, Look};
 use std::fmt::Write;
@@ -56,6 +57,8 @@ pub enum Coach {
         vessel: Vessel,
         low: bool,
     },
+    /// An aircraft.
+    Plane(Airframe),
 }
 
 /// A train's colours.
@@ -381,6 +384,17 @@ pub fn doors(coach: Coach) -> Doors {
             deck: true,
         };
     }
+    // Clicked from the apron under it or beside it, the seat up in the cabin.
+    if let Coach::Plane(frame) = coach {
+        let (spots, eye) = frame.seats_m();
+        return Doors {
+            spots: spots.to_vec(),
+            eye,
+            width: frame.cabin_m() as f32 + 1.0,
+            height: eye as f32 + 0.8,
+            deck: true,
+        };
+    }
     let spots = if matches!(
         coach,
         Coach::Container(_) | Coach::Tank(_) | Coach::Boxcar(_)
@@ -407,6 +421,7 @@ pub fn doors(coach: Coach) -> Doors {
 pub fn door_key(coach: Coach) -> String {
     match coach {
         Coach::Ship { vessel, .. } => format!("w_{}", vessel.name()),
+        Coach::Plane(frame) => format!("p_{}", frame.name()),
         _ if doors(coach).spots.is_empty() => NO_DOORS.to_string(),
         _ => format!("m{}", (length_m(coach) * 10.0).round() as u32),
     }
@@ -463,6 +478,7 @@ pub fn length_m(coach: Coach) -> f64 {
         Coach::Tank(_) => 15.0,
         Coach::Boxcar(_) => 16.5,
         Coach::Ship { vessel, .. } => vessel.size_m().0,
+        Coach::Plane(frame) => frame.size_m().0,
     }
 }
 
@@ -586,6 +602,7 @@ pub fn key(coach: Coach, livery: Livery) -> String {
         Coach::Ship { vessel, low } => {
             format!("ship_{}{}", vessel.name(), if low { "_low" } else { "" })
         }
+        Coach::Plane(frame) => format!("plane_{}", frame.name()),
     };
     match coach {
         Coach::Container(_) | Coach::Tank(_) | Coach::Boxcar(_) => c,
@@ -646,6 +663,7 @@ pub fn look(coach: Coach, l: Livery) -> Look {
             return wagon_look("freight_boxcar", c.to_string(), BOXCARS[c], BOXCARS[c]);
         }
         Coach::Ship { vessel, low } => (vessel.model(low), false),
+        Coach::Plane(frame) => (frame.model(), false),
     };
     Look {
         model,
@@ -670,10 +688,16 @@ fn front_of(coach: Coach) -> Option<bool> {
 }
 
 /// The body function of a carriage: a macro taking the carriage id `c` and its heading
-/// `h`, run where the carriage centre goes. One item display draws it.
+/// `h`, run where the carriage centre goes. One item display draws it. An aircraft is
+/// seen from further off, since it is as far overhead as it is away.
 pub fn summon_function(look: &Look, size: f64) -> String {
+    let view = if vehicle_models::flies(look.model) {
+        5
+    } else {
+        3
+    };
     format!(
-        "$summon item_display ~ ~ ~ {{Tags:[\"arnis.tp\",\"arnis.tc$(c)\"],Rotation:[$(h)f,0f],teleport_duration:2,view_range:3f,{}}}\n",
+        "$summon item_display ~ ~ ~ {{Tags:[\"arnis.tp\",\"arnis.tc$(c)\"],Rotation:[$(h)f,0f],teleport_duration:2,view_range:{view}f,{}}}\n",
         vehicle_models::display_snbt(
             look.model,
             &vehicle_models::item_model(look),
