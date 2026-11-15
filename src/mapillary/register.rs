@@ -354,30 +354,32 @@ fn clip_line(w: i64, h: i64, p1: &mut [i64; 2], p2: &mut [i64; 2]) -> bool {
 /// Felzenszwalb and Huttenlocher's lower envelope of parabolas, one pass down
 /// the columns and one along the rows. Exact, so it agrees with scipy's own
 /// exact transform cell for cell.
-fn edt(mask: &[bool], n: usize) -> Vec<f64> {
+pub(crate) fn edt(mask: &[bool], n: usize) -> Vec<f64> {
+    edt_rect(mask, n, n)
+}
+
+/// `edt` over a row-major grid `w` cells wide and `h` tall.
+pub(crate) fn edt_rect(mask: &[bool], w: usize, h: usize) -> Vec<f64> {
     let inf = f64::INFINITY;
-    let mut f = vec![0.0f64; n * n];
-    for (k, m) in mask.iter().enumerate() {
-        f[k] = if *m { 0.0 } else { inf };
-    }
-    let mut column = vec![0.0f64; n];
-    let mut out = vec![0.0f64; n * n];
+    let f: Vec<f64> = mask.iter().map(|&m| if m { 0.0 } else { inf }).collect();
+    let mut column = vec![0.0f64; h];
+    let mut out = vec![0.0f64; w * h];
     // Down the columns.
-    for x in 0..n {
-        for y in 0..n {
-            column[y] = f[y * n + x];
+    for x in 0..w {
+        for y in 0..h {
+            column[y] = f[y * w + x];
         }
         let d = envelope(&column);
-        for y in 0..n {
-            out[y * n + x] = d[y];
+        for y in 0..h {
+            out[y * w + x] = d[y];
         }
     }
     // Along the rows.
-    let mut row = vec![0.0f64; n];
-    for y in 0..n {
-        row.copy_from_slice(&out[y * n..(y + 1) * n]);
+    let mut row = vec![0.0f64; w];
+    for y in 0..h {
+        row.copy_from_slice(&out[y * w..(y + 1) * w]);
         let d = envelope(&row);
-        out[y * n..(y + 1) * n].copy_from_slice(&d);
+        out[y * w..(y + 1) * w].copy_from_slice(&d);
     }
     out
 }

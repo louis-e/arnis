@@ -530,7 +530,10 @@ impl Plan<'_> {
 
     /// Pedestrian heads either side of a signalised crossing, each facing the kerb opposite.
     fn pedestrian_heads(&mut self, id: u64, node: &SignalNode) {
-        let road = node.arms[0];
+        // A crossing mapped off any road has no kerbs to stand on.
+        let Some(&road) = node.arms.first() else {
+            return;
+        };
         let across = (-road.dir.1, road.dir.0);
         let origin = (node.x as f64 + 0.5, node.z as f64 + 0.5);
         for sign in [1.0, -1.0] {

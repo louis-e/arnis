@@ -47,6 +47,12 @@ impl BaySlot {
     pub fn is_window(self) -> bool {
         matches!(self, BaySlot::Window { .. })
     }
+
+    /// A window two columns wide or more.
+    #[inline]
+    pub fn is_wide_window(self) -> bool {
+        matches!(self, BaySlot::Window { width, .. } if width >= 2)
+    }
 }
 
 /// Per-column wall context.
