@@ -36,8 +36,8 @@ const MAX_PARKED: usize = 80;
 const MAX_POINTS: usize = 110_000;
 /// Chance a stand nobody flies from holds an aircraft.
 const STAND_OCCUPANCY: f64 = 0.6;
-/// Seconds of the airfield's round each flying aircraft adds to it, the shortest round
-/// and the longest.
+/// Seconds each flying aircraft adds to the airfield's round for the runway it uses, the
+/// shortest round and the longest.
 const SLOT_S: f64 = 150.0;
 const MIN_ROUND_S: f64 = 600.0;
 const MAX_ROUND_S: f64 = 3000.0;
@@ -100,7 +100,20 @@ const CLEAR_HEIGHT_M: f64 = 14.0;
 /// most of the airfield's round a runway is in use for.
 const FINAL_S: f64 = 25.0;
 const RUNWAY_PAD_S: i64 = 6;
-const RUNWAY_SHARE: f64 = 0.6;
+const RUNWAY_SHARE: f64 = 0.9;
+/// How far past where it lifts off a departure leaves the runway to the next, in metres,
+/// where the runway's far end is further.
+const CLIMB_OUT_M: f64 = 900.0;
+/// The longer way an aircraft takes to a runway than to another for each aircraft already
+/// flying from it, in metres of taxiing.
+const RUNWAY_TAKEN_M: f64 = 2000.0;
+/// Most times an aircraft turns all the way round off the downwind leg to land later, and
+/// the time either side of a landing, in seconds, past which a landing is not worth a
+/// turn more for the runway to be used more evenly.
+const ORBITS: usize = 2;
+const EVEN_S: i64 = 60;
+/// How much longer the airfield's clock is made each time its rounds do not all fit.
+const CLOCK_STEP: f64 = 1.03;
 /// Ground a path keeps over: close to the runway, and anywhere else, in metres.
 const CLEAR_RUNWAY_M: f64 = 2.0;
 const CLEAR_TERRAIN_M: f64 = 20.0;
@@ -846,6 +859,8 @@ enum Key {
     Circuit(usize, bool, bool),
     /// The climb off a runway for an airframe that started its roll so far along it.
     Climb(usize, bool, Airframe, i64),
+    /// A turn all the way round off a circuit's downwind leg, keyed as the circuit.
+    Orbit(usize, bool, bool),
 }
 
 /// A stretch of a piece an aircraft covers, backwards where `to` is less than `from`.
@@ -1782,18 +1797,28 @@ impl Pose {
 struct Round {
     stand: usize,
     frame: Airframe,
-    /// Its steps up to the wait before the runway, and from there on.
+    /// The strip it takes off from and lands on.
+    runway: usize,
+    /// Its steps up to the wait before the runway, and from there on for each number of
+    /// times it may turn round off the downwind leg.
     before: Vec<Step>,
-    after: Vec<Step>,
+    afters: Vec<Vec<Step>>,
     park: Step,
 }
 
-/// A round with its time: the second of the airfield's round its pushback starts at, and
-/// how long it waits before the runway.
+/// A round with its time: the second of the airfield's round its pushback starts at, how
+/// long it waits before the runway, and how many times it turns round before landing.
 struct Flight {
     round: Round,
     start: usize,
     wait: usize,
+    orbits: usize,
+}
+
+impl Flight {
+    fn after(&self) -> &[Step] {
+        &self.round.afters[self.orbits]
+    }
 }
 
 /// Whether two stretches of time on a clock of `round` seconds overlap.
@@ -2227,9 +2252,11 @@ impl<'a> Paths<'a> {
         let goal = |a: usize, b: usize| -> Option<f64> {
             (b == junction).then(|| turn_cost(turn_deg(field.dir(a, b), field.dir(b, into))) * k)
         };
+        // Off at the first way that leads on to the stand: rolling on along the runway
+        // would keep it from the next one.
         let way_in = field.way(
             (runway.nodes[leaves - 1], runway.nodes[leaves]),
-            &free,
+            &FnvHashSet::default(),
             3.0,
             k,
             goal,
@@ -2297,6 +2324,47 @@ impl<'a> Paths<'a> {
         Some(self.piece(key, |_| fine.piece()))
     }
 
+    /// The turn all the way round that an aircraft flies off the middle of a circuit's
+    /// downwind leg to land later, away from the runway and level with the leg: its piece,
+    /// made once, and how far along the circuit it leaves the leg and rejoins it. None
+    /// where it would not clear the ground.
+    fn orbit_piece(&mut self, u: &Use, tight: bool, circuit: usize) -> Option<(usize, f64)> {
+        let k = self.k;
+        let shape = if tight { TIGHT_CIRCUIT } else { WIDE_CIRCUIT };
+        let radius = shape.radius * k;
+        // The downwind leg as the circuit draws it: from the end of the turn past the far
+        // end to abeam the point the final starts at.
+        let line = &u.line;
+        let far = line.at(line.len() + u.beyond[usize::from(tight)]);
+        let to_side = mul(left(line.last()), u.side);
+        let from = add(far, mul(to_side, 2.0 * radius));
+        let near = line.at(-shape.before * k);
+        let to = add(near, mul(left(line.first()), u.side * 2.0 * radius));
+        let at = std::f64::consts::PI * radius + norm(sub(to, from)) / 2.0;
+        let key = Key::Orbit(u.runway.strip, u.runway.back, tight);
+        if let Some(&i) = self.by_key.get(&key) {
+            return Some((i, at));
+        }
+        let start = self.pieces[circuit].at(at);
+        let ahead = unit(sub(to, from));
+        let centre = add((start.x, start.z), mul(to_side, radius));
+        let step = 0.25;
+        let n = (2.0 * std::f64::consts::PI * radius / step).ceil() as usize;
+        let mut fine = Fine::default();
+        for i in 0..=n {
+            let t = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
+            let p = add(
+                sub(centre, mul(to_side, radius * t.cos())),
+                mul(ahead, radius * t.sin()),
+            );
+            if i % 8 == 0 && !self.clear((p.0, start.y, p.1), CLEAR_TERRAIN_M * k) {
+                return None;
+            }
+            fine.push((p.0, start.y, p.1), LEVEL_NOSE, false);
+        }
+        Some((self.piece(key, |_| fine.piece()), at))
+    }
+
     /// The piece of an airframe's climb off a runway from where it lined up, made once.
     fn climb_piece(&mut self, u: &Use, frame: Airframe, dep: f64) -> Option<usize> {
         let key = Key::Climb(u.runway.strip, u.runway.back, frame, dep.round() as i64);
@@ -2338,10 +2406,12 @@ impl<'a> Paths<'a> {
             holds: holds.then_some(strip),
         };
         let mut fly = draft.roll.clone();
-        // The runway is its own until it is past the far end, and anyone's after.
-        let (rotate, _) = pace.take_off(draft.dep);
+        // The runway is its own until it is past the far end, or well up and away on a
+        // long runway, and anyone's after.
+        let (rotate, lift) = pace.take_off(draft.dep);
         let climbed = self.pieces[climb].len;
-        let past_end = (u.runway.len() - rotate + 60.0 * k).clamp(0.0, climbed);
+        let past_end =
+            ((u.runway.len() + 60.0 * k).min(lift + CLIMB_OUT_M * k) - rotate).clamp(0.0, climbed);
         fly.push(air(climb, 0.0, past_end, pace.air, true));
         fly.push(air(climb, past_end, climbed, pace.air, false));
         // Down to its landing speed well before the wheels touch, the runway its own
@@ -2350,10 +2420,26 @@ impl<'a> Paths<'a> {
         let touch = len - NOSE_DOWN_M * k;
         let slow_from = (touch - 600.0 * k).max(0.0);
         let own_from = (touch - (pace.land * FINAL_S * STEPS_PER_S).max(600.0 * k)).max(0.0);
-        fly.push(air(circuit, 0.0, own_from, pace.air, false));
-        fly.push(air(circuit, own_from, slow_from, pace.air, true));
-        fly.push(air(circuit, slow_from, len, pace.land, true));
-        fly.extend(&draft.arrive);
+        // To land later, it may turn all the way round off the downwind leg, once or more.
+        let orbit = self
+            .orbit_piece(u, draft.frame.slow(), circuit)
+            .filter(|&(_, at)| at < own_from)
+            .map(|(piece, at)| (piece, at, self.pieces[piece].len));
+        let laps = |orbits: usize| -> Vec<Leg> {
+            let mut legs = fly.clone();
+            match orbit {
+                Some((piece, at, round)) if orbits > 0 => {
+                    legs.push(air(circuit, 0.0, at, pace.air, false));
+                    legs.extend((0..orbits).map(|_| air(piece, 0.0, round, pace.air, false)));
+                    legs.push(air(circuit, at, own_from, pace.air, false));
+                }
+                _ => legs.push(air(circuit, 0.0, own_from, pace.air, false)),
+            }
+            legs.push(air(circuit, own_from, slow_from, pace.air, true));
+            legs.push(air(circuit, slow_from, len, pace.land, true));
+            legs.extend(&draft.arrive);
+            legs
+        };
 
         let steps = |legs: &[Leg]| -> Vec<Step> {
             run(legs)
@@ -2376,15 +2462,23 @@ impl<'a> Paths<'a> {
         let pushed = *before.last()?;
         before.extend(pause(pushed, START_UP_S));
         before.extend(steps(&draft.out));
-        let mut after = steps(&draft.line_up);
-        let lined = *after.last().unwrap_or(before.last()?);
-        after.extend(pause(lined, LINE_UP_S));
-        after.extend(steps(&fly));
+        let mut lined_up = steps(&draft.line_up);
+        let lined = *lined_up.last().unwrap_or(before.last()?);
+        lined_up.extend(pause(lined, LINE_UP_S));
+        let ways = if orbit.is_some() { ORBITS + 1 } else { 1 };
+        let afters = (0..ways)
+            .map(|orbits| {
+                let mut after = lined_up.clone();
+                after.extend(steps(&laps(orbits)));
+                after
+            })
+            .collect();
         Some(Round {
             stand: draft.stand,
             frame: draft.frame,
+            runway: strip,
             before,
-            after,
+            afters,
             park,
         })
     }
@@ -2405,7 +2499,10 @@ impl<'a> Paths<'a> {
         if step.holds.is_some() {
             return step.holds;
         }
-        if matches!(self.keys[step.piece], Key::Circuit(..) | Key::Climb(..)) {
+        if matches!(
+            self.keys[step.piece],
+            Key::Circuit(..) | Key::Climb(..) | Key::Orbit(..)
+        ) {
             return None;
         }
         let p = self.pieces[step.piece].at(step.at);
@@ -2421,14 +2518,21 @@ impl<'a> Paths<'a> {
     }
 }
 
+/// Where an aircraft is each second of part of its round, and when it is on which strip:
+/// (strip, from, to) in seconds from the start of the part.
+type Half = (Vec<Pose>, Vec<(usize, i64, i64)>);
+
+/// A round's time: its start, its wait before the runway and its turns round.
+type Time = (usize, usize, usize);
+
 /// An aircraft's round sampled each second: where it is, and when it is on which strip,
 /// for its steps up to the wait before the runway and those after.
 struct Sampled {
     before: Vec<Pose>,
-    after: Vec<Pose>,
     /// (strip, from, to) in seconds from the start of each half.
     busy_before: Vec<(usize, i64, i64)>,
-    busy_after: Vec<(usize, i64, i64)>,
+    /// The second half for each number of times it may turn round.
+    afters: Vec<Half>,
     park: Pose,
 }
 
@@ -2453,12 +2557,10 @@ fn sample(paths: &Paths, round: &Round, strips: &[usize]) -> Sampled {
         (poses, busy)
     };
     let (before, busy_before) = half(&round.before);
-    let (after, busy_after) = half(&round.after);
     Sampled {
         before,
-        after,
         busy_before,
-        busy_after,
+        afters: round.afters.iter().map(|a| half(a)).collect(),
         park: paths.pose(round.park, round.frame),
     }
 }
@@ -2473,8 +2575,9 @@ impl Sky {
     }
 
     /// The first start and wait at which the round meets nobody, trying starts from
-    /// `first` on. The round is then in the sky for those after it to keep clear of.
-    fn place(&mut self, s: &Sampled, first: usize, size: f64, k: f64) -> Option<(usize, usize)> {
+    /// `first` on, and the number of turns round it makes there. The round is then in the
+    /// sky for those after it to keep clear of.
+    fn place(&mut self, s: &Sampled, first: usize, size: f64, k: f64) -> Option<Time> {
         let round = self.round;
         // The seconds its stand is not its own: someone passes too close to where it stands.
         let mut blocked = vec![0u32; round + 1];
@@ -2503,7 +2606,7 @@ impl Sky {
                 .iter()
                 .any(|&b| overlap((from - RUNWAY_PAD_S, to + RUNWAY_PAD_S), b, round as i64))
         };
-        let (nb, na) = (s.before.len(), s.after.len());
+        let nb = s.before.len();
         for start in (0..round)
             .step_by(START_STEP_S)
             .map(|d| (first + d) % round)
@@ -2522,8 +2625,7 @@ impl Sky {
             }
             let hold = s.before[nb - 1];
             for wait in (0..=MAX_HOLD_S).step_by(HOLD_STEP_S) {
-                let total = nb + wait + na;
-                if total + MIN_DWELL_S as usize > round {
+                if nb + wait + s.afters[0].0.len() + MIN_DWELL_S as usize > round {
                     break;
                 }
                 // Waiting where it would be in someone's way is no use waiting longer.
@@ -2531,38 +2633,93 @@ impl Sky {
                     break;
                 }
                 let off = start + nb + wait;
-                if !s
-                    .busy_after
-                    .iter()
-                    .all(|&(strip, a, b)| runway_free(strip, off as i64 + a, off as i64 + b))
-                    || !stand_free(start + total, start + round)
-                    || s.after.iter().enumerate().any(|(i, p)| meets(p, off + i))
-                {
-                    continue;
+                // Of the ways it may come back, the one that leaves the runway the most time
+                // either side of its landing, up to a minute, and then the shortest: the
+                // runway's take-offs and landings come evenly.
+                let mut best: Option<(i64, usize)> = None;
+                for (orbits, (after, busy_after)) in s.afters.iter().enumerate() {
+                    let total = nb + wait + after.len();
+                    if total + MIN_DWELL_S as usize > round {
+                        break;
+                    }
+                    if !busy_after
+                        .iter()
+                        .all(|&(strip, a, b)| runway_free(strip, off as i64 + a, off as i64 + b))
+                        || !stand_free(start + total, start + round)
+                        || after.iter().enumerate().any(|(i, p)| meets(p, off + i))
+                    {
+                        continue;
+                    }
+                    // Its take-off is the same whichever way it comes back.
+                    let room = busy_after
+                        .iter()
+                        .skip(1)
+                        .map(|&(strip, a, b)| {
+                            self.room_around(strip, off as i64 + a, off as i64 + b)
+                        })
+                        .min()
+                        .unwrap_or(EVEN_S)
+                        .min(EVEN_S);
+                    if best.is_none_or(|(r, _)| room > r) {
+                        best = Some((room, orbits));
+                    }
                 }
-                // Taken: into the sky with it.
-                for (i, p) in s.before.iter().enumerate() {
-                    self.poses[(start + i) % round].push(*p);
+                if let Some((_, orbits)) = best {
+                    let (after, busy_after) = &s.afters[orbits];
+                    let total = nb + wait + after.len();
+                    // Taken: into the sky with it.
+                    for (i, p) in s.before.iter().enumerate() {
+                        self.poses[(start + i) % round].push(*p);
+                    }
+                    for i in 0..wait {
+                        self.poses[(start + nb + i) % round].push(hold);
+                    }
+                    for (i, p) in after.iter().enumerate() {
+                        self.poses[(off + i) % round].push(*p);
+                    }
+                    for t in start + total..start + round {
+                        self.poses[t % round].push(s.park);
+                    }
+                    for &(strip, a, b) in &s.busy_before {
+                        self.busy[strip].push((start as i64 + a, start as i64 + b));
+                    }
+                    for &(strip, a, b) in busy_after {
+                        self.busy[strip].push((off as i64 + a, off as i64 + b));
+                    }
+                    return Some((start, wait, orbits));
                 }
-                for i in 0..wait {
-                    self.poses[(start + nb + i) % round].push(hold);
-                }
-                for (i, p) in s.after.iter().enumerate() {
-                    self.poses[(off + i) % round].push(*p);
-                }
-                for t in start + total..start + round {
-                    self.poses[t % round].push(s.park);
-                }
-                for &(strip, a, b) in &s.busy_before {
-                    self.busy[strip].push((start as i64 + a, start as i64 + b));
-                }
-                for &(strip, a, b) in &s.busy_after {
-                    self.busy[strip].push((off as i64 + a, off as i64 + b));
-                }
-                return Some((start, wait));
             }
         }
         None
+    }
+
+    /// The longest any strip in use stands idle between two uses, in seconds.
+    fn longest_idle(&self) -> i64 {
+        let round = self.round as i64;
+        let mut longest = 0;
+        for busy in &self.busy {
+            let mut uses: Vec<(i64, i64)> = busy
+                .iter()
+                .map(|&(a, b)| (a.rem_euclid(round), a.rem_euclid(round) + b - a))
+                .collect();
+            uses.sort_unstable();
+            for (i, &(_, end)) in uses.iter().enumerate() {
+                let next = uses.get(i + 1).map_or(uses[0].0 + round, |u| u.0);
+                longest = longest.max(next - end);
+            }
+        }
+        longest
+    }
+
+    /// The time the strip is free either side of a use of it from `from` to `to`, the
+    /// shorter, in seconds.
+    fn room_around(&self, strip: usize, from: i64, to: i64) -> i64 {
+        let round = self.round as i64;
+        self.busy[strip]
+            .iter()
+            .map(|&(a, b)| (a - to).rem_euclid(round).min((from - b).rem_euclid(round)))
+            .min()
+            .unwrap_or(round)
     }
 
     /// Whether an aircraft could stand at `pose` all round the clock.
@@ -2685,7 +2842,7 @@ fn nose_of(field: &Field, stand: usize) -> P {
 fn pieces_used(count: usize, flights: &[Flight], parked: &[Step]) -> Vec<bool> {
     let mut used = vec![false; count];
     for f in flights {
-        for s in f.round.before.iter().chain(&f.round.after) {
+        for s in f.round.before.iter().chain(f.after()) {
             used[s.piece] = true;
         }
         used[f.round.park.piece] = true;
@@ -2789,13 +2946,19 @@ fn plan_field(
                 if !taken.room(field, s, frame, size, k) {
                     continue;
                 }
+                // The runway with the shorter way, each aircraft already flying from one
+                // counting as a longer way to it, so that the runways share the flights.
+                let cost = |d: &Draft| {
+                    let flown = drafts.iter().filter(|o| o.used == d.used).count();
+                    d.taxied + flown as f64 * RUNWAY_TAKEN_M * k
+                };
                 let mut best: Option<Draft> = None;
                 for (i, u) in uses.iter().enumerate() {
                     if !u.frames.contains(&frame) {
                         continue;
                     }
                     if let Some(d) = paths.draft(s, frame, i, u, size) {
-                        if best.as_ref().is_none_or(|b| d.taxied < b.taxied) {
+                        if best.as_ref().is_none_or(|b| cost(&d) < cost(b)) {
                             best = Some(d);
                         }
                     }
@@ -2837,7 +3000,7 @@ fn plan_field(
             None => idle.push(d.stand),
         }
     }
-    let seconds = |r: &Round| (r.before.len() + r.after.len()) as f64 / STEPS_PER_S;
+    let seconds = |r: &Round| (r.before.len() + r.afters[0].len()) as f64 / STEPS_PER_S;
     rounds.retain(|r| {
         let fits = seconds(r) + MIN_DWELL_S + 30.0 <= MAX_ROUND_S;
         if !fits {
@@ -2851,32 +3014,88 @@ fn plan_field(
     // clock, the last rounds stay down.
     let mut sampled: Vec<Sampled> = rounds.iter().map(|r| sample(&paths, r, strips)).collect();
     let longest = rounds.iter().map(&seconds).fold(0.0, f64::max);
-    let clock_for = |sampled: &[Sampled]| -> f64 {
+    let clock_for = |rounds: &[Round], sampled: &[Sampled]| -> f64 {
         let mut in_use = vec![0.0f64; field.strips.len()];
-        for s in sampled {
-            for &(strip, a, b) in s.busy_before.iter().chain(&s.busy_after) {
+        let mut flown = vec![0usize; field.strips.len()];
+        for (r, s) in rounds.iter().zip(sampled) {
+            flown[r.runway] += 1;
+            for &(strip, a, b) in s.busy_before.iter().chain(&s.afters[0].1) {
                 in_use[strip] += (b - a + 2 * RUNWAY_PAD_S) as f64;
             }
         }
         let busiest = in_use.iter().copied().fold(0.0, f64::max);
-        (sampled.len() as f64 * SLOT_S)
+        let most = flown.iter().copied().max().unwrap_or(0);
+        (most as f64 * SLOT_S)
             .max(longest + MIN_DWELL_S + 30.0)
             .max(busiest / RUNWAY_SHARE)
             .max(MIN_ROUND_S)
     };
-    while sampled.len() > 1 && clock_for(&sampled) > MAX_ROUND_S {
+    while sampled.len() > 1 && clock_for(&rounds, &sampled) > MAX_ROUND_S {
         sampled.pop();
         if let Some(r) = rounds.pop() {
             idle.push(r.stand);
         }
     }
-    let clock = clock_for(&sampled).min(MAX_ROUND_S).ceil() as usize;
-    let mut sky = Sky::new(clock, field.strips.len());
+
+    // The rounds are given times two ways: each from a time of its own, so that the
+    // take-offs from each runway come evenly over the clock, and each from where the one
+    // before it went, packed close. Of those that find every round a time, the one that
+    // leaves no runway idle for as long; where neither does, the clock is let out a little
+    // and both are tried again. At the longest clock, those left stay down.
+    let mut on_runway = vec![0usize; field.strips.len()];
+    let rank: Vec<usize> = rounds
+        .iter()
+        .map(|r| {
+            on_runway[r.runway] += 1;
+            on_runway[r.runway] - 1
+        })
+        .collect();
+    let longest_clock = MAX_ROUND_S as usize;
+    let mut clock = (clock_for(&rounds, &sampled).min(MAX_ROUND_S).ceil() as usize).max(1);
+    let (clock, times, sky) = loop {
+        let last = clock >= longest_clock;
+        let mut best: Option<(i64, Vec<Option<Time>>, Sky)> = None;
+        for packed in [false, true] {
+            let mut sky = Sky::new(clock, field.strips.len());
+            let mut times = Vec::with_capacity(rounds.len());
+            let mut from = 0;
+            for ((r, s), &i) in rounds.iter().zip(&sampled).zip(&rank) {
+                let first = if packed {
+                    from
+                } else {
+                    let takes_off = i * clock / on_runway[r.runway].max(1);
+                    (takes_off + clock - s.before.len() % clock) % clock
+                };
+                let time = sky.place(s, first, size, k);
+                if let Some((start, ..)) = time {
+                    from = start;
+                } else if !last {
+                    break;
+                }
+                times.push(time);
+            }
+            let all = times.len() == rounds.len() && times.iter().all(Option::is_some);
+            if all || (last && !packed) {
+                let idle = if all { sky.longest_idle() } else { i64::MAX };
+                if best.as_ref().is_none_or(|(b, ..)| idle < *b) {
+                    best = Some((idle, times, sky));
+                }
+            }
+        }
+        if let Some((_, times, sky)) = best {
+            break (clock, times, sky);
+        }
+        clock = ((clock as f64 * CLOCK_STEP).ceil() as usize).min(longest_clock);
+    };
     let mut flights: Vec<Flight> = Vec::new();
-    let count = rounds.len().max(1);
-    for (i, (round, sampled)) in rounds.into_iter().zip(sampled).enumerate() {
-        match sky.place(&sampled, i * clock / count, size, k) {
-            Some((start, wait)) => flights.push(Flight { round, start, wait }),
+    for (round, time) in rounds.into_iter().zip(times) {
+        match time {
+            Some((start, wait, orbits)) => flights.push(Flight {
+                round,
+                start,
+                wait,
+                orbits,
+            }),
             None => idle.push(round.stand),
         }
     }
@@ -3017,7 +3236,7 @@ fn plan_field(
             .iter()
             .copied()
             .chain(std::iter::repeat_n(hold, f.wait * per))
-            .chain(f.round.after.iter().copied());
+            .chain(f.after().iter().copied());
         for (i, s) in steps.enumerate() {
             timetable[(f.start * per + i) % len] = place(s);
         }
@@ -3221,6 +3440,69 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_turn_round_off_the_downwind_leaves_and_rejoins_it_level_and_away_from_the_runway() {
+        let elements = airfield(3000, 9, 70);
+        let field = Field::read(&elements, 1.0);
+        let strips: Vec<usize> = (0..field.strips.len()).collect();
+        let mut paths = Paths {
+            field: &field,
+            k: 1.0,
+            ground: &flat,
+            datum: 64.0,
+            ceiling: f64::INFINITY,
+            pieces: Vec::new(),
+            keys: Vec::new(),
+            by_key: FnvHashMap::default(),
+            tall: &[],
+        };
+        let uses = runway_uses(&paths, &strips, None);
+        let u = &uses[0];
+        let off_line = |p: &Pt| point_to_segment((p.x, p.z), u.line.at(-5000.0), u.line.at(9000.0));
+        for tight in [false, true] {
+            let circuit = paths.circuit_piece(u, tight).expect("a circuit");
+            let (orbit, at) = paths.orbit_piece(u, tight, circuit).expect("room to turn");
+            let leaves = paths.pieces[circuit].at(at);
+            let pts = &paths.pieces[orbit].pts;
+            for p in [pts[0], *pts.last().expect("points")] {
+                let gap = (p.x - leaves.x).hypot(p.z - leaves.z);
+                assert!(gap < 1.0, "{gap:.2} blocks off the leg");
+                let turned = (p.yaw - leaves.yaw + 540.0).rem_euclid(360.0) - 180.0;
+                assert!(turned.abs() < 3.0, "turned {turned:.1}");
+            }
+            assert!(pts.iter().all(|p| (p.y - leaves.y).abs() < 1e-6 && !p.gear));
+            assert!(pts.iter().all(|p| off_line(p) > off_line(&leaves) - 1.0));
+            assert!(at < paths.pieces[circuit].len / 2.0, "on the downwind");
+        }
+    }
+
+    // Its one taxilane keeps this airfield's aircraft apart on the ground more than its
+    // runway does; a real airport's runway sees one every minute or two.
+    #[test]
+    fn the_runway_sees_a_take_off_or_landing_every_two_minutes_or_so() {
+        let fields = AirPlan::build(&airfield(3000, 9, 70), 1.0, usize::MAX, f64::INFINITY, flat)
+            .into_fields();
+        let (route, services) = &fields[0];
+        let gear = &route.air.as_ref().expect("an airfield's route").gear;
+        let mut moves = Vec::new();
+        let mut clock = 0;
+        for s in services.iter().filter(|s| s.timetable.len() > 1) {
+            clock = s.timetable.len();
+            let down = |i: usize| gear[(s.timetable[i % clock] / 1000) as usize];
+            // The wheels go up as it lifts off and come down on the approach.
+            moves.extend((0..clock).filter(|&i| down(i) != down(i + 1)));
+        }
+        moves.sort_unstable();
+        let longest = (0..moves.len())
+            .map(|i| (moves[(i + 1) % moves.len()] + clock - moves[i]) % clock)
+            .max()
+            .expect("aircraft fly") as f64
+            / STEPS_PER_S;
+        let every = clock as f64 / moves.len() as f64 / STEPS_PER_S;
+        assert!(every <= 140.0, "one every {every:.0} s");
+        assert!(longest <= 480.0, "{longest:.0} s without one");
     }
 
     #[test]
