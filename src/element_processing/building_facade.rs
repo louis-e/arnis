@@ -92,6 +92,8 @@ impl Default for ColumnFacade {
 pub struct BuildingContext<'a> {
     pub flood_fill_cache: &'a FloodFillCache,
     pub building_passages: &'a CoordinateBitmap,
+    /// Of the passages, those of track, and what it does in each building.
+    pub rail_passages: &'a crate::element_processing::railways::RailPassages,
     pub road_mask: &'a CoordinateBitmap,
     pub building_footprints: &'a CoordinateBitmap,
     /// group_seed -> sorted member way ids; only groups with >= 2 members.
@@ -467,6 +469,7 @@ mod tests {
             BuildingContext {
                 flood_fill_cache: &self.cache,
                 building_passages: &self.passages,
+                rail_passages: crate::element_processing::railways::RailPassages::none(),
                 road_mask: road,
                 building_footprints: footprints,
                 group_members: &self.groups,

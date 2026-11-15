@@ -337,6 +337,8 @@ pub struct WorldEditor<'a> {
     signage: Option<Arc<crate::element_processing::signage::SignageContext>>,
     /// Signal heads to build as cycling display entities instead of the banner heads.
     traffic_signals: Option<Arc<crate::element_processing::traffic_lights::SignalIndex>>,
+    /// Level crossings to build masts and booms at, which the data pack closes for trains.
+    crossings: Option<Arc<crate::element_processing::level_crossings::CrossingPlan>>,
     /// Lanes and cars, placed as their roads are built.
     car_network: Option<Arc<crate::element_processing::cars::CarNetwork>>,
     /// Parked cars are the moving cars' models rather than block cars.
@@ -414,6 +416,7 @@ impl<'a> WorldEditor<'a> {
             map_decals: false,
             signage: None,
             traffic_signals: None,
+            crossings: None,
             car_network: None,
             parked_car_models: false,
             strict_bounds: None,
@@ -489,6 +492,7 @@ impl<'a> WorldEditor<'a> {
             map_decals: false,
             signage: None,
             traffic_signals: None,
+            crossings: None,
             car_network: None,
             parked_car_models: false,
             strict_bounds: None,
@@ -564,6 +568,7 @@ impl<'a> WorldEditor<'a> {
             map_decals: false,
             signage: None,
             traffic_signals: None,
+            crossings: None,
             car_network: None,
             parked_car_models: false,
             strict_bounds: None,
@@ -1067,6 +1072,19 @@ impl<'a> WorldEditor<'a> {
         &self,
     ) -> Option<Arc<crate::element_processing::traffic_lights::SignalIndex>> {
         self.traffic_signals.clone()
+    }
+
+    pub fn set_crossings(
+        &mut self,
+        plan: Arc<crate::element_processing::level_crossings::CrossingPlan>,
+    ) {
+        self.crossings = Some(plan);
+    }
+
+    pub fn crossings(
+        &self,
+    ) -> Option<Arc<crate::element_processing::level_crossings::CrossingPlan>> {
+        self.crossings.clone()
     }
 
     pub fn set_car_network(&mut self, net: Arc<crate::element_processing::cars::CarNetwork>) {

@@ -102,7 +102,9 @@ const CARS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/cars/despawn.mcfunction",
     "data/arnis/function/cars/cap.mcfunction",
     "data/arnis/function/cars/light.mcfunction",
+    "data/arnis/function/cars/crossing.mcfunction",
     "data/arnis/function/cars/gate.mcfunction",
+    "data/arnis/function/cars/gate_crossing.mcfunction",
     "data/arnis/function/cars/gated.mcfunction",
     "data/arnis/function/cars/brake_lights.mcfunction",
     "data/arnis/function/cars/brake_switch.mcfunction",
@@ -125,6 +127,7 @@ const CARS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/cars/seat_move.mcfunction",
     "data/arnis/function/cars/seat_free.mcfunction",
     "data/arnis/function/cars/seat_check.mcfunction",
+    "data/arnis/function/cars/watch.mcfunction",
     "data/arnis/advancement/cars/board.json",
 ];
 
@@ -147,6 +150,26 @@ const TRAINS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/trains/gone_at.mcfunction",
     "data/arnis/function/trains/sweep.mcfunction",
     "data/arnis/function/trains/board.mcfunction",
+    "data/arnis/function/trains/air.mcfunction",
+    "data/arnis/function/trains/air_at.mcfunction",
+    "data/arnis/function/trains/air_put.mcfunction",
+    "data/arnis/function/trains/air_part.mcfunction",
+    "data/arnis/function/trains/air_gear0.mcfunction",
+    "data/arnis/function/trains/air_gear1.mcfunction",
+    "data/arnis/function/trains/watch.mcfunction",
+    "data/arnis/function/trains/watch_at.mcfunction",
+];
+
+/// The level crossings' functions; `check`, `boom` and one per crossing are generated.
+const CROSSINGS: &[(&str, &[u8])] = static_files![
+    "data/arnis/function/xing/load.mcfunction",
+    "data/arnis/function/xing/tick.mcfunction",
+    "data/arnis/function/xing/drive.mcfunction",
+    "data/arnis/function/xing/catch_up.mcfunction",
+    "data/arnis/function/xing/changed.mcfunction",
+    "data/arnis/function/xing/apply.mcfunction",
+    "data/arnis/function/xing/dark.mcfunction",
+    "data/arnis/function/xing/flash.mcfunction",
 ];
 
 const WALK: &[(&str, &[u8])] = static_files![
@@ -183,6 +206,9 @@ const WALK: &[(&str, &[u8])] = static_files![
     "data/arnis/function/walk/pick.mcfunction",
     "data/arnis/function/walk/pick_at.mcfunction",
     "data/arnis/function/walk/place.mcfunction",
+    "data/arnis/function/walk/rail.mcfunction",
+    "data/arnis/function/walk/rail_hold.mcfunction",
+    "data/arnis/function/walk/rail_open.mcfunction",
     "data/arnis/function/walk/reach.mcfunction",
     "data/arnis/function/walk/respawn.mcfunction",
     "data/arnis/function/walk/settle.mcfunction",
@@ -523,6 +549,8 @@ pub struct Extras {
     pub cars: bool,
     /// Set once the rail network turns out to have trains on it.
     pub trains: bool,
+    /// Set once a level crossing turns out to have trains to close for.
+    pub crossings: bool,
     pub pedestrians: bool,
 }
 
@@ -541,6 +569,7 @@ impl Extras {
             disasters: args.disasters,
             cars: args.moving_vehicles,
             trains: false,
+            crossings: false,
             pedestrians: args.pedestrians,
         }
     }
@@ -631,6 +660,8 @@ pub struct PackContext {
     /// The functions that hold the routes and timetables, run each train and summon its
     /// carriages.
     pub train_functions: Vec<(String, String)>,
+    /// The functions that close each level crossing for its trains.
+    pub crossing_functions: Vec<(String, String)>,
     /// The functions that hold the footways and move the walkers at the world's scale.
     pub walk_functions: Vec<(String, String)>,
     /// Which disasters the area gets and the water maps they rise by.
@@ -757,6 +788,9 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     if ex.trains {
         add_static(TRAINS);
     }
+    if ex.crossings {
+        add_static(CROSSINGS);
+    }
     if ex.pedestrians {
         add_static(WALK);
     }
@@ -776,6 +810,8 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
         (ex.disasters, "disaster"),
         (ex.cars, "cars"),
         (ex.trains, "trains"),
+        // After the trains, whose clock the crossings read.
+        (ex.crossings, "xing"),
         (ex.pedestrians, "walk"),
     ]
     .into_iter()
@@ -816,6 +852,13 @@ fn files(ctx: &PackContext) -> Vec<(String, Vec<u8>)> {
     if ex.trains {
         out.extend(
             ctx.train_functions
+                .iter()
+                .map(|(path, text)| (path.clone(), text.clone().into_bytes())),
+        );
+    }
+    if ex.crossings {
+        out.extend(
+            ctx.crossing_functions
                 .iter()
                 .map(|(path, text)| (path.clone(), text.clone().into_bytes())),
         );
@@ -953,6 +996,7 @@ fn pack_mcmeta(ex: Extras) -> Value {
         (ex.disasters, "disasters"),
         (ex.cars, "moving cars"),
         (ex.trains, "trains"),
+        (ex.crossings, "level crossings"),
         (ex.pedestrians, "pedestrians"),
     ] {
         if on {
@@ -1076,6 +1120,7 @@ mod tests {
             red_amber: true,
             car_functions: Vec::new(),
             train_functions: Vec::new(),
+            crossing_functions: Vec::new(),
             walk_functions: Vec::new(),
             disasters: extras
                 .disasters
@@ -1094,6 +1139,7 @@ mod tests {
             disasters: true,
             cars: true,
             trains: true,
+            crossings: true,
             pedestrians: true,
         }
     }
@@ -1133,7 +1179,7 @@ mod tests {
     fn every_bundled_file_is_shipped_by_some_feature() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/minecraft/datapack_extras");
         let listed: std::collections::HashSet<&str> = [
-            CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, DISASTERS, CARS, TRAINS, WALK,
+            CORE, GRAVITY, TRAFFIC, MENU, OUTBREAK, DISASTERS, CARS, TRAINS, CROSSINGS, WALK,
         ]
         .iter()
         .flat_map(|set| set.iter().map(|(p, _)| *p))
@@ -1216,7 +1262,10 @@ mod tests {
                             || name.starts_with(&format!("arnis:trains/{f}"))
                     }) || ["network", "move", "ahead", "gap", "behind", "aside"]
                         .iter()
-                        .any(|f| name == format!("arnis:walk/{f}"));
+                        .any(|f| name == format!("arnis:walk/{f}"))
+                        || ["check", "boom"]
+                            .iter()
+                            .any(|f| name == format!("arnis:xing/{f}"));
                     if name.contains("$(") || networked {
                         continue;
                     }

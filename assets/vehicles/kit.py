@@ -243,10 +243,14 @@ class Model:
 
     `bones` maps a moving bone's name to its pivot (wheels turn about x through it).
     `eye` is where a rider's eyes are (units, vehicle frame), checked to lie inside the
-    glasshouse with nothing drawn in front of them but the outside of the vehicle."""
+    glasshouse with nothing drawn in front of them but the outside of the vehicle.
+    `centre` is the point Java's model is fitted about, the middle of the model unless
+    given: a part its display turns, as a barrier boom about its hinge, is fitted about
+    the point it turns on, so that the display needs no translation to put it there."""
 
-    def __init__(self, id, boxes, painters, livery, bones=None, eye=None, notes=""):
+    def __init__(self, id, boxes, painters, livery, bones=None, eye=None, notes="", centre=None):
         self.id = id
+        self.centre = None if centre is None else [float(v) for v in centre]
         self.boxes = boxes
         self.painters = painters
         self.livery = {s: livery.get(s, livery.get("body")) for s in SLOTS}
@@ -313,9 +317,11 @@ def face_points(box, fname):
 
 
 def hidden(box, fname, grid, boxes):
-    """Whether every texel of a face sits inside some other box."""
+    """Whether every texel of a face sits inside some other box. An aircraft's landing gear
+    hides nothing but itself: it is left off in flight, and the body has to be whole then."""
     n_local = FACES[fname]["normal"]
-    others = [o for o in boxes if o is not box]
+    gear = box.bone.startswith(GEAR)
+    others = [o for o in boxes if o is not box and (gear or not o.bone.startswith(GEAR))]
     last = None
     for row in grid:
         for local in row:
@@ -662,6 +668,9 @@ def bedrock_geometry(built):
 # ---------------------------------------------------------------- Java
 
 JAVA_LIMIT = (-16.0, 32.0)
+# Bones of this name hold an aircraft's landing gear: Java gets a second model without
+# them (`<id>_up`), Bedrock hides them.
+GEAR = "gear"
 
 
 def java_frame(built):
@@ -669,7 +678,7 @@ def java_frame(built):
     boxes = built.model.boxes
     lo = [min(min(b.frm[i], b.origin[i]) for b in boxes) for i in range(3)]
     hi = [max(max(b.to[i], b.origin[i]) for b in boxes) for i in range(3)]
-    centre = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    centre = built.model.centre or [(lo[i] + hi[i]) / 2 for i in range(3)]
     reach = max(max(hi[i] - centre[i], centre[i] - lo[i]) for i in range(3))
     scale = min(1.0, 23.9 / reach) if reach > 0 else 1.0
     return centre, scale
@@ -677,8 +686,9 @@ def java_frame(built):
 
 def java_models(built, texture_ref):
     """The Java item models in the fitted frame: the body, with head lamps glowing; the
-    brake lamps on their own, bright (None without any); and the car parked, its body and
-    dim brake lamps, nothing glowing (None without brake lamps)."""
+    brake lamps on their own, bright (None without any); the car parked, its body and
+    dim brake lamps, nothing glowing (None without brake lamps); and the body without the
+    boxes of its `gear*` bones, an aircraft's landing gear up (None without any)."""
     model, faces, spots = built.model, built.faces, built.spots
     tw, th = built.texture.size
     centre, scale = java_frame(built)
@@ -713,7 +723,7 @@ def java_models(built, texture_ref):
             el["light_emission"] = 15
         return el
 
-    body, tail, dim = [], [], []
+    body, tail, dim, clean = [], [], [], []
     for box in model.boxes:
         if box.lamp == "brake":
             e = element(box, "bright")
@@ -726,11 +736,14 @@ def java_models(built, texture_ref):
             e = element(box, "plain")
             if e:
                 body.append(e)
+                if not box.bone.startswith(GEAR):
+                    clean.append(e)
     textures = {"t": texture_ref, "particle": texture_ref}
     main = {"textures": textures, "elements": body}
     dark = [{k: v for k, v in e.items() if k != "light_emission"} for e in body + dim]
     parked = {"textures": textures, "elements": dark} if tail else None
-    return main, ({"textures": textures, "elements": tail} if tail else None), parked, {"centre": [r4(c) for c in centre], "scale": scale}
+    up = {"textures": textures, "elements": clean} if len(clean) < len(body) else None
+    return main, ({"textures": textures, "elements": tail} if tail else None), parked, up, {"centre": [r4(c) for c in centre], "scale": scale}
 
 
 def squeeze(faces):
@@ -798,7 +811,7 @@ def write(built, out_dir):
     built.mask.save(base + ".mask.png", optimize=True)
     with open(base + ".geo.json", "w") as f:
         json.dump(bedrock_geometry(built), f, separators=(",", ":"))
-    main, tail, parked, frame = java_models(built, f"arnis:block/vehicle/{m.id}")
+    main, tail, parked, up, frame = java_models(built, f"arnis:block/vehicle/{m.id}")
     with open(base + ".java.json", "w") as f:
         json.dump(main, f, separators=(",", ":"))
     if tail:
@@ -806,7 +819,12 @@ def write(built, out_dir):
             json.dump(tail, f, separators=(",", ":"))
         with open(base + "_parked.java.json", "w") as f:
             json.dump(parked, f, separators=(",", ":"))
+    if up:
+        with open(base + "_up.java.json", "w") as f:
+            json.dump(up, f, separators=(",", ":"))
     meta = {"id": m.id, "java": frame, "brake": tail is not None, "bones": {k: [r4(v) for v in p] for k, p in m.bones.items()}}
+    if up:
+        meta["gear"] = True
     meta.update(built.stats())
     with open(base + ".meta.json", "w") as f:
         json.dump(meta, f, indent=1)

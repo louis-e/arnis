@@ -1,7 +1,7 @@
 // Cars on the lanes Arnis planned, driven as the Java pack's cars functions drive them:
 // speeds are thousandths of a block per step and a step is every second tick. The rules
 // Arnis writes into the Java pack come in the data; the rest are the pack's own numbers.
-import { Bits, ahead, distance, numbers, randInt, turnBetween, warn, yawOf } from "./util.js";
+import { Bits, ahead, distance, lowered, numbers, randInt, raised, turnBetween, warn, yawOf } from "./util.js";
 
 const FAMILY = "arnis_car";
 const BRAKE = "arnis:brake";
@@ -178,7 +178,7 @@ export class Cars {
       e.remove();
       return undefined;
     }
-    const at = e.location;
+    const at = lowered(e.location);
     const car = {
       e,
       id: e.id,
@@ -424,7 +424,7 @@ export class Cars {
   spawn(name, at, s, i, pace) {
     const lane = this.lane(s);
     const yaw = yawOf(lane.x[i] - at.x, lane.z[i] - at.z);
-    const e = this.dim.spawnEntity(`arnis:${name}`, at, { initialRotation: yaw });
+    const e = this.dim.spawnEntity(`arnis:${name}`, raised(at), { initialRotation: yaw });
     e.setDynamicProperty("arnis:p", pace);
     const car = {
       e,

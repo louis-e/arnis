@@ -37,6 +37,8 @@ pub struct Model {
     brake: Option<&'static str>,
     /// A car's body and dim brake lamps, nothing glowing: how it stands parked.
     parked: Option<&'static str>,
+    /// An aircraft without its landing gear: how it flies.
+    up: Option<&'static str>,
     meta: &'static str,
 }
 
@@ -50,7 +52,18 @@ macro_rules! model {
             java: include_str!(concat!("../assets/vehicles/out/", $id, ".java.json")),
             brake: None,
             parked: None,
+            up: None,
             meta: include_str!(concat!("../assets/vehicles/out/", $id, ".meta.json")),
+        }
+    };
+    ($id:literal, gear) => {
+        Model {
+            up: Some(include_str!(concat!(
+                "../assets/vehicles/out/",
+                $id,
+                "_up.java.json"
+            ))),
+            ..model!($id)
         }
     };
     ($id:literal, brake) => {
@@ -126,6 +139,17 @@ static MODELS: &[Model] = &[
     model!("signal_car_red_amber"),
     model!("signal_walk_red"),
     model!("signal_walk_green"),
+    // Level crossing masts, a model per lamp lit, and the boom; at 32 units too.
+    model!("xing_light_off"),
+    model!("xing_light_a"),
+    model!("xing_light_b"),
+    model!("xing_boom"),
+    // Aircraft, their main wheels at the origin; all but the light single fold them away.
+    model!("plane_light"),
+    model!("plane_bizjet", gear),
+    model!("plane_regional", gear),
+    model!("plane_narrow", gear),
+    model!("plane_wide", gear),
 ];
 
 /// The model of that id. The ids are fixed in the code that picks them, and a test
@@ -284,6 +308,12 @@ impl Model {
         self.brake.is_some()
     }
 
+    /// Whether it has a model of its own with the landing gear up.
+    #[cfg(test)]
+    pub fn has_gear_up(&self) -> bool {
+        self.up.is_some()
+    }
+
     /// Height of the model's highest point in metres at 1:1.
     pub fn top_m(&self) -> f64 {
         self.meta().bounds[1][1] / 16.0
@@ -301,7 +331,8 @@ impl Model {
     }
 
     /// Bedrock geometry named `identifier` at `size` blocks per metre, turned half a
-    /// circle when `backward`.
+    /// circle when `backward`, and let down `LIFT` under the entity, which the script
+    /// keeps that far over the spot the vehicle is drawn at.
     pub fn bedrock_geometry(&self, identifier: &str, size: f64, backward: bool) -> Value {
         let mut geo: Value = serde_json::from_str(self.geo).expect("vehicle geometry is JSON");
         let g = &mut geo["minecraft:geometry"][0];
@@ -311,14 +342,18 @@ impl Model {
             g["description"][key] = json!((v * size).ceil());
         }
         scale_list(&mut g["description"]["visible_bounds_offset"], size);
+        lower(&mut g["description"]["visible_bounds_offset"], LIFT);
         if let Some(bones) = g["bones"].as_array_mut() {
             for bone in bones.iter_mut() {
                 scale_list(&mut bone["pivot"], size);
+                lower(&mut bone["pivot"], LIFT * 16.0);
                 if let Some(cubes) = bone["cubes"].as_array_mut() {
                     for cube in cubes {
                         for key in ["origin", "size", "pivot"] {
                             scale_list(&mut cube[key], size);
                         }
+                        lower(&mut cube["origin"], LIFT * 16.0);
+                        lower(&mut cube["pivot"], LIFT * 16.0);
                     }
                 }
                 if backward {
@@ -333,6 +368,13 @@ impl Model {
             }
         }
         geo
+    }
+}
+
+/// Takes `by` off the height of a point, if there is one.
+fn lower(v: &mut Value, by: f64) {
+    if let Some(y) = v.get(1).and_then(Value::as_f64) {
+        v[1] = json!(((y - by) * 1000.0).round() / 1000.0);
     }
 }
 
@@ -390,10 +432,23 @@ pub fn brake_item_model(model: &str) -> String {
     format!("{NAMESPACE}:vehicle/{model}_brake")
 }
 
+/// Whether a model is an aircraft, which is drawn wheels up as well as down: the pack's
+/// gear functions name the item model of a look wheels up by the suffix `_up`.
+pub(crate) fn flies(model: &str) -> bool {
+    model.starts_with("plane_")
+}
+
 /// The item model id of a look parked: its headlights off.
 pub fn parked_item_model(look: &Look) -> String {
     format!("{NAMESPACE}:vehicle/{}_parked", look.name())
 }
+
+/// How far a moving vehicle stands above the spot it is drawn at, in blocks, along its own
+/// up, its model let down as far again. The game lights a display, and Bedrock an entity,
+/// by the block its position is in, and a vehicle gliding between two points up a step or
+/// a slope cuts into the road, the track bed or the ground for a moment: the whole model
+/// would go dark. A block up, that position is in the air over it.
+pub const LIFT: f64 = 1.0;
 
 /// How the display has to place the model so that a point of the vehicle at 1:1 lands
 /// `size` times as far out from the entity: (translation, left_rotation, scale).
@@ -402,15 +457,31 @@ pub fn parked_item_model(look: &Look) -> String {
 /// the model is the vehicle fitted into Java's -16..32: u = (v - centre) * fit + 8. So the
 /// scale is size / fit, and the translation puts the vehicle's own origin back on the
 /// entity: the centre, turned the way the model is.
+#[cfg(test)]
 pub fn display_transform(model: &str, size: f64, backward: bool) -> ([f64; 3], [f64; 4], f64) {
+    lifted_transform(model, size, backward, 0.0)
+}
+
+/// The same for a display standing `lift` blocks above the spot the vehicle is drawn at:
+/// the model is let down that far along the display's own up, so it turns with it.
+pub fn lifted_transform(
+    model: &str,
+    size: f64,
+    backward: bool,
+    lift: f64,
+) -> ([f64; 3], [f64; 4], f64) {
     let frame = &metas()[model].java;
     let c = frame.centre.map(|v| v * size / 16.0);
     if backward {
         // The half turn here undoes the renderer's: the model's front faces the back.
-        (c, [0.0, 1.0, 0.0, 0.0], size / frame.scale)
+        (
+            [c[0], c[1] - lift, c[2]],
+            [0.0, 1.0, 0.0, 0.0],
+            size / frame.scale,
+        )
     } else {
         (
-            [-c[0], c[1], -c[2]],
+            [-c[0], c[1] - lift, -c[2]],
             [0.0, 0.0, 0.0, 1.0],
             size / frame.scale,
         )
@@ -433,15 +504,16 @@ pub fn culling_box(model: &str, size: f64) -> (f64, f64) {
 }
 
 /// The SNBT of a display drawing `item_model` (which may hold macro variables) for
-/// `model`, for a `summon` command; `extra` goes in as it is.
+/// `model`, standing `lift` blocks over it, for a `summon` command; `extra` goes in as it is.
 pub fn display_snbt(
     model: &str,
     item_model: &str,
     size: f64,
     backward: bool,
+    lift: f64,
     extra: &str,
 ) -> String {
-    let (t, q, s) = display_transform(model, size, backward);
+    let (t, q, s) = lifted_transform(model, size, backward, lift);
     let (w, h) = culling_box(model, size);
     format!(
         "item:{{id:\"{CARRIER}\",count:1,components:{{\"minecraft:item_model\":\"{item_model}\"}}}},\
@@ -458,7 +530,18 @@ pub fn display_nbt(
     size: f64,
     backward: bool,
 ) -> HashMap<String, Nbt> {
-    let (t, q, s) = display_transform(model, size, backward);
+    lifted_display_nbt(model, item_model, size, backward, 0.0)
+}
+
+/// The same for a display standing `lift` blocks over the vehicle it draws.
+pub fn lifted_display_nbt(
+    model: &str,
+    item_model: &str,
+    size: f64,
+    backward: bool,
+    lift: f64,
+) -> HashMap<String, Nbt> {
+    let (t, q, s) = lifted_transform(model, size, backward, lift);
     let floats = |v: &[f64]| Nbt::List(v.iter().map(|f| Nbt::Float(*f as f32)).collect());
     let components = HashMap::from([(
         "minecraft:item_model".to_string(),
@@ -488,6 +571,8 @@ pub fn display_nbt(
 
 /// The resource pack files that draw `looks` on Java: per model its geometry and, for
 /// cars, its brake lights; per look a texture, a model naming it and an item definition.
+/// An aircraft's look has a second item, wheels up, which for one with fixed wheels is
+/// the same model again.
 pub fn java_pack<'a>(
     looks: impl IntoIterator<Item = &'a Look>,
     parked: &'a [Look],
@@ -516,6 +601,14 @@ pub fn java_pack<'a>(
             v["textures"] = json!({ "t": first, "particle": first });
             out.push((
                 format!("assets/{NAMESPACE}/models/item/vehicle/{id}{suffix}.json"),
+                pretty(&v),
+            ));
+        }
+        if let Some(text) = m.up {
+            let mut v: Value = serde_json::from_str(text).expect("vehicle models are JSON");
+            v["textures"] = json!({ "t": first, "particle": first });
+            out.push((
+                format!("assets/{NAMESPACE}/models/item/vehicle/{id}_up.json"),
                 pretty(&v),
             ));
         }
@@ -558,6 +651,24 @@ pub fn java_pack<'a>(
                     "{NAMESPACE}:item/vehicle/{name}"
                 ))),
             ));
+            if flies(id) {
+                let up = if m.up.is_some() {
+                    out.push((
+                        format!("assets/{NAMESPACE}/models/item/vehicle/{name}_up.json"),
+                        pretty(&json!({
+                            "parent": format!("{NAMESPACE}:item/vehicle/{id}_up"),
+                            "textures": { "t": texture, "particle": texture },
+                        })),
+                    ));
+                    format!("{NAMESPACE}:item/vehicle/{name}_up")
+                } else {
+                    format!("{NAMESPACE}:item/vehicle/{name}")
+                };
+                out.push((
+                    format!("assets/{NAMESPACE}/items/vehicle/{name}_up.json"),
+                    pretty(&item_definition(&up)),
+                ));
+            }
             if parks(look) {
                 out.push((
                     format!("assets/{NAMESPACE}/models/item/vehicle/{name}_parked.json"),
@@ -632,6 +743,91 @@ mod tests {
         let (t, q, s) = display_transform(model, size, backward);
         let r = unit_quat_turn(q, turned.map(|c| c * s));
         [0, 1, 2].map(|i| t[i] + r[i])
+    }
+
+    /// Lifted and let down as far, a vehicle is drawn just where it was, however it is
+    /// turned: the pack lifts it along its own up, the model comes down along the same.
+    /// The pack's functions and the Bedrock script lift it by as much.
+    #[test]
+    fn a_lifted_display_draws_its_vehicle_where_it_was() {
+        for (model, backward) in [
+            ("car_sedan", false),
+            ("plane_narrow", false),
+            ("plane_light", true),
+        ] {
+            for v in [[0.0, 0.0, 0.0], [12.0, 30.0, -40.0], [-8.0, 4.0, 25.0]] {
+                let flat = drawn(model, v, 1.5, backward);
+                let frame = &metas()[model].java;
+                let u = [0, 1, 2].map(|i| (v[i] - frame.centre[i]) * frame.scale + 8.0);
+                let local = [0, 1, 2].map(|i| (u[i] - 8.0) / 16.0);
+                let turned = [-local[0], local[1], -local[2]];
+                let (t, q, s) = lifted_transform(model, 1.5, backward, LIFT);
+                let r = unit_quat_turn(q, turned.map(|c| c * s));
+                let lifted = [t[0] + r[0], t[1] + r[1] + LIFT, t[2] + r[2]];
+                for i in 0..3 {
+                    assert!((flat[i] - lifted[i]).abs() < 1e-9, "{model} {v:?}");
+                }
+            }
+        }
+        let pack = |path: &str| -> &str {
+            match path {
+                "put" => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/trains/put.mcfunction"
+                ),
+                "air_put" => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/trains/air_put.mcfunction"
+                ),
+                "step" => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/cars/step.mcfunction"
+                ),
+                _ => include_str!(
+                    "../assets/minecraft/datapack_extras/data/arnis/function/cars/claim.mcfunction"
+                ),
+            }
+        };
+        // The body is found, made and dated where it stands; the doors stay by the track.
+        assert_eq!(
+            pack("put")
+                .matches(&format!("positioned ^ ^{LIFT} ^$(f)"))
+                .count(),
+            3
+        );
+        assert_eq!(
+            pack("put")
+                .matches("positioned ^ ^ ^$(f) if entity @a")
+                .count(),
+            1
+        );
+        let up = format!("rotated $(h) $(p) positioned ^ ^{LIFT} ^");
+        assert_eq!(pack("air_put").matches(&up).count(), 3);
+        assert!(pack("step").contains(&format!(
+            "run tp @e[tag=arnis.car.go,tag=arnis.car.lift,distance=..0.1] ~ ~{LIFT} ~"
+        )));
+        assert!(pack("claim").contains(&format!("positioned ~ ~{LIFT} ~ as @e[tag=arnis.car.lift")));
+        let script = include_str!("../assets/minecraft/bedrock_addon/scripts/util.js");
+        assert!(script.contains(&format!("export const LIFT = {LIFT};")));
+    }
+
+    /// On Bedrock the geometry is let down under the entity, which the script lifts.
+    #[test]
+    fn bedrock_geometry_hangs_under_the_entity() {
+        let m = model("car_sedan");
+        let raw: Value = serde_json::from_str(m.geo).unwrap();
+        let geo = m.bedrock_geometry("geometry.test", 2.0, false);
+        let cubes = |g: &Value| -> Vec<f64> {
+            g["minecraft:geometry"][0]["bones"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|b| b["cubes"].as_array().cloned().unwrap_or_default())
+                .map(|c| c["origin"][1].as_f64().unwrap())
+                .collect()
+        };
+        let (before, after) = (cubes(&raw), cubes(&geo));
+        assert!(!before.is_empty() && before.len() == after.len());
+        for (b, a) in before.iter().zip(&after) {
+            assert!((b * 2.0 - LIFT * 16.0 - a).abs() < 0.002, "{b} {a}");
+        }
     }
 
     #[test]
@@ -709,6 +905,48 @@ mod tests {
             one["minecraft:geometry"][0]["description"]["identifier"],
             "geometry.t"
         );
+    }
+
+    /// The pack's gear functions swap an aircraft's item for the one named `_up`: the
+    /// model without its landing gear, or the same model again where the wheels are fixed.
+    #[test]
+    fn an_aircraft_has_an_item_with_its_wheels_up() {
+        let looks = [
+            Look::plain("plane_bizjet", "w", "minecraft:white_concrete"),
+            Look::plain("plane_light", "w", "minecraft:white_concrete"),
+        ];
+        let files = java_pack(&looks, &[]);
+        let file = |p: &str| -> Value {
+            let (_, bytes) = files
+                .iter()
+                .find(|(f, _)| f == p)
+                .unwrap_or_else(|| panic!("{p}"));
+            serde_json::from_slice(bytes).unwrap()
+        };
+        let count = |v: &Value| v["elements"].as_array().unwrap().len();
+        let down = file("assets/arnis/models/item/vehicle/plane_bizjet.json");
+        let up = file("assets/arnis/models/item/vehicle/plane_bizjet_up.json");
+        assert!(count(&up) < count(&down) && count(&up) > count(&down) / 2);
+        let item = file("assets/arnis/items/vehicle/plane_bizjet_w_up.json");
+        assert_eq!(
+            item["model"]["model"],
+            "arnis:item/vehicle/plane_bizjet_w_up"
+        );
+        let child = file("assets/arnis/models/item/vehicle/plane_bizjet_w_up.json");
+        assert_eq!(child["parent"], "arnis:item/vehicle/plane_bizjet_up");
+        assert_eq!(child["textures"]["t"], "arnis:block/vehicle/plane_bizjet_w");
+        // Fixed wheels: the item is there all the same, drawing the one model.
+        let fixed = file("assets/arnis/items/vehicle/plane_light_w_up.json");
+        assert_eq!(fixed["model"]["model"], "arnis:item/vehicle/plane_light_w");
+        assert!(!files
+            .iter()
+            .any(|(f, _)| f.ends_with("plane_light_up.json")));
+        // Nothing but aircraft gets one.
+        let car = java_pack(
+            &[Look::plain("car_sedan", "red", "minecraft:red_concrete")],
+            &[],
+        );
+        assert!(!car.iter().any(|(f, _)| f.contains("_up")));
     }
 
     /// A parked car is the same model with its lamps dark and its brake lamps on it,

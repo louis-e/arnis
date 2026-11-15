@@ -1,11 +1,14 @@
 # Vehicle models
 
-The cars, trains and ships of `--moving-vehicles` (and the parked cars with it), drawn as
-real models instead of stretched blocks: an `item_display` with a model from the world's
-resource pack on Java (1.21.6+), an entity geometry on Bedrock. The signal heads of
+The cars, trains, ships and aircraft of `--moving-vehicles` (and the parked cars with it),
+drawn as real models instead of stretched blocks: an `item_display` with a model from the
+world's resource pack on Java (1.21.6+), an entity geometry on Bedrock. The signal heads of
 `--traffic-lights` are built the same way (`models/signals.py`, one model per state the
 data pack switches between); being small, they are drawn at 32 units to the metre, and
-with no box turned they work from Java 1.21.4, as the traffic lights always have.
+with no box turned they work from Java 1.21.4, as the traffic lights always have. So are
+the masts and booms of the level crossings the trains close (`models/crossings.py`): a
+mast model per lamp lit, and a boom whose display the pack turns about its hinge, for
+which the model names the point Java fits it about (`Model(centre=...)`).
 
 Each model is Python in `models/`, built with `kit.py`. `build.py` writes for every model,
 into `out/`:
@@ -16,7 +19,7 @@ into `out/`:
 | `<id>.png` | the texture in the preview livery |
 | `<id>.mask.png` | per texel: livery slot (R, 0 = fixed colour), shade (G, 128 = none), lamp flags (B) |
 | `<id>.geo.json` | Bedrock geometry at 1:1, lamp bones `lit`, `brake_off`, `lit_brake`, wheel bones |
-| `<id>.java.json`, `<id>_brake.java.json` | Java item models, fitted into -16..32 |
+| `<id>.java.json`, `<id>_brake.java.json`, `<id>_up.java.json` | Java item models, fitted into -16..32 |
 | `<id>.meta.json` | how the Java model was fitted, bone pivots, counts |
 
 and `review.bbmodel`, every model side by side. Arnis embeds `out/` and colours each model
@@ -59,6 +62,13 @@ centimetres away.
   separate Java display).
 - **Bones.** A road wheel goes in its own bone, named `wheel_*`, pivot at its centre in
   `Model(bones=...)`; Bedrock turns those with speed.
+- **Aircraft** (`plane_*`) stand on their wheels with **z = 0 at the main wheels**, not
+  the middle of the body: Arnis turns them and lifts their nose about that point. Their
+  landing gear goes in bones named `gear*`; the kit then writes a second Java model
+  without those boxes, `<id>_up.java.json`, which Arnis draws in flight, and Bedrock hides
+  the bones. The body has to be whole without them. Fixed wheels stay in `body`. Livery
+  slots: `body` the fuselage, `lower` the belly, `stripe` the cheatline, `door` the fin
+  and wingtips, `roof` the engines.
 - **Hidden faces** (inside another box) are left out by themselves. Two coplanar faces
   over each other flicker: keep a part standing proud by at least 0.25 units, or keep the
   two from overlapping.
@@ -83,6 +93,8 @@ block atlas the facade photos share.
 | freight wagons | 80 | 300 | 256² |
 | boats up to 40 m | 150 | 500 | 512² |
 | ships | 300 | 1200 | 1024² |
+| light aircraft, business jets | 150 | 550 | 256² |
+| airliners | 320 | 1200 | 1024² |
 
 ## Style
 

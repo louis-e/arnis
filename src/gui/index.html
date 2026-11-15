@@ -993,61 +993,15 @@
 
               <div class="setting-grid">
                 <div class="settings-row setting-tile">
-                  <label for="pause-menu-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-menu-square"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="pause_menu">Arnis Pause Menu</span>
-                        <span class="tooltip-icon" data-tooltip-key="pause_menu_tip" data-tooltip="Adds an Arnis button to the pause menu for travelling to landmarks, seeing discoveries and the map credits. Java 1.21.6+; on 1.21.4 and 1.21.5 the credits go to chat.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="pause_menu_desc">Travel, discoveries and credits from the pause menu.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="pause-menu-toggle" name="pause-menu-toggle">
-                  </div>
-                </div>
-                <div class="settings-row setting-tile">
-                  <label for="discoveries-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-compass"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="discoveries">Discoveries</span>
-                        <span class="tooltip-icon" data-tooltip-key="discoveries_tip" data-tooltip="Adds an advancement tab with the area's landmarks, museums, parks, stations and more. Each one unlocks when you get there. Java 1.21.4+.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="discoveries_desc">Walk to real landmarks to unlock them as advancements.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="discoveries-toggle" name="discoveries-toggle">
-                  </div>
-                </div>
-                <div class="settings-row setting-tile">
-                  <label for="traffic-lights-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-traffic-light"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="traffic_lights">Working Traffic Lights</span>
-                        <span class="tooltip-icon" data-tooltip-key="traffic_lights_tip" data-tooltip="Traffic lights cycle through red, amber and green, with pedestrian and bike lights at crossings. Crossing roads take turns. Java 1.21.4+.">?</span>
-                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="traffic_lights" data-new-when="#traffic-lights-toggle:checked">
-                      </span>
-                      <span class="setting-desc" data-localize="traffic_lights_desc">Traffic lights that actually switch.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="checkbox" class="switch" id="traffic-lights-toggle" name="traffic-lights-toggle">
-                  </div>
-                </div>
-                <div class="settings-row setting-tile">
                   <label for="moving-cars-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-car"></use></svg>
                     <span class="setting-text">
                       <span class="setting-heading">
                         <span data-localize="moving_vehicles">Moving Vehicles</span>
-                        <span class="tooltip-icon" data-tooltip-key="moving_vehicles_tip" data-tooltip="Cars drive the mapped streets at the speed limit and, on Java, stop at red lights. Trains and trams run the tracks and stop at stations. Ferries cross on their mapped lines, ships sail the navigable rivers and canals, and boats cruise on open lakes and along the coast. Only vehicles near a player move. Java 1.21.6+ or Bedrock 1.21.120+.">?</span>
+                        <span class="tooltip-icon" data-tooltip-key="moving_vehicles_tip" data-tooltip="Trains stop at stations, aircraft take off and land, and on Java cars stop at red lights and level crossings. Vehicles move within your simulation distance. Java 1.21.6+ or Bedrock 1.21.120+.">?</span>
                         <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="moving_vehicles" data-new-when="#moving-cars-toggle:checked">
                       </span>
-                      <span class="setting-desc" data-localize="moving_vehicles_desc">Cars, trains, ferries and ships that run your streets, tracks and water.</span>
+                      <span class="setting-desc" data-localize="moving_vehicles_desc">Cars, trains, ships and aircraft that run your streets, tracks, water and airports.</span>
                     </span>
                   </label>
                   <div class="settings-control">
@@ -1070,7 +1024,37 @@
                     <input type="checkbox" class="switch" id="pedestrians-toggle" name="pedestrians-toggle">
                   </div>
                 </div>
-
+                <div class="settings-row setting-tile">
+                  <label for="traffic-lights-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-traffic-light"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="traffic_lights">Working Traffic Lights</span>
+                        <span class="tooltip-icon" data-tooltip-key="traffic_lights_tip" data-tooltip="Traffic lights cycle through red, amber and green, with pedestrian and bike lights at crossings. Crossing roads take turns. Java 1.21.4+.">?</span>
+                        <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="traffic_lights" data-new-when="#traffic-lights-toggle:checked">
+                      </span>
+                      <span class="setting-desc" data-localize="traffic_lights_desc">Traffic lights that actually switch.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="traffic-lights-toggle" name="traffic-lights-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="disasters-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tornado"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="disasters">Disasters</span>
+                        <span class="tooltip-icon" data-tooltip-key="disasters_tip" data-tooltip="Disasters strike one after another, each with a short warning: storms, meteors, tornadoes, floods, wildfires and more. The damage stays. Turns on Fill Ground and interiors and starts in Survival. Java 1.21.6+.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="disasters_desc">A disaster every few minutes: floods, tornadoes, earthquakes and more.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="disasters-toggle" name="disasters-toggle">
+                  </div>
+                </div>
                 <div class="settings-row setting-tile">
                   <label for="zombie-outbreak-toggle" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-skull"></use></svg>
@@ -1087,18 +1071,33 @@
                   </div>
                 </div>
                 <div class="settings-row setting-tile">
-                  <label for="disasters-toggle" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tornado"></use></svg>
+                  <label for="discoveries-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-compass"></use></svg>
                     <span class="setting-text">
                       <span class="setting-heading">
-                        <span data-localize="disasters">Disasters</span>
-                        <span class="tooltip-icon" data-tooltip-key="disasters_tip" data-tooltip="Disasters strike one after another, each with a short warning: storms, meteors, tornadoes, floods, wildfires and more. The damage stays. Turns on Fill Ground and interiors and starts in Survival. Java 1.21.6+.">?</span>
+                        <span data-localize="discoveries">Discoveries</span>
+                        <span class="tooltip-icon" data-tooltip-key="discoveries_tip" data-tooltip="Adds an advancement tab with the area's landmarks, museums, parks, stations and more. Each one unlocks when you get there. Java 1.21.4+.">?</span>
                       </span>
-                      <span class="setting-desc" data-localize="disasters_desc">A disaster every few minutes: floods, tornadoes, earthquakes and more.</span>
+                      <span class="setting-desc" data-localize="discoveries_desc">Walk to real landmarks to unlock them as advancements.</span>
                     </span>
                   </label>
                   <div class="settings-control">
-                    <input type="checkbox" class="switch" id="disasters-toggle" name="disasters-toggle">
+                    <input type="checkbox" class="switch" id="discoveries-toggle" name="discoveries-toggle">
+                  </div>
+                </div>
+                <div class="settings-row setting-tile">
+                  <label for="pause-menu-toggle" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-menu-square"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="pause_menu">Arnis Pause Menu</span>
+                        <span class="tooltip-icon" data-tooltip-key="pause_menu_tip" data-tooltip="Adds an Arnis button to the pause menu for travelling to landmarks, seeing discoveries and the map credits. Java 1.21.6+; on 1.21.4 and 1.21.5 the credits go to chat.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="pause_menu_desc">Travel, discoveries and credits from the pause menu.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="checkbox" class="switch" id="pause-menu-toggle" name="pause-menu-toggle">
                   </div>
                 </div>
                 <div class="settings-row setting-tile">

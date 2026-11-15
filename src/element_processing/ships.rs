@@ -545,6 +545,7 @@ impl ShipPlan {
             stops: Vec::new(),
             ys: Some(ys),
             lift: WATER_LIFT,
+            air: None,
         };
         // Piers on the way; the ends are where it turns anyway.
         let clear = vessel.size_m().0 * self.size;
@@ -715,6 +716,7 @@ impl ShipPlan {
                     stops: Vec::new(),
                     ys: Some(ys),
                     lift: WATER_LIFT,
+                    air: None,
                 };
                 let service = self.service(&route, v, low, seed, Some(headway_s(class)))?;
                 Some((route, service))
@@ -744,6 +746,7 @@ impl ShipPlan {
             stops: Vec::new(),
             ys: Some(ys),
             lift: WATER_LIFT,
+            air: None,
         };
         let service = self.service(&route, vessel, low, line.seed, None)?;
         Some((route, service))

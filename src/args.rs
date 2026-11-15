@@ -435,11 +435,13 @@ pub struct Args {
     pub disasters: bool,
 
     /// Cars that drive the streets at the speed limit, queue behind each other, turn at
-    /// junctions and, with --traffic-lights, stop at red; and trains, S-Bahns, metros and
-    /// trams that run the mapped tracks and stop at their stations. On Java, right-click a
-    /// car or train to get in, or click one as a spectator to follow it, and parked cars are
-    /// the same models as the moving ones. Java 1.21.6+ or Bedrock 1.21.120+; Bedrock has no
-    /// traffic lights to stop at.
+    /// junctions and, with --traffic-lights, stop at red; trains, S-Bahns, metros and
+    /// trams that run the mapped tracks and stop at their stations; and aircraft that are
+    /// pushed back from their stands, taxi out, take off, fly a circuit and land. On Java,
+    /// level crossings close their booms for each train and the cars wait, right-click a
+    /// car, train or aircraft to get in, or click one as a spectator to follow it, and
+    /// parked cars are the same models as the moving ones. Java 1.21.6+ or Bedrock
+    /// 1.21.120+; Bedrock has no traffic lights or level crossings to stop at.
     #[arg(long, alias = "moving-cars", default_value_t = false)]
     pub moving_vehicles: bool,
 

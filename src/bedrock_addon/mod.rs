@@ -40,16 +40,25 @@ const SCRIPTS: [(&str, &[u8]); 4] = [
 pub enum Fleet {
     Car,
     Train,
+    /// An aircraft: run with the trains, and pitched and its wheels folded besides.
+    Plane,
 }
 
 impl Fleet {
     fn family(self) -> &'static str {
         match self {
             Fleet::Car => "arnis_car",
-            Fleet::Train => "arnis_train",
+            // The trains' script runs both and tells its entities by this.
+            Fleet::Train | Fleet::Plane => "arnis_train",
         }
     }
 }
+
+/// Most an aircraft's nose is up or down, in tenths of a degree.
+const PITCH_MAX: i32 = 450;
+const PITCH_ANIMATION: &str = "animation.arnis.pitch";
+/// The bone an aircraft's other bones hang from, which its pitch turns.
+const PITCH_BONE: &str = "air";
 
 /// A vehicle body, the entity `arnis:<name>`: a model in a livery, at `size` blocks per
 /// metre.
@@ -193,15 +202,32 @@ fn build(data: &Value, bodies: &[Body], mut uuid: impl FnMut() -> String) -> Add
         // One geometry per model and way round, shared by its liveries.
         let geometry = geometry_name(look, body.size);
         if geometries.insert(geometry.clone()) {
+            let mut geo = model.bedrock_geometry(&geometry, body.size, look.backward);
+            if body.fleet == Fleet::Plane {
+                hang_from_pitch_bone(&mut geo);
+            }
             // Most of the packs by size, so not indented.
             resources.push((
                 format!(
                     "models/entity/{}.geo.json",
                     geometry.trim_start_matches("geometry.")
                 ),
-                serde_json::to_vec(&model.bedrock_geometry(&geometry, body.size, look.backward))
-                    .expect("JSON values always serialise"),
+                serde_json::to_vec(&geo).expect("JSON values always serialise"),
             ));
+        }
+        if body.fleet == Fleet::Plane {
+            // The nose comes up about the main wheels, which are the model's origin. A
+            // bone turned about x by a positive angle tips its front down.
+            animations
+                .entry(PITCH_ANIMATION.to_string())
+                .or_insert_with(|| {
+                    json!({
+                        "loop": true,
+                        "bones": {
+                            PITCH_BONE: { "rotation": ["-0.1 * q.property('arnis:pitch')", 0, 0] },
+                        },
+                    })
+                });
         }
         let wheels = model.wheels();
         if body.fleet == Fleet::Car && !wheels.is_empty() {
@@ -231,6 +257,7 @@ fn build(data: &Value, bodies: &[Body], mut uuid: impl FnMut() -> String) -> Add
         let label = match body.fleet {
             Fleet::Car => "Car",
             Fleet::Train => "Train",
+            Fleet::Plane => "Aircraft",
         };
         lang.push_str(&format!("entity.arnis:{}.name={label}\n", body.name));
     }
@@ -253,6 +280,20 @@ fn build(data: &Value, bodies: &[Body], mut uuid: impl FnMut() -> String) -> Add
             folder: "arnis_vehicles",
             files: resources,
         },
+    }
+}
+
+/// Hangs every bone of an aircraft's geometry from one at its origin, for its pitch to turn:
+/// the main wheels, let down under the entity with the rest of the model.
+fn hang_from_pitch_bone(geo: &mut Value) {
+    if let Some(bones) = geo["minecraft:geometry"][0]["bones"].as_array_mut() {
+        for bone in bones.iter_mut() {
+            if bone.get("parent").is_none() {
+                bone["parent"] = json!(PITCH_BONE);
+            }
+        }
+        let origin = -vehicle_models::LIFT * 16.0;
+        bones.insert(0, json!({ "name": PITCH_BONE, "pivot": [0, origin, 0] }));
     }
 }
 
@@ -287,6 +328,17 @@ fn behavior_entity(body: &Body) -> Value {
             "arnis:speed": {
                 "type": "int",
                 "range": [0, SPEED_MAX],
+                "default": 0,
+                "client_sync": true,
+            },
+        });
+    }
+    if body.fleet == Fleet::Plane {
+        description["properties"] = json!({
+            "arnis:gear": { "type": "bool", "default": true, "client_sync": true },
+            "arnis:pitch": {
+                "type": "int",
+                "range": [-PITCH_MAX, PITCH_MAX],
                 "default": 0,
                 "client_sync": true,
             },
@@ -334,6 +386,7 @@ fn client_entity(body: &Body, geometry: &str) -> Value {
     let controller = match body.fleet {
         Fleet::Car => "controller.render.arnis.car",
         Fleet::Train => "controller.render.arnis.vehicle",
+        Fleet::Plane => "controller.render.arnis.plane",
     };
     let mut description = json!({
         "identifier": format!("arnis:{}", body.name),
@@ -355,6 +408,10 @@ fn client_entity(body: &Body, geometry: &str) -> Value {
             "animate": ["wheels"],
         });
         description["animations"] = json!({ "wheels": wheel_animation(body.look.model) });
+    }
+    if body.fleet == Fleet::Plane {
+        description["scripts"] = json!({ "animate": ["pitch"] });
+        description["animations"] = json!({ "pitch": PITCH_ANIMATION });
     }
     json!({
         "format_version": "1.10.0",
@@ -379,6 +436,16 @@ fn render_controllers() -> Value {
                 "part_visibility": [
                     { "brake_off": "!q.property('arnis:brake')" },
                     { "lit_brake": "q.property('arnis:brake')" },
+                ],
+            },
+            // An aircraft's wheels, and the lamps on them, show while they are down.
+            "controller.render.arnis.plane": {
+                "geometry": "Geometry.default",
+                "materials": materials,
+                "textures": ["Texture.default"],
+                "part_visibility": [
+                    { "gear*": "q.property('arnis:gear')" },
+                    { "lit_gear*": "q.property('arnis:gear')" },
                 ],
             },
         },
@@ -533,6 +600,75 @@ mod tests {
             json(bp, "manifest.json")["modules"][1]["entry"],
             "scripts/main.js"
         );
+    }
+
+    /// An aircraft is run with the trains, and besides is pitched about its main wheels
+    /// and shows its landing gear only while it is down.
+    #[test]
+    fn an_aircraft_pitches_and_folds_its_wheels() {
+        let mut n = 0;
+        let plane = Body {
+            name: "train_plane_bizjet_jw".to_string(),
+            fleet: Fleet::Plane,
+            look: Look::plain("plane_bizjet", "jw", "minecraft:white_concrete"),
+            size: 1.0,
+        };
+        let addon = build(&json!({ "cars": null, "trains": null }), &[plane], || {
+            n += 1;
+            format!("00000000-0000-4000-8000-{n:012}")
+        });
+        let (bp, rp) = (&addon.behavior, &addon.resources);
+        let entity = json(bp, "entities/train_plane_bizjet_jw.json");
+        let description = &entity["minecraft:entity"]["description"];
+        assert_eq!(description["properties"]["arnis:gear"]["default"], true);
+        assert_eq!(
+            description["properties"]["arnis:pitch"]["range"],
+            json!([-450, 450])
+        );
+        let family = &entity["minecraft:entity"]["components"]["minecraft:type_family"]["family"];
+        assert_eq!(
+            family[0], "arnis_train",
+            "the trains' script finds it by this"
+        );
+        let client = json(rp, "entity/train_plane_bizjet_jw.entity.json");
+        let description = &client["minecraft:client_entity"]["description"];
+        assert_eq!(
+            description["render_controllers"][0],
+            "controller.render.arnis.plane"
+        );
+        assert_eq!(description["animations"]["pitch"], PITCH_ANIMATION);
+        assert_eq!(description["scripts"]["animate"][0], "pitch");
+        // Every bone hangs from the one the pitch turns, and the gear is in bones the
+        // render controller hides.
+        let geometry = description["geometry"]["default"].as_str().unwrap();
+        let geo = json(
+            rp,
+            &format!(
+                "models/entity/{}.geo.json",
+                geometry.trim_start_matches("geometry.")
+            ),
+        );
+        let bones = geo["minecraft:geometry"][0]["bones"].as_array().unwrap();
+        assert_eq!(bones[0]["name"], PITCH_BONE);
+        // It turns about the main wheels, let down under the entity with the model.
+        assert_eq!(
+            bones[0]["pivot"],
+            json!([0, -vehicle_models::LIFT * 16.0, 0])
+        );
+        assert!(bones[1..].iter().all(|b| b["parent"] == PITCH_BONE));
+        assert!(bones
+            .iter()
+            .any(|b| b["name"].as_str().unwrap().starts_with("gear")));
+        let controllers = json(
+            rp,
+            "render_controllers/arnis_vehicles.render_controllers.json",
+        );
+        let hidden =
+            &controllers["render_controllers"]["controller.render.arnis.plane"]["part_visibility"];
+        assert_eq!(hidden[0]["gear*"], "q.property('arnis:gear')");
+        let animations = json(rp, "animations/arnis_wheels.animation.json");
+        let turn = &animations["animations"][PITCH_ANIMATION]["bones"][PITCH_BONE]["rotation"];
+        assert_eq!(turn[0], "-0.1 * q.property('arnis:pitch')");
     }
 
     #[test]
