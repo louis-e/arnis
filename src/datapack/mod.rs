@@ -157,6 +157,7 @@ const TRAINS: &[(&str, &[u8])] = static_files![
     "data/arnis/function/trains/air_gear0.mcfunction",
     "data/arnis/function/trains/air_gear1.mcfunction",
     "data/arnis/function/trains/watch.mcfunction",
+    "data/arnis/function/trains/watch_at.mcfunction",
 ];
 
 /// The level crossings' functions; `check`, `boom` and one per crossing are generated.

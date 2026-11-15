@@ -2650,10 +2650,15 @@ impl Sky {
                     {
                         continue;
                     }
-                    // Its take-off is the same whichever way it comes back.
+                    // Its take-off, the first use of the runway it lands on, and any runway
+                    // crossed on the way out are the same whichever way it comes back.
+                    let took_off = busy_after
+                        .last()
+                        .and_then(|l| busy_after.iter().position(|w| w.0 == l.0))
+                        .map_or(0, |i| i + 1);
                     let room = busy_after
                         .iter()
-                        .skip(1)
+                        .skip(took_off)
                         .map(|&(strip, a, b)| {
                             self.room_around(strip, off as i64 + a, off as i64 + b)
                         })

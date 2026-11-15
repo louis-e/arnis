@@ -47,7 +47,8 @@ execute if score #c arnis.car matches 1.. run tag @s remove arnis.car.still
 execute if score #c arnis.car matches ..0 if entity @s[tag=arnis.car.ridden] run function arnis:cars/seat_check
 execute if score #c arnis.car matches ..0 run return 0
 execute store result entity @s data.d double 0.001 run scoreboard players get #c arnis.car
-execute as @e[tag=arnis.car.part,distance=..1.1] if score @s arnis.car = #id arnis.car run tag @s add arnis.car.go
+# The seat is moved on its own after, from where the car stands then.
+execute as @e[tag=arnis.car.part,tag=!arnis.car.seat,distance=..1.1] if score @s arnis.car = #id arnis.car run tag @s add arnis.car.go
 function arnis:cars/move with entity @s data
 # Still where the move began, so only this car's parts are searched, not every one. The
 # model stands a block up, lit by the air rather than the road it cuts into on a slope.

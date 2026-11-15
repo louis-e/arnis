@@ -737,8 +737,8 @@ pub fn collect_rail_passages(
 ) -> RailPassages {
     let reach = ((TRAIN_REACH_M * scale).round() as i32).max(1);
     // The footprints hold what is inside the walls; the walls are the ring round them.
-    let in_building = |x: i32, z: i32| {
-        (-1..=1).any(|dx| (-1..=1).any(|dz| building_footprints.contains(x + dx, z + dz)))
+    let near_building = |x: i32, z: i32, by: i32| {
+        (-by..=by).any(|dx| (-by..=by).any(|dz| building_footprints.contains(x + dx, z + dz)))
     };
     let mut cells: Option<CoordinateBitmap> = None;
     let mut under: Option<CoordinateBitmap> = None;
@@ -769,10 +769,15 @@ pub fn collect_rail_passages(
                         .get_or_insert_with(|| CoordinateBitmap::new(xzbbox))
                         .set(cx, cz);
                 }
+                // Only where the train would touch the wall: track running past a building
+                // a block or more clear of its wall leaves it shut.
+                if !near_building(cx, cz, 2) {
+                    continue;
+                }
                 for dx in -reach..=reach {
                     for dz in -reach..=reach {
                         let (x, z) = (cx + dx, cz + dz);
-                        if !in_building(x, z) {
+                        if !near_building(x, z, 1) {
                             continue;
                         }
                         cells
@@ -2031,6 +2036,9 @@ mod tests {
         let under = track_along(2, 30, &[("tunnel", "building_passage")]);
         assert_eq!(through(under), RailThrough::Under);
         assert_eq!(through(track_along(3, 41, &[])), RailThrough::Clips);
+        // Running past the wall (z = 41) a block or more clear of it.
+        let past = collect_rail_passages(&[track_along(8, 43, &[])], &xz, 1.0, &footprints);
+        assert!(past.cells.is_empty(), "track beside a building opens it");
         assert_eq!(
             through(track_along(4, 30, &[("bridge", "yes")])),
             RailThrough::None

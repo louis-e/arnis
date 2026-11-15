@@ -408,11 +408,15 @@ pub fn doors(coach: Coach) -> Doors {
     if let Coach::Ship { vessel, .. } = coach {
         let (spots, eye) = vessel.seats_m();
         let (len, beam) = vessel.size_m();
+        let width = (beam as f32).max(DOOR_BOX_WIDTH);
         let hull = len as f32 - 2.0 * HULL_BOX_CLEAR;
+        // A box as wide as the beam reaches as far along the hull, and one over a seat's
+        // would take the click that boards.
+        let clear = HULL_BOX_CLEAR.max(width);
         let view = if hull > 0.0 {
             spread(hull, HULL_BOX_SPACING)
                 .into_iter()
-                .filter(|v| spots.iter().all(|s| (s - v).abs() >= HULL_BOX_CLEAR))
+                .filter(|v| spots.iter().all(|s| (s - v).abs() >= clear))
                 .collect()
         } else {
             Vec::new()
@@ -421,7 +425,7 @@ pub fn doors(coach: Coach) -> Doors {
             spots: spots.to_vec(),
             view,
             eye,
-            width: (beam as f32).max(DOOR_BOX_WIDTH),
+            width,
             height: eye as f32 + 0.5,
             deck: true,
         };
@@ -519,6 +523,11 @@ pub fn door_functions(key: &str, doors: &Doors, size: f64) -> (String, String) {
             doors.height * k,
         );
     }
+    // Each box knows its carriage, for a spectator who clicks it to be put on that model.
+    let _ = writeln!(
+        make,
+        "$scoreboard players set @e[type=interaction,tag=arnis.ts$(c),distance=..{reach:.1}] arnis.tw $(c)"
+    );
     (keep, make)
 }
 
@@ -895,8 +904,8 @@ mod tests {
             let mut boxes: Vec<f32> = doors.spots.iter().chain(&doors.view).copied().collect();
             assert!(!boxes.is_empty(), "{coach:?}");
             boxes.sort_by(f32::total_cmp);
-            // No long stretch of a carriage or a hull without one, outside an aircraft's
-            // wings and tail.
+            // No long stretch of a carriage or a hull out of any box's reach, outside an
+            // aircraft's wings and tail.
             if !matches!(coach, Coach::Plane(_)) {
                 let half = length_m(coach) as f32 / 2.0;
                 let mut edges = vec![-half];
@@ -904,10 +913,17 @@ mod tests {
                 edges.push(half);
                 for pair in edges.windows(2) {
                     assert!(
-                        pair[1] - pair[0] <= 2.0 * HULL_BOX_SPACING,
+                        pair[1] - pair[0] - doors.width / 2.0 <= 2.0 * HULL_BOX_SPACING,
                         "{coach:?}: {boxes:?}"
                     );
                 }
+            }
+            // A box with no seat never covers one that boards.
+            for v in &doors.view {
+                assert!(
+                    doors.spots.iter().all(|s| (s - v).abs() >= doors.width),
+                    "{coach:?}"
+                );
             }
             let (keep, make) = door_functions(&door_key(coach), &doors, 1.0);
             assert_eq!(make.matches("summon interaction").count(), boxes.len());

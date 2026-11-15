@@ -45,6 +45,9 @@ const KERB_BACK: f64 = 1.5;
 /// How far from the middle of a track a walker waits for its crossing to open, in metres,
 /// and how far from a lane a crossing's spot may be and still be on its way, in blocks.
 const RAIL_BACK_M: f64 = 3.5;
+/// Least sine of the angle a lane crosses the tracks at, about 17 degrees: a way at a
+/// shallower one runs along them rather than over.
+const RAIL_MIN_SINE: f64 = 0.3;
 const RAIL_REACH: f64 = 2.0;
 /// How far a walker may sink into the ground between two points, and float over it,
 /// before a point is put in where the ground bends, in blocks.
@@ -939,10 +942,16 @@ impl WalkNetwork {
                         let Some((s, dir)) = path.nearest(stop.at, reach) else {
                             continue;
                         };
-                        if s < 1.0 {
+                        // Only a lane that goes over the tracks, or ends on them where its way
+                        // is split at the crossing: not one ending short of them, nor one
+                        // running along beside them.
+                        let sine = (dir.0 * stop.track.1 - dir.1 * stop.track.0).abs();
+                        let end = path.points[path.points.len() - 1];
+                        let ends_short = s + 1.0 > path.length()
+                            && (end.0 - stop.at.0).hypot(end.1 - stop.at.1) > 1.5;
+                        if s < 1.0 || ends_short || sine < RAIL_MIN_SINE {
                             continue;
                         }
-                        let sine = (dir.0 * stop.track.1 - dir.1 * stop.track.0).abs();
                         let back = RAIL_BACK_M * scale / sine.max(0.4);
                         marks.push(((s - back).max(0.0), None, false, Some(stop.crossing)));
                     }
@@ -2686,6 +2695,17 @@ mod tests {
             ..stops[0]
         }];
         let net = WalkNetwork::build(&elements, 1.0, false, false, &far, &world(), |_, _, _| 64);
+        assert!(net
+            .lanes
+            .iter()
+            .all(|l| l.points.iter().all(|p| p.rail.is_none())));
+        // A track along this way, crossed by a road beside it: walkers on it never cross.
+        let along = [WalkStop {
+            track: (0.0, 1.0),
+            at: (1.5, 0.5),
+            ..stops[0]
+        }];
+        let net = WalkNetwork::build(&elements, 1.0, false, false, &along, &world(), |_, _, _| 64);
         assert!(net
             .lanes
             .iter()
