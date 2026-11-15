@@ -2822,8 +2822,7 @@ impl BuildingStyle {
             }
         });
 
-        // A stripe at every storey is left to the types that ask for one; the
-        // roll stays so later draws keep their place.
+        // Storey stripes only where a type asks; the roll stays so later draws keep their place.
         let striped = preset.use_accent_lines.is_none()
             && !matches!(
                 category,
@@ -3990,8 +3989,7 @@ fn pick_ground_floor(
     }
 }
 
-/// The fascia band of a plain low shop or hall, which doubles as its sign
-/// zone: two rows of a tone set off against the wall, three on a tall hall.
+/// Fascia band (and sign zone) of a plain low shop or hall: two rows, three on a tall hall.
 fn top_band_for(
     category: BuildingCategory,
     wall_block: Block,
@@ -4045,8 +4043,7 @@ fn top_band_for(
     (band != wall_block).then_some((band, rows))
 }
 
-/// Shutters beside every window or none: a house's by its frame style, and
-/// dressed town fabric of France, the Mediterranean and central Europe.
+/// Shutters on every window or none: houses by frame style, dressed French, Mediterranean and central fabric.
 fn shutters_for(
     category: BuildingCategory,
     dressed: bool,
@@ -4084,8 +4081,7 @@ fn shutters_for(
     })
 }
 
-/// Trapdoor of the timber frame in the window reveals: every dressed front
-/// that hangs no shutters, and wooden houses of North America and the north.
+/// Trapdoor of the timber frame in the window reveals, for unshuttered dressed fronts and houses.
 fn window_reveal_for(
     category: BuildingCategory,
     dressed: bool,
@@ -4127,8 +4123,7 @@ fn window_reveal_for(
     Some(dark)
 }
 
-/// Pilasters every second or third bay, and their block: trim stone on
-/// historic fabric, else the wall's own. Civic fronts mostly.
+/// Pilasters every second or third bay, and their block; mostly civic fronts.
 #[allow(clippy::too_many_arguments)]
 fn pilasters_for(
     category: BuildingCategory,
@@ -4180,8 +4175,7 @@ fn pilasters_for(
     Some((every, if stone { trim_block } else { wall_block }))
 }
 
-/// A plain modern front's accent tone, and whether it is laid as panels up
-/// the window columns (true) or as a band at every storey.
+/// Accent tone of a plain modern front: panels up the window columns (true) or a band per storey.
 fn modern_accent_for(
     category: BuildingCategory,
     dressed: bool,
@@ -4244,8 +4238,7 @@ fn modern_accent_for(
     (tone != wall_block).then_some((tone, tall || roll <= 3))
 }
 
-/// Whether a low building's pitched roof is laid 1:2 in slabs: up to three
-/// storeys, outside the steep-roof traditions.
+/// Whether a low building outside the steep-roof traditions gets a 1:2 slab roof.
 fn takes_low_pitch_roof(
     category: BuildingCategory,
     materials: MaterialRegion,
@@ -4266,9 +4259,7 @@ fn takes_low_pitch_roof(
         )
 }
 
-/// Whether a building dresses its windows and wall top in trim stone: by its
-/// era when dated, else European fabric short of bare concrete and masonry
-/// rows and walk-ups elsewhere. Nordic and overseas houses stay bare.
+/// Whether windows and wall top are dressed in trim stone: by era when dated, else by region and wall.
 fn dressed_fabric(
     category: BuildingCategory,
     era: ArchEra,
@@ -6334,8 +6325,7 @@ fn get_wall_block_for_category(
     }
 }
 
-/// Building types whose storeys are about three metres: housing, and the
-/// untyped building, which is mostly housing.
+/// Building types with storeys of about three metres: housing and the untyped building.
 fn housing_scale(building_type: &str) -> bool {
     const TYPES: &[&str] = &[
         "house",
@@ -6356,9 +6346,7 @@ fn housing_scale(building_type: &str) -> bool {
     TYPES.contains(&building_type) || building_type == "yes"
 }
 
-/// Gross block height of one upper floor: what the mapped height and level
-/// count say, else 3 for mapped housing storeys and 4 for everything else.
-/// `housing_group`: the part belongs to a building of flats or houses.
+/// Block height of an upper floor: from mapped height and levels, else 3 for mapped housing, else 4.
 fn floor_cycle_for(
     building_type: &str,
     tags: &HashMap<String, String>,
@@ -8317,7 +8305,11 @@ fn build_wall_ring(
             // building the photograph does not show, so the shell
             // keeps its own colour up here too, and so does a wall
             // the presets flatten for a picture of their own.
-            let roof_line_block = if config.use_accent_roof_line && !photo && !flat {
+            let roof_line_block = if photo || flat {
+                config.wall_block
+            } else if let Some((band, _)) = config.top_band {
+                band
+            } else if config.use_accent_roof_line {
                 config.accent_block
             } else {
                 config.wall_block
@@ -9891,7 +9883,9 @@ fn determine_wall_block_at_position_pristine(
 ) -> Block {
     let block = unzoned_wall_block(h, config, col);
     if let Some((band, rows)) = config.top_band {
-        if block == config.wall_block && h > config.start_y_offset + config.building_height - rows {
+        // Above the ground floor it runs over the top storey's glass, or it breaks at every window.
+        let over = block == config.wall_block || h > config.ground_floor_top();
+        if over && h > config.start_y_offset + config.building_height - rows {
             return band;
         }
     }
@@ -10229,8 +10223,7 @@ fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
     (polygon_area / bbox_area).min(1.0)
 }
 
-/// Whether an outline is turned off the grid far enough that its walls step
-/// every few blocks, as `segment_is_stepped` has it for one wall.
+/// Whether an outline is turned far enough off the grid that its walls step every few blocks.
 fn outline_is_turned(nodes: &[ProcessedNode]) -> bool {
     dominant_axis_angle(nodes).tan().abs() * 6.0 > 1.0
 }
@@ -10886,8 +10879,7 @@ fn generate_balconies(
     let columns = facade_columns(&element.nodes, config);
     let mut wall = WallRuns::default();
     for wc in columns.iter() {
-        // A stepped wall carries no balcony.
-        let here = (!wc.stepped).then_some((wc.run, wc.normal));
+        let here = Some((wc.run, wc.normal));
         wall.entry((wc.x, wc.z))
             .and_modify(|w| {
                 if *w != here {
@@ -11120,8 +11112,7 @@ fn upside_down_stair(stair_block: Block, facing: &str) -> BlockWithProperties {
     ))
 }
 
-/// Quoins at the real corners of a dressed front, corner boards in trim on a
-/// plain house.
+/// Quoins at the real corners of a dressed front, corner boards on a plain house.
 fn generate_corner_quoins(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -11193,7 +11184,7 @@ fn generate_corner_quoins(
         .collect();
     let n = vertices.len();
     // A real corner: both walls a few blocks long and the turn sharp.
-    let corners: Vec<(i32, i32)> = (0..n)
+    let mut corners: Vec<(i32, i32)> = (0..n)
         .filter(|&i| {
             let (sin, la, lb) = turn(
                 vertices[(i + n - 1) % n],
@@ -11204,6 +11195,10 @@ fn generate_corner_quoins(
         })
         .map(|i| vertices[i])
         .collect();
+    // The street corner is framed however short its walls are.
+    if let Some(v) = guaranteed_corner.filter(|v| !corners.contains(v)) {
+        corners.push(v);
+    }
 
     let top_h = config.start_y_offset + config.building_height;
     let passage_h = config.start_y_offset + BUILDING_PASSAGE_HEIGHT.min(config.building_height);
@@ -11404,10 +11399,8 @@ fn generate_window_frames(
         return;
     }
     let top_h = config.start_y_offset + config.building_height;
-    // A coursed front has a ledge at every storey instead, and on a tall
-    // one a sill per window is a grid of dots.
+    // On a tall front a sill per window is a grid of dots; a coursed front's ledge runs through its sills.
     let sills = (config.dressed || house)
-        && !config.coursed
         && config.building_height <= 12 * config.floor_cycle + GROUND_FLOOR_BONUS;
     // Brick and stone outside Europe often hood every window in trim stone.
     let hooded_front = config.dressed
@@ -11574,9 +11567,7 @@ fn generate_window_frames(
     }
 }
 
-/// A fire escape up the street front: a deck two cells deep with a railing at
-/// every upper storey across two window bays, a ladder up the pier between.
-/// Returns whether it was built.
+/// Fire escape up the street front, two cells deep over two bays; returns whether it was built.
 fn generate_fire_escape(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -11725,8 +11716,7 @@ fn generate_fire_escape(
     true
 }
 
-/// A timber frame in the reveals of wide windows: an open trapdoor against
-/// each jamb, in what the set-back glass and the window life leave open.
+/// Timber frame in the reveals of wide windows: an open trapdoor against each jamb.
 fn generate_window_reveals(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -12440,8 +12430,7 @@ fn generate_corner_downpipes(
     }
 }
 
-/// Pilasters on the piers of every second or third bay, from the course over
-/// the ground floor to the cornice; a pier with something across it gets none.
+/// Pilasters on the piers of every second or third bay, from the ground-floor course to the cornice.
 fn place_pilasters(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -12480,7 +12469,8 @@ fn place_pilasters(
         let (Some(_), Some(next)) = (window_at(-1), window_at(1)) else {
             continue;
         };
-        if next % every != 0 {
+        // Counted from the nearer end, so the rhythm is the same both ways.
+        if next.min(wc.upper.count - next) % every != 0 {
             continue;
         }
         let (x, z) = (wc.x + wc.normal.0, wc.z + wc.normal.1);
@@ -13540,7 +13530,9 @@ pub fn generate_buildings(
         cached_footprint_size,
         if category == BuildingCategory::Religious {
             RisePitch::Steep
-        } else if low_pitch_roof || outline_is_turned(&element.nodes) {
+        } else if low_pitch_roof
+            || (outline_is_turned(&element.nodes) && style.roof_type != RoofType::Mansard)
+        {
             RisePitch::Low
         } else {
             RisePitch::Standard
@@ -14897,7 +14889,8 @@ fn generate_building_roof(
         steep_cap: region == BuildingRegion::Europe,
         short_eave: region == BuildingRegion::Europe && town_block,
         blocked: eave_blocked,
-        turned: outline_is_turned(&element.nodes),
+        // A mansard keeps its eaves and dormers, as no slab roof can stand in for it.
+        turned: outline_is_turned(&element.nodes) && style.roof_type != RoofType::Mansard,
         low_pitch: config.low_pitch_roof && !steep_gable,
     };
 
@@ -17774,8 +17767,7 @@ fn hip_edge_distances(
     dist
 }
 
-/// Whole cells from each cell straight to the nearest one off the footprint,
-/// zero on the outline: a turned hip roof's run up from its eave.
+/// Straight-line distance from each cell to the outline: a turned hip roof's run up from its eave.
 fn eave_distances(floor_area: &[(i32, i32)]) -> FnvHashMap<(i32, i32), i32> {
     let Some(&(x0, z0)) = floor_area.first() else {
         return FnvHashMap::default();
@@ -17785,14 +17777,14 @@ fn eave_distances(floor_area: &[(i32, i32)]) -> FnvHashMap<(i32, i32), i32> {
         .fold((x0, x0, z0, z0), |(a, b, c, d), &(x, z)| {
             (a.min(x), b.max(x), c.min(z), d.max(z))
         });
-    // A square grid with a ring of cells off the footprint around it.
-    let n = ((max_x - min_x).max(max_z - min_z) + 3) as usize;
-    let at = |x: i32, z: i32| (z - min_z + 1) as usize * n + (x - min_x + 1) as usize;
-    let mut off = vec![true; n * n];
+    // The bounding box with a ring of cells off the footprint around it.
+    let (w, h) = ((max_x - min_x + 3) as usize, (max_z - min_z + 3) as usize);
+    let at = |x: i32, z: i32| (z - min_z + 1) as usize * w + (x - min_x + 1) as usize;
+    let mut off = vec![true; w * h];
     for &(x, z) in floor_area {
         off[at(x, z)] = false;
     }
-    let squared = crate::mapillary::register::edt(&off, n);
+    let squared = crate::mapillary::register::edt_rect(&off, w, h);
     floor_area
         .iter()
         .map(|&(x, z)| {
@@ -24627,6 +24619,28 @@ mod facade_integration_tests {
         }
         assert!(boxes > 0, "no window box on eight old blocks");
 
+        // A coursed front, a ledge along every storey, keeps its boxes on the ledge.
+        let mut coursed_boxes = 0;
+        for id in 400..416u64 {
+            let world = dwelling_world(paris(), id, old);
+            let ledge_rows = (1..40)
+                .filter(|&y| {
+                    let slabs = (12..=43)
+                        .filter(|&x| {
+                            world
+                                .get(&(x, y, 19))
+                                .is_some_and(|b| b.name().ends_with("_slab"))
+                        })
+                        .count();
+                    slabs >= 28
+                })
+                .count();
+            if ledge_rows >= 4 {
+                coursed_boxes += window_boxes(&world).len();
+            }
+        }
+        assert!(coursed_boxes > 0, "no window box on a coursed Paris front");
+
         // Not on new blocks, offices, or in North America.
         let new: &[(&str, &str)] = &[
             ("building", "apartments"),
@@ -24983,6 +24997,35 @@ mod facade_integration_tests {
     }
 
     #[test]
+    fn a_turned_mansard_keeps_its_dormers() {
+        let flats: &[(&str, &str)] = &[
+            ("building", "apartments"),
+            ("building:levels", "5"),
+            ("start_date", "1880"),
+            ("roof:shape", "mansard"),
+        ];
+        let rect = [(0.0, 0.0), (30.0, 0.0), (30.0, 16.0), (0.0, 16.0)];
+        let mut dormer_glass = 0;
+        for id in 700..704u64 {
+            let world = built_world(paris(), &turned_way(id, &rect, flats));
+            // Glass over the lowest roof stair is a dormer's.
+            let Some(eave) = world
+                .iter()
+                .filter(|&(&(_, y, _), b)| y > 8 && b.name().ends_with("_stairs"))
+                .map(|(&(_, y, _), _)| y)
+                .min()
+            else {
+                continue;
+            };
+            dormer_glass += world
+                .iter()
+                .filter(|&(&(_, y, _), &b)| y > eave && is_glass(b))
+                .count();
+        }
+        assert!(dormer_glass > 0, "no dormer on four turned mansards");
+    }
+
+    #[test]
     fn a_turned_l_shape_keeps_a_roof_without_stairs() {
         let ell = [
             (0.0, 0.0),
@@ -25053,24 +25096,32 @@ mod facade_integration_tests {
 
     #[test]
     fn a_retail_box_wears_its_band_along_the_top() {
-        let shop: &[(&str, &str)] = &[("building", "retail"), ("building:levels", "1")];
-        let mut banded = 0;
-        for id in 820..826u64 {
-            let world = dwelling_world(nyc(), id, shop);
-            // The side wall at x = 10: its top rows against the row below them.
-            let at = |y: i32| world.get(&(10, y, 28)).copied();
-            let top = (1..20).rev().find(|&y| at(y).is_some()).unwrap();
-            let band = at(top - 1) != at(top - 3);
-            banded += i32::from(band);
-            // A banded top is whole: no storey band or window panel cuts into it.
-            if band {
-                for z in 22..=34 {
-                    let (a, b) = (world.get(&(10, top - 1, z)), world.get(&(10, top - 2, z)));
-                    assert_eq!(a, b, "way {id}: the top band breaks at z {z}");
+        for levels in ["1", "2"] {
+            let shop: &[(&str, &str)] = &[("building", "retail"), ("building:levels", levels)];
+            let mut banded = 0;
+            for id in 820..826u64 {
+                let world = dwelling_world(nyc(), id, shop);
+                // The side wall at x = 10: its top rows against the row below them.
+                let at = |y: i32| world.get(&(10, y, 28)).copied();
+                let top = (1..30).rev().find(|&y| at(y).is_some()).unwrap();
+                let band = at(top - 1) != at(top - 3);
+                banded += i32::from(band);
+                // A banded top is whole: no storey band, panel or window head cuts into it.
+                if band {
+                    for z in 22..=34 {
+                        let rows = [top, top - 1, top - 2].map(|y| world.get(&(10, y, z)));
+                        assert!(
+                            rows.iter().all(|b| *b == rows[0]),
+                            "{levels} storeys, way {id}: the top band breaks at z {z}"
+                        );
+                    }
                 }
             }
+            assert!(
+                banded >= 4,
+                "{banded} of six {levels}-storey retail boxes carry a top band"
+            );
         }
-        assert!(banded >= 4, "{banded} of six retail boxes carry a top band");
     }
 
     #[test]
