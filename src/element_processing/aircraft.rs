@@ -1014,9 +1014,9 @@ impl Fine {
         for i in 0..n {
             sums[i + 1] = sums[i] + self.nose[i];
         }
-        for i in 0..n {
+        for (i, nose) in self.nose.iter_mut().enumerate() {
             let (lo, hi) = (i.saturating_sub(w), (i + w + 1).min(n));
-            self.nose[i] = (sums[hi] - sums[lo]) / (hi - lo) as f64;
+            *nose = (sums[hi] - sums[lo]) / (hi - lo) as f64;
         }
     }
 
