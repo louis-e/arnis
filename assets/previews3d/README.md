@@ -2,7 +2,7 @@
 
 The pictures in `src/gui/images/previews3d/` (shown by the settings page, `src/gui/js/preview-popover.js`) are made here.
 
-    python -I scripts/previews3d/previews3d.py [name-prefix] --exe target/release/arnis.exe
+    python -I assets/previews3d/previews3d.py [name-prefix] --exe target/release/arnis.exe
 
 Needs Python with nbtlib, numpy and Pillow. Each entry of `previews3d.json` is `{name, bbox, flags, crop}`; the driver builds
 that bbox with the Arnis binary into a temp folder and writes `<name>.webp` (720x540, at most 60 KB). Naming is
@@ -10,6 +10,6 @@ that bbox with the Arnis binary into a temp folder and writes `<name>.webp` (720
 A new picture needs a `preview_<name with _>` caption key in every locale file.
 
 The binary fetches live map data, so a regenerated picture can differ a little from the committed one. After a change to road
-markings regenerate just those: `python -I scripts/previews3d/previews3d.py road-detail --exe ...`.
+markings regenerate just those: `python -I assets/previews3d/previews3d.py road-detail --exe ...`.
 
 Tests: `node tests/gui/preview-popover.mjs` (from any folder).
