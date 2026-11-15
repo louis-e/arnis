@@ -4,6 +4,7 @@
 //! - `emergency=fire_hydrant` - Fire hydrants
 
 use crate::block_definitions::*;
+use crate::element_processing::structure_kit::concrete_for_colour;
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::osm_parser::ProcessedNode;
 use crate::world_editor::{WorldEditor, WorldFormat};
@@ -38,6 +39,8 @@ pub fn generate_emergency(
 
 /// How far a hydrant looks for the road its outlets face, in blocks.
 const ROAD_REACH: i32 = 8;
+/// Below this many blocks to the metre a hydrant is too small to make out, and is a block.
+const MIN_SCALE: f64 = 0.5;
 
 /// Generate a fire hydrant
 ///
@@ -65,24 +68,40 @@ fn generate_fire_hydrant(
         return;
     }
 
-    let abs_y = editor.get_absolute_y(x, 1, z);
-
-    if editor.format() == WorldFormat::JavaAnvil {
-        // The carriageway, not the pavement it most likely stands on.
-        let roads = editor.carriageway().unwrap_or(road_mask);
-        let facing = road_facing(roads, x, z, node.id);
-        let body = body_block(node.tags.get("colour").map(String::as_str));
+    if editor.format() == WorldFormat::JavaAnvil && editor.scale() >= MIN_SCALE {
+        let carriageway = editor.carriageway().filter(|c| !c.is_empty());
+        // Mapped on the kerb line, a hydrant can fall on the carriageway: it stands beside it.
+        let (x, z) = match carriageway {
+            Some(c) if c.contains(x, z) => {
+                nearest(x, z, 3, |cx, cz| !c.contains(cx, cz)).unwrap_or((x, z))
+            }
+            _ => (x, z),
+        };
+        // Towards the carriageway, not the pavement it most likely stands on; any road or
+        // path where there is none near.
+        let facing = carriageway
+            .and_then(|c| road_facing(c, x, z))
+            .or_else(|| road_facing(road_mask, x, z))
+            .unwrap_or([(0.0, 1.0), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0)][(node.id % 4) as usize]);
+        let body = node.tags.get("colour").and_then(|c| body_block(c));
+        let body = format!("minecraft:{}", body.unwrap_or(RED_CONCRETE).name());
+        // Its cell is held by an invisible block: solid to walk into, and no grass grows
+        // up through it.
+        editor.set_block(BARRIER, x, 1, z, None, None);
+        let abs_y = editor.get_absolute_y(x, 1, z);
         let k = editor.scale();
         let mut hydrant = Hydrant {
             editor,
             centre: (f64::from(x) + 0.5, f64::from(abs_y), f64::from(z) + 0.5),
             facing,
             k,
-            seed: node.id as i64 * 64,
+            seed: (node.id as i64).wrapping_mul(64),
         };
-        hydrant.build(body);
+        hydrant.build(&body);
         return;
     }
+
+    let abs_y = editor.get_absolute_y(x, 1, z);
 
     // Simple hydrant: a single redstone block at ground level.
     editor.set_block(REDSTONE_BLOCK, x, 1, z, None, None);
@@ -112,42 +131,49 @@ fn generate_fire_hydrant(
     }
 }
 
-/// The way to the nearest road cell within reach, for the big outlet to face; without a
-/// road near, a quarter turn picked by the node so neighbours don't all face one way.
-fn road_facing(road_mask: &CoordinateBitmap, x: i32, z: i32, id: u64) -> (f64, f64) {
+/// The way to the nearest cell of `roads` within reach, other than its own.
+fn road_facing(roads: &CoordinateBitmap, x: i32, z: i32) -> Option<(f64, f64)> {
+    let (rx, rz) = nearest(x, z, ROAD_REACH, |cx, cz| roads.contains(cx, cz))?;
+    let (dx, dz) = (f64::from(rx - x), f64::from(rz - z));
+    let len = dx.hypot(dz);
+    Some((dx / len, dz / len))
+}
+
+/// The nearest cell other than (x, z) within `reach` that `wanted`, by straight-line
+/// distance. `get_nearest_road_block` looks only every other block and eight ways, too
+/// coarse for a hydrant a block off the kerb or the way it faces.
+fn nearest(x: i32, z: i32, reach: i32, wanted: impl Fn(i32, i32) -> bool) -> Option<(i32, i32)> {
     let mut best: Option<(i32, (i32, i32))> = None;
-    for dx in -ROAD_REACH..=ROAD_REACH {
-        for dz in -ROAD_REACH..=ROAD_REACH {
+    for dx in -reach..=reach {
+        for dz in -reach..=reach {
             let d = dx * dx + dz * dz;
-            if d == 0 || d > ROAD_REACH * ROAD_REACH || !road_mask.contains(x + dx, z + dz) {
+            if d == 0 || d > reach * reach || !wanted(x + dx, z + dz) {
                 continue;
             }
             if best.is_none_or(|(b, _)| d < b) {
-                best = Some((d, (dx, dz)));
+                best = Some((d, (x + dx, z + dz)));
             }
         }
     }
-    match best {
-        Some((d, (dx, dz))) => {
-            let len = f64::from(d).sqrt();
-            (f64::from(dx) / len, f64::from(dz) / len)
-        }
-        None => [(0.0, 1.0), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0)][(id % 4) as usize],
-    }
+    best.map(|(_, c)| c)
 }
 
-/// The barrel's block for a mapped `colour`; red where none is mapped.
-fn body_block(colour: Option<&str>) -> &'static str {
-    match colour.map(str::to_ascii_lowercase).as_deref() {
-        Some("yellow" | "#ffff00" | "gold") => "minecraft:yellow_concrete",
-        Some("orange") => "minecraft:orange_concrete",
-        Some("green" | "darkgreen" | "dark_green") => "minecraft:green_concrete",
-        Some("blue") => "minecraft:blue_concrete",
-        Some("white") => "minecraft:white_concrete",
-        Some("silver" | "grey" | "gray") => "minecraft:light_gray_concrete",
-        Some("black") => "minecraft:black_concrete",
-        _ => "minecraft:red_concrete",
-    }
+/// The barrel's block for a mapped `colour`: a plain name its concrete, as a hydrant
+/// painted yellow is yellow whatever web yellow comes nearest, anything else the nearest
+/// concrete.
+fn body_block(colour: &str) -> Option<Block> {
+    let colour = colour.trim().to_ascii_lowercase();
+    Some(match colour.as_str() {
+        "red" => RED_CONCRETE,
+        "yellow" | "gold" => YELLOW_CONCRETE,
+        "orange" => ORANGE_CONCRETE,
+        "green" => GREEN_CONCRETE,
+        "blue" => BLUE_CONCRETE,
+        "white" => WHITE_CONCRETE,
+        "silver" | "grey" | "gray" => LIGHT_GRAY_CONCRETE,
+        "black" => BLACK_CONCRETE,
+        _ => return concrete_for_colour(&colour),
+    })
 }
 
 /// Grey iron for the foot, the caps and the nut.
@@ -292,8 +318,8 @@ mod tests {
         generate_emergency(&mut editor, &hydrant(1, &[]), &road);
         let parts = parts(&editor);
         assert_eq!(parts.len(), 12);
-        // No block of its own, all of it standing on its cell and under a block high.
-        assert!(!editor.check_for_block(10, 1, 10, Some(&[REDSTONE_BLOCK])));
+        // An invisible block holds its cell; all of it stands on that cell, under a block high.
+        assert!(editor.check_for_block(10, 1, 10, Some(&[BARRIER])));
         let ground = f64::from(editor.get_absolute_y(10, 1, 10));
         for (_, p) in &parts {
             assert!(
@@ -322,6 +348,13 @@ mod tests {
             .unwrap();
         assert_eq!(north.0, CAP);
         assert!((10.5 - north.1[2] - 0.215).abs() < 0.01, "{north:?}");
+
+        // Mapped onto the carriageway, it stands beside it, still facing it.
+        let mut editor = test_editor(&xz);
+        editor.set_carriageway(std::sync::Arc::new(bitmap_with_rect(&xz, 0, 4, 29, 10)));
+        generate_emergency(&mut editor, &hydrant(7, &[]), &pavement);
+        assert!(editor.check_for_block(10, 1, 11, Some(&[BARRIER])));
+        assert!(self::parts(&editor).iter().all(|(_, p)| p[2] > 11.0));
     }
 
     #[test]
@@ -338,6 +371,25 @@ mod tests {
         let ground = f64::from(editor.get_absolute_y(10, 1, 10));
         let top = parts.iter().map(|(_, p)| p[1]).fold(f64::MIN, f64::max);
         assert!((top - ground - 2.0 * 0.885).abs() < 0.01, "{top}");
+
+        // A colour given as a hex code takes the nearest concrete.
+        let mut editor = test_editor(&xz);
+        generate_emergency(&mut editor, &hydrant(5, &[("colour", "#1e3fa0")]), &road);
+        assert!(self::parts(&editor)
+            .iter()
+            .any(|(b, _)| b == "minecraft:blue_concrete"));
+
+        // Too small to make out at a fifth of a block to the metre: a block, no displays.
+        let mut editor = test_editor(&xz);
+        editor.set_projection_info("local", 0.2);
+        generate_emergency(&mut editor, &hydrant(6, &[]), &road);
+        assert!(editor.entities_of("minecraft:block_display").is_empty());
+        assert!(editor.check_for_block(10, 1, 10, Some(&[REDSTONE_BLOCK])));
+
+        // Any node id makes a seed.
+        let mut editor = test_editor(&xz);
+        generate_emergency(&mut editor, &hydrant(u64::MAX - 3, &[]), &road);
+        assert_eq!(self::parts(&editor).len(), 12);
 
         for kind in ["underground", "wall", "pond"] {
             let mut editor = test_editor(&xz);
