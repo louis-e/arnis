@@ -344,16 +344,25 @@ pub fn rotate_xz(x: i32, z: i32, w: i32, l: i32, k: u8) -> (i32, i32) {
     }
 }
 
+/// Min corner of the `s`-block slot cell holding (x, z). Each row of cells is shifted along x
+/// by its own amount, so slots line up in no column.
+pub fn slot_cell(x: i32, z: i32, s: i32) -> (i32, i32) {
+    let s = s.max(1);
+    let cz = z.div_euclid(s);
+    let shift =
+        (crate::land_cover::coord_hash(cz.wrapping_mul(0x3d3d) + 5, 0x5107) % s as u64) as i32;
+    ((x - shift).div_euclid(s) * s + shift, cz * s)
+}
+
 /// Trunk slot with an explicit spacing `s` (blocks). Pure function of (x,z) so it is seam-safe.
+/// It wanders over the cell but for its last row and column, so neighbours keep a block apart.
 pub fn trunk_slot_s(x: i32, z: i32, s: i32) -> (i32, i32) {
     let s = s.max(1);
-    let cx = x.div_euclid(s);
-    let cz = z.div_euclid(s);
+    let (x0, z0) = slot_cell(x, z, s);
     let h =
-        crate::land_cover::coord_hash(cx.wrapping_mul(0x1f1f) + 17, cz.wrapping_mul(0x2b2b) + 91);
-    let jx = (h & 1) as i32;
-    let jz = ((h >> 1) & 1) as i32;
-    (cx * s + jx, cz * s + jz)
+        crate::land_cover::coord_hash(x0.wrapping_mul(0x1f1f) + 17, z0.wrapping_mul(0x2b2b) + 91);
+    let reach = (s - 1).max(1) as u64;
+    (x0 + (h % reach) as i32, z0 + ((h / reach) % reach) as i32)
 }
 
 /// One of the nine leaf types `map_block` can emit (vine/moss map to OAK_LEAVES).
@@ -847,18 +856,50 @@ mod tests {
 
     #[test]
     fn trunk_slots_stay_at_least_one_block_apart() {
-        let mut slots = std::collections::HashSet::new();
-        for x in -30..30 {
-            for z in -30..30 {
-                slots.insert(trunk_slot_s(x, z, 3));
+        for s in [3, 4, 5, 6, 7] {
+            let mut slots = std::collections::HashSet::new();
+            for x in -40..40 {
+                for z in -40..40 {
+                    let slot = trunk_slot_s(x, z, s);
+                    // A column's slot lies in its own cell.
+                    let (x0, z0) = slot_cell(x, z, s);
+                    assert!((x0..x0 + s).contains(&slot.0) && (z0..z0 + s).contains(&slot.1));
+                    slots.insert(slot);
+                }
+            }
+            let v: Vec<(i32, i32)> = slots.into_iter().collect();
+            for i in 0..v.len() {
+                for j in (i + 1)..v.len() {
+                    let (dx, dz) = ((v[i].0 - v[j].0).abs(), (v[i].1 - v[j].1).abs());
+                    assert!(
+                        dx.max(dz) >= 2,
+                        "s {s}: slots {:?} and {:?} touch",
+                        v[i],
+                        v[j]
+                    );
+                }
             }
         }
-        let v: Vec<(i32, i32)> = slots.into_iter().collect();
-        for i in 0..v.len() {
-            for j in (i + 1)..v.len() {
-                let (dx, dz) = ((v[i].0 - v[j].0).abs(), (v[i].1 - v[j].1).abs());
-                assert!(dx.max(dz) >= 2, "slots {:?} and {:?} touch", v[i], v[j]);
+    }
+
+    #[test]
+    fn trunk_slots_form_no_grid() {
+        // Over a field of cells, slots take many offsets in their cell and rows don't line up.
+        let s = 5;
+        let (mut offsets, mut columns) = (
+            std::collections::HashSet::new(),
+            std::collections::HashSet::new(),
+        );
+        for cz in 0..40 {
+            for cx in 0..40 {
+                let (x, z) = (cx * s, cz * s);
+                let (x0, z0) = slot_cell(x, z, s);
+                let slot = trunk_slot_s(x, z, s);
+                offsets.insert((slot.0 - x0, slot.1 - z0));
+                columns.insert(x0.rem_euclid(s));
             }
         }
+        assert!(offsets.len() >= 12, "{} offsets", offsets.len());
+        assert_eq!(columns.len(), s as usize, "row shifts");
     }
 }

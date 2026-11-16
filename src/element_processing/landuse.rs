@@ -10,6 +10,7 @@ use crate::floodfill_cache::{
     in_hole, without_holes, BuildingFootprintBitmap, FloodFillCache, Holes, InnerRings,
     RoadMaskBitmap,
 };
+use crate::ground_generation::FOREST_LITTER;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::prelude::IndexedRandom;
@@ -220,6 +221,9 @@ fn landuse_area(
         }
         let plot = field_layout.as_ref().map(|l| l.plot_at(x, z));
         let climate = editor.local_climate(x, z).unwrap_or(area_climate);
+        let forest_floor = (landuse_tag == "forest")
+            .then(|| editor.forest_floor_at(x, z))
+            .flatten();
 
         // Apply per-block randomness for certain landuse types
         let actual_block = if let Some(p) = &plot {
@@ -251,6 +255,8 @@ fn landuse_area(
             } else {
                 ANDESITE
             }
+        } else if let Some(floor) = forest_floor {
+            floor
         } else {
             block_type
         };
@@ -288,7 +294,13 @@ fn landuse_area(
 
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
-            "forest" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
+            "forest"
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    || editor.check_for_block(x, 0, z, Some(FOREST_LITTER)) =>
+            {
+                // Litter carries the odd fern, a sward under crowns thins out.
+                let litter = editor.check_for_block(x, 0, z, Some(FOREST_LITTER));
+                let floor = forest_floor.is_some();
                 // Density-modulated spawn: thickets in some patches, clearings in others.
                 let density = crate::ground_generation::value_noise_01(x, z, 32);
                 let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
@@ -328,9 +340,14 @@ fn landuse_area(
                             ),
                         }
                     } else if random_choice <= 12 {
-                        if rng.random_range(0..100) < 12 {
+                        let fern = rng.random_range(0..100) < 12;
+                        if litter {
+                            if random_choice <= 3 {
+                                editor.set_block(FERN, x, 1, z, None, None);
+                            }
+                        } else if fern {
                             editor.set_block(FERN, x, 1, z, None, None);
-                        } else {
+                        } else if !floor || random_choice <= 5 {
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
                     }

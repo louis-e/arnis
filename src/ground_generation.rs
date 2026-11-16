@@ -41,6 +41,7 @@ use rand::Rng;
 
 // Salts that keep the undergrowth fields independent of each other.
 const SALT_FOREST_FLOOR: u32 = 0xF0E5_7F10;
+const SALT_FOREST_LITTER: u32 = 0xF0E5_7117;
 const SALT_SHRUB_FLOOR: u32 = 0x5B7B_F10A;
 const SALT_SHRUB_DIRT: u32 = 0x5B7B_D127;
 const SALT_BARE_EARTH: u32 = 0xBA4E_EA27;
@@ -190,10 +191,8 @@ fn canopy_verdict(
     tree_pack: Option<&crate::trees::region::RegionLibrary>,
     scale: f64,
 ) -> (bool, bool) {
-    let cell = XZPoint::new(
-        x.div_euclid(spacing) * spacing - origin_x,
-        z.div_euclid(spacing) * spacing - origin_z,
-    );
+    let (x0, z0) = crate::trees::schematic::slot_cell(x, z, spacing);
+    let cell = XZPoint::new(x0 - origin_x, z0 - origin_z);
     if (x, z) != crate::trees::schematic::trunk_slot_s(x, z, spacing) {
         return (ground.canopy_measured(cell, spacing), false);
     }
@@ -380,6 +379,15 @@ pub fn generate_ground_region(
                 continue;
             }
             let forest_fern_share = fern_share_at((chunk_x << 4) + 8, (chunk_z << 4) + 8);
+            let forest_floor = {
+                let point = XZPoint::new(
+                    (chunk_x << 4) + 8 - xzbbox.min_x(),
+                    (chunk_z << 4) + 8 - xzbbox.min_z(),
+                );
+                forest_floor_kind(ground, point, ground.climate_at(point), || {
+                    ground.local_lat(point).unwrap_or(center_lat).abs()
+                })
+            };
             // Fallen rock is only looked for where the relief could hold a cliff.
             let talus_field = (terrain_enabled && planetary_body.is_none())
                 .then(|| {
@@ -697,6 +705,18 @@ pub fn generate_ground_region(
                             };
                             let talus_block =
                                 terrain_surface::talus_palette(x, z, talus, cover_here, rock);
+                            // Whether the cascade below laid this column's forest floor.
+                            let mut floored = false;
+                            // Forest cover outside measured clearings, or open cover inside a stand.
+                            let floor_here = forest_floor.filter(|_| match cover_here {
+                                land_cover::LC_TREE_COVER => ground
+                                    .canopy_height_m(coord)
+                                    .is_none_or(|h| h >= crate::canopy::CANOPY_MIN_M),
+                                land_cover::LC_GRASSLAND | land_cover::LC_SHRUBLAND => {
+                                    in_closed_stand(ground, coord)
+                                }
+                                _ => false,
+                            });
 
                             // The field plot this column's cropland surface came from.
                             let mut cropland_plot: Option<(Plot, Block)> = None;
@@ -740,6 +760,9 @@ pub fn generate_ground_region(
                                     rock == terrain_surface::Rock::Red,
                                 ) {
                                     p
+                                } else if let Some(kind) = floor_here {
+                                    floored = true;
+                                    forest_floor_surface(x, z, kind)
                                 } else {
                                     // Select surface block based on ESA land cover class
                                     match cover {
@@ -1120,6 +1143,26 @@ pub fn generate_ground_region(
                                     None,
                                 );
                                 let sward = climate_sward(climate) * if worn { 0.5 } else { 1.0 };
+                                // Litter carries ferns alone; the sward under a crown thins out.
+                                let litter = floored
+                                    && editor.check_for_block_absolute(
+                                        x,
+                                        ground_y,
+                                        z,
+                                        Some(FOREST_LITTER),
+                                        None,
+                                    );
+                                let floor_mean = match (floored, litter) {
+                                    (_, true) => 0.08,
+                                    (true, false) => 0.15,
+                                    (false, _) => 0.4,
+                                };
+                                let forest_fern = |x: i32, z: i32| {
+                                    litter
+                                        || (land_cover::coord_hash(x ^ 0xFE, z ^ 0x4E) % 100) as f64
+                                            / 100.0
+                                            < forest_fern_share
+                                };
 
                                 match cover {
                                     land_cover::LC_TREE_COVER
@@ -1151,19 +1194,45 @@ pub fn generate_ground_region(
                                             && undergrowth_roll(
                                                 x,
                                                 z,
-                                                0.4 * sward,
+                                                floor_mean * sward,
                                                 SALT_FOREST_FLOOR,
                                             )
                                         {
                                             // Undergrowth only on natural surfaces. Flowers
                                             // come in patches from the decoration pass.
-                                            let fern = (land_cover::coord_hash(x ^ 0xFE, z ^ 0x4E)
-                                                % 100)
-                                                as f64
-                                                / 100.0
-                                                < forest_fern_share;
+                                            let fern = forest_fern(x, z);
                                             editor.set_block_absolute(
                                                 if fern { FERN } else { GRASS },
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
+                                    // Meadow and scrub under a measured crown are forest floor.
+                                    land_cover::LC_GRASSLAND | land_cover::LC_SHRUBLAND
+                                        if floored && ground_is_natural =>
+                                    {
+                                        // Scrub keeps its wild bushes under the crowns.
+                                        if cover == land_cover::LC_SHRUBLAND
+                                            && rng.random_range(0..100) < 2
+                                        {
+                                            crate::element_processing::bush::place_bush(
+                                                editor,
+                                                x,
+                                                z,
+                                                crate::element_processing::bush::BushKind::Wild,
+                                            );
+                                        } else if undergrowth_roll(
+                                            x,
+                                            z,
+                                            floor_mean * sward,
+                                            SALT_FOREST_FLOOR,
+                                        ) {
+                                            editor.set_block_absolute(
+                                                if forest_fern(x, z) { FERN } else { GRASS },
                                                 x,
                                                 ground_y + 1,
                                                 z,
@@ -1548,6 +1617,106 @@ pub fn generate_ground_region(
     ground_pb.finish();
 }
 
+/// What carpets the floor of a temperate forest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ForestFloor {
+    /// Needles: podzol and coarse dirt in patches.
+    Conifer,
+    /// Leaf litter and moss between the sward.
+    Broadleaf,
+    /// Dry oak and pine woodland: bare coarse dirt.
+    Dry,
+}
+
+/// The forest floor of a temperate forest at `point`; None where the climate palettes or the
+/// tropics decide the ground.
+fn forest_floor_kind(
+    ground: &Ground,
+    point: XZPoint,
+    climate: crate::climate::Climate,
+    abs_lat: impl FnOnce() -> f64,
+) -> Option<ForestFloor> {
+    use crate::climate::Climate;
+    if !matches!(climate, Climate::Temperate | Climate::DryContinental) {
+        return None;
+    }
+    use crate::ecoregion::EcoBiome::*;
+    match ground.ecoregion(point).map(|e| e.biome) {
+        Some(TemperateConifer | Boreal) => Some(ForestFloor::Conifer),
+        Some(TemperateBroadleaf | TemperateGrassland | MontaneGrassland) => {
+            Some(ForestFloor::Broadleaf)
+        }
+        Some(Mediterranean) => Some(ForestFloor::Dry),
+        Some(_) => None,
+        // Temperate also holds the wet tropics, which keep their own ground.
+        None => match abs_lat() {
+            lat if lat < 23.5 => None,
+            lat if lat > 55.0 => Some(ForestFloor::Conifer),
+            _ => Some(ForestFloor::Broadleaf),
+        },
+    }
+}
+
+/// Whether a measured crown at `coord` stands among others, not alone on a lawn.
+fn in_closed_stand(ground: &Ground, coord: XZPoint) -> bool {
+    let crown = |dx: i32, dz: i32| {
+        ground
+            .canopy_height_m(XZPoint::new(coord.x + dx, coord.z + dz))
+            .is_some_and(|h| h >= crate::canopy::CANOPY_MIN_M)
+    };
+    crown(0, 0)
+        && [(6, 0), (-6, 0), (0, 6), (0, -6)]
+            .iter()
+            .filter(|&&(dx, dz)| crown(dx, dz))
+            .count()
+            >= 3
+}
+
+/// Top block of a mapped wood at `point` (world `x, z`): the forest floor of a temperate
+/// forest, except in a clearing the canopy map measured; None keeps the area's grass.
+pub(crate) fn mapped_forest_floor(
+    ground: &Ground,
+    point: XZPoint,
+    x: i32,
+    z: i32,
+    world_lat: f64,
+) -> Option<Block> {
+    let abs_lat = || ground.local_lat(point).unwrap_or(world_lat).abs();
+    let climate = ground.climate_at(point);
+    // Boreal land cover gets podzol from its climate palette; a mapped wood there matches it.
+    let kind = if matches!(climate, crate::climate::Climate::Boreal) {
+        ForestFloor::Conifer
+    } else {
+        forest_floor_kind(ground, point, climate, abs_lat)?
+    };
+    if ground
+        .canopy_height_m(point)
+        .is_some_and(|h| h < crate::canopy::CANOPY_MIN_M)
+    {
+        return None;
+    }
+    Some(forest_floor_surface(x, z, kind).0)
+}
+
+/// Blocks of a forest floor's litter, which carries ferns rather than grass.
+pub(crate) const FOREST_LITTER: &[Block] = &[PODZOL, COARSE_DIRT, MOSS_BLOCK];
+
+/// Surface and under-block of a forest floor column: litter in patches between the sward.
+fn forest_floor_surface(x: i32, z: i32, kind: ForestFloor) -> (Block, Block) {
+    let n = ground_noise(x, z, 7, SALT_FOREST_LITTER);
+    let top = match kind {
+        ForestFloor::Conifer if n < 0.30 => PODZOL,
+        ForestFloor::Conifer if n < 0.42 => COARSE_DIRT,
+        ForestFloor::Broadleaf if n < 0.12 => PODZOL,
+        ForestFloor::Broadleaf if n < 0.20 => COARSE_DIRT,
+        ForestFloor::Broadleaf if n < 0.25 => MOSS_BLOCK,
+        ForestFloor::Dry if n < 0.22 => COARSE_DIRT,
+        ForestFloor::Dry if n < 0.28 => PODZOL,
+        _ => GRASS_BLOCK,
+    };
+    (top, DIRT)
+}
+
 /// Whether a column carries undergrowth: `mean` of the ground on average, but
 /// thick in some stretches and thin in others, as the game's grass patches are.
 fn undergrowth_roll(x: i32, z: i32, mean: f64, salt: u32) -> bool {
@@ -1707,6 +1876,52 @@ pub(crate) fn patch_noise(x: i32, z: i32, scale: i32, salt: u32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_closed_stand_counts_as_one() {
+        // One 5-block crown on a lawn, and a closed stand to its east.
+        let side = 128usize;
+        let mut grid = vec![0u8; side * side];
+        for z in 0..side {
+            for x in 0..side {
+                let lone = (18..23).contains(&x) && (18..23).contains(&z);
+                if lone || x >= 64 {
+                    grid[z * side + x] = 15;
+                }
+            }
+        }
+        let ground =
+            Ground::new_flat_canopy_test(CanopyData::from_grid(grid, side, side), side, side);
+        assert!(!in_closed_stand(&ground, XZPoint::new(20, 20)));
+        assert!(in_closed_stand(&ground, XZPoint::new(90, 40)));
+        // The stand's edge row still has crowns on three sides.
+        assert!(in_closed_stand(&ground, XZPoint::new(64, 40)));
+        assert!(!in_closed_stand(&ground, XZPoint::new(40, 40)));
+    }
+
+    #[test]
+    fn forest_floors_lay_litter_by_kind() {
+        let share = |kind: ForestFloor| {
+            let mut litter = 0;
+            for x in 0..300 {
+                for z in 0..300 {
+                    let (top, under) = forest_floor_surface(x * 3, z * 3, kind);
+                    assert_eq!(under, DIRT);
+                    litter += i32::from(top != GRASS_BLOCK);
+                }
+            }
+            f64::from(litter) / 90_000.0
+        };
+        // Needles cover the most ground, broadleaf litter and dry woodland less.
+        let (conifer, broadleaf, dry) = (
+            share(ForestFloor::Conifer),
+            share(ForestFloor::Broadleaf),
+            share(ForestFloor::Dry),
+        );
+        assert!((conifer - 0.42).abs() < 0.06, "{conifer}");
+        assert!((broadleaf - 0.25).abs() < 0.06, "{broadleaf}");
+        assert!((dry - 0.28).abs() < 0.06, "{dry}");
+    }
 
     #[test]
     fn ground_noise_keeps_shares_and_varies_patch_size() {

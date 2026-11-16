@@ -204,6 +204,21 @@ pub fn load(
 mod tests {
     use super::*;
 
+    /// Whether a leafy model leaves the top of a log open to the sky.
+    fn shows_a_log(schem: &crate::trees::schematic::Schematic) -> bool {
+        let mut top = std::collections::HashMap::new();
+        for &(x, y, z, block) in &schem.voxels {
+            let t = top.entry((x, z)).or_insert((y, block));
+            if y > t.0 {
+                *t = (y, block);
+            }
+        }
+        schem.has_leaves()
+            && top
+                .values()
+                .any(|(_, b)| crate::ground_decoration::WOOD.contains(b))
+    }
+
     /// Every model a manifest lists exists and loads as a tree, and every
     /// contributed model is listed somewhere.
     #[test]
@@ -228,6 +243,7 @@ mod tests {
                                 .unwrap_or_else(|| panic!("{path} is listed but missing"));
                             let schem = crate::trees::schematic::load_schem(file.contents())
                                 .unwrap_or_else(|e| panic!("{path}: {e}"));
+                            assert!(!shows_a_log(&schem), "{path} shows a log from above");
                             // Cacti and snags are listed on purpose and skipped at load.
                             if path.contains("/contrib/") {
                                 assert!(schem.has_leaves(), "{path} has no leaves");
