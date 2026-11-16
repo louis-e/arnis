@@ -129,11 +129,14 @@ fn chunk_piece(
     chunk_z: i32,
     rock_density: f64,
     bush_density: f64,
+    rugged: f64,
 ) -> Option<(&'static StructureSchematic, bool, u8, i32, i32)> {
     let mut rng = crate::deterministic_rng::coord_rng(chunk_x, chunk_z, SALT);
     // Both rolls are drawn either way, so one kind's flag never moves the other.
-    let rock_hit = rng.random::<f64>() < rock_density;
+    let rock_roll = rng.random::<f64>();
     let bush_hit = rng.random::<f64>() < bush_density;
+    // Rugged ground adds rocks only to chunks no bush rolled for.
+    let rock_hit = rock_roll < rock_density || (!bush_hit && rock_roll < rock_density * rugged);
     let pool = match (rock_hit, bush_hit) {
         (true, _) => rocks(),
         (false, true) => bushes(),
@@ -249,14 +252,28 @@ pub fn place_mapped_rock(
     }) {
         return;
     }
-    let low = offsets
+    let base: Vec<i32> = offsets
         .iter()
         .filter(|o| o.1 == 0)
         .map(|&(dx, _, dz)| editor.get_ground_level(ax + dx, az + dz))
-        .min();
-    let Some(low) = low else {
+        .collect();
+    let (Some(&low), Some(&high)) = (base.iter().min(), base.iter().max()) else {
         return;
     };
+    // Steeper than this, the uphill side would bury most of it.
+    if high - low > MAX_BASE_STEP + 2 {
+        return;
+    }
+    // Whatever stands there already, a bench or a trunk, keeps its place.
+    let occupied = offsets.iter().any(|&(dx, dy, dz)| {
+        let (x, y, z) = (ax + dx, low + 1 + dy, az + dz);
+        y > editor.get_ground_level(x, z)
+            && editor.block_exists_absolute(x, y, z)
+            && !editor.check_for_block_absolute(x, y, z, Some(LOOSE_PLANTS), None)
+    });
+    if occupied {
+        return;
+    }
     place_structure(editor, schem, ax, az, low + 1, rot, None);
 }
 
@@ -299,22 +316,14 @@ pub fn scatter_region(
 
     for chunk_x in (min_x >> 4)..=(max_x >> 4) {
         for chunk_z in (min_z >> 4)..=(max_z >> 4) {
-            // Rugged ground holds more rocks; the roll stays the chunk's own either way.
             let centre = XZPoint::new(
                 (chunk_x << 4) + 8 - xzbbox.min_x(),
                 (chunk_z << 4) + 8 - xzbbox.min_z(),
             );
-            let slope = if ground.elevation_enabled {
-                ground.slope_and_gradient(centre).0
-            } else {
-                0.0
-            };
-            let Some((schem, is_rock, rot, ax, az)) = chunk_piece(
-                chunk_x,
-                chunk_z,
-                rock_density * ruggedness_factor(slope),
-                bush_density,
-            ) else {
+            let rugged = ruggedness_factor(ground.slope_and_gradient(centre).0);
+            let Some((schem, is_rock, rot, ax, az)) =
+                chunk_piece(chunk_x, chunk_z, rock_density, bush_density, rugged)
+            else {
                 continue;
             };
             let anchor = XZPoint::new(ax - xzbbox.min_x(), az - xzbbox.min_z());
@@ -429,7 +438,7 @@ mod tests {
         }
         for cx in -40..40 {
             for cz in -40..40 {
-                if let Some((schem, _, rot, x, z)) = chunk_piece(cx, cz, 0.5, 0.5) {
+                if let Some((schem, _, rot, x, z)) = chunk_piece(cx, cz, 0.5, 0.5, 1.0) {
                     for (dx, _, dz) in rotated_offsets(schem, rot) {
                         assert_eq!(((x + dx) >> 4, (z + dz) >> 4), (cx, cz));
                     }
@@ -445,7 +454,7 @@ mod tests {
             let mut bushes = 0;
             for cx in 0..100 {
                 for cz in 0..100 {
-                    match chunk_piece(cx, cz, rock, bush) {
+                    match chunk_piece(cx, cz, rock, bush, 1.0) {
                         Some((_, true, ..)) => rocks += 1,
                         Some((_, false, ..)) => bushes += 1,
                         None => {}
@@ -464,8 +473,8 @@ mod tests {
         // A bush chunk stays a bush chunk whether or not rocks are on.
         for cx in 0..30 {
             for cz in 0..30 {
-                if let Some((_, false, rot, x, z)) = chunk_piece(cx, cz, 0.02, 0.05) {
-                    let alone = chunk_piece(cx, cz, 0.0, 0.05).map(|p| (p.2, p.3, p.4));
+                if let Some((_, false, rot, x, z)) = chunk_piece(cx, cz, 0.02, 0.05, 1.0) {
+                    let alone = chunk_piece(cx, cz, 0.0, 0.05, 1.0).map(|p| (p.2, p.3, p.4));
                     assert_eq!(alone, Some((rot, x, z)));
                 }
             }
@@ -588,6 +597,26 @@ mod tests {
     }
 
     #[test]
+    fn rugged_ground_keeps_every_bush() {
+        let (mut bushes_flat, mut bushes_rugged, mut rocks_flat, mut rocks_rugged) = (0, 0, 0, 0);
+        for cx in -60..60 {
+            for cz in -60..60 {
+                let flat = chunk_piece(cx, cz, 0.02, 0.05, 1.0).map(|p| p.1);
+                let rugged = chunk_piece(cx, cz, 0.02, 0.05, 3.0).map(|p| p.1);
+                bushes_flat += i32::from(flat == Some(false));
+                bushes_rugged += i32::from(rugged == Some(false));
+                rocks_flat += i32::from(flat == Some(true));
+                rocks_rugged += i32::from(rugged == Some(true));
+            }
+        }
+        assert_eq!(bushes_flat, bushes_rugged);
+        assert!(
+            rocks_rugged > 2 * rocks_flat,
+            "{rocks_flat} -> {rocks_rugged}"
+        );
+    }
+
+    #[test]
     fn rugged_ground_holds_more_rocks() {
         assert_eq!(ruggedness_factor(0.0), 1.0);
         assert_eq!(ruggedness_factor(1.0), 1.0);
@@ -707,7 +736,7 @@ mod tests {
         let (mut rocks, mut large) = (0, 0);
         for cx in 0..100 {
             for cz in 0..100 {
-                if let Some((schem, true, ..)) = chunk_piece(cx, cz, 1.0, 0.0) {
+                if let Some((schem, true, ..)) = chunk_piece(cx, cz, 1.0, 0.0, 1.0) {
                     rocks += 1;
                     large += is_large(schem) as u32;
                 }
@@ -725,7 +754,7 @@ mod tests {
         // Both densities at 1.0: every chunk rolls both, and every piece is a rock.
         for cx in 0..20 {
             for cz in 0..20 {
-                if let Some((_, is_rock, ..)) = chunk_piece(cx, cz, 1.0, 1.0) {
+                if let Some((_, is_rock, ..)) = chunk_piece(cx, cz, 1.0, 1.0, 1.0) {
                     assert!(is_rock);
                 }
             }
@@ -736,7 +765,7 @@ mod tests {
     fn density_zero_places_nothing() {
         for cx in -20..20 {
             for cz in -20..20 {
-                assert!(chunk_piece(cx, cz, 0.0, 0.0).is_none());
+                assert!(chunk_piece(cx, cz, 0.0, 0.0, 1.0).is_none());
             }
         }
     }

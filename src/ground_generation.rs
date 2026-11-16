@@ -191,10 +191,8 @@ fn canopy_verdict(
     tree_pack: Option<&crate::trees::region::RegionLibrary>,
     scale: f64,
 ) -> (bool, bool) {
-    let cell = XZPoint::new(
-        x.div_euclid(spacing) * spacing - origin_x,
-        z.div_euclid(spacing) * spacing - origin_z,
-    );
+    let (x0, z0) = crate::trees::schematic::slot_cell(x, z, spacing);
+    let cell = XZPoint::new(x0 - origin_x, z0 - origin_z);
     if (x, z) != crate::trees::schematic::trunk_slot_s(x, z, spacing) {
         return (ground.canopy_measured(cell, spacing), false);
     }
@@ -386,12 +384,9 @@ pub fn generate_ground_region(
                     (chunk_x << 4) + 8 - xzbbox.min_x(),
                     (chunk_z << 4) + 8 - xzbbox.min_z(),
                 );
-                forest_floor_kind(
-                    ground,
-                    point,
-                    ground.climate_at(point),
-                    ground.local_lat(point).unwrap_or(center_lat).abs(),
-                )
+                forest_floor_kind(ground, point, ground.climate_at(point), || {
+                    ground.local_lat(point).unwrap_or(center_lat).abs()
+                })
             };
             // Fallen rock is only looked for where the relief could hold a cliff.
             let talus_field = (terrain_enabled && planetary_body.is_none())
@@ -710,6 +705,8 @@ pub fn generate_ground_region(
                             };
                             let talus_block =
                                 terrain_surface::talus_palette(x, z, talus, cover_here, rock);
+                            // Whether the cascade below laid this column's forest floor.
+                            let mut floored = false;
                             // Forest cover outside measured clearings, or open cover inside a stand.
                             let floor_here = forest_floor.filter(|_| match cover_here {
                                 land_cover::LC_TREE_COVER => ground
@@ -764,6 +761,7 @@ pub fn generate_ground_region(
                                 ) {
                                     p
                                 } else if let Some(kind) = floor_here {
+                                    floored = true;
                                     forest_floor_surface(x, z, kind)
                                 } else {
                                     // Select surface block based on ESA land cover class
@@ -1146,7 +1144,7 @@ pub fn generate_ground_region(
                                 );
                                 let sward = climate_sward(climate) * if worn { 0.5 } else { 1.0 };
                                 // Litter carries ferns alone; the sward under a crown thins out.
-                                let litter = floor_here.is_some()
+                                let litter = floored
                                     && editor.check_for_block_absolute(
                                         x,
                                         ground_y,
@@ -1154,7 +1152,7 @@ pub fn generate_ground_region(
                                         Some(FOREST_LITTER),
                                         None,
                                     );
-                                let floor_mean = match (floor_here.is_some(), litter) {
+                                let floor_mean = match (floored, litter) {
                                     (_, true) => 0.08,
                                     (true, false) => 0.15,
                                     (false, _) => 0.4,
@@ -1215,9 +1213,19 @@ pub fn generate_ground_region(
                                     }
                                     // Meadow and scrub under a measured crown are forest floor.
                                     land_cover::LC_GRASSLAND | land_cover::LC_SHRUBLAND
-                                        if floor_here.is_some() && ground_is_natural =>
+                                        if floored && ground_is_natural =>
                                     {
-                                        if undergrowth_roll(
+                                        // Scrub keeps its wild bushes under the crowns.
+                                        if cover == land_cover::LC_SHRUBLAND
+                                            && rng.random_range(0..100) < 2
+                                        {
+                                            crate::element_processing::bush::place_bush(
+                                                editor,
+                                                x,
+                                                z,
+                                                crate::element_processing::bush::BushKind::Wild,
+                                            );
+                                        } else if undergrowth_roll(
                                             x,
                                             z,
                                             floor_mean * sward,
@@ -1626,7 +1634,7 @@ fn forest_floor_kind(
     ground: &Ground,
     point: XZPoint,
     climate: crate::climate::Climate,
-    abs_lat: f64,
+    abs_lat: impl FnOnce() -> f64,
 ) -> Option<ForestFloor> {
     use crate::climate::Climate;
     if !matches!(climate, Climate::Temperate | Climate::DryContinental) {
@@ -1641,9 +1649,11 @@ fn forest_floor_kind(
         Some(Mediterranean) => Some(ForestFloor::Dry),
         Some(_) => None,
         // Temperate also holds the wet tropics, which keep their own ground.
-        None if abs_lat < 23.5 => None,
-        None if abs_lat > 55.0 => Some(ForestFloor::Conifer),
-        None => Some(ForestFloor::Broadleaf),
+        None => match abs_lat() {
+            lat if lat < 23.5 => None,
+            lat if lat > 55.0 => Some(ForestFloor::Conifer),
+            _ => Some(ForestFloor::Broadleaf),
+        },
     }
 }
 
@@ -1669,8 +1679,9 @@ pub(crate) fn mapped_forest_floor(
     point: XZPoint,
     x: i32,
     z: i32,
+    world_lat: f64,
 ) -> Option<Block> {
-    let abs_lat = ground.local_lat(point).map_or(45.0, f64::abs);
+    let abs_lat = || ground.local_lat(point).unwrap_or(world_lat).abs();
     let climate = ground.climate_at(point);
     // Boreal land cover gets podzol from its climate palette; a mapped wood there matches it.
     let kind = if matches!(climate, crate::climate::Climate::Boreal) {

@@ -204,8 +204,6 @@ pub fn load(
 mod tests {
     use super::*;
 
-    /// Every model a manifest lists exists and loads as a tree, and every
-    /// contributed model is listed somewhere.
     /// Whether a leafy model leaves the top of a log open to the sky.
     fn shows_a_log(schem: &crate::trees::schematic::Schematic) -> bool {
         let mut top = std::collections::HashMap::new();
@@ -221,6 +219,8 @@ mod tests {
                 .any(|(_, b)| crate::ground_decoration::WOOD.contains(b))
     }
 
+    /// Every model a manifest lists exists and loads as a tree, and every
+    /// contributed model is listed somewhere.
     #[test]
     fn every_listed_model_loads_and_none_is_orphaned() {
         let mut listed = std::collections::HashSet::new();
