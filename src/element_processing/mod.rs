@@ -144,8 +144,14 @@ impl RelationArea {
 
 /// `landuse` values that leave the ground to the land cover. They cover whole zones or grounds,
 /// gardens, lawns and playing fields included, which the 10 m land cover resolves far better.
-pub const LANDUSE_FROM_LAND_COVER: &[&str] =
-    &["residential", "commercial", "education", "religious"];
+/// A retail park is mostly car park and paving, which a lawn fill would turn green.
+pub const LANDUSE_FROM_LAND_COVER: &[&str] = &[
+    "residential",
+    "commercial",
+    "retail",
+    "education",
+    "religious",
+];
 
 /// Whether a `landuse` value paints ground at all.
 /// `generate_landuse` bails on these before placing anything, and they are typically the largest
