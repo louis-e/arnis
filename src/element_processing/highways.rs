@@ -16,6 +16,7 @@ use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::raceways;
 use crate::element_processing::road_detail::RoadDetail;
 use crate::element_processing::road_markings::{self, CrossMark, CrossingPaint, RoadMarkingIndex};
+use crate::element_processing::road_width;
 use crate::element_processing::surfaces::{
     cycleway_palette, get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
 };
@@ -28,9 +29,6 @@ use fnv::FnvHashMap;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-
-/// Widest road half-width in blocks.
-const MAX_BLOCK_RANGE: usize = 8;
 
 /// Centerline cells between pillars under a raised non-bridge road.
 const OVERPASS_PILLAR_INTERVAL: usize = 8;
@@ -389,6 +387,28 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     // A red bicycle path next to a road, so the road's width does not pave it over.
     RED_TERRACOTTA,
     RED_CONCRETE,
+];
+
+/// What the parking rows of a road, outside its lanes, must not overwrite: the road list and
+/// the paving of a sidewalk mapped beside the road.
+const PARKING_ROW_PROTECTED_SURFACES: &[Block] = &[
+    BLACK_CONCRETE,
+    GRAY_CONCRETE_POWDER,
+    CYAN_TERRACOTTA,
+    WHITE_CONCRETE,
+    YELLOW_CONCRETE,
+    WARPED_STAIRS,
+    WARPED_TRAPDOOR,
+    WARPED_SLAB,
+    STRIPPED_WARPED_STEM,
+    STRIPPED_WARPED_HYPHAE,
+    SEA_LANTERN,
+    ANDESITE_WALL,
+    SMOOTH_SANDSTONE_STAIRS,
+    RED_TERRACOTTA,
+    RED_CONCRETE,
+    SMOOTH_STONE,
+    GRAY_CONCRETE,
 ];
 
 /// What a red bicycle path or race track paint must not overwrite: the road list
@@ -1902,9 +1922,16 @@ fn generate_highways_internal(
                 } else {
                     ROAD_PROTECTED_SURFACES
                 };
+            // A sidewalk is drawn over a road's parking row, though not over its lanes, so
+            // the two meet at the kerb whichever is built first.
+            let is_sidewalk = way.tags.get("footway").map(String::as_str) == Some("sidewalk");
 
             // Canonical width (shared with prescan/bridge consumers).
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
+            // The lanes the paint divides, inside any parking rows.
+            let lane_range = highway_lane_range(highway_type, &way.tags, scale_factor);
+            // Decks and their ramps keep the square their rails are laid out from.
+            let square_stamp = is_bridge_member || is_bridge_ramp;
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
 
@@ -1935,9 +1962,9 @@ fn generate_highways_internal(
             let lines = if renders_as_highway_tunnel(way) {
                 Vec::new()
             } else {
-                let road_width = 2 * block_range + 1;
+                let road_width = 2 * lane_range + 1;
                 let oneway = road_markings::oneway_sign(highway_type, &way.tags) != 0;
-                lane_lines(highway_type, &way.tags, block_range, markings)
+                lane_lines(highway_type, &way.tags, lane_range, markings)
                     .into_iter()
                     .filter(|l| {
                         args.road_detail.keeps_lane_line(
@@ -2238,6 +2265,9 @@ fn generate_highways_internal(
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
                             for dz in -block_range..=block_range {
+                                if !square_stamp && !in_road_stamp(dx, dz, block_range) {
+                                    continue;
+                                }
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
                                 if drown_over_water
@@ -2360,7 +2390,16 @@ fn generate_highways_internal(
                                     let effective_block = race.unwrap_or_else(|| {
                                         semirandom_surface(set_x, set_z, block_types)
                                     });
+                                    // The parking rows outside the lanes stop at a
+                                    // sidewalk mapped alongside, whichever is built first.
+                                    let parking_row = !square_stamp
+                                        && lane_range < block_range
+                                        && !in_road_stamp(dx, dz, lane_range);
                                     let protect = if race.is_some() {
+                                        OVER_ASPHALT_PROTECTED_SURFACES
+                                    } else if parking_row {
+                                        PARKING_ROW_PROTECTED_SURFACES
+                                    } else if is_sidewalk && !editor.on_carriageway(set_x, set_z) {
                                         OVER_ASPHALT_PROTECTED_SURFACES
                                     } else {
                                         surface_protect
@@ -2663,7 +2702,11 @@ fn generate_highways_internal(
                                 .iter()
                                 .filter(|m| m.covers(t))
                             {
-                                let reach = block_range as f32 * (perp_x.abs() + perp_z.abs());
+                                let reach = if square_stamp {
+                                    block_range as f32 * (perp_x.abs() + perp_z.abs())
+                                } else {
+                                    block_range as f32
+                                };
                                 let spacing = perp_x.abs() + perp_z.abs();
                                 let r = block_range + 1;
                                 for dx in -r..=r {
@@ -3526,60 +3569,39 @@ fn is_fast_road(highway_type: &str, tags: &HashMap<String, String>) -> bool {
     .any(|v| v.contains("rural") || v.contains("motorway") || v.contains("nsl"))
 }
 
-/// Canonical road half-width in blocks. Single source of truth shared by the
-/// renderer and the prescan/bitmap/bridge consumers, so they never disagree.
+/// Canonical road half-width in blocks, kerb to kerb. Single source of truth shared by the
+/// renderer and the prescan/bitmap/bridge consumers, so they never disagree. The rules are
+/// in `road_width`.
 pub(crate) fn highway_block_range(
     highway_type: &str,
     tags: &HashMap<String, String>,
     scale: f64,
 ) -> i32 {
-    // A road under construction is as wide as the finished road.
-    let highway_type = if highway_type == "construction" {
-        tags.get("construction")
-            .map_or(highway_type, String::as_str)
-    } else {
-        highway_type
-    };
-    let (mut block_range, scales_with_lanes): (i32, bool) = match highway_type {
-        "footway" | "pedestrian" => (1, false),
-        // Bicycle paths are 2-4 m across; at the road default they swallowed the verge
-        // and the kerb of the road they run beside.
-        "path" | "cycleway" => (1, false),
-        "motorway" | "primary" | "trunk" => (5, true),
-        "secondary" => (4, true),
-        "tertiary" => (2, true),
-        "track" => (1, false),
-        "service" => (2, true),
-        "secondary_link" | "tertiary_link" => (1, true),
-        "escape" => (1, false),
-        "steps" => (1, false),
-        "raceway" => (raceways::default_half_width(tags), false),
-        _ => (2, true),
-    };
+    road_width::road_halves(highway_type, tags, scale).kerb
+}
 
-    const MAX_LANES: i32 = 16;
-    let lanes = tags
-        .get("lanes")
-        .and_then(|l| l.parse::<i32>().ok())
-        .unwrap_or_else(|| highway_default_lanes(highway_type))
-        .clamp(1, MAX_LANES);
+/// Half-width in blocks of a road's traffic lanes, which its lane lines divide and cars
+/// drive in: the kerb-to-kerb width less the cars parked along it.
+pub(crate) fn highway_lane_range(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    scale: f64,
+) -> i32 {
+    road_width::road_halves(highway_type, tags, scale).lanes
+}
 
-    // Explicit width=* wins; else vehicular roads use 3.5 m/lane, never below
-    // the default. The -1 accounts for the centre block in 2*block_range+1.
-    if let Some(w) = parse_width_tag_m(tags) {
-        block_range = (w / 2.0).round() as i32;
-    } else if scales_with_lanes {
-        let lanes_based = ((lanes as f32 * 3.5 - 1.0) / 2.0).round() as i32;
-        block_range = block_range.max(lanes_based);
-    }
-    block_range = block_range.clamp(1, MAX_BLOCK_RANGE as i32);
+/// Whether the cell `(dx, dz)` from a centreline cell lies in the stamp of a road of
+/// half-width `half`. A disc, so a road is as wide across on a diagonal as along an axis;
+/// a square came out about a quarter wider at 30 to 45 degrees. Footways (half 1) still
+/// stamp their full 3x3.
+pub(crate) fn in_road_stamp(dx: i32, dz: i32, half: i32) -> bool {
+    dx * dx + dz * dz <= half * half + half
+}
 
-    if scale < 1.0 {
-        // max(1): scaling must never collapse a road to zero width.
-        block_range = (((block_range as f64) * scale).floor() as i32).max(1);
-    }
-
-    block_range
+/// Whether a way is stamped with a square rather than `in_road_stamp`'s disc, as decks are:
+/// their rails, parapets and piers are laid out from the square.
+pub(crate) fn stamps_square(way: &ProcessedWay) -> bool {
+    is_bridge_way(way)
 }
 
 /// The road half of `collect_road_and_carriageway_coords`.
@@ -3657,13 +3679,13 @@ pub(crate) fn tunnel_renders_at_surface(
 }
 
 /// Collect all (x, z) coordinates that are covered by any rendered road or path
-/// surface, and in a second bitmap the carriageways among them, in one pass over the
-/// roads. The first bitmap has 1 for every block that the highway renderer
+/// surface, and in a second bitmap the carriageways among them (their lanes, without the
+/// parking rows along the kerbs), in one pass over the roads. The first bitmap has 1 for every block that the highway renderer
 /// places as a road/path surface and 0 everywhere else.
 ///
 /// Geometry is computed identically to `generate_highways_internal`:
 /// - Bresenham line between each consecutive pair of OSM nodes
-/// - Expanded by `block_range` in both axes (same value as the renderer uses)
+/// - Stamped with `block_range` around each cell (same value and shape as the renderer)
 /// - `area=yes` ways, indoor ways, negative-level ways, and pure node types
 ///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
 ///   early-return guards.
@@ -3738,6 +3760,8 @@ fn stamp_highway_surfaces(
 
         // Use the same block_range the renderer uses for this highway type
         let block_range = highway_block_range(highway_type, &way.tags, scale);
+        // Only the lanes count as carriageway; the parking rows outside them do not.
+        let lane_range = highway_lane_range(highway_type, &way.tags, scale);
         let carriageway = is_carriageway(highway_type);
         let drowned = drowning.filter(|_| {
             water_detail.drowns_crossing(scale, &way.tags)
@@ -3761,14 +3785,23 @@ fn stamp_highway_surfaces(
             crate::water_detail::drowned_points(&points, block_range, |x, z| fills(e, x, z))
         });
 
+        let square = stamps_square(way);
         for (i, &(bx, bz)) in points.iter().enumerate() {
             let skip_water = drowned_points.as_ref().is_some_and(|d| d[i]);
             for dx in -block_range..=block_range {
                 for dz in -block_range..=block_range {
+                    if !square && !in_road_stamp(dx, dz, block_range) {
+                        continue;
+                    }
                     if skip_water && drowned.is_some_and(|e| fills(e, bx + dx, bz + dz)) {
                         continue;
                     }
-                    stamp(carriageway, bx + dx, bz + dz);
+                    let in_lanes = if square {
+                        dx.abs() <= lane_range && dz.abs() <= lane_range
+                    } else {
+                        in_road_stamp(dx, dz, lane_range)
+                    };
+                    stamp(carriageway && in_lanes, bx + dx, bz + dz);
                 }
             }
         }
@@ -3824,7 +3857,9 @@ pub fn collect_building_passage_coords(
             for (bx, _, bz) in &points {
                 for dx in -block_range..=block_range {
                     for dz in -block_range..=block_range {
-                        bitmap.set(bx + dx, bz + dz);
+                        if in_road_stamp(dx, dz, block_range) {
+                            bitmap.set(bx + dx, bz + dz);
+                        }
                     }
                 }
             }
@@ -3846,11 +3881,10 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect()
         };
-        // Untagged roads keep their per-type defaults...
+        // Untagged roads keep their per-type defaults: a rural secondary is 7 m across.
         assert_eq!(highway_block_range("residential", &tags(&[]), 1.0), 2);
         assert_eq!(highway_block_range("motorway", &tags(&[]), 1.0), 5);
-        assert_eq!(highway_block_range("secondary", &tags(&[]), 1.0), 4);
-        // ...except tertiary, which widens to its two-lane default.
+        assert_eq!(highway_block_range("secondary", &tags(&[]), 1.0), 3);
         assert_eq!(highway_block_range("tertiary", &tags(&[]), 1.0), 3);
         assert_eq!(
             highway_block_range("tertiary", &tags(&[("lanes", "2")]), 1.0),
@@ -3859,11 +3893,11 @@ mod tests {
         // More lanes widen, clamped to the cap.
         assert_eq!(
             highway_block_range("primary", &tags(&[("lanes", "4")]), 1.0),
-            7
+            6
         );
         assert_eq!(
             highway_block_range("motorway", &tags(&[("lanes", "6")]), 1.0),
-            MAX_BLOCK_RANGE as i32
+            road_width::MAX_HALF
         );
         // Non-vehicular types never scale with lanes.
         assert_eq!(
@@ -3884,9 +3918,22 @@ mod tests {
             ),
             4
         );
+        // Parked cars widen the kerb, not the lanes.
+        let parked = tags(&[("parking:both", "lane")]);
+        assert_eq!(highway_block_range("residential", &parked, 1.0), 4);
+        assert_eq!(highway_lane_range("residential", &parked, 1.0), 2);
         // Down-scaling never collapses a road to zero width.
         assert_eq!(highway_block_range("footway", &tags(&[]), 0.4), 1);
         assert_eq!(highway_block_range("residential", &tags(&[]), 0.4), 1);
+    }
+
+    #[test]
+    fn the_road_stamp_is_a_disc() {
+        // A footway still covers its full 3x3.
+        assert!(in_road_stamp(1, 1, 1));
+        // Wider roads lose their corners, so a diagonal is no wider than an axis.
+        assert!(in_road_stamp(2, 0, 2) && in_road_stamp(2, 1, 2) && !in_road_stamp(2, 2, 2));
+        assert!(in_road_stamp(3, 1, 3) && !in_road_stamp(3, 2, 3));
     }
 
     /// The water carve finds a bore's roof by what it is built of, so it has to know
@@ -5979,13 +6026,14 @@ mod tests {
             ],
         );
 
-        // Perpendicular to a (1, 1) way is (1, -1).
+        // Perpendicular to a (1, 1) way is (1, -1); the 5-wide road covers cells whose x - z
+        // is at most 3 from the centreline's, so one step each way is still on it.
         for along in [46, 50, 54] {
             let level = editor
                 .highest_block_between(along, along, -12, 8)
                 .expect("centerline is not empty");
             assert!(level < 0, "the ramp has descended by ({along}, {along})");
-            for k in -2..=2 {
+            for k in -1..=1 {
                 let (x, z) = (along + k, along - k);
                 assert_eq!(
                     editor.highest_block_between(x, z, -12, 8),

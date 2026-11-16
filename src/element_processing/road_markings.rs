@@ -7,7 +7,7 @@ use crate::bresenham::bresenham_line;
 use crate::clipping::is_invented_node_id;
 use crate::decals::region::SignRegion;
 use crate::element_processing::highways::{
-    highway_block_range, lane_marking_count, surface_palette,
+    highway_block_range, in_road_stamp, lane_marking_count, stamps_square, surface_palette,
 };
 use crate::element_processing::raceways::RacewayPaint;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -111,6 +111,8 @@ pub struct CarriagewayClip {
     /// Road centreline cells near the crossing; the road paves `half` around each.
     centre: Vec<(i32, i32)>,
     half: i32,
+    /// The road's stamp is the deck's square rather than the disc.
+    square: bool,
     palette: &'static [Block],
 }
 
@@ -121,9 +123,12 @@ impl CarriagewayClip {
     }
 
     pub fn contains(&self, x: i32, z: i32) -> bool {
-        self.centre
-            .iter()
-            .any(|&(cx, cz)| (x - cx).abs() <= self.half && (z - cz).abs() <= self.half)
+        self.centre.iter().any(|&(cx, cz)| {
+            let (dx, dz) = (x - cx, z - cz);
+            dx.abs() <= self.half
+                && dz.abs() <= self.half
+                && (self.square || in_road_stamp(dx, dz, self.half))
+        })
     }
 }
 
@@ -153,10 +158,23 @@ struct Road<'a> {
     /// +1 one-way along the way, -1 against it, 0 two-way.
     oneway: i8,
     half: i32,
+    /// Stamped as a deck's square rather than the disc.
+    square: bool,
     marked: bool,
     palette: &'static [Block],
     /// Path index of each node.
     node_t: Vec<u32>,
+}
+
+impl Road<'_> {
+    /// How far the road's surface reaches across it, along the unit perpendicular `(px, pz)`.
+    fn reach(&self, px: f32, pz: f32) -> i32 {
+        if self.square {
+            (self.half as f32 * (px.abs() + pz.abs())).round() as i32
+        } else {
+            self.half
+        }
+    }
 }
 
 /// A centreline cell of an arm, with the way and path index that paint it.
@@ -597,6 +615,7 @@ impl RoadMarkingIndex {
                     ring: is_roundabout(&way.tags),
                     oneway: oneway_sign(highway, &way.tags),
                     half: highway_block_range(highway, &way.tags, scale),
+                    square: stamps_square(way),
                     marked: lane_marking_count(highway, &way.tags) >= 2,
                     palette: surface_palette(highway, &way.tags),
                     node_t: node_path_index(way),
@@ -697,6 +716,7 @@ impl RoadMarkingIndex {
                     let clip = CarriagewayClip {
                         centre,
                         half: road.half,
+                        square: road.square,
                         palette: road.palette,
                     };
                     // Cells the crossing paints: its width, on this carriageway only.
@@ -723,7 +743,7 @@ impl RoadMarkingIndex {
                         let last = (0..cells.len()).rev().find(|&k| {
                             let (ux, uz) = local_dir(cells, k, (1.0, 0.0));
                             let (px, pz) = (-uz, ux);
-                            let w = (road.half as f32 * (px.abs() + pz.abs())).round() as i32;
+                            let w = road.reach(px, pz);
                             (-w..=w).any(|p| {
                                 let x = cells[k].x + (px * p as f32).round() as i32;
                                 let z = cells[k].z + (pz * p as f32).round() as i32;
@@ -1316,7 +1336,7 @@ impl RoadMarkingIndex {
                 let (ux, uz) = local_dir(&arm.cells, s, arm.unit);
                 let (px, pz) = (-uz, ux);
                 let c = &arm.cells[s];
-                let w = (roads[c.road].half as f32 * (px.abs() + pz.abs())).round() as i32;
+                let w = roads[c.road].reach(px, pz);
                 let blocked = (-w..=w).any(|p| {
                     let x = (c.x as f32 + px * p as f32).round() as i32;
                     let z = (c.z as f32 + pz * p as f32).round() as i32;
@@ -2095,7 +2115,11 @@ mod tests {
         way_cells(&way)
             .iter()
             .flat_map(|&(x, z)| {
-                (-half..=half).flat_map(move |dx| (-half..=half).map(move |dz| (x + dx, z + dz)))
+                (-half..=half).flat_map(move |dx| {
+                    (-half..=half)
+                        .filter(move |&dz| in_road_stamp(dx, dz, half))
+                        .map(move |dz| (x + dx, z + dz))
+                })
             })
             .collect()
     }
@@ -2158,10 +2182,11 @@ mod tests {
         ];
         let index = build(&elements);
         let clips = index.crossing_clips(5).expect("clipped");
-        assert!(clips.iter().any(|c| c.contains(12, 4)));
-        assert!(!clips.iter().any(|c| c.contains(12, 5)));
-        // The lane line keeps a clear row past the last painted cell.
-        assert!(index.way(1).expect("gap").in_gap(13 + 60));
+        // The secondary is 7 wide: its kerb row is z = 3.
+        assert!(clips.iter().any(|c| c.contains(12, 3)));
+        assert!(!clips.iter().any(|c| c.contains(12, 4)));
+        // The last painted cell is (11, 3); the lane line keeps a clear row past it.
+        assert!(index.way(1).expect("gap").in_gap(12 + 60));
     }
 
     #[test]

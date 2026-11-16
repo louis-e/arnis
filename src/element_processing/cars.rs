@@ -12,7 +12,9 @@ use crate::bedrock_addon::{self, Body, Fleet};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::datapack::macro_coord;
-use crate::element_processing::highways::{highway_block_range, highway_default_lanes};
+use crate::element_processing::highways::{
+    highway_block_range, highway_default_lanes, highway_lane_range,
+};
 use crate::element_processing::level_crossings::{CrossingPlan, STOP_GROUP};
 use crate::element_processing::road_markings::{
     is_roundabout, oneway_sign, RoadMarkingIndex, StopLine,
@@ -612,7 +614,10 @@ pub struct CarNetwork {
 struct Piece<'a> {
     way: &'a ProcessedWay,
     nodes: &'a [ProcessedNode],
+    /// Kerb to kerb.
     half: i32,
+    /// The traffic lanes, inside any parking rows.
+    lanes: i32,
     oneway: i8,
 }
 
@@ -832,6 +837,7 @@ impl CarNetwork {
 
         let mut pieces: Vec<Piece> = Vec::new();
         for (way, half, oneway) in &roads {
+            let lanes = highway_lane_range(&way.tags["highway"], &way.tags, scale).min(*half);
             let mut start = 0;
             for k in 1..way.nodes.len() {
                 if k == way.nodes.len() - 1
@@ -842,6 +848,7 @@ impl CarNetwork {
                         way,
                         nodes: &way.nodes[start..=k],
                         half: *half,
+                        lanes,
                         oneway: *oneway,
                     });
                     start = k;
@@ -852,7 +859,7 @@ impl CarNetwork {
         let mut lanes: Vec<Lane> = Vec::new();
         for (p, piece) in pieces.iter().enumerate() {
             let two_way = piece.oneway == 0;
-            let (along, against) = lanes_each_way(piece.way, piece.half, piece.oneway);
+            let (along, against) = lanes_each_way(piece.way, piece.lanes, piece.oneway);
             let first = lanes.len();
             for (count, backward) in [(along, false), (against, true)] {
                 let nodes: Vec<&ProcessedNode> = if backward {
@@ -867,7 +874,7 @@ impl CarNetwork {
                         reverse: None,
                         two_way,
                         backward,
-                        offset: lane_offset(piece.half, count, k, two_way),
+                        offset: lane_offset(piece.lanes, count, k, two_way),
                         count,
                     });
                 }
@@ -897,7 +904,7 @@ impl CarNetwork {
                 let path = Path::new(fitted_lane_line(
                     &lane.nodes,
                     lane.offset,
-                    lane_floor(piece.half, lane.offset, lane.count, lane.two_way),
+                    lane_floor(piece.lanes, lane.offset, lane.count, lane.two_way),
                     drives_on_left,
                     &built,
                 ));

@@ -362,7 +362,7 @@ impl GradeRoads {
         out
     }
 
-    /// Whether (x, z) lies on an at-grade way's surface, as its square stamps lay it.
+    /// Whether (x, z) lies on an at-grade way's surface, as its disc stamps lay it.
     fn covers(&self, x: i32, z: i32) -> bool {
         let Some(list) = self
             .buckets
@@ -381,7 +381,7 @@ impl GradeRoads {
                 0.0
             };
             let (cx, cz) = (ax + t * dx, az + t * dz);
-            (px - cx).abs().max((pz - cz).abs()) <= reach
+            (px - cx).hypot(pz - cz) <= reach
         })
     }
 }

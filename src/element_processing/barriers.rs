@@ -495,7 +495,7 @@ pub struct RoadClearance {
 struct RoadSegment {
     a: (f32, f32),
     d: (f32, f32),
-    /// Chebyshev reach of the stamp from the centreline.
+    /// Reach of the stamp from the centreline: the road's disc, half a block past its half-width.
     reach: f32,
     carriageway: bool,
 }
@@ -521,24 +521,6 @@ impl RoadSegment {
         let t = ((px * self.d.0 + pz * self.d.1) / (self.d.0 * self.d.0 + self.d.1 * self.d.1))
             .clamp(0.0, 1.0);
         (px - t * self.d.0).hypot(pz - t * self.d.1)
-    }
-
-    /// Chebyshev distance to the segment, the metric of the square road stamp.
-    fn chebyshev(&self, x: f32, z: f32) -> f32 {
-        let (px, pz) = (x - self.a.0, z - self.a.1);
-        let (dx, dz) = self.d;
-        let at = |t: f32| (px - t * dx).abs().max((pz - t * dz).abs());
-        // Convex and piecewise linear: the minimum is at an end or a kink.
-        let mut best = at(0.0).min(at(1.0));
-        for (num, den) in [(px, dx), (pz, dz), (px - pz, dx - dz), (px + pz, dx + dz)] {
-            if den != 0.0 {
-                let t = num / den;
-                if (0.0..=1.0).contains(&t) {
-                    best = best.min(at(t));
-                }
-            }
-        }
-        best
     }
 }
 
@@ -661,7 +643,7 @@ impl RoadClearance {
             .get(&bucket(x, z))?
             .iter()
             .map(|&i| &self.segments[i as usize])
-            .filter(|s| s.chebyshev(fx, fz) <= s.reach)
+            .filter(|s| s.distance(fx, fz) <= s.reach)
             .min_by(|a, b| a.distance(fx, fz).total_cmp(&b.distance(fx, fz)))
     }
 
@@ -712,7 +694,7 @@ impl RoadClearance {
             }
             last = c;
             match edge {
-                None if road.chebyshev(c.0 as f32, c.1 as f32) > road.reach => edge = Some((k, c)),
+                None if road.distance(c.0 as f32, c.1 as f32) > road.reach => edge = Some((k, c)),
                 Some((k0, _)) if k >= k0 + EXTRA_SHIFT => break,
                 _ => {}
             }
@@ -1280,28 +1262,6 @@ mod tests {
             }
             assert!(post(editor, 30, 40 + r + 1));
         });
-    }
-
-    #[test]
-    fn chebyshev_distance_matches_the_square_road_stamp() {
-        let a = ProcessedNode {
-            id: 1,
-            tags: HashMap::new(),
-            x: 0,
-            z: 0,
-        };
-        let b = ProcessedNode {
-            id: 2,
-            tags: HashMap::new(),
-            x: 10,
-            z: 10,
-        };
-        let seg = RoadSegment::new(&a, &b, 2.5, true).unwrap();
-        assert_eq!(seg.chebyshev(5.0, 5.0), 0.0);
-        // Straight across a diagonal the square stamp reaches half the offset.
-        assert_eq!(seg.chebyshev(7.0, 3.0), 2.0);
-        assert_eq!(seg.chebyshev(-3.0, 0.0), 3.0);
-        assert_eq!(seg.chebyshev(12.0, 15.0), 5.0);
     }
 
     fn draw<R>(tags: &[(&str, &str)], read: impl FnOnce(&WorldEditor) -> R) -> R {

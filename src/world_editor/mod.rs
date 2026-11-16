@@ -831,8 +831,8 @@ impl<'a> WorldEditor<'a> {
             .is_some_and(|m| m.contains(x, z))
     }
 
-    /// True if a road for vehicles runs over this column (footways, paths and tracks
-    /// are not counted).
+    /// True if the lanes of a road for vehicles run over this column (footways, paths and
+    /// tracks are not counted, nor the parking rows along a kerb).
     #[inline]
     pub fn on_carriageway(&self, x: i32, z: i32) -> bool {
         self.carriageway.as_ref().is_some_and(|m| m.contains(x, z))

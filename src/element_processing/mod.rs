@@ -46,6 +46,7 @@ pub mod rail_track;
 pub mod railways;
 pub mod road_detail;
 pub mod road_markings;
+pub(crate) mod road_width;
 pub mod rooftops;
 pub mod ship_bodies;
 pub mod ships;
