@@ -2635,6 +2635,8 @@ fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
     tags.contains_key("natural")
         || tags.contains_key("landuse")
         || tags.contains_key("leisure")
+        || crate::element_processing::highways::is_highway_area_relation(tags)
+        || tags.get("amenity").map(String::as_str) == Some("parking")
         || crate::element_processing::golf::claims(tags)
         || crate::element_processing::camp_sites::claims(tags)
         || crate::element_processing::cemetery::claims(tags)

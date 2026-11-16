@@ -876,6 +876,20 @@ impl FloodFillCache {
                         }
                     }
                 }
+                // Squares and parking lots mapped as multipolygons pave their outers like the
+                // closed ways, yielding to lawns inside; their holes are left out of the fill.
+                if matches!(
+                    RelationArea::of(&r.tags),
+                    Some(RelationArea::Highway | RelationArea::Parking)
+                ) {
+                    for m in r
+                        .members
+                        .iter()
+                        .filter(|m| m.role == ProcessedMemberRole::Outer && self.contains(m.way.id))
+                    {
+                        sealed_ids.push((m.way.id, true));
+                    }
+                }
                 continue;
             }
             let ProcessedElement::Way(w) = element else {

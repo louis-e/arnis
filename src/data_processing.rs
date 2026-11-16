@@ -791,6 +791,40 @@ fn process_element(
                 };
                 swimming_pools::generate_swimming_pool_from_relation(editor, rel, &ctx);
             }
+            Some(area @ (RelationArea::Highway | RelationArea::Parking)) => {
+                // Each outer ring with the relation's tags, less the holes its inner rings cut.
+                let inners = InnerRings::of(rel);
+                for member in rel
+                    .members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer)
+                {
+                    let holes =
+                        flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
+                    let way = ProcessedWay {
+                        id: member.way.id,
+                        nodes: member.way.nodes.clone(),
+                        tags: rel.tags.clone(),
+                    };
+                    if area == RelationArea::Highway {
+                        highways::generate_highway_area(
+                            editor,
+                            &way,
+                            args,
+                            flood_fill_cache,
+                            holes.as_ref(),
+                        );
+                    } else {
+                        parking_lots::generate_parking_lot(
+                            editor,
+                            &way,
+                            args,
+                            flood_fill_cache,
+                            holes.as_ref(),
+                        );
+                    }
+                }
+            }
             Some(RelationArea::ManMade) => {
                 man_made::generate_man_made(
                     editor,

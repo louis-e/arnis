@@ -22,7 +22,7 @@ use crate::element_processing::surfaces::{
 };
 use crate::element_processing::traffic_lights::is_signal;
 use crate::floodfill::flood_fill_area;
-use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
+use crate::floodfill_cache::{in_hole, CoordinateBitmap, FloodFillCache, Holes, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fnv::FnvHashMap;
@@ -1854,25 +1854,7 @@ fn generate_highways_internal(
             let ProcessedElement::Way(way) = element else {
                 return;
             };
-
-            // Handle areas like pedestrian plazas. Unified surface handling
-            // via the shared surfaces module.
-            let fallback: &[Block] = if highway_type == "raceway" {
-                surface_palette(highway_type, &way.tags)
-            } else {
-                &[STONE]
-            };
-            let surface_block: Block = pedestrian_paving(&way.tags)
-                .unwrap_or_else(|| get_blocks_for_surface_way(way, fallback))[0];
-
-            // Fill the area using flood fill cache
-            let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
-
-            for &(x, z) in filled_area.iter() {
-                if !editor.nested_area_owns(x, z) {
-                    editor.set_block(surface_block, x, 0, z, None, None);
-                }
-            }
+            generate_highway_area(editor, way, args, flood_fill_cache, None);
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
             let scale_factor = args.scale;
@@ -2782,6 +2764,65 @@ fn generate_highways_internal(
         // Tram crossings carry the signal tags but no highway tag.
         if is_signal(&node.tags) {
             signals.place(editor, node, &signal_base);
+        }
+    }
+}
+
+/// Multipolygons paved by `generate_highway_area`: pedestrian squares and streets, and the
+/// other ground-level ways people or cars use mapped as areas. Indoor and underground ones,
+/// platforms (the stations draw those) and service areas, which are not one surface, are left
+/// out.
+pub(crate) fn is_highway_area_relation(tags: &HashMap<String, String>) -> bool {
+    let indoor = tags.get("indoor").is_some_and(|v| v != "no");
+    let below = ["level", "layer"].iter().any(|k| {
+        tags.get(*k)
+            .and_then(|v| v.parse::<i32>().ok())
+            .is_some_and(|l| l < 0)
+    });
+    !indoor
+        && !below
+        && matches!(
+            tags.get("highway").map(String::as_str),
+            Some(
+                "pedestrian"
+                    | "footway"
+                    | "path"
+                    | "cycleway"
+                    | "bridleway"
+                    | "living_street"
+                    | "residential"
+                    | "unclassified"
+                    | "service"
+                    | "track"
+            )
+        )
+}
+
+/// Paves a highway area, such as a pedestrian square, in its surface: a closed `area=yes`
+/// way, or an outer ring of a multipolygon less the `holes` its inner rings cut.
+pub fn generate_highway_area(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    holes: Option<&Holes>,
+) {
+    let highway_type = way.tags.get("highway").map_or("", String::as_str);
+    // Unified surface handling via the shared surfaces module.
+    let fallback: &[Block] = if highway_type == "raceway" {
+        surface_palette(highway_type, &way.tags)
+    } else {
+        &[STONE]
+    };
+    let surface_block: Block = pedestrian_paving(&way.tags)
+        .unwrap_or_else(|| get_blocks_for_surface_way(way, fallback))[0];
+
+    // Fill the area using flood fill cache
+    let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+
+    for &(x, z) in filled_area.iter() {
+        if !editor.nested_area_owns(x, z) && !in_hole(holes, x, z) {
+            editor.set_block(surface_block, x, 0, z, None, None);
         }
     }
 }
@@ -3925,6 +3966,35 @@ mod tests {
         // Down-scaling never collapses a road to zero width.
         assert_eq!(highway_block_range("footway", &tags(&[]), 0.4), 1);
         assert_eq!(highway_block_range("residential", &tags(&[]), 0.4), 1);
+    }
+
+    #[test]
+    fn squares_and_lots_mapped_as_multipolygons_are_drawn() {
+        use crate::element_processing::RelationArea;
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let mp = |pairs: &[(&str, &str)]| {
+            let mut t = tags(pairs);
+            t.insert("type".into(), "multipolygon".into());
+            RelationArea::of(&t)
+        };
+        let square = mp(&[("highway", "pedestrian"), ("area", "yes")]);
+        assert_eq!(square, Some(RelationArea::Highway));
+        assert!(square.unwrap().fills_members(&tags(&[])));
+        assert_eq!(mp(&[("amenity", "parking")]), Some(RelationArea::Parking));
+        // Indoor corridors, platforms and service areas stay undrawn.
+        assert_eq!(mp(&[("highway", "pedestrian"), ("indoor", "yes")]), None);
+        assert_eq!(mp(&[("highway", "platform")]), None);
+        assert_eq!(mp(&[("highway", "services")]), None);
+        // A park that is also a square stays a park.
+        assert_eq!(
+            mp(&[("highway", "pedestrian"), ("leisure", "park")]),
+            Some(RelationArea::Leisure)
+        );
     }
 
     #[test]
