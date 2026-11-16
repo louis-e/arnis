@@ -127,11 +127,11 @@ fn a_line_only_stream_is_shallow_at_its_edges() {
         row,
         [None, Some(0), Some(1), Some(1), Some(1), Some(0), None]
     );
-    // An untagged stream draws 2 wide and one block deep.
+    // An untagged stream draws 3 wide, shallow at its edges.
     let els = vec![way(1, &[("waterway", "stream")], &[(100, 20), (100, 180)])];
     let f = build(&els, 1.0, &no_lc, &no_legacy);
     let row: Vec<_> = (97..=103).map(|x| f.depth_override(x, 100)).collect();
-    assert_eq!(row, [None, None, None, Some(0), Some(0), None, None]);
+    assert_eq!(row, [None, None, Some(0), Some(1), Some(0), None, None]);
 }
 
 #[test]

@@ -134,11 +134,12 @@ pub fn get_waterway_width(waterway_type: &str) -> i32 {
     match waterway_type {
         "river" => 8,
         "canal" => 6,
-        // A creek one can step across: village streams in Bavaria measure 1-2 m.
-        "stream" => 2,
+        // Village streams in Bavaria measure 1-2 m, but a two-block creek is lost under
+        // its trees and banks; three reads as a stream and stays narrower than a road.
+        "stream" => 3,
         "fairway" => 12,
         "flowline" => 2,
-        "brook" => 2,
+        "brook" => 3,
         "ditch" => 1,
         "drain" => 1,
         _ => 4,
@@ -414,7 +415,7 @@ mod waterway_profile_tests {
     fn a_channel_draws_exactly_its_width() {
         let bbox = world_bbox();
         for (kind, width, want) in [
-            ("stream", None, vec![32, 33]),
+            ("stream", None, vec![31, 32, 33]),
             ("stream", Some("5"), vec![30, 31, 32, 33, 34]),
             ("ditch", None, vec![32]),
             ("river", None, (29..=36).collect()),
