@@ -71,6 +71,22 @@ export const licenseText = `
 <p>The "Real Tree Cover" setting places trees from the <a href="https://registry.opendata.aws/dataforgood-fb-forests/" target="_blank" rel="noopener noreferrer">High Resolution Canopy Height Maps</a> (1m resolution), &copy; Meta and the <a href="https://www.wri.org/" target="_blank" rel="noopener noreferrer">World Resources Institute</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
 </div>
 <div class="credit">
+<h4>Bavarian Laser Scans and Aerial Photos</h4>
+<p>The Laser Data settings (Garden Detail, Measured Trees, Measured Heights) measure gardens, trees and building heights in Bavaria from the state's <a href="https://geodaten.bayern.de/opengeodata/" target="_blank" rel="noopener noreferrer">open laser point clouds and DOP20 aerial photos</a>, &copy; Bayerische Vermessungsverwaltung &ndash; <a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener noreferrer">www.geodaten.bayern.de</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>. Here and below, Arnis derives block classes from the data and does not redistribute it; the outlines used to tell which areas each source covers are simplified from OpenStreetMap.</p>
+</div>
+<div class="credit">
+<h4>French Laser Scans and Aerial Photos</h4>
+<p>In France the Laser Data settings read IGN's <a href="https://geoservices.ign.fr/lidarhd" target="_blank" rel="noopener noreferrer">LiDAR HD</a> point clouds and <a href="https://geoservices.ign.fr/bdortho" target="_blank" rel="noopener noreferrer">BD ORTHO</a> aerial photos through the G&eacute;oplateforme, &copy; IGN. Licensed under the <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" target="_blank" rel="noopener noreferrer">Licence Ouverte / Open Licence 2.0</a> (Etalab).</p>
+</div>
+<div class="credit">
+<h4>Dutch Laser Scans and Aerial Photos</h4>
+<p>In the Netherlands they read the <a href="https://www.ahn.nl/" target="_blank" rel="noopener noreferrer">Actueel Hoogtebestand Nederland</a> (AHN4 under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>, AHN5 under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>) and the national aerial photo of Beeldmateriaal Nederland through <a href="https://www.pdok.nl/" target="_blank" rel="noopener noreferrer">PDOK</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+</div>
+<div class="credit">
+<h4>Swiss Laser Scans and Aerial Photos</h4>
+<p>In Switzerland they read <a href="https://www.swisstopo.admin.ch/en/height-model-swisssurface3d" target="_blank" rel="noopener noreferrer">swissSURFACE3D</a> and <a href="https://www.swisstopo.admin.ch/en/orthoimage-swissimage-10" target="_blank" rel="noopener noreferrer">SWISSIMAGE</a>, free geodata of the Federal Office of Topography &copy; swisstopo, under the <a href="https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices" target="_blank" rel="noopener noreferrer">swisstopo terms for free geodata</a>.</p>
+</div>
+<div class="credit">
 <h4>Koppen-Geiger Climate Data</h4>
 <p>Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" target="_blank" rel="noopener noreferrer">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
 </div>

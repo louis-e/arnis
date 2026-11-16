@@ -48,6 +48,8 @@ pub struct Ground {
     /// `None` when the option is off or the fetch failed, which restores the
     /// land-cover-only behaviour.
     canopy: Option<CanopyData>,
+    /// Garden detail from laser scans and aerial photos, where a source covers the area.
+    survey: Option<crate::survey::SurveyData>,
     /// World size in blocks, used to map coords onto the land-cover grid when elevation data is absent (flat mode).
     world_width: usize,
     world_height: usize,
@@ -320,6 +322,7 @@ impl Ground {
             elevation_data: None,
             land_cover: None,
             canopy: None,
+            survey: None,
             world_width: 0,
             world_height: 0,
             rotation_mask: None,
@@ -380,6 +383,7 @@ impl Ground {
             elevation_data: None,
             land_cover,
             canopy,
+            survey: None,
             world_width: world_w,
             world_height: world_h,
             rotation_mask: None,
@@ -407,6 +411,7 @@ impl Ground {
             elevation_data: None,
             land_cover: Some(land_cover),
             canopy: None,
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -440,6 +445,7 @@ impl Ground {
             elevation_data: None,
             land_cover: None,
             canopy: Some(canopy),
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -495,6 +501,7 @@ impl Ground {
             }),
             land_cover: None,
             canopy: None,
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -642,6 +649,7 @@ impl Ground {
                         elevation_data: Some(elevation_data),
                         land_cover,
                         canopy,
+                        survey: None,
                         world_width: final_w,
                         world_height: final_h,
                         rotation_mask: None,
@@ -682,6 +690,7 @@ impl Ground {
                         elevation_data: None,
                         land_cover: None,
                         canopy: None,
+                        survey: None,
                         world_width: 0,
                         world_height: 0,
                         rotation_mask: None,
@@ -803,6 +812,77 @@ impl Ground {
     #[inline(always)]
     pub fn has_canopy(&self) -> bool {
         self.canopy.is_some()
+    }
+
+    /// Whether garden detail was measured for this area and is wanted.
+    pub fn has_survey(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.garden)
+    }
+
+    /// Whether laser data was measured for this area, whatever it is used for.
+    pub fn has_laser(&self) -> bool {
+        self.survey.is_some()
+    }
+
+    /// Whether the run wants measured building heights.
+    pub fn laser_heights_wanted(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.heights)
+    }
+
+    /// With measured trees on: the laser's trees replace the canopy map wherever
+    /// the laser measured, at their measured height; bare ground it measured is
+    /// bare. Outside its reach the canopy map stays. Mapped trees read their height
+    /// from the same grid, so they get the measured one too.
+    pub fn apply_measured_canopy(&mut self) {
+        let Some(s) = self.survey.as_ref().filter(|s| s.features.trees) else {
+            return;
+        };
+        let (w, h) = (s.width, s.height);
+        let canopy = self
+            .canopy
+            .get_or_insert_with(|| CanopyData::from_grid(vec![canopy::CANOPY_NODATA; w * h], w, h));
+        if canopy.width != w || canopy.height != h {
+            return;
+        }
+        let mut trees = 0usize;
+        for gz in 0..h {
+            for gx in 0..w {
+                let Some(c) = s.at_any(gx, gz) else { continue };
+                let v = if c.kind == crate::survey::Kind::Tree {
+                    trees += 1;
+                    c.height.round().clamp(3.0, 60.0) as u8
+                } else {
+                    0
+                };
+                canopy.set(gx, gz, v);
+            }
+        }
+        println!("Measured trees: {trees} canopy blocks from the laser scans");
+    }
+
+    pub fn set_survey(&mut self, survey: Option<crate::survey::SurveyData>) {
+        self.survey = survey;
+    }
+
+    /// The garden survey's cell under `coord`, sampled like the canopy map, when
+    /// garden detail is on.
+    pub fn survey_cell(&self, coord: XZPoint) -> Option<crate::survey::Cell> {
+        if !self.has_survey() {
+            return None;
+        }
+        self.laser_cell(coord)
+    }
+
+    /// The laser's cell under `coord` whatever the run uses it for, buildings and
+    /// trees included.
+    pub fn laser_cell(&self, coord: XZPoint) -> Option<crate::survey::Cell> {
+        let s = self.survey.as_ref()?;
+        let (world_w, world_h) = self.world_dims();
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (s.width - 1) as f64).round() as usize).min(s.width - 1);
+        let z = ((z_ratio * (s.height - 1) as f64).round() as usize).min(s.height - 1);
+        s.at_any(x, z)
     }
 
     /// Canopy top in metres, or `None` where the map has no measurement.
@@ -1577,8 +1657,42 @@ impl Ground {
     }
 }
 
-/// `peaks` delivers OSM summits once the parallel OSM fetch has them.
+/// `peaks` delivers OSM summits once the parallel OSM fetch has them. Garden
+/// detail downloads beside the elevation and land cover, on its own thread.
 pub fn generate_ground_data(
+    args: &Args,
+    bbox: LLBBox,
+    peaks: &crate::elevation::PeakSource,
+) -> Ground {
+    std::thread::scope(|scope| {
+        let survey = scope.spawn(|| fetch_survey(args, &bbox));
+        let mut ground = generate_ground_layers(args, bbox, peaks);
+        ground.set_survey(survey.join().ok().flatten());
+        ground.apply_measured_canopy();
+        ground
+    })
+}
+
+/// Laser data on the grid the canopy map is sampled on, so the two line up. None
+/// unless the run asks for a laser feature it can have and a source covers the area.
+fn fetch_survey(args: &Args, bbox: &LLBBox) -> Option<crate::survey::SurveyData> {
+    let features = args.lidar_features()?;
+    let frame = GroundFrame::from_args(args, bbox);
+    let plan = frame.fetch_plan(bbox, args.scale);
+    let (grid_w, grid_h) = plan.grid_dims();
+    let mut survey =
+        crate::survey::fetch_survey_data(&plan.bbox, grid_w, grid_h, args.lidar_max_mb, features)?;
+    if frame.mercator.is_some() {
+        survey.remap_rows_to_mercator(plan.bbox.max().lat(), plan.bbox.min().lat());
+    }
+    if plan.pad > 0 {
+        let (w, h) = plan.final_dims;
+        survey.crop(plan.pad, plan.pad, w, h);
+    }
+    Some(survey)
+}
+
+fn generate_ground_layers(
     args: &Args,
     bbox: LLBBox,
     peaks: &crate::elevation::PeakSource,
@@ -2014,6 +2128,7 @@ mod tests {
             }),
             land_cover: None,
             canopy: None,
+            survey: None,
             world_width: w,
             world_height: h,
             rotation_mask: None,
@@ -2556,6 +2671,7 @@ pub(crate) mod test_support {
             }),
             land_cover: Some(land_cover),
             canopy: None,
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,

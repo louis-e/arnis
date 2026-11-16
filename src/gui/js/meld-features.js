@@ -1194,7 +1194,7 @@ function lines(box, rows) {
   box.hidden = false;
 }
 
-const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints' };
+const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints', laser: 'Laser scans' };
 
 // `area()` is the selected bbox; `plan()` the settings a run's plan depends on; `baking(on)` hears
 // a Download & Bake start and end.

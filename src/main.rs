@@ -70,6 +70,7 @@ mod retrieve_data;
 mod river_bed;
 mod scale;
 mod structures;
+mod survey;
 #[cfg(feature = "gui")]
 mod telemetry;
 mod terrain_surface;
@@ -1058,6 +1059,16 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         ..
     } = overture_data;
 
+    // Measured heights first: where the laser saw a building, its roof beats
+    // Overture's estimate. Both only fill buildings OSM gives no height.
+    let measured_heights = survey::heights::apply(&mut parsed_elements, &ground, &xzbbox);
+    if measured_heights > 0 {
+        println!(
+            "  Measured heights for {} buildings from laser scans",
+            measured_heights.to_string().bright_white().bold()
+        );
+    }
+
     // Fill height/levels on OSM buildings that have neither, before the
     // footprints are merged (Overture's own ways carry their tags already).
     let enriched = overture_hints.apply(&mut parsed_elements);
@@ -1080,6 +1091,19 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         );
     } else if args.overture && !skip_objects && enriched == 0 {
         println!("  No additional buildings from Overture Maps for this area");
+    }
+
+    // Sheds, garages and pools garden detail measured, where nothing mapped stands.
+    let measured = survey::elements::merge(
+        survey::elements::candidates(&ground, &xzbbox),
+        &parsed_elements,
+    );
+    if !measured.is_empty() {
+        println!(
+            "  Added {} sheds, garages and pools from garden detail",
+            measured.len().to_string().bright_white().bold()
+        );
+        parsed_elements.extend(measured);
     }
 
     osm_parser::sort_by_priority(&mut parsed_elements);

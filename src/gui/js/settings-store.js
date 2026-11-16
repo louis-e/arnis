@@ -34,6 +34,11 @@ const SETTINGS = [
   { id: 'field-preset-group', kind: 'segmented', store: OWN, valueAttr: 'data-field-preset' },
   { id: 'legacy-trees-toggle', kind: 'checkbox', store: OWN },
   { id: 'winter-toggle', kind: 'checkbox', store: OWN },
+  { id: 'lidar-toggle', kind: 'checkbox', store: OWN },
+  { id: 'garden-detail-toggle', kind: 'checkbox', store: OWN },
+  { id: 'measured-trees-toggle', kind: 'checkbox', store: OWN },
+  { id: 'measured-heights-toggle', kind: 'checkbox', store: OWN },
+  { id: 'lidar-limit-group', kind: 'segmented', store: OWN, valueAttr: 'data-lidar-limit' },
   { id: 'post-apocalyptic-toggle', kind: 'checkbox', store: OWN },
 
   // World

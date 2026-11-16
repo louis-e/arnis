@@ -202,6 +202,34 @@ pub struct Args {
     #[arg(long = "canopy-height", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub canopy_height: bool,
 
+    /// Use open airborne laser scans and aerial photos where a region publishes them
+    /// (Bavaria, France, the Netherlands, parts of Switzerland). Off by default: the
+    /// first run of an area downloads about 100 MB a square kilometre. The
+    /// features below follow it. Never used for One World pieces, and skipped for
+    /// areas over 16 km² or past --lidar-max-mb.
+    #[arg(long = "lidar", default_value_t = false, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub lidar: bool,
+
+    /// With --lidar: fill gardens and yards OpenStreetMap leaves empty with measured
+    /// lawn, paving, hedges, bushes, beds, sheds, pools and fences. Mapped features win.
+    #[arg(long = "garden-detail", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub garden_detail: bool,
+
+    /// With --lidar: trees where the laser saw them, at their measured height, in
+    /// place of the canopy map.
+    #[arg(long = "measured-trees", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub measured_trees: bool,
+
+    /// With --lidar: measured heights, and flat roofs, for buildings OpenStreetMap
+    /// gives neither height nor levels.
+    #[arg(long = "measured-heights", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub measured_heights: bool,
+
+    /// Most a run may download for --lidar, in megabytes of laser scans not yet
+    /// cached. Past it the run goes on without them.
+    #[arg(long = "lidar-max-mb", default_value_t = 500)]
+    pub lidar_max_mb: u32,
+
     /// Add building footprints from Overture Maps that are missing in OpenStreetMap.
     /// Helps sparsely mapped areas; may occasionally add a satellite-detected false positive.
     #[arg(long = "overture", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
@@ -1310,6 +1338,21 @@ impl Args {
     /// Terrain-only still loads it, for the water and nature it keeps.
     pub fn skip_osm(&self) -> bool {
         self.scale < OBJECT_SKIP_SCALE || !self.body.is_earth()
+    }
+
+    /// The laser features this run asks for, or `None` when it asks for none or
+    /// cannot have them: off the Earth, for One World pieces (a region built cell by
+    /// cell would download scans for every cell), or below 0.75 blocks a metre, where
+    /// a hedge is a fraction of a block.
+    pub fn lidar_features(&self) -> Option<crate::survey::Features> {
+        let f = crate::survey::Features {
+            garden: self.garden_detail,
+            trees: self.measured_trees,
+            heights: self.measured_heights,
+        };
+        let any = f.garden || f.trees || f.heights;
+        (self.lidar && any && self.body.is_earth() && !self.one_world && self.scale >= 0.75)
+            .then_some(f)
     }
 
     /// The Mapillary token, if one was given and is not blank.
