@@ -669,6 +669,7 @@ pub static FRANCE: Source = Source {
         building: &[6],
         object: &[1, 3, 4, 5, 64, 67],
         vegetation: &[3, 4, 5],
+        footprint: &[],
     },
     laser_plants: true,
     attribution: "IGN – LiDAR HD, BD ORTHO (Licence Ouverte Etalab 2.0)",

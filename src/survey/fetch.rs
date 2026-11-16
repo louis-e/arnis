@@ -87,7 +87,7 @@ fn back_off(d: Duration) {
 fn get(
     client: &reqwest::blocking::Client,
     url: &str,
-    range: Option<(u64, u64)>,
+    range: Option<Span>,
 ) -> Result<Vec<u8>, Failure> {
     let mut wait_ms = 1000;
     let limit = paced(url);
@@ -98,8 +98,12 @@ fn get(
         let resp = {
             let _permit = crate::net::request_permit();
             let mut req = client.get(url);
-            if let Some((start, len)) = range {
-                req = req.header("Range", format!("bytes={}-{}", start, start + len - 1));
+            match range {
+                Some(Span::From(start, len)) => {
+                    req = req.header("Range", format!("bytes={}-{}", start, start + len - 1));
+                }
+                Some(Span::Tail(len)) => req = req.header("Range", format!("bytes=-{len}")),
+                None => {}
             }
             req.send()
                 .and_then(|r| {
@@ -147,14 +151,41 @@ fn get(
     Err(Failure::Other("server busy".into()))
 }
 
-/// `len` bytes of `url` from `start`.
+/// `len` bytes of `url` from `start`. A file stored uncompressed inside an
+/// archive is named `{archive}#at={offset}`, its first byte's place in the
+/// archive, and read from there.
 pub fn get_range(
     client: &reqwest::blocking::Client,
     url: &str,
     start: u64,
     len: u64,
 ) -> Result<Vec<u8>, Failure> {
-    get(client, url, Some((start, len)))
+    let (url, base) = match url.rsplit_once("#at=") {
+        Some((u, at)) => match at.parse::<u64>() {
+            Ok(at) => (u, at),
+            Err(_) => (url, 0),
+        },
+        None => (url, 0),
+    };
+    get(client, url, Some(Span::From(base + start, len)))
+}
+
+/// The last `len` bytes of `url` (an archive's directory).
+pub fn get_tail(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    len: u64,
+) -> Result<Vec<u8>, Failure> {
+    get(client, url, Some(Span::Tail(len)))
+}
+
+/// The part of a file a request asks for.
+#[derive(Clone, Copy)]
+enum Span {
+    /// `len` bytes from `start`.
+    From(u64, u64),
+    /// The last `len` bytes.
+    Tail(u64),
 }
 
 /// A whole small response.

@@ -309,6 +309,7 @@ pub static SWITZERLAND: Source = Source {
         building: &[6],
         object: &[1, 3],
         vegetation: &[3],
+        footprint: &[],
     },
     laser_plants: true,
     attribution: "Federal Office of Topography swisstopo – swissSURFACE3D, SWISSIMAGE",

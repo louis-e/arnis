@@ -1,4 +1,5 @@
-//! WGS84 / ETRS89 latitude and longitude to and from UTM, by Krüger's series.
+//! Transverse Mercator by Krüger's series: UTM, and national grids that are
+//! Transverse Mercator on an ellipsoid of their own (see `crs::datum`).
 //!
 //! Sixth order in the third flattening, which is good to well under a millimetre
 //! inside a zone (Karney 2011). ETRS89 and WGS84 differ by well under a metre
@@ -10,24 +11,33 @@ const F: f64 = 1.0 / 298.257_223_563;
 const K0: f64 = 0.9996;
 const FALSE_EASTING: f64 = 500_000.0;
 
-struct Series {
+/// A Transverse Mercator grid: central meridian, latitude of origin, scale and
+/// false origin. The ellipsoid is the [`Series`] it is used with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tm {
+    pub lon0: f64,
+    pub lat0: f64,
+    pub k0: f64,
+    pub fe: f64,
+    pub fn_: f64,
+}
+
+pub struct Series {
     big_a: f64,
     alpha: [f64; 6],
     beta: [f64; 6],
     e: f64,
 }
 
-fn series() -> &'static Series {
-    use std::sync::OnceLock;
-    static S: OnceLock<Series> = OnceLock::new();
-    S.get_or_init(|| {
-        let n = F / (2.0 - F);
+impl Series {
+    pub fn new(a: f64, f: f64) -> Self {
+        let n = f / (2.0 - f);
         let n2 = n * n;
         let n3 = n2 * n;
         let n4 = n3 * n;
         let n5 = n4 * n;
         let n6 = n5 * n;
-        let big_a = A / (1.0 + n) * (1.0 + n2 / 4.0 + n4 / 64.0 + n6 / 256.0);
+        let big_a = a / (1.0 + n) * (1.0 + n2 / 4.0 + n4 / 64.0 + n6 / 256.0);
         let alpha = [
             n / 2.0 - 2.0 * n2 / 3.0 + 5.0 * n3 / 16.0 + 41.0 * n4 / 180.0 - 127.0 * n5 / 288.0
                 + 7891.0 * n6 / 37800.0,
@@ -50,67 +60,113 @@ fn series() -> &'static Series {
             4583.0 * n5 / 161280.0 - 108847.0 * n6 / 3991680.0,
             20648693.0 * n6 / 638668800.0,
         ];
-        let e = (F * (2.0 - F)).sqrt();
+        let e = (f * (2.0 - f)).sqrt();
         Series {
             big_a,
             alpha,
             beta,
             e,
         }
-    })
+    }
+
+    /// Latitude in degrees and longitude from the central meridian in radians
+    /// to (eta, xi), the grid's coordinates before the scale and the origin.
+    fn forward(&self, lat: f64, lam: f64) -> (f64, f64) {
+        let phi = lat.to_radians();
+        let t = (phi.sin().atanh() - self.e * (self.e * phi.sin()).atanh()).sinh();
+        let xi_p = t.atan2(lam.cos());
+        let eta_p = (lam.sin() / (1.0 + t * t).sqrt()).atanh();
+        let mut xi = xi_p;
+        let mut eta = eta_p;
+        for (j, a) in self.alpha.iter().enumerate() {
+            let k = 2.0 * (j as f64 + 1.0);
+            xi += a * (k * xi_p).sin() * (k * eta_p).cosh();
+            eta += a * (k * xi_p).cos() * (k * eta_p).sinh();
+        }
+        (eta, xi)
+    }
+
+    /// The inverse of [`Series::forward`]: latitude in degrees and longitude
+    /// from the central meridian in radians.
+    fn inverse(&self, eta: f64, xi: f64) -> (f64, f64) {
+        let mut xi_p = xi;
+        let mut eta_p = eta;
+        for (j, b) in self.beta.iter().enumerate() {
+            let k = 2.0 * (j as f64 + 1.0);
+            xi_p -= b * (k * xi).sin() * (k * eta).cosh();
+            eta_p -= b * (k * xi).cos() * (k * eta).sinh();
+        }
+        let tau_p = xi_p.sin() / (eta_p.sinh().powi(2) + xi_p.cos().powi(2)).sqrt();
+        // Newton on tau = tan(phi) from tau' (Karney 2011, eq. 19-21).
+        let e = self.e;
+        let mut tau = tau_p;
+        for _ in 0..5 {
+            let sigma = (e * (e * tau / (1.0 + tau * tau).sqrt()).atanh()).sinh();
+            let tau_i = tau * (1.0 + sigma * sigma).sqrt() - sigma * (1.0 + tau * tau).sqrt();
+            let d = (tau_p - tau_i) / (1.0 + tau_i * tau_i).sqrt()
+                * (1.0 + (1.0 - e * e) * tau * tau)
+                / ((1.0 - e * e) * (1.0 + tau * tau).sqrt());
+            tau += d;
+            if d.abs() < 1e-14 {
+                break;
+            }
+        }
+        (tau.atan().to_degrees(), eta_p.sinh().atan2(xi_p.cos()))
+    }
 }
 
-fn central_meridian(zone: u8) -> f64 {
-    (f64::from(zone) * 6.0 - 183.0).to_radians()
+fn series() -> &'static Series {
+    use std::sync::OnceLock;
+    static S: OnceLock<Series> = OnceLock::new();
+    S.get_or_init(|| Series::new(A, F))
+}
+
+impl Tm {
+    /// xi of the latitude of origin.
+    fn xi0(&self, s: &Series) -> f64 {
+        if self.lat0 == 0.0 {
+            0.0
+        } else {
+            s.forward(self.lat0, 0.0).1
+        }
+    }
+
+    /// Latitude and longitude in degrees to (easting, northing).
+    pub fn forward(&self, s: &Series, lat: f64, lon: f64) -> (f64, f64) {
+        let (eta, xi) = s.forward(lat, lon.to_radians() - self.lon0.to_radians());
+        (
+            self.fe + self.k0 * s.big_a * eta,
+            self.fn_ + self.k0 * s.big_a * (xi - self.xi0(s)),
+        )
+    }
+
+    /// (easting, northing) to latitude and longitude in degrees.
+    pub fn inverse(&self, s: &Series, e: f64, n: f64) -> (f64, f64) {
+        let xi = (n - self.fn_) / (self.k0 * s.big_a) + self.xi0(s);
+        let eta = (e - self.fe) / (self.k0 * s.big_a);
+        let (lat, lam) = s.inverse(eta, xi);
+        (lat, (self.lon0.to_radians() + lam).to_degrees())
+    }
+}
+
+fn utm(zone: u8) -> Tm {
+    Tm {
+        lon0: f64::from(zone) * 6.0 - 183.0,
+        lat0: 0.0,
+        k0: K0,
+        fe: FALSE_EASTING,
+        fn_: 0.0,
+    }
 }
 
 /// Latitude and longitude in degrees to (easting, northing) in a northern UTM zone.
 pub fn to_utm(lat: f64, lon: f64, zone: u8) -> (f64, f64) {
-    let s = series();
-    let phi = lat.to_radians();
-    let lam = lon.to_radians() - central_meridian(zone);
-    let t = (phi.sin().atanh() - s.e * (s.e * phi.sin()).atanh()).sinh();
-    let xi_p = t.atan2(lam.cos());
-    let eta_p = (lam.sin() / (1.0 + t * t).sqrt()).atanh();
-    let mut xi = xi_p;
-    let mut eta = eta_p;
-    for (j, a) in s.alpha.iter().enumerate() {
-        let k = 2.0 * (j as f64 + 1.0);
-        xi += a * (k * xi_p).sin() * (k * eta_p).cosh();
-        eta += a * (k * xi_p).cos() * (k * eta_p).sinh();
-    }
-    (FALSE_EASTING + K0 * s.big_a * eta, K0 * s.big_a * xi)
+    utm(zone).forward(series(), lat, lon)
 }
 
 /// (easting, northing) in a northern UTM zone to latitude and longitude in degrees.
 pub fn from_utm(easting: f64, northing: f64, zone: u8) -> (f64, f64) {
-    let s = series();
-    let xi = northing / (K0 * s.big_a);
-    let eta = (easting - FALSE_EASTING) / (K0 * s.big_a);
-    let mut xi_p = xi;
-    let mut eta_p = eta;
-    for (j, b) in s.beta.iter().enumerate() {
-        let k = 2.0 * (j as f64 + 1.0);
-        xi_p -= b * (k * xi).sin() * (k * eta).cosh();
-        eta_p -= b * (k * xi).cos() * (k * eta).sinh();
-    }
-    let tau_p = xi_p.sin() / (eta_p.sinh().powi(2) + xi_p.cos().powi(2)).sqrt();
-    // Newton on tau = tan(phi) from tau' (Karney 2011, eq. 19-21).
-    let mut tau = tau_p;
-    for _ in 0..5 {
-        let sigma = (s.e * (s.e * tau / (1.0 + tau * tau).sqrt()).atanh()).sinh();
-        let tau_i = tau * (1.0 + sigma * sigma).sqrt() - sigma * (1.0 + tau * tau).sqrt();
-        let d = (tau_p - tau_i) / (1.0 + tau_i * tau_i).sqrt()
-            * (1.0 + (1.0 - s.e * s.e) * tau * tau)
-            / ((1.0 - s.e * s.e) * (1.0 + tau * tau).sqrt());
-        tau += d;
-        if d.abs() < 1e-14 {
-            break;
-        }
-    }
-    let lat = tau.atan().to_degrees();
-    let lon = (central_meridian(zone) + eta_p.sinh().atan2(xi_p.cos())).to_degrees();
-    (lat, lon)
+    utm(zone).inverse(series(), easting, northing)
 }
 
 #[cfg(test)]

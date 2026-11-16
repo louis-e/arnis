@@ -10,7 +10,11 @@
 //!   fold in the Bessel datum shift and keep within a metre of RDNAPTRANS over
 //!   the Netherlands;
 //! * Swiss LV95 (EPSG:2056) by swisstopo's approximate formulas, within about a
-//!   metre over Switzerland.
+//!   metre over Switzerland;
+//! * Estonia's L-EST97 (EPSG:3301), the same conic on its own parallels;
+//! * Luxembourg's LUREF / Luxembourg TM (EPSG:2169), Transverse Mercator on
+//!   the International ellipsoid after EPSG's seven-parameter shift from WGS84
+//!   (LUREF to WGS 84 (3)), which PROJ rates at a metre.
 
 use super::utm;
 
@@ -21,6 +25,10 @@ pub enum Crs {
     Lambert93,
     RdNew,
     Lv95,
+    /// Estonia's L-EST97.
+    Lest97,
+    /// Luxembourg's LUREF / Luxembourg TM.
+    Luref,
 }
 
 impl Crs {
@@ -28,9 +36,11 @@ impl Crs {
     pub fn forward(self, lat: f64, lon: f64) -> (f64, f64) {
         match self {
             Crs::Utm(zone) => utm::to_utm(lat, lon, zone),
-            Crs::Lambert93 => lambert93::forward(lat, lon),
+            Crs::Lambert93 => lambert::lambert93().forward(lat, lon),
             Crs::RdNew => rd::forward(lat, lon),
             Crs::Lv95 => lv95::forward(lat, lon),
+            Crs::Lest97 => lambert::lest97().forward(lat, lon),
+            Crs::Luref => datum::luref().forward(lat, lon),
         }
     }
 
@@ -38,9 +48,11 @@ impl Crs {
     pub fn inverse(self, x: f64, y: f64) -> (f64, f64) {
         match self {
             Crs::Utm(zone) => utm::from_utm(x, y, zone),
-            Crs::Lambert93 => lambert93::inverse(x, y),
+            Crs::Lambert93 => lambert::lambert93().inverse(x, y),
             Crs::RdNew => rd::inverse(x, y),
             Crs::Lv95 => lv95::inverse(x, y),
+            Crs::Lest97 => lambert::lest97().inverse(x, y),
+            Crs::Luref => datum::luref().inverse(x, y),
         }
     }
 
@@ -51,46 +63,80 @@ impl Crs {
             Crs::Lambert93 => 2154,
             Crs::RdNew => 28992,
             Crs::Lv95 => 2056,
+            Crs::Lest97 => 3301,
+            Crs::Luref => 2169,
         }
+    }
+
+    /// Whether the grid's EPSG definition puts northing first, as WMS 1.3.0
+    /// then wants its bounding boxes.
+    pub fn north_first(self) -> bool {
+        matches!(self, Crs::Lest97 | Crs::Luref)
     }
 }
 
 /// Lambert conformal conic with two standard parallels on GRS80.
-mod lambert93 {
+mod lambert {
     use std::f64::consts::FRAC_PI_4;
 
     const A: f64 = 6_378_137.0;
     const F: f64 = 1.0 / 298.257_222_101;
-    const LAT0: f64 = 46.5;
-    const LAT1: f64 = 49.0;
-    const LAT2: f64 = 44.0;
-    const LON0: f64 = 3.0;
-    const X0: f64 = 700_000.0;
-    const Y0: f64 = 6_600_000.0;
 
-    struct Cone {
+    /// A conic's defining parameters, in degrees and metres.
+    pub struct Params {
+        pub lat0: f64,
+        pub lat1: f64,
+        pub lat2: f64,
+        pub lon0: f64,
+        pub x0: f64,
+        pub y0: f64,
+    }
+
+    /// Lambert-93 (EPSG:2154).
+    pub const LAMBERT93: Params = Params {
+        lat0: 46.5,
+        lat1: 49.0,
+        lat2: 44.0,
+        lon0: 3.0,
+        x0: 700_000.0,
+        y0: 6_600_000.0,
+    };
+
+    /// L-EST97 (EPSG:3301).
+    pub const LEST97: Params = Params {
+        lat0: 57.517_553_930_555_56,
+        lat1: 59.333_333_333_333_34,
+        lat2: 58.0,
+        lon0: 24.0,
+        x0: 500_000.0,
+        y0: 6_375_000.0,
+    };
+
+    pub struct Cone {
+        p: &'static Params,
         e: f64,
         n: f64,
         af: f64,
         rho0: f64,
     }
 
-    fn cone() -> &'static Cone {
-        use std::sync::OnceLock;
-        static C: OnceLock<Cone> = OnceLock::new();
-        C.get_or_init(|| {
-            let e = (F * (2.0 - F)).sqrt();
-            let m = |phi: f64| phi.cos() / (1.0 - (e * phi.sin()).powi(2)).sqrt();
-            let (p0, p1, p2) = (LAT0.to_radians(), LAT1.to_radians(), LAT2.to_radians());
-            let n = (m(p1).ln() - m(p2).ln()) / (t(e, p1).ln() - t(e, p2).ln());
-            let af = A * m(p1) / (n * t(e, p1).powf(n));
-            Cone {
-                e,
-                n,
-                af,
-                rho0: af * t(e, p0).powf(n),
-            }
-        })
+    pub fn cone(p: &'static Params) -> Cone {
+        let e = (F * (2.0 - F)).sqrt();
+        let m = |phi: f64| phi.cos() / (1.0 - (e * phi.sin()).powi(2)).sqrt();
+        let (p0, p1, p2) = (
+            p.lat0.to_radians(),
+            p.lat1.to_radians(),
+            p.lat2.to_radians(),
+        );
+        let n = (m(p1).ln() - m(p2).ln()) / (t(e, p1).ln() - t(e, p2).ln());
+        let af = A * m(p1) / (n * t(e, p1).powf(n));
+        Cone {
+            p,
+            e,
+            n,
+            af,
+            rho0: af * t(e, p0).powf(n),
+        }
     }
 
     fn t(e: f64, phi: f64) -> f64 {
@@ -98,31 +144,157 @@ mod lambert93 {
         (FRAC_PI_4 - phi / 2.0).tan() / ((1.0 - es) / (1.0 + es)).powf(e / 2.0)
     }
 
-    pub fn forward(lat: f64, lon: f64) -> (f64, f64) {
-        let c = cone();
-        let rho = c.af * t(c.e, lat.to_radians()).powf(c.n);
-        let theta = c.n * (lon - LON0).to_radians();
-        (X0 + rho * theta.sin(), Y0 + c.rho0 - rho * theta.cos())
+    impl Cone {
+        pub fn forward(&self, lat: f64, lon: f64) -> (f64, f64) {
+            let rho = self.af * t(self.e, lat.to_radians()).powf(self.n);
+            let theta = self.n * (lon - self.p.lon0).to_radians();
+            (
+                self.p.x0 + rho * theta.sin(),
+                self.p.y0 + self.rho0 - rho * theta.cos(),
+            )
+        }
+
+        pub fn inverse(&self, x: f64, y: f64) -> (f64, f64) {
+            let (dx, dy) = (x - self.p.x0, self.rho0 - (y - self.p.y0));
+            let rho = (dx * dx + dy * dy).sqrt();
+            let tp = (rho / self.af).powf(1.0 / self.n);
+            let lon = self.p.lon0 + (dx.atan2(dy) / self.n).to_degrees();
+            let mut phi = std::f64::consts::FRAC_PI_2 - 2.0 * tp.atan();
+            for _ in 0..10 {
+                let es = self.e * phi.sin();
+                let next = std::f64::consts::FRAC_PI_2
+                    - 2.0 * (tp * ((1.0 - es) / (1.0 + es)).powf(self.e / 2.0)).atan();
+                let done = (next - phi).abs() < 1e-13;
+                phi = next;
+                if done {
+                    break;
+                }
+            }
+            (phi.to_degrees(), lon)
+        }
     }
 
-    pub fn inverse(x: f64, y: f64) -> (f64, f64) {
-        let c = cone();
-        let (dx, dy) = (x - X0, c.rho0 - (y - Y0));
-        let rho = (dx * dx + dy * dy).sqrt();
-        let tp = (rho / c.af).powf(1.0 / c.n);
-        let lon = LON0 + (dx.atan2(dy) / c.n).to_degrees();
-        let mut phi = std::f64::consts::FRAC_PI_2 - 2.0 * tp.atan();
-        for _ in 0..10 {
-            let es = c.e * phi.sin();
-            let next = std::f64::consts::FRAC_PI_2
-                - 2.0 * (tp * ((1.0 - es) / (1.0 + es)).powf(c.e / 2.0)).atan();
-            let done = (next - phi).abs() < 1e-13;
-            phi = next;
-            if done {
-                break;
-            }
+    pub fn lambert93() -> &'static Cone {
+        use std::sync::OnceLock;
+        static C: OnceLock<Cone> = OnceLock::new();
+        C.get_or_init(|| cone(&LAMBERT93))
+    }
+
+    pub fn lest97() -> &'static Cone {
+        use std::sync::OnceLock;
+        static C: OnceLock<Cone> = OnceLock::new();
+        C.get_or_init(|| cone(&LEST97))
+    }
+}
+
+/// Grids on a datum of their own: WGS84 latitude and longitude are shifted
+/// onto the local ellipsoid by a seven-parameter (Helmert) transformation,
+/// then projected.
+mod datum {
+    use super::utm::{Series, Tm};
+
+    const WGS84_A: f64 = 6_378_137.0;
+    const WGS84_F: f64 = 1.0 / 298.257_223_563;
+
+    /// A Helmert transformation from the local datum to WGS84, in EPSG's
+    /// coordinate frame convention: metres, arc seconds, parts per million.
+    pub struct Helmert {
+        pub t: [f64; 3],
+        pub r: [f64; 3],
+        pub s: f64,
+    }
+
+    impl Helmert {
+        fn rotation(&self) -> [[f64; 3]; 3] {
+            let [rx, ry, rz] = self.r.map(|v| (v / 3600.0).to_radians());
+            [[1.0, rz, -ry], [-rz, 1.0, rx], [ry, -rx, 1.0]]
         }
-        (phi.to_degrees(), lon)
+
+        /// Local cartesian to WGS84 cartesian.
+        fn onto_wgs84(&self, p: [f64; 3]) -> [f64; 3] {
+            let m = self.rotation();
+            let k = 1.0 + self.s * 1e-6;
+            std::array::from_fn(|i| {
+                self.t[i] + k * (m[i][0] * p[0] + m[i][1] * p[1] + m[i][2] * p[2])
+            })
+        }
+
+        /// WGS84 cartesian to local cartesian: the transposed rotation, which
+        /// for angles of seconds is its inverse to well under a millimetre.
+        fn off_wgs84(&self, p: [f64; 3]) -> [f64; 3] {
+            let m = self.rotation();
+            let k = 1.0 + self.s * 1e-6;
+            let d = [p[0] - self.t[0], p[1] - self.t[1], p[2] - self.t[2]];
+            std::array::from_fn(|i| (m[0][i] * d[0] + m[1][i] * d[1] + m[2][i] * d[2]) / k)
+        }
+    }
+
+    fn to_cart(a: f64, f: f64, lat: f64, lon: f64) -> [f64; 3] {
+        let e2 = f * (2.0 - f);
+        let (sp, cp) = lat.to_radians().sin_cos();
+        let (sl, cl) = lon.to_radians().sin_cos();
+        let nu = a / (1.0 - e2 * sp * sp).sqrt();
+        [nu * cp * cl, nu * cp * sl, nu * (1.0 - e2) * sp]
+    }
+
+    fn from_cart(a: f64, f: f64, p: [f64; 3]) -> (f64, f64) {
+        let e2 = f * (2.0 - f);
+        let r = p[0].hypot(p[1]);
+        let mut lat = p[2].atan2(r * (1.0 - e2));
+        for _ in 0..6 {
+            let sp = lat.sin();
+            let nu = a / (1.0 - e2 * sp * sp).sqrt();
+            lat = (p[2] + e2 * nu * sp).atan2(r);
+        }
+        (lat.to_degrees(), p[1].atan2(p[0]).to_degrees())
+    }
+
+    pub struct Grid {
+        a: f64,
+        f: f64,
+        helmert: Helmert,
+        tm: Tm,
+        series: Series,
+    }
+
+    impl Grid {
+        pub fn forward(&self, lat: f64, lon: f64) -> (f64, f64) {
+            let p = self.helmert.off_wgs84(to_cart(WGS84_A, WGS84_F, lat, lon));
+            let (la, lo) = from_cart(self.a, self.f, p);
+            self.tm.forward(&self.series, la, lo)
+        }
+
+        pub fn inverse(&self, x: f64, y: f64) -> (f64, f64) {
+            let (la, lo) = self.tm.inverse(&self.series, x, y);
+            let p = self.helmert.onto_wgs84(to_cart(self.a, self.f, la, lo));
+            from_cart(WGS84_A, WGS84_F, p)
+        }
+    }
+
+    /// LUREF / Luxembourg TM (EPSG:2169) by LUREF to WGS 84 (3), EPSG:5486.
+    pub fn luref() -> &'static Grid {
+        use std::sync::OnceLock;
+        static G: OnceLock<Grid> = OnceLock::new();
+        G.get_or_init(|| {
+            let (a, f) = (6_378_388.0, 1.0 / 297.0);
+            Grid {
+                a,
+                f,
+                helmert: Helmert {
+                    t: [-189.6806, 18.3463, -42.7695],
+                    r: [0.33746, 3.09264, -2.53861],
+                    s: 0.4598,
+                },
+                tm: Tm {
+                    lon0: 6.0 + 10.0 / 60.0,
+                    lat0: 49.0 + 50.0 / 60.0,
+                    k0: 1.0,
+                    fe: 80_000.0,
+                    fn_: 100_000.0,
+                },
+                series: Series::new(a, f),
+            }
+        })
     }
 }
 
@@ -315,6 +487,34 @@ mod tests {
                 (46.2, 6.14, 2_499_760.952, 1_117_336.098),
             ],
             1.5,
+        );
+    }
+
+    #[test]
+    fn lest97_matches_proj() {
+        check(
+            Crs::Lest97,
+            &[
+                (59.437, 24.745, 542_275.378, 6_589_030.824),
+                (58.38, 26.72, 659_081.552, 6_474_284.185),
+                (58.25, 22.48, 410_756.653, 6_457_590.420),
+                (59.36, 28.19, 738_149.315, 6_587_658.430),
+            ],
+            0.01,
+        );
+        assert!(Crs::Lest97.north_first() && !Crs::Utm(32).north_first());
+    }
+
+    #[test]
+    fn luref_matches_proj() {
+        check(
+            Crs::Luref,
+            &[
+                (49.61, 6.13, 77_244.696, 75_041.871),
+                (49.5, 5.98, 66_373.092, 62_823.714),
+                (50.05, 6.05, 71_539.236, 123_987.480),
+            ],
+            0.05,
         );
     }
 

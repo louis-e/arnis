@@ -12,7 +12,7 @@
 //!   tile's photo is read 51.2 m block by block with range requests.
 
 use super::crs::Crs;
-use super::source::{Laser, LaserClasses, Photo, Source};
+use super::source::{Laser, LaserClasses, Locate, Photo, Source};
 
 /// The state outline, simplified to about a kilometre and pushed out by about two,
 /// so tiles along the border are asked for and anything beyond is not.
@@ -344,7 +344,7 @@ pub static BAVARIA: Source = Source {
     crs: Crs::Utm(32),
     outline: &[OUTLINE],
     laser: Laser::Whole {
-        url: laser_url,
+        locate: Locate::Urls(laser_url),
         tile_mb: 110,
     },
     photo: Photo::TiledTiff(photo_url),
@@ -356,13 +356,16 @@ pub static BAVARIA: Source = Source {
         building: &[6],
         object: &[20],
         vegetation: &[],
+        footprint: &[],
     },
     laser_plants: false,
     attribution: "Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0)",
 };
 
-fn laser_url(e_km: i32, n_km: i32) -> String {
-    format!("https://geodaten.bayern.de/odd_data/laser/{e_km}_{n_km}.laz")
+fn laser_url(e_km: i32, n_km: i32) -> Vec<String> {
+    vec![format!(
+        "https://geodaten.bayern.de/odd_data/laser/{e_km}_{n_km}.laz"
+    )]
 }
 
 fn photo_url(e_km: i32, n_km: i32) -> String {

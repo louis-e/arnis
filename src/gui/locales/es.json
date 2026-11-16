@@ -848,7 +848,7 @@
   "settings_nav_lidar": "Jardines, árboles, alturas",
   "lidar": "Datos láser",
   "lidar_desc": "Detalle medido donde una región publica sus escaneos.",
-  "lidar_tip": "Lee escaneos láser y fotos aéreas abiertos para el detalle que falta en OpenStreetMap, donde una región los publica. No se usa en One World ni en áreas de más de 16 km². Cubre Baviera, Francia, los Países Bajos y parte de Suiza.",
+  "lidar_tip": "Lee escaneos láser y fotos aéreas abiertos para el detalle que falta en OpenStreetMap, donde una región los publica. No se usa en One World ni en áreas de más de 16 km². Cubre Baviera, Renania del Norte-Westfalia, Francia, los Países Bajos, Luxemburgo, Estonia y parte de Suiza.",
   "measured_trees": "Árboles medidos",
   "measured_trees_desc": "Árboles donde el láser los vio, a su altura.",
   "measured_trees_tip": "Coloca árboles donde el láser los vio, a su altura medida, en lugar del mapa mundial de dosel. Los árboles mapeados también toman la altura medida.",

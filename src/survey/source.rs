@@ -14,19 +14,25 @@ pub struct LaserClasses {
     /// The object classes that are vegetation. Empty where the source does not
     /// tell vegetation apart; the pulse's returns then stand in for it.
     pub vegetation: &'static [u8],
+    /// Synthetic points that mark a building's outline on the ground rather
+    /// than a return: where a source has no building class (the German states'
+    /// AdV scheme), the object points over them and a metre around, other than
+    /// the plants, are its roof. Empty where the source classes buildings.
+    pub footprint: &'static [u8],
 }
 
 /// A rectangle in the source's grid metres: west, south, east, north.
 pub type Rect = (f64, f64, f64, f64);
 
-/// Tiles (south-west corners in km) and the URL of each.
+/// Tiles (south-west corners in km) and the URL of each; a tile listed more than
+/// once is made of several files (COPC only).
 pub type TileUrls = Vec<((i32, i32), String)>;
 
 /// Where a source's laser points come from.
 pub enum Laser {
     /// Plain LAZ tiles, read whole.
     Whole {
-        url: fn(i32, i32) -> String,
+        locate: Locate,
         /// Typical size of a tile, for the download estimate.
         tile_mb: u32,
     },
@@ -41,7 +47,7 @@ pub enum Laser {
     },
 }
 
-/// How a COPC source's tile URLs are found.
+/// How a source's tile URLs are found.
 pub enum Locate {
     /// Candidate URLs of a tile, best first; a missing one answers 403 or 404.
     Urls(fn(i32, i32) -> Vec<String>),
@@ -88,6 +94,9 @@ pub static SOURCES: &[&Source] = &[
     &super::france::FRANCE,
     &super::netherlands::NETHERLANDS,
     &super::switzerland::SWITZERLAND,
+    &super::nrw::NRW,
+    &super::estonia::ESTONIA,
+    &super::luxembourg::LUXEMBOURG,
 ];
 
 impl Source {
@@ -107,6 +116,29 @@ impl Source {
             }
         }
         inside
+    }
+
+    /// How far (lat, lon) lies from the nearest edge of the outline, in metres
+    /// near enough.
+    pub fn depth(&self, lat: f64, lon: f64) -> f64 {
+        let ky = 110_574.0;
+        let kx = 111_320.0 * lat.to_radians().cos();
+        let mut best = f64::MAX;
+        for pts in self.outline {
+            for w in pts.windows(2) {
+                let (ax, ay) = ((w[0].1 - lon) * kx, (w[0].0 - lat) * ky);
+                let (bx, by) = ((w[1].1 - lon) * kx, (w[1].0 - lat) * ky);
+                let (dx, dy) = (bx - ax, by - ay);
+                let len2 = dx * dx + dy * dy;
+                let t = if len2 > 0.0 {
+                    (-(ax * dx + ay * dy) / len2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                best = best.min((ax + t * dx).hypot(ay + t * dy));
+            }
+        }
+        best
     }
 
     /// Whether any part of the bbox is inside the outline, judged on a lattice of
@@ -146,15 +178,22 @@ impl Source {
 }
 
 /// The source for a bbox: the one whose outline holds its centre, else the
-/// first whose outline it reaches.
+/// first whose outline it reaches. Where outlines overlap along a border, the
+/// one the centre lies deepest inside: every outline reaches the same two
+/// kilometres past its border, so that is the side the centre is on.
 pub fn for_bbox(bbox: &LLBBox) -> Option<&'static Source> {
     let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
     let lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-    SOURCES
-        .iter()
-        .copied()
-        .find(|s| s.contains(lat, lon))
-        .or_else(|| SOURCES.iter().copied().find(|s| s.covers(bbox)))
+    let mut holding = SOURCES.iter().copied().filter(|s| s.contains(lat, lon));
+    let first = holding.next();
+    match holding.next() {
+        None => first,
+        Some(second) => [first?, second]
+            .into_iter()
+            .chain(holding)
+            .max_by(|a, b| a.depth(lat, lon).total_cmp(&b.depth(lat, lon))),
+    }
+    .or_else(|| SOURCES.iter().copied().find(|s| s.covers(bbox)))
 }
 
 #[cfg(test)]
@@ -178,12 +217,41 @@ mod tests {
         assert_eq!(which(50.85, 5.69), Some("netherlands")); // Maastricht
         assert_eq!(which(46.95, 7.45), Some("switzerland")); // Bern
         assert_eq!(which(46.01, 8.96), Some("switzerland")); // Lugano
+        assert_eq!(which(51.96, 7.63), Some("nrw")); // Münster
+        assert_eq!(which(50.78, 6.08), Some("nrw")); // Aachen
+        assert_eq!(which(59.44, 24.75), Some("estonia")); // Tallinn
+        assert_eq!(which(58.38, 26.72), Some("estonia")); // Tartu
+        assert_eq!(which(49.61, 6.13), Some("luxembourg")); // Luxembourg City
+        assert_eq!(which(56.95, 24.11), None); // Riga
+        assert_eq!(which(51.34, 12.37), None); // Leipzig
         assert_eq!(which(48.78, 9.18), None); // Stuttgart
         assert_eq!(which(48.21, 16.37), None); // Vienna
         assert_eq!(which(50.11, 8.68), None); // Frankfurt
         assert_eq!(which(50.85, 4.35), None); // Brussels
         assert_eq!(which(51.51, -0.13), None); // London
         assert_eq!(which(41.39, 2.17), None); // Barcelona
+    }
+
+    /// The source `for_bbox` picks for a small area around (lat, lon).
+    fn picked(lat: f64, lon: f64) -> Option<&'static str> {
+        let bbox = LLBBox::new(lat - 0.002, lon - 0.003, lat + 0.002, lon + 0.003).unwrap();
+        for_bbox(&bbox).map(|s| s.id)
+    }
+
+    #[test]
+    fn borders_go_to_the_side_the_area_is_on() {
+        // Kerkrade and Herzogenrath, a street apart: both outlines hold each.
+        assert_eq!(picked(50.866, 6.050), Some("netherlands"));
+        assert_eq!(picked(50.870, 6.105), Some("nrw"));
+        // Basel and Saint-Louis.
+        assert_eq!(picked(47.560, 7.590), Some("switzerland"));
+        assert_eq!(picked(47.590, 7.555), Some("france"));
+        // Esch-sur-Alzette and Audun-le-Tiche.
+        assert_eq!(picked(49.495, 5.985), Some("luxembourg"));
+        assert_eq!(picked(49.470, 5.950), Some("france"));
+        // Deep inside, nothing changes.
+        assert_eq!(picked(48.14, 11.57), Some("bavaria"));
+        assert_eq!(picked(50.94, 6.96), Some("nrw")); // Cologne
     }
 
     #[test]

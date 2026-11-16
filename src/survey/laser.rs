@@ -330,20 +330,33 @@ fn read_copc(
             m.add(layout, rec);
         }
     };
-    let stats = copc::read(client, url, window, target_density(), 4, &visit)?;
-    let area = (window.2 - window.0) * (window.3 - window.1);
-    fetch::count_laser_area(area);
-    if std::env::var_os("ARNIS_LASER_DEBUG").is_some() {
-        eprintln!(
-            "laser {te}_{tn}: level {} nodes {} requests {} {:.1} MB {:.1} pts/m² over {:.2} km²",
-            stats.level,
-            stats.nodes,
-            stats.requests,
-            stats.bytes as f64 / 1e6,
-            stats.points as f64 / area,
-            area / 1e6
-        );
+    // A tile made of several files (one line each) is read from all of them
+    // that exist; a file it does not reach costs only its header.
+    let mut found = false;
+    for part in url.split('\n') {
+        let stats = match copc::read(client, part, window, target_density(), 4, &visit) {
+            Ok(s) => s,
+            Err(Failure::Missing) if url.contains('\n') => continue,
+            Err(e) => return Err(e),
+        };
+        found = true;
+        let area = (window.2 - window.0) * (window.3 - window.1);
+        if std::env::var_os("ARNIS_LASER_DEBUG").is_some() {
+            eprintln!(
+                "laser {te}_{tn}: level {} nodes {} requests {} {:.1} MB {:.1} pts/m² over {:.2} km²",
+                stats.level,
+                stats.nodes,
+                stats.requests,
+                stats.bytes as f64 / 1e6,
+                stats.points as f64 / area,
+                area / 1e6
+            );
+        }
     }
+    if !found {
+        return Err(Failure::Missing);
+    }
+    fetch::count_laser_area((window.2 - window.0) * (window.3 - window.1));
     let measured = m
         .into_inner()
         .unwrap_or_else(|e| e.into_inner())
@@ -521,6 +534,8 @@ struct Measure<'a> {
     /// Window in tile cells: first column, first row, end column, end row.
     window: (usize, usize, usize, usize),
     n_all: Vec<u32>,
+    /// Cells under a building outline, where the source marks them.
+    footprint: Vec<bool>,
     gz_sum: Vec<f64>,
     /// Ground returns: (cell, intensity).
     ground: Vec<(u32, u16)>,
@@ -536,6 +551,11 @@ impl<'a> Measure<'a> {
             n1: f64::from(tn + 1) * 1000.0,
             window,
             n_all: vec![0; CELLS],
+            footprint: if source.classes.footprint.is_empty() {
+                Vec::new()
+            } else {
+                vec![false; CELLS]
+            },
             gz_sum: vec![0.0; CELLS],
             ground: Vec::new(),
             above: Vec::new(),
@@ -554,7 +574,6 @@ impl<'a> Measure<'a> {
             return;
         }
         let cell = row as u32 * TILE as u32 + col as u32;
-        self.n_all[cell as usize] += 1;
         // Point formats 0-5 keep the class in byte 15 and returns in byte 14
         // (3+3 bits); 6-10 keep returns in byte 14 (4+4 bits) and the class in 16.
         let (class, ret, nret) = if l.format >= 6 {
@@ -562,9 +581,15 @@ impl<'a> Measure<'a> {
         } else {
             (rec[15] & 0x1F, rec[14] & 0x07, (rec[14] >> 3) & 0x07)
         };
+        let classes = &self.source.classes;
+        if classes.footprint.contains(&class) {
+            // Not a return: only a mark on the ground.
+            self.footprint[cell as usize] = true;
+            return;
+        }
+        self.n_all[cell as usize] += 1;
         let zi = i32::from_le_bytes(rec[8..12].try_into().unwrap());
         let z = f64::from(zi) * l.scale[2] + l.offset[2];
-        let classes = &self.source.classes;
         if classes.ground.contains(&class) {
             self.ground
                 .push((cell, u16::from_le_bytes([rec[12], rec[13]])));
@@ -599,12 +624,24 @@ impl<'a> Measure<'a> {
             }
         }
 
+        // Where the source marks outlines instead of classing roofs, what stands
+        // over an outline or within a metre of it (the eaves) and is not a plant
+        // is the roof.
+        let mut above = self.above;
+        if !self.footprint.is_empty() {
+            let roof = grow_by_one(&self.footprint);
+            for p in &mut above {
+                if p.2 & PLANT == 0 && roof[p.0 as usize] {
+                    p.2 = BUILDING;
+                }
+            }
+        }
+
         // Heights above the ground for building and object returns.
         let mut n_obj = vec![0u32; CELLS];
         let mut n_bld = vec![0u32; CELLS];
         let mut n_veg = vec![0u32; CELLS];
-        let heights: Vec<(u32, f32, u8)> = self
-            .above
+        let heights: Vec<(u32, f32, u8)> = above
             .iter()
             .map(|&(c, z, f)| (c, z - ground_z[c as usize], f))
             .filter(|&(_, h, f)| f & BUILDING != 0 || h > 0.25)
@@ -649,6 +686,24 @@ impl<'a> Measure<'a> {
         }
         t
     }
+}
+
+/// The cells set in `m` and their eight neighbours, over a whole tile.
+fn grow_by_one(m: &[bool]) -> Vec<bool> {
+    let mut out = m.to_vec();
+    for row in 0..TILE {
+        for col in 0..TILE {
+            if !m[row * TILE + col] {
+                continue;
+            }
+            for r in row.saturating_sub(1)..=(row + 1).min(TILE - 1) {
+                for k in col.saturating_sub(1)..=(col + 1).min(TILE - 1) {
+                    out[r * TILE + k] = true;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Values grouped by cell with a counting sort, sorted within each cell.
@@ -826,6 +881,53 @@ mod tests {
         }
         let z = fill_ground(&sum, &count);
         assert!((z[105 * TILE + 105] - 450.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn outline_marks_turn_the_last_returns_over_them_into_roof() {
+        let src = &super::super::nrw::NRW;
+        let layout = PointLayout {
+            format: 1,
+            record_len: 28,
+            scale: [0.01, 0.01, 0.01],
+            offset: [0.0, 0.0, 0.0],
+        };
+        // A point in tile 367_5646 at cell (col, row), z metres, class, return
+        // `ret` of `nret`.
+        let rec = |col: usize, row: usize, z: f64, class: u8, ret: u8, nret: u8| {
+            let mut r = vec![0u8; 28];
+            let x = ((367_000.0 + col as f64 + 0.5) / 0.01) as i32;
+            let y = ((5_647_000.0 - row as f64 - 0.5) / 0.01) as i32;
+            r[0..4].copy_from_slice(&x.to_le_bytes());
+            r[4..8].copy_from_slice(&y.to_le_bytes());
+            r[8..12].copy_from_slice(&((z / 0.01) as i32).to_le_bytes());
+            r[14] = ret | (nret << 3);
+            r[15] = class;
+            r
+        };
+        let mut m = Measure::new(src, 367, 5646, (0, 0, TILE, TILE));
+        for col in 490..520 {
+            m.add(&layout, &rec(col, 500, 100.0, 2, 1, 1));
+        }
+        // An outline mark at column 500; a roof's last return on it and one
+        // a metre off (the eaves), a crown's first return on it, and a last
+        // return two metres off, which stays an object.
+        m.add(&layout, &rec(500, 500, 100.0, 26, 1, 1));
+        m.add(&layout, &rec(500, 500, 106.0, 20, 1, 1));
+        m.add(&layout, &rec(501, 500, 105.0, 20, 1, 1));
+        m.add(&layout, &rec(500, 500, 109.0, 1, 1, 2));
+        m.add(&layout, &rec(502, 500, 106.0, 20, 1, 1));
+        let t = m.finish("test");
+        let c = |col: usize| 500 * TILE + col;
+        assert_eq!(
+            (t.n_bld[c(500)], t.n_obj[c(500)], t.n_veg[c(500)]),
+            (1, 1, 1)
+        );
+        assert_eq!(t.h_bld[c(500)], 30, "6 m in fifths");
+        assert_eq!((t.n_bld[c(501)], t.n_obj[c(501)]), (1, 0));
+        assert_eq!((t.n_bld[c(502)], t.n_obj[c(502)]), (0, 1));
+        // The mark is not a return.
+        assert_eq!(t.n_all[c(500)], 3);
     }
 
     #[test]

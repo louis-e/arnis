@@ -284,14 +284,16 @@ fn fetch_wms(
             let (px0, px1) = (bx0 * 256, ((bx1 + 1) * 256).min(full));
             let (py0, py1) = (by0 * 256, ((by1 + 1) * 256).min(full));
             let m = |px: usize| px as f64 / PX_PER_M as f64;
+            let (w, s, e, n) = (te0 + m(px0), tn1 - m(py1), te0 + m(px1), tn1 - m(py0));
+            let bbox = if source.crs.north_first() {
+                format!("{s},{w},{n},{e}")
+            } else {
+                format!("{w},{s},{e},{n}")
+            };
             let req = format!(
                 "{url}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={layer}&STYLES=\
-                 &CRS=EPSG:{}&BBOX={},{},{},{}&WIDTH={}&HEIGHT={}&FORMAT=image/jpeg",
+                 &CRS=EPSG:{}&BBOX={bbox}&WIDTH={}&HEIGHT={}&FORMAT=image/jpeg",
                 source.crs.epsg(),
-                te0 + m(px0),
-                tn1 - m(py1),
-                te0 + m(px1),
-                tn1 - m(py0),
                 px1 - px0,
                 py1 - py0
             );

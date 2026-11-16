@@ -1,8 +1,9 @@
 //! Garden detail: what stands in the places OSM leaves empty, measured rather than
 //! guessed, from open airborne laser scans and aerial photographs.
 //!
-//! Where a source covers the area (see [`source::SOURCES`]: Bavaria, France, the
-//! Netherlands, Switzerland), the parts of its laser tiles and photos the area
+//! Where a source covers the area (see [`source::SOURCES`]: Bavaria, North
+//! Rhine-Westphalia, France, the Netherlands, Switzerland, Estonia, Luxembourg),
+//! the parts of its laser tiles and photos the area
 //! needs are read ([`copc`] reads cloud-optimised tiles in part), boiled down to
 //! a few numbers per square metre ([`laser`], [`photo`]), classified per metre
 //! on the source's own grid ([`classify`], [`crs`]) and sampled onto the world's
@@ -19,12 +20,15 @@ pub mod classify;
 pub mod copc;
 pub mod crs;
 pub mod elements;
+pub mod estonia;
 pub mod fetch;
 pub mod france;
 pub mod grid;
 pub mod heights;
 pub mod laser;
+pub mod luxembourg;
 pub mod netherlands;
+pub mod nrw;
 pub mod photo;
 pub mod place;
 pub mod source;
@@ -326,43 +330,46 @@ fn mosaic(
         .filter(|&t| laser::cached(&root, plan.source, t.0, t.1, &plan.want(t)).is_none())
         .collect();
     let mut urls: std::collections::HashMap<(i32, i32), Vec<String>> = Default::default();
-    match &plan.source.laser {
-        Laser::Whole { url, .. } => {
+    let (Laser::Whole { locate, .. } | Laser::Copc { locate, .. }) = &plan.source.laser;
+    match locate {
+        Locate::Urls(f) => {
             for &(te, tn) in &uncached {
-                urls.insert((te, tn), vec![url(te, tn)]);
+                urls.insert((te, tn), f(te, tn));
             }
         }
-        Laser::Copc { locate, .. } => match locate {
-            Locate::Urls(f) => {
-                for &(te, tn) in &uncached {
-                    urls.insert((te, tn), f(te, tn));
-                }
+        Locate::Lookup(f) if !uncached.is_empty() => {
+            if let Err(e) = crate::net::ensure_online("laser scans") {
+                eprintln!("Warning: {e}");
+                return None;
             }
-            Locate::Lookup(f) if !uncached.is_empty() => {
-                if let Err(e) = crate::net::ensure_online("laser scans") {
-                    eprintln!("Warning: {e}");
+            match f(client, plan.rect) {
+                // Nothing at all is more likely a gap in the index (or a
+                // hiccup) than a reason to mark every tile absent for weeks.
+                Ok(found) if found.is_empty() => {
+                    println!("Laser data: {} has no scans here yet", plan.source.name);
                     return None;
                 }
-                match f(client, plan.rect) {
-                    // Nothing at all is more likely a gap in the index (or a
-                    // hiccup) than a reason to mark every tile absent for weeks.
-                    Ok(found) if found.is_empty() => {
-                        println!("Laser data: {} has no scans here yet", plan.source.name);
-                        return None;
+                Ok(found) => {
+                    // A tile listed more than once is made of several files,
+                    // read together as one (a line each).
+                    let mut parts: std::collections::BTreeMap<(i32, i32), Vec<String>> =
+                        Default::default();
+                    for (t, u) in found {
+                        parts.entry(t).or_default().push(u);
                     }
-                    Ok(found) => {
-                        for (t, u) in found {
-                            urls.insert(t, vec![u]);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: laser scan index unavailable: {e}");
-                        return None;
+                    for (t, mut p) in parts {
+                        p.sort();
+                        p.dedup();
+                        urls.insert(t, vec![p.join("\n")]);
                     }
                 }
+                Err(e) => {
+                    eprintln!("Warning: laser scan index unavailable: {e}");
+                    return None;
+                }
             }
-            Locate::Lookup(_) => {}
-        },
+        }
+        Locate::Lookup(_) => {}
     }
 
     // Laser tiles two at a time: each takes a few hundred MB while it is decoded.

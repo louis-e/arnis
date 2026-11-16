@@ -253,6 +253,7 @@ pub static NETHERLANDS: Source = Source {
         building: &[6],
         object: &[1],
         vegetation: &[],
+        footprint: &[],
     },
     laser_plants: true,
     attribution: "AHN (CC0 / CC BY 4.0), Beeldmateriaal Nederland via PDOK (CC BY 4.0)",

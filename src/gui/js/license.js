@@ -87,6 +87,18 @@ export const licenseText = `
 <p>In Switzerland they read <a href="https://www.swisstopo.admin.ch/en/height-model-swisssurface3d" target="_blank" rel="noopener noreferrer">swissSURFACE3D</a> and <a href="https://www.swisstopo.admin.ch/en/orthoimage-swissimage-10" target="_blank" rel="noopener noreferrer">SWISSIMAGE</a>, free geodata of the Federal Office of Topography &copy; swisstopo, under the <a href="https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices" target="_blank" rel="noopener noreferrer">swisstopo terms for free geodata</a>.</p>
 </div>
 <div class="credit">
+<h4>North Rhine-Westphalian Laser Scans and Aerial Photos</h4>
+<p>In North Rhine-Westphalia they read the <a href="https://www.opengeodata.nrw.de/produkte/geobasis/hm/3dm_l_las/" target="_blank" rel="noopener noreferrer">3D-Messdaten</a> laser point clouds and the DOP aerial photos of Geobasis NRW, &copy; Land NRW, under the <a href="https://www.govdata.de/dl-de/zero-2-0" target="_blank" rel="noopener noreferrer">Datenlizenz Deutschland &ndash; Zero &ndash; 2.0</a>.</p>
+</div>
+<div class="credit">
+<h4>Estonian Laser Scans and Aerial Photos</h4>
+<p>In Estonia they read the laser scans and orthophotos of the <a href="https://geoportaal.maaruum.ee/" target="_blank" rel="noopener noreferrer">Estonian Land and Spatial Development Board</a> (Maa- ja Ruumiamet), under its open data licence.</p>
+</div>
+<div class="credit">
+<h4>Luxembourgish Laser Scans and Aerial Photos</h4>
+<p>In Luxembourg they read the <a href="https://data.public.lu/en/datasets/lidar-2024-releve-3d-du-territoire-luxembourgeois/" target="_blank" rel="noopener noreferrer">LiDAR 2024</a> point clouds and the orthophoto of the Administration du cadastre et de la topographie through <a href="https://data.public.lu/" target="_blank" rel="noopener noreferrer">data.public.lu</a> and <a href="https://www.geoportail.lu/" target="_blank" rel="noopener noreferrer">geoportail.lu</a>, released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>.</p>
+</div>
+<div class="credit">
 <h4>Koppen-Geiger Climate Data</h4>
 <p>Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" target="_blank" rel="noopener noreferrer">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
 </div>
