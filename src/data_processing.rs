@@ -980,6 +980,8 @@ pub fn generate_world_with_options(
     waterfront::drop_paths_on_piers(&mut elements, args.scale, args.timeout.as_ref());
     // A peak's summit cross that is also mapped on its own stands once, as the mapped one.
     man_made::drop_doubled_summit_crosses(&mut elements, args.scale);
+    // Parking lots lay their stalls along the aisles mapped in them.
+    parking_lots::orient_parking_lots(&mut elements);
 
     crate::element_processing::surfaces::set_patches(args.surface_patches);
 

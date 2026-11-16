@@ -1,0 +1,529 @@
+//! Surface parking lots: the asphalt, rows of stalls turned to the lot, lamps and parked
+//! cars. Rows run along the parking aisles mapped in the lot, or along the long side of the
+//! smallest rectangle around the lot where none are.
+
+use crate::args::Args;
+use crate::block_definitions::*;
+use crate::bresenham::bresenham_line;
+use crate::clipping::is_invented_node_id;
+use crate::element_processing::surfaces::{get_blocks_for_surface, semirandom_surface};
+use crate::floodfill_cache::{in_hole, FloodFillCache, Holes};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
+use crate::world_editor::WorldEditor;
+use std::collections::HashMap;
+
+/// Width of a stall, its line included, and its length, which fits the bundled cars.
+const STALL_WIDTH: i32 = 4;
+const STALL_LENGTH: i32 = 8;
+/// The aisle behind each row of stalls.
+const AISLE_WIDTH: i32 = 5;
+const ROW_PERIOD: i32 = STALL_LENGTH + AISLE_WIDTH;
+
+/// Tag `orient_parking_lots` leaves on a lot with a parking aisle in it: the direction its
+/// rows run in, as a unit vector, and a point on the aisle, "ux uz x z".
+const AISLE_TAG: &str = "arnis:parking_aisle";
+
+/// What a stall line or the asphalt may be laid over.
+const LOT_SURFACES: &[Block] = &[
+    BLACK_CONCRETE,
+    GRAY_CONCRETE_POWDER,
+    CYAN_TERRACOTTA,
+    GRAY_CONCRETE,
+];
+
+/// The grid stalls are laid out on: rows run along `u`, stalls reach along `v`, and
+/// `origin` is where a row of stalls begins.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StallGrid {
+    origin: (f64, f64),
+    u: (f64, f64),
+    v: (f64, f64),
+}
+
+impl StallGrid {
+    /// Grid coordinates of a cell's centre.
+    fn local(&self, x: i32, z: i32) -> (f64, f64) {
+        let (dx, dz) = (
+            f64::from(x) + 0.5 - self.origin.0,
+            f64::from(z) + 0.5 - self.origin.1,
+        );
+        (dx * self.u.0 + dz * self.u.1, dx * self.v.0 + dz * self.v.1)
+    }
+
+    /// The cell at grid coordinates `(a, b)`.
+    fn cell(&self, a: f64, b: f64) -> (i32, i32) {
+        (
+            (self.origin.0 + a * self.u.0 + b * self.v.0 - 0.5).round() as i32,
+            (self.origin.1 + a * self.u.1 + b * self.v.1 - 0.5).round() as i32,
+        )
+    }
+
+    /// Facing of a car parked in a stall, as Minecraft yaw: its length runs along `v`.
+    fn yaw(&self) -> f64 {
+        (-self.v.0).atan2(self.v.1).to_degrees()
+    }
+
+    /// Rows along `u`, with a row of stalls starting at `origin`.
+    fn along(u: (f64, f64), origin: (f64, f64)) -> Self {
+        let len = u.0.hypot(u.1);
+        let u = (u.0 / len, u.1 / len);
+        Self {
+            origin,
+            u,
+            v: (-u.1, u.0),
+        }
+    }
+
+    /// Rows along an aisle through `point`: the aisle's middle falls on the mapped line.
+    fn from_aisle(u: (f64, f64), point: (f64, f64)) -> Self {
+        let grid = Self::along(u, point);
+        let back = f64::from(STALL_LENGTH) + f64::from(AISLE_WIDTH) / 2.0;
+        Self {
+            origin: (point.0 - grid.v.0 * back, point.1 - grid.v.1 * back),
+            ..grid
+        }
+    }
+}
+
+/// Convex hull of points, counter-clockwise, by the monotone chain.
+fn convex_hull(mut points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    points.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    points.dedup();
+    if points.len() < 3 {
+        return points;
+    }
+    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
+    };
+    let chain = |points: &mut dyn Iterator<Item = (f64, f64)>| {
+        let mut half: Vec<(f64, f64)> = Vec::new();
+        for p in points {
+            while half.len() >= 2 && cross(half[half.len() - 2], half[half.len() - 1], p) <= 0.0 {
+                half.pop();
+            }
+            half.push(p);
+        }
+        half.pop();
+        half
+    };
+    let mut hull = chain(&mut points.iter().copied());
+    hull.extend(chain(&mut points.iter().rev().copied()));
+    hull
+}
+
+/// Rows along the long side of the smallest rectangle around the outline, from the corner
+/// where its first row begins. Points added by clipping the lot to the area are left out
+/// where enough mapped ones remain, so the grid does not turn with the area's edge.
+fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
+    // Cell centres.
+    let xz = |n: &ProcessedNode| (f64::from(n.x) + 0.5, f64::from(n.z) + 0.5);
+    let mapped: Vec<(f64, f64)> = nodes
+        .iter()
+        .filter(|n| !is_invented_node_id(n.id))
+        .map(xz)
+        .collect();
+    let points = if mapped.len() >= 3 {
+        mapped
+    } else {
+        nodes.iter().map(xz).collect()
+    };
+    let hull = convex_hull(points);
+    if hull.len() < 3 {
+        return None;
+    }
+    let span = |d: (f64, f64)| {
+        hull.iter()
+            .map(|p| p.0 * d.0 + p.1 * d.1)
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), s| {
+                (lo.min(s), hi.max(s))
+            })
+    };
+    // (area, long side's direction); the smallest rectangle has a side on the hull.
+    let mut best: Option<(f64, (f64, f64))> = None;
+    for i in 0..hull.len() {
+        let (a, b) = (hull[i], hull[(i + 1) % hull.len()]);
+        let len = (b.0 - a.0).hypot(b.1 - a.1);
+        if len < 1e-6 {
+            continue;
+        }
+        let e = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+        let n = (-e.1, e.0);
+        let ((e0, e1), (n0, n1)) = (span(e), span(n));
+        let area = (e1 - e0) * (n1 - n0);
+        if best.is_none_or(|(a, _)| area < a - 1e-6) {
+            best = Some((area, if e1 - e0 >= n1 - n0 { e } else { n }));
+        }
+    }
+    let (_, u) = best?;
+    let grid = StallGrid::along(u, (0.0, 0.0));
+    let (a0, b0) = (span(grid.u).0, span(grid.v).0);
+    Some(StallGrid::along(
+        u,
+        (grid.u.0 * a0 + grid.v.0 * b0, grid.u.1 * a0 + grid.v.1 * b0),
+    ))
+}
+
+/// The grid a lot's stalls are laid out on.
+fn stall_grid(way: &ProcessedWay) -> Option<StallGrid> {
+    if let Some(aisle) = way.tags.get(AISLE_TAG) {
+        let v: Vec<f64> = aisle
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        if let [ux, uz, x, z] = v[..] {
+            return Some(StallGrid::from_aisle((ux, uz), (x, z)));
+        }
+    }
+    rectangle_grid(&way.nodes)
+}
+
+/// Whether (x, z) lies inside a closed ring, by crossings.
+fn ring_contains(ring: &[ProcessedNode], x: f64, z: f64) -> bool {
+    let mut inside = false;
+    let mut j = ring.len() - 1;
+    for i in 0..ring.len() {
+        let (xi, zi) = (f64::from(ring[i].x), f64::from(ring[i].z));
+        let (xj, zj) = (f64::from(ring[j].x), f64::from(ring[j].z));
+        if (zi > z) != (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// A straight stretch of parking aisle.
+struct Stretch {
+    len: f64,
+    /// Unit direction.
+    u: (f64, f64),
+    mid: (f64, f64),
+}
+
+fn is_closed(nodes: &[ProcessedNode]) -> bool {
+    nodes.len() >= 4
+        && nodes[0].x == nodes[nodes.len() - 1].x
+        && nodes[0].z == nodes[nodes.len() - 1].z
+}
+
+/// Turns each parking lot to the parking aisles mapped inside it: the direction most of their
+/// length runs in, recorded on the lot for `generate_parking_lot` with a point on the longest
+/// aisle that way. Returns the number of lots turned.
+pub fn orient_parking_lots(elements: &mut [ProcessedElement]) -> usize {
+    let aisles: Vec<&ProcessedWay> = elements
+        .iter()
+        .filter_map(|e| match e {
+            ProcessedElement::Way(w)
+                if w.tags.get("service").map(String::as_str) == Some("parking_aisle")
+                    && w.tags.contains_key("highway") =>
+            {
+                Some(w)
+            }
+            _ => None,
+        })
+        .collect();
+    if aisles.is_empty() {
+        return 0;
+    }
+    // The direction most of the aisle inside the rings runs in, within 10 degrees, and the
+    // longest stretch that way to put an aisle on.
+    let aisle_in = |rings: &[&[ProcessedNode]]| -> Option<String> {
+        let (x0, z0, x1, z1) = rings.iter().flat_map(|r| r.iter()).fold(
+            (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
+            |(a, b, c, d), n| (a.min(n.x), b.min(n.z), c.max(n.x), d.max(n.z)),
+        );
+        let in_box = |n: &ProcessedNode| n.x >= x0 && n.x <= x1 && n.z >= z0 && n.z <= z1;
+        let mut stretches: Vec<Stretch> = Vec::new();
+        for aisle in &aisles {
+            for pair in aisle.nodes.windows(2) {
+                let (a, b) = (&pair[0], &pair[1]);
+                let mid = (f64::from(a.x + b.x) / 2.0, f64::from(a.z + b.z) / 2.0);
+                let d = (f64::from(b.x - a.x), f64::from(b.z - a.z));
+                let len = d.0.hypot(d.1);
+                if len >= 1.0
+                    && (in_box(a) || in_box(b))
+                    && rings.iter().any(|r| ring_contains(r, mid.0, mid.1))
+                {
+                    stretches.push(Stretch {
+                        len,
+                        u: (d.0 / len, d.1 / len),
+                        mid,
+                    });
+                }
+            }
+        }
+        let alike = 10f64.to_radians().cos();
+        let support = |u: (f64, f64)| -> f64 {
+            stretches
+                .iter()
+                .filter(|s| (s.u.0 * u.0 + s.u.1 * u.1).abs() >= alike)
+                .map(|s| s.len)
+                .sum()
+        };
+        let (_, best) = stretches
+            .iter()
+            .map(|s| ((support(s.u), s.len), s))
+            .max_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)))?;
+        Some(format!(
+            "{:.5} {:.5} {:.1} {:.1}",
+            best.u.0,
+            best.u.1,
+            best.mid.0 + 0.5,
+            best.mid.1 + 0.5
+        ))
+    };
+    let turns: Vec<(usize, String)> = elements
+        .iter()
+        .enumerate()
+        .filter_map(|(i, element)| {
+            let tag = match element {
+                ProcessedElement::Way(w) if is_lot(&w.tags) && is_closed(&w.nodes) => {
+                    aisle_in(&[&w.nodes[..]])
+                }
+                ProcessedElement::Relation(r) if is_lot(&r.tags) => {
+                    let rings: Vec<&[ProcessedNode]> = r
+                        .members
+                        .iter()
+                        .filter(|m| m.role == ProcessedMemberRole::Outer && is_closed(&m.way.nodes))
+                        .map(|m| &m.way.nodes[..])
+                        .collect();
+                    (!rings.is_empty()).then(|| aisle_in(&rings)).flatten()
+                }
+                _ => None,
+            };
+            tag.map(|t| (i, t))
+        })
+        .collect();
+    for (i, tag) in &turns {
+        match &mut elements[*i] {
+            ProcessedElement::Way(w) => w.tags.insert(AISLE_TAG.to_string(), tag.clone()),
+            ProcessedElement::Relation(r) => r.tags.insert(AISLE_TAG.to_string(), tag.clone()),
+            ProcessedElement::Node(_) => None,
+        };
+    }
+    turns.len()
+}
+
+fn is_lot(tags: &HashMap<String, String>) -> bool {
+    tags.get("amenity").map(String::as_str) == Some("parking") && !tags.contains_key("building")
+}
+
+/// A parking lot: its asphalt, rows of stalls with a lamp every few, and parked cars.
+/// `holes` are the inner rings of a multipolygon lot.
+pub fn generate_parking_lot(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    holes: Option<&Holes>,
+) {
+    // Speckled asphalt mix like roads; honor an explicit surface=* tag.
+    let block_types: &[Block] = way
+        .tags
+        .get("surface")
+        .and_then(|s| get_blocks_for_surface(s))
+        .unwrap_or(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]);
+
+    // The outline, in the lot's own surface.
+    for pair in way.nodes.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        for (bx, _, bz) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
+            if in_hole(holes, bx, bz) {
+                continue;
+            }
+            editor.set_block(
+                semirandom_surface(bx, bz, block_types),
+                bx,
+                0,
+                bz,
+                Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                None,
+            );
+        }
+    }
+
+    let flood_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+    let mut lot: Vec<(i32, i32)> = flood_area
+        .iter()
+        .copied()
+        .filter(|&(x, z)| !editor.nested_area_owns(x, z) && !in_hole(holes, x, z))
+        .collect();
+    let Some(grid) = stall_grid(way) else {
+        return;
+    };
+
+    for &(x, z) in &lot {
+        editor.set_block(
+            semirandom_surface(x, z, block_types),
+            x,
+            0,
+            z,
+            Some(LOT_SURFACES),
+            None,
+        );
+        // Stall sides on the left of each stall, a line across its front, and the stall
+        // ends at the aisle; the aisles keep the bare asphalt.
+        let (a, b) = grid.local(x, z);
+        let across = (a.floor() as i32).rem_euclid(STALL_WIDTH);
+        let along = (b.floor() as i32).rem_euclid(ROW_PERIOD);
+        let line = if along < STALL_LENGTH {
+            across == 0 || along == 0
+        } else {
+            along == STALL_LENGTH
+        };
+        if line {
+            editor.set_block(WHITE_CONCRETE, x, 0, z, Some(LOT_SURFACES), None);
+        }
+    }
+
+    // Lamps and cars, by the stall corners and middles the grid puts inside the lot.
+    lot.sort_unstable();
+    let in_lot = |x: i32, z: i32| lot.binary_search(&(x, z)).is_ok();
+    if lot.is_empty() {
+        return;
+    }
+    let (lo, hi) = lot.iter().fold(
+        (
+            (f64::INFINITY, f64::INFINITY),
+            (f64::NEG_INFINITY, f64::NEG_INFINITY),
+        ),
+        |(lo, hi), &(x, z)| {
+            let (a, b) = grid.local(x, z);
+            ((lo.0.min(a), lo.1.min(b)), (hi.0.max(a), hi.1.max(b)))
+        },
+    );
+    let (w, p) = (f64::from(STALL_WIDTH), f64::from(ROW_PERIOD));
+    let yaw = grid.yaw();
+    for i in (lo.0 / w).floor() as i32..=(hi.0 / w).ceil() as i32 {
+        for j in (lo.1 / p).floor() as i32..=(hi.1 / p).ceil() as i32 {
+            let (a, b) = (f64::from(i) * w, f64::from(j) * p);
+            // A slim metal lamp with a cool-white head, at every third stall of every other row.
+            let corner = grid.cell(a + 0.5, b + 0.5);
+            if i.rem_euclid(3) == 0 && j.rem_euclid(2) == 0 && in_lot(corner.0, corner.1) {
+                let (x, z) = corner;
+                editor.set_block(SMOOTH_STONE, x, 1, z, None, None);
+                editor.set_block(ANDESITE_WALL, x, 2, z, None, None);
+                for dy in 3..=5 {
+                    editor.set_block(IRON_BARS, x, dy, z, None, None);
+                }
+                editor.set_block(SEA_LANTERN, x, 6, z, None, None);
+                editor.set_block(SMOOTH_STONE_SLAB, x, 7, z, None, None);
+            }
+            // Park cars on some stalls wholly inside the lot, leaving plenty empty.
+            let inside = (0..=STALL_WIDTH).all(|da| {
+                (0..=STALL_LENGTH).all(|db| {
+                    let (x, z) = grid.cell(a + f64::from(da), b + f64::from(db));
+                    in_lot(x, z)
+                })
+            });
+            if inside {
+                let (x, z) = grid.cell(
+                    a + f64::from(STALL_WIDTH) / 2.0,
+                    b + f64::from(STALL_LENGTH) / 2.0,
+                );
+                crate::structures::car::maybe_park_car_facing(editor, x, z, yaw);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(id: u64, x: i32, z: i32) -> ProcessedNode {
+        ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        }
+    }
+
+    fn ring(points: &[(i32, i32)]) -> Vec<ProcessedNode> {
+        let mut nodes: Vec<ProcessedNode> = points
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, z))| node(i as u64 + 1, x, z))
+            .collect();
+        nodes.push(nodes[0].clone());
+        nodes
+    }
+
+    fn close(a: (f64, f64), b: (f64, f64)) -> bool {
+        (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6
+    }
+
+    #[test]
+    fn rows_run_along_the_long_side() {
+        // Long north to south.
+        let grid = rectangle_grid(&ring(&[(0, 0), (20, 0), (20, 60), (0, 60)])).unwrap();
+        assert!(close((grid.u.0.abs(), grid.u.1.abs()), (0.0, 1.0)));
+        // Long east to west.
+        let grid = rectangle_grid(&ring(&[(0, 0), (60, 0), (60, 20), (0, 20)])).unwrap();
+        assert!(close((grid.u.0.abs(), grid.u.1.abs()), (1.0, 0.0)));
+    }
+
+    #[test]
+    fn rows_turn_with_a_turned_lot() {
+        // A 40 x 20 lot turned 30 degrees.
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let at = |a: f64, b: f64| {
+            (
+                (a * c - b * s).round() as i32,
+                (a * s + b * c).round() as i32,
+            )
+        };
+        let lot = ring(&[at(0.0, 0.0), at(40.0, 0.0), at(40.0, 20.0), at(0.0, 20.0)]);
+        let grid = rectangle_grid(&lot).unwrap();
+        let angle = grid.u.1.atan2(grid.u.0).to_degrees().rem_euclid(180.0);
+        assert!((angle - 30.0).abs() < 3.0, "{angle}");
+        // Every corner of the lot is at or past the grid's start.
+        for n in &lot {
+            let (a, b) = grid.local(n.x, n.z);
+            assert!(a > -1.0 && b > -1.0, "{a} {b}");
+        }
+    }
+
+    #[test]
+    fn an_aisle_puts_the_aisle_on_its_line() {
+        let grid = StallGrid::from_aisle((1.0, 0.0), (10.5, 20.5));
+        let (_, b) = grid.local(10, 20);
+        assert!((b - (f64::from(STALL_LENGTH) + f64::from(AISLE_WIDTH) / 2.0)).abs() < 1e-9);
+        // Cars park across the aisle.
+        assert!((grid.yaw().abs() % 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_lot_turns_with_the_aisles_inside_it() {
+        let lot = ProcessedWay {
+            id: 1,
+            nodes: ring(&[(0, 0), (60, 0), (60, 30), (0, 30)]),
+            tags: [("amenity", "parking")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let aisle = |id: u64, a: (i32, i32), b: (i32, i32)| ProcessedWay {
+            id,
+            nodes: vec![node(id * 10, a.0, a.1), node(id * 10 + 1, b.0, b.1)],
+            tags: [("highway", "service"), ("service", "parking_aisle")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let mut elements = vec![
+            ProcessedElement::Way(lot),
+            // A short one across the lot, a long one north to south, one outside.
+            ProcessedElement::Way(aisle(2, (5, 10), (25, 10))),
+            ProcessedElement::Way(aisle(3, (40, 2), (40, 28))),
+            ProcessedElement::Way(aisle(4, (100, 0), (100, 90))),
+        ];
+        assert_eq!(orient_parking_lots(&mut elements), 1);
+        let ProcessedElement::Way(lot) = &elements[0] else {
+            unreachable!()
+        };
+        let grid = stall_grid(lot).unwrap();
+        assert!(close((grid.u.0.abs(), grid.u.1.abs()), (0.0, 1.0)));
+    }
+}

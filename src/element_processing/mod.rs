@@ -37,6 +37,7 @@ pub mod level_crossings;
 pub mod man_made;
 pub mod natural;
 pub mod parking_garage;
+pub mod parking_lots;
 pub mod pedestrians;
 pub mod plane_bodies;
 pub mod plantations;
