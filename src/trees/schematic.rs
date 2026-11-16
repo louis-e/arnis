@@ -225,6 +225,7 @@ pub fn load_schem_within(
         }
     }
     drop_stray_leaves(&mut voxels, width, height, length);
+    cap_open_logs(&mut voxels);
 
     // Normalise so the lowest log/leaf sits at y=0 (schems pad air below the trunk).
     if let Some(min_y) = voxels.iter().map(|v| v.1).min() {
@@ -282,6 +283,36 @@ fn lowest_wood(voxels: &[(i16, i16, i16, Block)]) -> Vec<(i16, i16, i16)> {
         lowest.into_iter().map(|((x, z), y)| (x, z, y)).collect();
     columns.sort_unstable();
     columns
+}
+
+/// A leaf of the model's own kind on every log nothing covers from above, so no trunk or
+/// branch end shows its cut face through the crown. Leafless models stay as they are.
+fn cap_open_logs(voxels: &mut Vec<(i16, i16, i16, Block)>) {
+    let mut kinds: HashMap<Block, u32> = HashMap::new();
+    let mut top: HashMap<(i16, i16), (i16, Block)> = HashMap::new();
+    for &(x, y, z, block) in voxels.iter() {
+        if is_leaf(block) {
+            *kinds.entry(block).or_default() += 1;
+        }
+        let t = top.entry((x, z)).or_insert((y, block));
+        if y > t.0 {
+            *t = (y, block);
+        }
+    }
+    let Some(leaf) = kinds
+        .into_iter()
+        .max_by_key(|&(b, n)| (n, b))
+        .map(|(b, _)| b)
+    else {
+        return;
+    };
+    let mut open: Vec<(i16, i16, i16, Block)> = top
+        .into_iter()
+        .filter(|&(_, (_, block))| is_log(block))
+        .map(|((x, z), (y, _))| (x, y + 1, z, leaf))
+        .collect();
+    open.sort_unstable();
+    voxels.extend(open);
 }
 
 /// Furthest apart, per axis, two voxels of one tree may be: one air block between still
@@ -592,6 +623,30 @@ pub fn place_schematic_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_log_tops_get_a_leaf_of_the_crown() {
+        use crate::block_definitions::{BIRCH_LEAVES, OAK_LEAVES, OAK_LOG};
+        // A trunk standing a block above its crown, and a branch end beside it.
+        let mut voxels = vec![
+            (1, 0, 1, OAK_LOG),
+            (1, 1, 1, OAK_LOG),
+            (1, 2, 1, OAK_LOG),
+            (0, 1, 1, OAK_LEAVES),
+            (2, 1, 1, OAK_LEAVES),
+            (1, 1, 0, OAK_LEAVES),
+            (1, 1, 2, BIRCH_LEAVES),
+            (3, 1, 1, OAK_LOG),
+        ];
+        cap_open_logs(&mut voxels);
+        assert!(voxels.contains(&(1, 3, 1, OAK_LEAVES)), "trunk top capped");
+        assert!(voxels.contains(&(3, 2, 1, OAK_LEAVES)), "branch end capped");
+        assert_eq!(voxels.len(), 10);
+        // A leafless snag stays bare.
+        let mut snag = vec![(0, 0, 0, OAK_LOG), (0, 1, 0, OAK_LOG)];
+        cap_open_logs(&mut snag);
+        assert_eq!(snag.len(), 2);
+    }
 
     /// A wide trunk is judged by all its columns, not the model's middle; a leaf is not wood.
     #[test]

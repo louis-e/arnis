@@ -595,6 +595,22 @@ fn process_element(
                     building_footprints,
                     bridge_surface,
                 );
+            } else if let Some(kind @ ("stone" | "rock")) =
+                node.tags.get("natural").map(String::as_str)
+            {
+                // A mapped boulder, at full size and on land: water is carved after nodes.
+                if args.scale >= 0.75
+                    && editor.cover_class(node.x, node.z) != crate::land_cover::LC_WATER
+                {
+                    crate::ground_scatter::place_mapped_rock(
+                        editor,
+                        building_footprints,
+                        node.x,
+                        node.z,
+                        node.id,
+                        kind == "stone",
+                    );
+                }
             } else if attractions::claims(&node.tags) {
                 attractions::generate_ride(
                     editor,

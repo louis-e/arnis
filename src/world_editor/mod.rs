@@ -714,6 +714,12 @@ impl<'a> WorldEditor<'a> {
         self.water_field = Some(field);
     }
 
+    /// Top block of a mapped wood at (x, z): its forest floor, or None to keep the grass.
+    pub fn forest_floor_at(&self, x: i32, z: i32) -> Option<Block> {
+        let ground = self.ground.as_deref()?;
+        crate::ground_generation::mapped_forest_floor(ground, self.ground_point(x, z), x, z)
+    }
+
     /// Drops the water carve depths once every bore is laid out.
     pub fn release_water_field(&mut self) {
         self.water_field = None;
