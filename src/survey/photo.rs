@@ -77,7 +77,9 @@ impl PhotoTile {
         }
         let blocks_in = raw[12..12 + nb].iter().map(|&b| b != 0).collect();
         let cells = raw[12 + nb..]
-            .chunks_exact(8)
+            .as_chunks::<8>()
+            .0
+            .iter()
             .map(|c| PhotoCell {
                 exg: c[0] as i8,
                 green: c[1],

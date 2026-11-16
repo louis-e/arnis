@@ -3852,6 +3852,8 @@ function refreshLidarRows() {
   const reason = why([selectedCelestialBody === 'earth', 'reason_earth'], [!isOneWorldEnabled(), 'reason_not_one_world']);
   setSettingsRowAvailable('lidar-toggle', !reason, reason);
   const open = !reason && master.checked;
+  // Squares the card's lower corners while its rows hang under it, as One World does.
+  document.getElementById('lidar-stack')?.classList.toggle('is-open', open);
   LASER_ROWS.forEach((id) => {
     const row = document.getElementById(id);
     if (row) row.style.display = open ? '' : 'none';

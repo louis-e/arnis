@@ -704,9 +704,7 @@ mod tests {
         let out = classify(&inp, (1450.0, 1600.0));
         assert_eq!(out[5 * w + 5].class, HEDGE);
         // At full density two hits are too few for a hedge.
-        for c in 0..w * h {
-            inp.n_all[c] = 18;
-        }
+        inp.n_all.fill(18);
         let out = classify(&inp, (1450.0, 1600.0));
         assert_ne!(out[5 * w + 5].class, HEDGE);
     }

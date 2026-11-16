@@ -161,7 +161,7 @@ type Page = (Vec<Node>, Vec<(i32, i32, i32, u64, u64)>);
 fn parse_page(d: &[u8]) -> Page {
     let mut nodes = Vec::new();
     let mut pages = Vec::new();
-    for e in d.chunks_exact(32) {
+    for e in d.as_chunks::<32>().0 {
         let i32_at = |o: usize| i32::from_le_bytes(e[o..o + 4].try_into().unwrap());
         let (level, x, y) = (i32_at(0), i32_at(4), i32_at(8));
         let offset = u64::from_le_bytes(e[16..24].try_into().unwrap());

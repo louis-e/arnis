@@ -264,14 +264,6 @@
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
-          <button type="button" class="settings-nav-item" data-target="settings-section-lidar">
-            <svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg>
-            <span class="settings-nav-text">
-              <span class="settings-nav-title" data-localize="settings_section_lidar">Laser Data</span>
-              <span class="settings-nav-sub" data-localize="settings_nav_lidar">Gardens, trees, heights</span>
-            </span>
-            <span class="settings-nav-dot" aria-hidden="true"></span>
-          </button>
           <button type="button" class="settings-nav-item" data-target="settings-section-gameplay">
             <svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg>
             <span class="settings-nav-text">
@@ -990,108 +982,6 @@
             </section>
 
             <!-- Gameplay -->
-            <section class="settings-section" id="settings-section-lidar">
-              <header class="settings-section-head">
-                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-layers"></use></svg></span>
-                <div>
-                  <h3 data-localize="settings_section_lidar">Laser Data</h3>
-                  <p data-localize="settings_section_lidar_desc">Detail measured by open laser scans and aerial photos.</p>
-                </div>
-              </header>
-
-              <div class="setting-grid">
-                <!-- Laser Data and the features it feeds, as one block: they show while it is on -->
-                <div class="setting-stack is-wide" id="lidar-stack">
-                  <div class="settings-row setting-tile is-wide">
-                    <label for="lidar-toggle" class="setting-label">
-                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
-                      <span class="setting-text">
-                        <span class="setting-heading">
-                          <span data-localize="lidar">Laser Data</span>
-                          <span class="tooltip-icon" data-tooltip-key="lidar_tip" data-tooltip="Reads open laser scans and aerial photos for detail OpenStreetMap lacks, where a region publishes them. Not used for One World or areas over 16 km². Covers Bavaria, North Rhine-Westphalia, France, the Netherlands, Luxembourg, Estonia and parts of Switzerland.">?</span>
-                          <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="lidar" data-new-when="#lidar-toggle:checked">
-                        </span>
-                        <span class="setting-desc" data-localize="lidar_desc">Measured detail where a region publishes its scans.</span>
-                      </span>
-                    </label>
-                    <div class="settings-control">
-                      <input type="checkbox" class="switch" id="lidar-toggle" name="lidar-toggle">
-                    </div>
-                  </div>
-
-                  <div class="settings-row setting-tile is-wide setting-sub" id="garden-detail-row" style="display: none;">
-                    <label for="garden-detail-toggle" class="setting-label">
-                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-trees"></use></svg>
-                      <span class="setting-text">
-                        <span class="setting-heading">
-                          <span data-localize="garden_detail">Garden Detail</span>
-                          <span class="tooltip-icon" data-tooltip-key="garden_detail_tip" data-tooltip="Fills unmapped gardens and yards with lawns, paving, hedges, beds, sheds and pools measured by the laser and the photos. Mapped features always win.">?</span>
-                        </span>
-                        <span class="setting-desc" data-localize="garden_detail_desc">Lawns, hedges and sheds measured by laser scans.</span>
-                      </span>
-                    </label>
-                    <div class="settings-control">
-                      <input type="checkbox" class="switch" id="garden-detail-toggle" name="garden-detail-toggle" checked>
-                    </div>
-                  </div>
-
-                  <div class="settings-row setting-tile is-wide setting-sub" id="measured-trees-row" style="display: none;">
-                    <label for="measured-trees-toggle" class="setting-label">
-                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tree"></use></svg>
-                      <span class="setting-text">
-                        <span class="setting-heading">
-                          <span data-localize="measured_trees">Measured Trees</span>
-                          <span class="tooltip-icon" data-tooltip-key="measured_trees_tip" data-tooltip="Places trees where the laser saw them, at their measured height, instead of the global canopy map. Mapped trees take the measured height too.">?</span>
-                        </span>
-                        <span class="setting-desc" data-localize="measured_trees_desc">Trees where the laser saw them, at their height.</span>
-                      </span>
-                    </label>
-                    <div class="settings-control">
-                      <input type="checkbox" class="switch" id="measured-trees-toggle" name="measured-trees-toggle" checked>
-                    </div>
-                  </div>
-
-                  <div class="settings-row setting-tile is-wide setting-sub" id="measured-heights-row" style="display: none;">
-                    <label for="measured-heights-toggle" class="setting-label">
-                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-building"></use></svg>
-                      <span class="setting-text">
-                        <span class="setting-heading">
-                          <span data-localize="measured_heights">Measured Heights</span>
-                          <span class="tooltip-icon" data-tooltip-key="measured_heights_tip" data-tooltip="Gives buildings that OpenStreetMap leaves without height or levels the height the laser measured, and flat roofs where it saw them.">?</span>
-                        </span>
-                        <span class="setting-desc" data-localize="measured_heights_desc">Real heights for buildings without a height tag.</span>
-                      </span>
-                    </label>
-                    <div class="settings-control">
-                      <input type="checkbox" class="switch" id="measured-heights-toggle" name="measured-heights-toggle" checked>
-                    </div>
-                  </div>
-
-                  <div class="settings-row setting-tile is-wide setting-sub" id="lidar-limit-row" style="display: none;">
-                    <label class="setting-label">
-                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-download"></use></svg>
-                      <span class="setting-text">
-                        <span class="setting-heading">
-                          <span data-localize="lidar_limit">Download Limit</span>
-                          <span class="tooltip-icon" data-tooltip-key="lidar_limit_tip" data-tooltip="Most a run downloads for laser data. Cached scans do not count. Past it the run goes on without them. A square kilometre is about 100 MB.">?</span>
-                        </span>
-                        <span class="setting-desc" data-localize="lidar_limit_desc">Most a run downloads for laser data.</span>
-                      </span>
-                    </label>
-                    <div class="settings-control">
-                      <div class="segmented-control" id="lidar-limit-group">
-                        <button type="button" class="segment" data-lidar-limit="250">250 MB</button>
-                        <button type="button" class="segment active" data-default data-lidar-limit="500">500 MB</button>
-                        <button type="button" class="segment" data-lidar-limit="1000">1 GB</button>
-                        <button type="button" class="segment" data-lidar-limit="2000">2 GB</button>
-                        <button type="button" class="segment" data-lidar-limit="5000">5 GB</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
             <section class="settings-section" id="settings-section-gameplay">
               <header class="settings-section-head">
                 <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-gamepad"></use></svg></span>
@@ -1364,6 +1254,96 @@
                   </label>
                   <div class="settings-control">
                     <input type="checkbox" class="switch" id="enable-hytale-toggle" name="enable-hytale-toggle">
+                  </div>
+                </div>
+
+                <!-- Laser Data and the features it feeds, as one block: they show while it is on -->
+                <div class="setting-stack is-wide" id="lidar-stack">
+                  <div class="settings-row setting-tile is-wide">
+                    <label for="lidar-toggle" class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading">
+                          <span data-localize="lidar">Laser Data</span>
+                          <span class="tooltip-icon" data-tooltip-key="lidar_tip" data-tooltip="Reads open laser scans and aerial photos for detail OpenStreetMap lacks, where a region publishes them. Not used for One World or areas over 16 km². Covers Bavaria, North Rhine-Westphalia, France, the Netherlands, Luxembourg, Estonia and parts of Switzerland. Experimental.">?</span>
+                          <img class="new-badge" src="images/new-badge.png" alt="New" data-localize-alt="new_badge" data-new="lidar" data-new-when="#lidar-toggle:checked">
+                        </span>
+                        <span class="setting-desc" data-localize="lidar_desc">Measured detail where a region publishes its scans. Experimental.</span>
+                      </span>
+                    </label>
+                    <div class="settings-control">
+                      <input type="checkbox" class="switch" id="lidar-toggle" name="lidar-toggle">
+                    </div>
+                  </div>
+
+                  <div class="settings-row setting-tile is-wide setting-sub" id="garden-detail-row" style="display: none;">
+                    <label for="garden-detail-toggle" class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-trees"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading">
+                          <span data-localize="garden_detail">Garden Detail</span>
+                          <span class="tooltip-icon" data-tooltip-key="garden_detail_tip" data-tooltip="Fills unmapped gardens and yards with lawns, paving, hedges, beds, sheds and pools measured by the laser and the photos. Mapped features always win.">?</span>
+                        </span>
+                        <span class="setting-desc" data-localize="garden_detail_desc">Lawns, hedges and sheds measured by laser scans.</span>
+                      </span>
+                    </label>
+                    <div class="settings-control">
+                      <input type="checkbox" class="switch" id="garden-detail-toggle" name="garden-detail-toggle" checked>
+                    </div>
+                  </div>
+
+                  <div class="settings-row setting-tile is-wide setting-sub" id="measured-trees-row" style="display: none;">
+                    <label for="measured-trees-toggle" class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-tree"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading">
+                          <span data-localize="measured_trees">Measured Trees</span>
+                          <span class="tooltip-icon" data-tooltip-key="measured_trees_tip" data-tooltip="Places trees where the laser saw them, at their measured height, instead of the global canopy map. Mapped trees take the measured height too.">?</span>
+                        </span>
+                        <span class="setting-desc" data-localize="measured_trees_desc">Trees where the laser saw them, at their height.</span>
+                      </span>
+                    </label>
+                    <div class="settings-control">
+                      <input type="checkbox" class="switch" id="measured-trees-toggle" name="measured-trees-toggle" checked>
+                    </div>
+                  </div>
+
+                  <div class="settings-row setting-tile is-wide setting-sub" id="measured-heights-row" style="display: none;">
+                    <label for="measured-heights-toggle" class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-building"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading">
+                          <span data-localize="measured_heights">Measured Heights</span>
+                          <span class="tooltip-icon" data-tooltip-key="measured_heights_tip" data-tooltip="Gives buildings that OpenStreetMap leaves without height or levels the height the laser measured, and flat roofs where it saw them.">?</span>
+                        </span>
+                        <span class="setting-desc" data-localize="measured_heights_desc">Real heights for buildings without a height tag.</span>
+                      </span>
+                    </label>
+                    <div class="settings-control">
+                      <input type="checkbox" class="switch" id="measured-heights-toggle" name="measured-heights-toggle" checked>
+                    </div>
+                  </div>
+
+                  <div class="settings-row setting-tile is-wide setting-sub" id="lidar-limit-row" style="display: none;">
+                    <label class="setting-label">
+                      <svg class="icon setting-icon" aria-hidden="true"><use href="#i-download"></use></svg>
+                      <span class="setting-text">
+                        <span class="setting-heading">
+                          <span data-localize="lidar_limit">Download Limit</span>
+                          <span class="tooltip-icon" data-tooltip-key="lidar_limit_tip" data-tooltip="Most a run downloads for laser data. Cached scans do not count. Past it the run goes on without them. A square kilometre is about 100 MB.">?</span>
+                        </span>
+                        <span class="setting-desc" data-localize="lidar_limit_desc">Most a run downloads for laser data.</span>
+                      </span>
+                    </label>
+                    <div class="settings-control">
+                      <div class="segmented-control" id="lidar-limit-group">
+                        <button type="button" class="segment" data-lidar-limit="250">250 MB</button>
+                        <button type="button" class="segment active" data-default data-lidar-limit="500">500 MB</button>
+                        <button type="button" class="segment" data-lidar-limit="1000">1 GB</button>
+                        <button type="button" class="segment" data-lidar-limit="2000">2 GB</button>
+                        <button type="button" class="segment" data-lidar-limit="5000">5 GB</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

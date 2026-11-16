@@ -154,8 +154,10 @@ impl LaserTile {
         }
         let layer = |i: usize| raw[base + i * CELLS..base + (i + 1) * CELLS].to_vec();
         let i_gnd = raw[base + 7 * CELLS..]
-            .chunks_exact(2)
-            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&b| u16::from_le_bytes(b))
             .collect();
         Some(LaserTile {
             n_all: layer(0),
@@ -617,10 +619,10 @@ impl<'a> Measure<'a> {
 
         // Ground intensity medians.
         let i_by_cell = group_by_cell(&self.ground, &n_gnd, |&(_, i)| f32::from(i));
-        for c in 0..CELLS {
+        for (c, slot) in t.i_gnd.iter_mut().enumerate() {
             let vals = i_by_cell.cell(c);
             if !vals.is_empty() {
-                t.i_gnd[c] = quantile(vals, 0.5).round() as u16;
+                *slot = quantile(vals, 0.5).round() as u16;
             }
         }
 
