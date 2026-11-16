@@ -1,3 +1,4 @@
+use super::provider::SourcePixels;
 use crate::land_cover::{LandCoverData, LC_BUILT_UP, LC_WATER};
 use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
@@ -220,12 +221,17 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>], m_per_cell: f64) {
 /// pull-down reaches into built-up shorelines. This counteracts the DSM
 /// building-height bias at the waterfront that a Gaussian alone would turn
 /// into a visible "rising ramp" between water and the city interior.
+///
+/// `source` is the source resolution behind each cell, where the provider knows it. Both
+/// the Gaussian and the pull fade out over a fine source (see `CoarseShare`).
+#[allow(clippy::too_many_arguments)]
 pub fn apply_land_cover_repair(
     heights: &mut [Vec<f64>],
     land_cover: &mut LandCoverData,
     built_up_sigma_cells: f64,
     coastal_pull_distance_cells: u32,
     m_per_cell: f64,
+    source: Option<&SourcePixels>,
     report: &dyn Fn(f64),
 ) {
     let grid_h = heights.len();
@@ -275,6 +281,14 @@ pub fn apply_land_cover_repair(
         land_cover.invalidate_water_blend_grid();
     }
 
+    let coarse = CoarseShare::of(source, grid_w, grid_h, built_up_sigma_cells);
+    if matches!(coarse, CoarseShare::Nowhere) {
+        eprintln!(
+            "Land cover repair: LiDAR terrain throughout, keeping its banks and steps unsmoothed"
+        );
+        return;
+    }
+
     // Smooth before pull; otherwise the Gaussian raises pulled cells back up.
     // The Gaussian dominates this step's cost, so it drives the reported progress.
     smooth_built_up_gaussian(
@@ -282,10 +296,81 @@ pub fn apply_land_cover_repair(
         &land_cover.grid,
         &is_water_surface,
         built_up_sigma_cells,
+        &coarse,
         report,
     );
     if coastal_pull_distance_cells > 0 {
-        pull_coastal_land_toward_water(heights, &is_water_surface, coastal_pull_distance_cells);
+        pull_coastal_land_toward_water(
+            heights,
+            &is_water_surface,
+            coastal_pull_distance_cells,
+            &coarse,
+        );
+    }
+}
+
+/// Source pixels up to this size come from laser-scanned terrain models: Mapterhorn serves
+/// tiles past z12 only where a national LiDAR survey covers the ground, and GLO-30 is never
+/// finer than about 10 m a pixel.
+const FINE_SOURCE_M: f32 = 5.0;
+
+/// How much of the repairs for coarse elevation each cell takes. The built-up Gaussian
+/// and the coastal pull were made for 30 m surface models, whose banks blur into the water
+/// and whose cities carry their buildings. A LiDAR terrain model has neither fault, and the
+/// repairs would only take out what it got right: quay walls 2-3 m above a river and steps
+/// in the town of a metre or so.
+enum CoarseShare {
+    /// Every cell coarse, or the source unknown: the repairs run as they always have.
+    Everywhere,
+    /// Every cell fine: no repair runs.
+    Nowhere,
+    /// 1 over coarse source, 0 over fine, feathered between so a coverage edge shows no seam.
+    Partly(Vec<Vec<f32>>),
+}
+
+impl CoarseShare {
+    fn of(source: Option<&SourcePixels>, w: usize, h: usize, sigma_cells: f64) -> Self {
+        let Some(source) = source.filter(|s| s.height() == h) else {
+            return Self::Everywhere;
+        };
+        let fine_row = |gz: usize| -> Vec<u8> {
+            let runs = source.row(gz).runs();
+            let mut row = vec![0u8; w];
+            for (i, &(start, m)) in runs.iter().enumerate() {
+                let end = runs.get(i + 1).map_or(w, |&(s, _)| (s as usize).min(w));
+                if m <= FINE_SOURCE_M {
+                    row[(start as usize).min(w)..end].fill(1);
+                }
+            }
+            row
+        };
+        let fine: Vec<Vec<u8>> = (0..h).into_par_iter().map(fine_row).collect();
+        let count: usize = fine
+            .par_iter()
+            .map(|r| r.iter().filter(|&&c| c == 1).count())
+            .sum();
+        if count == 0 {
+            return Self::Everywhere;
+        }
+        if count == w * h {
+            return Self::Nowhere;
+        }
+        let sigma = sigma_cells.max(1.5);
+        let mut share = gaussian_blur_mask_to_f32_reported(&fine, 1, w, h, sigma, &|_| {});
+        share
+            .par_iter_mut()
+            .flatten()
+            .for_each(|v| *v = (1.0 - *v).clamp(0.0, 1.0));
+        Self::Partly(share)
+    }
+
+    #[inline]
+    fn at(&self, x: usize, y: usize) -> f64 {
+        match self {
+            Self::Everywhere => 1.0,
+            Self::Nowhere => 0.0,
+            Self::Partly(g) => f64::from(g[y][x]),
+        }
     }
 }
 
@@ -1943,6 +2028,7 @@ fn pull_coastal_land_toward_water(
     heights: &mut [Vec<f64>],
     is_water_surface: &[Vec<bool>],
     max_distance: u32,
+    coarse: &CoarseShare,
 ) {
     if max_distance == 0 {
         return;
@@ -2011,7 +2097,10 @@ fn pull_coastal_land_toward_water(
                 skipped_cliff += 1;
                 continue;
             }
-            let weight = ((max_distance - d) as f64 / denom).clamp(0.0, 1.0);
+            let weight = ((max_distance - d) as f64 / denom).clamp(0.0, 1.0) * coarse.at(x, y);
+            if weight <= 0.0 {
+                continue;
+            }
             heights[y][x] = orig * (1.0 - weight) + wl * weight;
             affected += 1;
         }
@@ -2048,6 +2137,7 @@ fn smooth_built_up_gaussian(
     lc_grid: &[Vec<u8>],
     is_water_surface: &[Vec<bool>],
     sigma_cells: f64,
+    coarse: &CoarseShare,
     report: &dyn Fn(f64),
 ) {
     const MIN_SIGMA: f64 = 1.5;
@@ -2096,7 +2186,7 @@ fn smooth_built_up_gaussian(
             if is_water_surface[y][x] {
                 continue;
             }
-            let m = (feathered_mask[y][x] as f64).clamp(0.0, 1.0);
+            let m = (feathered_mask[y][x] as f64).clamp(0.0, 1.0) * coarse.at(x, y);
             if m <= 1.0e-4 {
                 continue;
             }
@@ -3331,7 +3421,76 @@ mod mask_blur_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elevation::provider::SourceRow;
     use crate::land_cover::LC_GRASSLAND;
+
+    /// `n` x `n` grid of source pixels: `metres(x)` along every row.
+    fn source(n: usize, metres: impl Fn(usize) -> f32) -> SourcePixels {
+        SourcePixels::new(
+            (0..n)
+                .map(|_| {
+                    let mut row = SourceRow::default();
+                    (0..n).for_each(|x| row.push(x, metres(x)));
+                    row
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn the_coarse_repairs_fade_out_over_lidar() {
+        let n = 120;
+        assert!(matches!(
+            CoarseShare::of(None, n, n, 30.0),
+            CoarseShare::Everywhere
+        ));
+        let glo = source(n, |_| 19.0);
+        assert!(matches!(
+            CoarseShare::of(Some(&glo), n, n, 30.0),
+            CoarseShare::Everywhere
+        ));
+        let lidar = source(n, |_| 0.8);
+        assert!(matches!(
+            CoarseShare::of(Some(&lidar), n, n, 30.0),
+            CoarseShare::Nowhere
+        ));
+        // LiDAR on the west half, GLO-30 to the east: no repair deep in the west, the
+        // full one deep in the east, and a smooth change between with no step at the edge.
+        let mixed = source(n, |x| if x < 60 { 0.8 } else { 19.0 });
+        let share = CoarseShare::of(Some(&mixed), n, n, 8.0);
+        assert!(share.at(5, 60) < 0.01 && share.at(114, 60) > 0.99);
+        for x in 1..n {
+            assert!((share.at(x, 60) - share.at(x - 1, 60)).abs() < 0.1, "x={x}");
+        }
+    }
+
+    #[test]
+    fn a_quay_wall_over_lidar_is_not_pulled_down() {
+        // Water at 330 m on x < 40, a quay 3 m above it beyond.
+        let n = 100;
+        let fresh = || -> Vec<Vec<f64>> {
+            (0..n)
+                .map(|_| (0..n).map(|x| if x < 40 { 330.0 } else { 333.0 }).collect())
+                .collect()
+        };
+        let water: Vec<Vec<bool>> = (0..n).map(|_| (0..n).map(|x| x < 40).collect()).collect();
+        let mut coarse = fresh();
+        pull_coastal_land_toward_water(&mut coarse, &water, 25, &CoarseShare::Everywhere);
+        assert!(
+            coarse[50][41] < 331.0,
+            "a coarse bank is pulled: {}",
+            coarse[50][41]
+        );
+        let mut fine = fresh();
+        let lidar = source(n, |_| 0.8);
+        pull_coastal_land_toward_water(
+            &mut fine,
+            &water,
+            25,
+            &CoarseShare::of(Some(&lidar), n, n, 30.0),
+        );
+        assert_eq!(fine, fresh(), "LiDAR keeps its wall");
+    }
 
     /// 200x200 m grid at 1 m/cell: a hillside rising 0.6 m per metre along
     /// x (31 degrees) with land everywhere.
