@@ -245,11 +245,10 @@ fn rasterize_osm_water(
                         waterway_type,
                         &way.tags,
                     );
-                    let half_width = waterway_width / 2;
                     changed += rasterize_line(
                         grid,
                         &way.nodes,
-                        half_width,
+                        crate::element_processing::waterways::channel_reach(waterway_width),
                         heights,
                         context,
                         min_x,
@@ -585,7 +584,7 @@ fn point_in_sorted_ranges(x: f64, sorted: &[f64]) -> bool {
 fn rasterize_line(
     grid: &mut [Vec<u8>],
     nodes: &[ProcessedNode],
-    half_width: i32,
+    (before, after): (i32, i32),
     heights: &[Vec<f32>],
     context: Option<&WaterContext>,
     min_x_world: i32,
@@ -599,12 +598,12 @@ fn rasterize_line(
     write: bool,
     mut inland: Option<&mut InlandWater>,
 ) -> usize {
-    if nodes.len() < 2 || half_width < 0 {
+    if nodes.len() < 2 || before < 0 || after < 0 {
         return 0;
     }
     let width_i32 = width as i32;
     let height_i32 = height as i32;
-    let margin = half_width.max(0);
+    let margin = before.max(after);
     let mut count = 0;
     for pair in nodes.windows(2) {
         let (x1, z1) = (pair[0].x, pair[0].z);
@@ -622,8 +621,8 @@ fn rasterize_line(
             continue;
         }
         for (bx, _, bz) in bresenham_line(x1, 0, z1, x2, 0, z2) {
-            for dx in -half_width..=half_width {
-                for dz in -half_width..=half_width {
+            for dx in -before..=after {
+                for dz in -before..=after {
                     let wx = bx + dx;
                     let wz = bz + dz;
                     let rel_x = wx - min_x_world;

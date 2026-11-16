@@ -115,14 +115,23 @@ fn cross_section_is_a_u_that_deepens_with_width() {
 
 #[test]
 fn a_line_only_stream_is_shallow_at_its_edges() {
-    // An untagged stream draws 5 wide: one block of water at the edges, two in the middle.
-    let els = vec![way(1, &[("waterway", "stream")], &[(100, 20), (100, 180)])];
+    // A stream 5 wide: one block of water at the edges, two in the middle.
+    let els = vec![way(
+        1,
+        &[("waterway", "stream"), ("width", "5")],
+        &[(100, 20), (100, 180)],
+    )];
     let f = build(&els, 1.0, &no_lc, &no_legacy);
     let row: Vec<_> = (97..=103).map(|x| f.depth_override(x, 100)).collect();
     assert_eq!(
         row,
         [None, Some(0), Some(1), Some(1), Some(1), Some(0), None]
     );
+    // An untagged stream draws 2 wide and one block deep.
+    let els = vec![way(1, &[("waterway", "stream")], &[(100, 20), (100, 180)])];
+    let f = build(&els, 1.0, &no_lc, &no_legacy);
+    let row: Vec<_> = (97..=103).map(|x| f.depth_override(x, 100)).collect();
+    assert_eq!(row, [None, None, None, Some(0), Some(0), None, None]);
 }
 
 #[test]
@@ -363,8 +372,8 @@ fn a_width_cap_narrows_the_line_mask() {
     let line = vec![way(1, &[("waterway", "river")], &[(20, 100), (180, 100)])];
     let wide = build(&line, 0.25, &no_lc, &no_legacy).override_count();
     let capped = build_capped(&line, 0.25, Some(1), &no_lc, &no_legacy).override_count();
-    // Untagged river: 8 wide -> ribbon of 2 * (4 + 1) + 1 = 11; capped to 1 -> 3.
-    assert_eq!(wide / capped, 11 / 3, "{wide} vs {capped}");
+    // Untagged river: a ribbon 8 wide; capped to 1, one cell.
+    assert_eq!(wide / capped, 8, "{wide} vs {capped}");
 }
 
 #[test]

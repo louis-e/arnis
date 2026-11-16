@@ -62,6 +62,7 @@ pub fn generate_waterways(
             // the endpoints and clamp to the local surface so the sheet never floats.
             let last = bresenham_points.len().saturating_sub(1) as i64;
             let dy = i64::from(y1 - y0);
+            let mut prev: Option<(i32, i32)> = None;
             for (i, (bx, _, bz)) in bresenham_points.into_iter().enumerate() {
                 let ramped = if last > 0 {
                     let num = dy * i as i64;
@@ -74,8 +75,17 @@ pub fn generate_waterways(
                     bed.road_mask.contains(bx, bz)
                         && (!decks.deck_clears(bx, bz, seg_water_y) || decks.over_grade_way(bx, bz))
                 }) {
+                    prev = None;
                     continue;
                 }
+                // A one-block channel steps diagonally from cell to cell; the corner keeps
+                // its water joined side to side.
+                if waterway_width == 1 {
+                    if let Some((px, _)) = prev.filter(|&(px, pz)| px != bx && pz != bz) {
+                        create_water_channel(editor, px, bz, 1, seg_water_y, bed);
+                    }
+                }
+                prev = Some((bx, bz));
                 create_water_channel(editor, bx, bz, waterway_width, seg_water_y, bed);
             }
         }
@@ -124,11 +134,12 @@ pub fn get_waterway_width(waterway_type: &str) -> i32 {
     match waterway_type {
         "river" => 8,
         "canal" => 6,
-        "stream" => 3,
+        // A creek one can step across: village streams in Bavaria measure 1-2 m.
+        "stream" => 2,
         "fairway" => 12,
         "flowline" => 2,
         "brook" => 2,
-        "ditch" => 2,
+        "ditch" => 1,
         "drain" => 1,
         _ => 4,
     }
@@ -152,8 +163,12 @@ pub fn waterway_width(waterway_type: &str, tags: &HashMap<String, String>) -> i3
     }
 }
 
-/// `waterway_width` under the small-map cap: `cap` for rivers and canals, and the narrowest
-/// channel for streams and ditches, so the two still read apart.
+/// Widest a stream or ditch is drawn under the small-map cap, so it still reads apart from
+/// a river drawn at the cap.
+const SMALL_CHANNEL_CAP: i32 = 3;
+
+/// `waterway_width` under the small-map cap: `cap` for rivers and canals, and at most
+/// `SMALL_CHANNEL_CAP` for streams and ditches, so the two still read apart.
 pub fn capped_waterway_width(
     waterway_type: &str,
     tags: &HashMap<String, String>,
@@ -161,10 +176,20 @@ pub fn capped_waterway_width(
 ) -> i32 {
     let width = waterway_width(waterway_type, tags);
     match cap {
-        Some(cap) if get_waterway_width(waterway_type) <= 3 => width.min(cap).min(1),
+        Some(cap) if get_waterway_width(waterway_type) <= 3 => {
+            width.min(cap).min(SMALL_CHANNEL_CAP)
+        }
         Some(cap) => width.min(cap),
         None => width,
     }
+}
+
+/// Cells a channel `width` blocks wide covers before and after its centreline, across the
+/// axis it runs along: `width` cells in all, an even width's extra one on the far side.
+/// Every mask of a drawn channel stamps this, so they agree on its banks.
+pub fn channel_reach(width: i32) -> (i32, i32) {
+    let width = width.max(1);
+    ((width - 1) / 2, width / 2)
 }
 
 /// Creates a water channel at a target water level with the given width.
@@ -179,54 +204,41 @@ fn create_water_channel(
     bed: &ChannelBed,
 ) {
     const BANK_TOLERANCE: i32 = 2;
-    let half_width = width / 2;
+    let (before, after) = channel_reach(width);
 
-    for x in (center_x - half_width - 1)..=(center_x + half_width + 1) {
-        for z in (center_z - half_width - 1)..=(center_z + half_width + 1) {
-            let dx = (x - center_x).abs();
-            let dz = (z - center_z).abs();
-            let distance_from_center = dx.max(dz);
+    for x in (center_x - before)..=(center_x + after) {
+        for z in (center_z - before)..=(center_z + after) {
+            let ground_y = editor.get_ground_level(x, z);
+            // Only place water where terrain is at or below the water surface,
+            // but allow small elevation steps to avoid gaps on gentle slopes.
+            let water_y = if ground_y <= target_water_y {
+                Some(target_water_y)
+            } else if ground_y <= target_water_y + BANK_TOLERANCE
+                && !editor.block_exists_absolute(x, ground_y, z)
+            {
+                Some(ground_y)
+            } else {
+                None
+            };
 
-            if distance_from_center <= half_width + 1 {
-                let ground_y = editor.get_ground_level(x, z);
-                // Only place water where terrain is at or below the water surface,
-                // but allow small elevation steps to avoid gaps on gentle slopes.
-                let water_y = if ground_y <= target_water_y {
-                    Some(target_water_y)
-                } else if ground_y <= target_water_y + BANK_TOLERANCE
-                    && !editor.block_exists_absolute(x, ground_y, z)
+            if let Some(water_y) = water_y {
+                editor.set_block_absolute(WATER, x, water_y, z, None, None);
+                // A river's or missed canal's depth and bed, unless a road or bore owns it.
+                let missed = || !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
+                let under_deck =
+                    || bed.decks.deck_clears(x, z, water_y) && !bed.decks.over_grade_way(x, z);
+                if (bed.field.is_river(x, z) || missed())
+                    && (!bed.road_mask.contains(x, z) || under_deck())
+                    && !at_bore(bed.field, bed.tunnel_footprint, x, z)
+                    && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
                 {
-                    Some(ground_y)
-                } else {
-                    None
-                };
-
-                if let Some(water_y) = water_y {
-                    editor.set_block_absolute(WATER, x, water_y, z, None, None);
-                    // A river's or missed canal's depth and bed, unless a road or bore owns it.
-                    let missed = || !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
-                    let under_deck =
-                        || bed.decks.deck_clears(x, z, water_y) && !bed.decks.over_grade_way(x, z);
-                    if (bed.field.is_river(x, z) || missed())
-                        && (!bed.road_mask.contains(x, z) || under_deck())
-                        && !at_bore(bed.field, bed.tunnel_footprint, x, z)
-                        && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
-                    {
-                        let depth = bed.field.depth_at(x, z);
-                        carve_water_column(editor, x, z, water_y, depth, bed.road_mask, bed.field);
-                    }
-
-                    // Clear vegetation above the water, a sunflower's top half too.
-                    editor.set_block_absolute(AIR, x, water_y + 1, z, Some(PLOT_PLANTS), None);
-                    editor.set_block_absolute(
-                        AIR,
-                        x,
-                        water_y + 2,
-                        z,
-                        Some(&[SUNFLOWER_UPPER]),
-                        None,
-                    );
+                    let depth = bed.field.depth_at(x, z);
+                    carve_water_column(editor, x, z, water_y, depth, bed.road_mask, bed.field);
                 }
+
+                // Clear vegetation above the water, a sunflower's top half too.
+                editor.set_block_absolute(AIR, x, water_y + 1, z, Some(PLOT_PLANTS), None);
+                editor.set_block_absolute(AIR, x, water_y + 2, z, Some(&[SUNFLOWER_UPPER]), None);
             }
         }
     }
@@ -389,6 +401,60 @@ mod waterway_profile_tests {
             .insert("waterway".to_string(), "canal".to_string());
         generate_waterways(&mut editor, &canal, None, &no_bed());
         assert_eq!(water_ys(&editor, CENTER_X, 30), vec![6, 7, 8]);
+    }
+
+    fn wet_columns_in_row(editor: &WorldEditor, z: i32) -> Vec<i32> {
+        (0..SIDE as i32)
+            .filter(|&x| !water_ys(editor, x, z).is_empty())
+            .collect()
+    }
+
+    /// A channel is as wide as its tag or its type's default, not two blocks more.
+    #[test]
+    fn a_channel_draws_exactly_its_width() {
+        let bbox = world_bbox();
+        for (kind, width, want) in [
+            ("stream", None, vec![32, 33]),
+            ("stream", Some("5"), vec![30, 31, 32, 33, 34]),
+            ("ditch", None, vec![32]),
+            ("river", None, (29..=36).collect()),
+        ] {
+            let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
+            let mut way = stream(FIRST_Z, LAST_Z);
+            way.tags.insert("waterway".to_string(), kind.to_string());
+            if let Some(w) = width {
+                way.tags.insert("width".to_string(), w.to_string());
+            }
+            generate_waterways(&mut editor, &way, None, &no_bed());
+            assert_eq!(wet_columns_in_row(&editor, 30), want, "{kind} {width:?}");
+        }
+    }
+
+    /// A one-block ditch running diagonally stays joined side to side.
+    #[test]
+    fn a_diagonal_ditch_stays_joined() {
+        let bbox = world_bbox();
+        let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
+        let mut way = stream(10, 40);
+        way.tags.insert("waterway".to_string(), "ditch".to_string());
+        way.nodes[0].x = 10;
+        way.nodes[1].x = 40;
+        generate_waterways(&mut editor, &way, None, &no_bed());
+        let wet = |x: i32, z: i32| !water_ys(&editor, x, z).is_empty();
+        for i in 10..40 {
+            assert!(wet(i, i), "gap at {i}");
+            assert!(
+                wet(i, i + 1) || wet(i + 1, i),
+                "only a corner joins {i} and {}",
+                i + 1
+            );
+        }
+        // Two cells per step along the diagonal, no more.
+        let total = (0..SIDE as i32)
+            .flat_map(|x| (0..SIDE as i32).map(move |z| (x, z)))
+            .filter(|&(x, z)| wet(x, z))
+            .count();
+        assert_eq!(total, 31 + 30);
     }
 
     #[test]
