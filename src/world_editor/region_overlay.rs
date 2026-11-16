@@ -740,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_feature_region_preserves_terrain_and_overlays_blocks() {
+    fn sparse_feature_region_preserves_terrain_and_overlays_building_blocks() {
         let temp = tempfile::tempdir().unwrap();
         let terrain_path = temp.path().join("terrain.mca");
         let features_path = temp.path().join("features.mca");
@@ -777,8 +777,8 @@ mod tests {
                 4,
                 vec![
                     palette_item("air"),
-                    palette_item("smooth_stone"),
-                    palette_item("white_concrete"),
+                    palette_item("bricks"),
+                    palette_item("glass_pane"),
                 ],
                 &feature_blocks,
             )],
@@ -796,11 +796,8 @@ mod tests {
         let bytes = region.read_chunk(0, 0).unwrap().unwrap();
         let merged: Chunk = fastnbt::from_bytes(&bytes).unwrap();
         let merged_section = &merged.sections[0];
-        assert_eq!(state_at(merged_section, 8, 1, 8), "minecraft:smooth_stone");
-        assert_eq!(
-            state_at(merged_section, 9, 1, 8),
-            "minecraft:white_concrete"
-        );
+        assert_eq!(state_at(merged_section, 8, 1, 8), "minecraft:bricks");
+        assert_eq!(state_at(merged_section, 9, 1, 8), "minecraft:glass_pane");
         assert_eq!(state_at(merged_section, 0, 0, 0), "minecraft:grass_block");
         assert_eq!(state_at(merged_section, 9, 0, 9), "minecraft:grass_block");
         let Some(Value::Compound(heightmaps)) = merged.other.get("Heightmaps") else {

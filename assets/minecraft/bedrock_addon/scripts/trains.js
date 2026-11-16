@@ -2,7 +2,7 @@
 // train is where its timetable says it is now, so it keeps no state of its own, and its
 // carriages are set down behind the front. Distances are thousandths of a block.
 import { world } from "@minecraft/server";
-import { distance, mod, number, numbers, warn } from "./util.js";
+import { distance, lowered, mod, number, numbers, raised, warn } from "./util.js";
 
 const FAMILY = "arnis_train";
 const RAD = Math.PI / 180;
@@ -32,7 +32,22 @@ function decodeRoute(raw) {
     z[i] = az / 100;
     h[i] = ah / 10;
   }
-  return { n, x, y, z, h, loop: raw.loop };
+  const route = { n, x, y, z, h, loop: raw.loop };
+  if (raw.air) {
+    // An airfield: how steeply the path climbs on from each point, how far the nose is up
+    // there, both in degrees, and whether the wheels are down.
+    const a = numbers(raw.air);
+    route.air = true;
+    route.q = new Float64Array(n);
+    route.nose = new Int16Array(n);
+    route.gear = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      route.q[i] = a[3 * i] / 10;
+      route.nose[i] = a[3 * i + 1];
+      route.gear[i] = a[3 * i + 2];
+    }
+  }
+  return route;
 }
 
 /** A timetable from its first value and (step, repeats) pairs. */
@@ -77,6 +92,7 @@ export class Trains {
       this.budget -= this.raw[r].p.length;
       this.routes[r] = decodeRoute(this.raw[r]);
       delete this.raw[r].p;
+      delete this.raw[r].air;
     }
     if (!this.timetables[t]) {
       this.budget -= service.steps.length;
@@ -148,24 +164,45 @@ export class Trains {
     const p = this.point(route, i);
     if (!this.dim.isChunkLoaded(p)) return;
     const yaw = route.h[i];
-    const next = i + 1 < route.n ? i + 1 : route.loop ? 0 : i;
-    const at = {
-      x: p.x - Math.sin(yaw * RAD) * f,
-      y: p.y + (route.y[next] - p.y) * f,
-      z: p.z + Math.cos(yaw * RAD) * f,
-    };
+    let at;
+    if (route.air) {
+      // An airfield's points are pieces of path end to end: on from one the way it says,
+      // not towards the next.
+      const climb = route.q[i] * RAD;
+      const flat = Math.cos(climb) * f;
+      at = {
+        x: p.x - Math.sin(yaw * RAD) * flat,
+        y: p.y + Math.sin(climb) * f,
+        z: p.z + Math.cos(yaw * RAD) * flat,
+      };
+    } else {
+      const next = i + 1 < route.n ? i + 1 : route.loop ? 0 : i;
+      at = {
+        x: p.x - Math.sin(yaw * RAD) * f,
+        y: p.y + (route.y[next] - p.y) * f,
+        z: p.z + Math.cos(yaw * RAD) * f,
+      };
+    }
     if (!this.dim.isChunkLoaded(at)) return;
     let e = this.carriages.get(c);
     if (!e?.isValid) e = this.find(c, at);
     if (e) {
-      this.glide.move(e, e.location, at, yaw);
+      this.glide.move(e, lowered(e.location), at, yaw);
     } else {
       // Not there yet: it has just come into view, or into the area.
-      e = this.dim.spawnEntity(`arnis:${this.bodies[body]}`, at, { initialRotation: yaw });
+      e = this.dim.spawnEntity(`arnis:${this.bodies[body]}`, raised(at), { initialRotation: yaw });
       e.setDynamicProperty("arnis:c", c);
     }
+    if (route.air) this.fly(e, route.nose[i], route.gear[i] === 1);
     this.carriages.set(c, e);
     this.seen.set(c, this.now);
+  }
+
+  /** An aircraft's nose as far up as its point says, in tenths of a degree, and its wheels. */
+  fly(e, nose, gear) {
+    const pitch = Math.max(-450, Math.min(450, nose));
+    if (e.getProperty("arnis:pitch") !== pitch) e.setProperty("arnis:pitch", pitch);
+    if (e.getProperty("arnis:gear") !== gear) e.setProperty("arnis:gear", gear);
   }
 
   find(c, at) {

@@ -146,7 +146,10 @@ pub fn generate_barriers(
             .zip(&trace.dirs)
             .zip(deck)
             .map(|((&(x, z), &dir), on_deck)| {
-                if on_deck {
+                // The bridge brings its own railing and keeps its deck clear.
+                if on_deck && bridge_surface.keeps_clear(x, z) {
+                    Spot::RoadGap
+                } else if on_deck {
                     Spot::Post(x, z)
                 } else {
                     clearance.place(x, z, dir, style.crosses_roads, building_footprints)
@@ -890,7 +893,12 @@ mod tests {
             &outlines,
             1.0,
         );
-        let surface = BridgeSurfaceMap::build(elements, &structures, 1.0);
+        let surface = BridgeSurfaceMap::build(elements, &structures, 1.0).with_parts(
+            elements,
+            &structures,
+            &editor,
+            1.0,
+        );
         let roads = Arc::new(collect_road_surface_coords(
             elements,
             &editor,
@@ -970,9 +978,9 @@ mod tests {
         let deck_y = member.y_at(30);
         assert!(deck_y >= 4, "the span is raised");
 
-        // Along the deck: on the deck.
+        // Along the deck: left to the bridge, which keeps its deck clear.
         generate_barriers(&mut editor, &along, &surface, &clearance, &buildings);
-        assert!(editor.block_exists_absolute(40, deck_y + 1, 40));
+        assert!(!editor.block_exists_absolute(40, deck_y + 1, 40));
         assert!(!editor.block_exists_absolute(40, 1, 40));
         // Passing underneath: on the ground, not cut open for the road above.
         generate_barriers(&mut editor, &under, &surface, &clearance, &buildings);
@@ -980,6 +988,84 @@ mod tests {
         // Off the deck edge mid-span: not hanging beside it.
         generate_barriers(&mut editor, &beside, &surface, &clearance, &buildings);
         assert!(!editor.block_exists_absolute(40, deck_y + 1, 44));
+    }
+
+    #[test]
+    fn a_barrier_across_a_low_deck_leaves_its_road_open() {
+        let r = reach("residential");
+        let bridge = ProcessedElement::Way(way(
+            1,
+            &[("highway", "residential"), ("bridge", "yes")],
+            &[(10, 40), (70, 40)],
+        ));
+        let elements = [bridge, fence(2, &[(40, 10), (40, 70)])];
+        render(100.0, &elements, |editor, _| {
+            for z in 40 - r..=40 + r {
+                assert!(!post(editor, 40, z), "open at z={z}");
+            }
+            assert!(post(editor, 40, 20) && post(editor, 40, 60));
+        });
+    }
+
+    #[test]
+    fn a_wall_mapped_along_a_bridge_leaves_it_its_own_railing() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let edge = 40 + reach("residential") + 1;
+        let elements = vec![
+            ProcessedElement::Way(way(
+                1,
+                &[
+                    ("highway", "residential"),
+                    ("bridge", "yes"),
+                    ("layer", "1"),
+                ],
+                &[(10, 40), (70, 40)],
+            )),
+            ProcessedElement::Way(way(2, &[("barrier", "wall")], &[(12, edge), (68, edge)])),
+        ];
+        let outlines = BridgeOutlineIndex::build(&elements);
+        let structures = BridgeStructureMap::build(
+            &elements,
+            &editor,
+            &build_highway_connectivity_map(&elements),
+            &outlines,
+            1.0,
+        );
+        let surface = BridgeSurfaceMap::build(&elements, &structures, 1.0).with_parts(
+            &elements,
+            &structures,
+            &editor,
+            1.0,
+        );
+        let member = structures.lookup_member(1).unwrap();
+        let design = structures.structure_of(member).design;
+        crate::element_processing::bridge_decks::render(
+            &mut editor,
+            design,
+            surface.parts_of(1).unwrap(),
+        );
+        let deck_y = member.y_at(30);
+        let railing = editor.get_block_absolute(40, deck_y + 1, edge);
+        assert!(
+            railing.is_some(),
+            "the bridge stands its railing on the edge"
+        );
+        let roads = Arc::new(collect_road_surface_coords(
+            &elements,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+        ));
+        let clearance = RoadClearance::build(&elements, &editor, 1.0, roads);
+        let buildings = CoordinateBitmap::new_empty();
+        generate_barriers(&mut editor, &elements[1], &surface, &clearance, &buildings);
+        assert_eq!(editor.get_block_absolute(40, deck_y + 1, edge), railing);
+        assert!(
+            !editor.block_exists_absolute(40, deck_y + 2, edge),
+            "nothing stacks on the railing"
+        );
     }
 
     #[test]

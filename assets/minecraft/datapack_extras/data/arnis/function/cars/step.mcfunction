@@ -17,10 +17,11 @@ function arnis:cars/look
 execute if score #ahead arnis.car matches 2 run scoreboard players operation #t arnis.car < #q25 arnis.car
 execute if score #ahead arnis.car matches 1 run scoreboard players operation #t arnis.car < #q50 arnis.car
 # Crossing a junction, a car close ahead is a conflict to give way to for a while; on a
-# lane it is a queue to wait in.
+# lane it is a queue to wait in, and so is one waiting at a red line past the junction.
 execute if score #ahead arnis.car matches 3 unless data entity @s data.j run scoreboard players set #t arnis.car 0
-execute if score #ahead arnis.car matches 3 if data entity @s data.j run scoreboard players set #jam arnis.car 1
+execute if score #ahead arnis.car matches 3 if data entity @s data.j run function arnis:cars/conflict
 function arnis:cars/clear
+execute if entity @s[tag=arnis.car.gate] if score #t arnis.car matches 1.. run function arnis:cars/gate
 # Gentle on the throttle, firm on the brake.
 execute store result score #c arnis.car run data get entity @s data.c
 scoreboard players operation #was arnis.car = #c arnis.car
@@ -28,6 +29,8 @@ scoreboard players operation #c arnis.car += #accel arnis
 scoreboard players operation #c arnis.car < #t arnis.car
 execute store result entity @s data.c int 1 run scoreboard players get #c arnis.car
 execute store result entity @s data.w int 1 run scoreboard players get #w arnis.car
+# Off across the junction: the room past it was checked.
+execute if score #c arnis.car matches 1.. run tag @s remove arnis.car.gate
 # Standing for a minute with no red light to blame is stuck: it leaves and another car comes.
 execute store result score #q arnis.car run data get entity @s data.q
 execute if score #c arnis.car matches 1.. run scoreboard players set #q arnis.car 0
@@ -44,9 +47,12 @@ execute if score #c arnis.car matches 1.. run tag @s remove arnis.car.still
 execute if score #c arnis.car matches ..0 if entity @s[tag=arnis.car.ridden] run function arnis:cars/seat_check
 execute if score #c arnis.car matches ..0 run return 0
 execute store result entity @s data.d double 0.001 run scoreboard players get #c arnis.car
-execute as @e[tag=arnis.car.part,distance=..0.1] if score @s arnis.car = #id arnis.car run tag @s add arnis.car.go
+# The seat is moved on its own after, from where the car stands then.
+execute as @e[tag=arnis.car.part,tag=!arnis.car.seat,distance=..1.1] if score @s arnis.car = #id arnis.car run tag @s add arnis.car.go
 function arnis:cars/move with entity @s data
-# Still where the move began, so only this car's parts are searched, not every one.
-tp @e[tag=arnis.car.go,distance=..0.1] @s
-execute at @s run tag @e[tag=arnis.car.go,distance=..0.1] remove arnis.car.go
+# Still where the move began, so only this car's parts are searched, not every one. The
+# model stands a block up, lit by the air rather than the road it cuts into on a slope.
+tp @e[tag=arnis.car.go,distance=..1.1] @s
+execute at @s run tp @e[tag=arnis.car.go,tag=arnis.car.lift,distance=..0.1] ~ ~1 ~
+execute at @s run tag @e[tag=arnis.car.go,distance=..1.1] remove arnis.car.go
 execute if entity @s[tag=arnis.car.ridden] at @s run function arnis:cars/seat_move with entity @s data

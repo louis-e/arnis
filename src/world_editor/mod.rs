@@ -242,6 +242,9 @@ pub struct WorldEditor<'a> {
     /// Columns owned by a man-made ground cover (roads, paths, pitches, courts,
     /// parking); vegetation stays off them. Shared via Arc with the tile editors.
     sealed_surface: Option<Arc<crate::floodfill_cache::SealedSurfaceBitmap>>,
+    /// The vehicular part of the roads, where trees keep their trunks out and leave
+    /// more headroom than over a footway. Shared via Arc with the tile editors.
+    carriageway: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     /// Where `man_made=crane` stands, shared via Arc with the tile editors.
@@ -272,6 +275,8 @@ pub struct WorldEditor<'a> {
     hedge_columns: FnvHashSet<(i32, i32)>,
     /// Street lamp columns, checked for water once the fill is done.
     lamp_columns: Vec<(i32, i32)>,
+    /// Benches and bins as their cells, checked for water once the fill is done.
+    furniture: Vec<Vec<(i32, i32, i32)>>,
     /// The block each way's rails lie in, by way and column, shared with the tile editors
     /// so the trains can ride them; None when there are no trains.
     rail_heights: Option<RailHeights>,
@@ -338,8 +343,12 @@ pub struct WorldEditor<'a> {
     signage: Option<Arc<crate::element_processing::signage::SignageContext>>,
     /// Signal heads to build as cycling display entities instead of the banner heads.
     traffic_signals: Option<Arc<crate::element_processing::traffic_lights::SignalIndex>>,
+    /// Level crossings to build masts and booms at, which the data pack closes for trains.
+    crossings: Option<Arc<crate::element_processing::level_crossings::CrossingPlan>>,
     /// Lanes and cars, placed as their roads are built.
     car_network: Option<Arc<crate::element_processing::cars::CarNetwork>>,
+    /// Parked cars are the moving cars' models rather than block cars.
+    parked_car_models: bool,
     /// Strict (non-halo) bounds of a tile editor: min_x, min_z, max_x, max_z inclusive.
     /// None for the main editor, which owns everything.
     strict_bounds: Option<(i32, i32, i32, i32)>,
@@ -368,6 +377,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            carriageway: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -380,6 +390,7 @@ impl<'a> WorldEditor<'a> {
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
+            furniture: Vec::new(),
             rail_heights: None,
             water_probe: None,
             walk_probe: None,
@@ -413,7 +424,9 @@ impl<'a> WorldEditor<'a> {
             map_decals: false,
             signage: None,
             traffic_signals: None,
+            crossings: None,
             car_network: None,
+            parked_car_models: false,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
@@ -442,6 +455,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            carriageway: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -454,6 +468,7 @@ impl<'a> WorldEditor<'a> {
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
+            furniture: Vec::new(),
             rail_heights: None,
             water_probe: None,
             walk_probe: None,
@@ -487,7 +502,9 @@ impl<'a> WorldEditor<'a> {
             map_decals: false,
             signage: None,
             traffic_signals: None,
+            crossings: None,
             car_network: None,
+            parked_car_models: false,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
@@ -516,6 +533,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             tree_pack: None,
             sealed_surface: None,
+            carriageway: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -528,6 +546,7 @@ impl<'a> WorldEditor<'a> {
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
             lamp_columns: Vec::new(),
+            furniture: Vec::new(),
             rail_heights: None,
             water_probe: None,
             walk_probe: None,
@@ -561,7 +580,9 @@ impl<'a> WorldEditor<'a> {
             map_decals: false,
             signage: None,
             traffic_signals: None,
+            crossings: None,
             car_network: None,
+            parked_car_models: false,
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
@@ -668,10 +689,16 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface = Some(mask);
     }
 
-    /// Drops the sealed-surface mask and the mapped trunks once every vegetation
-    /// pass is done, so neither is carried into the save phase.
+    /// Sets the carriageway mask (shared across the main and tile editors).
+    pub fn set_carriageway(&mut self, mask: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.carriageway = Some(mask);
+    }
+
+    /// Drops the sealed-surface and carriageway masks and the mapped trunks once
+    /// every vegetation pass is done, so none is carried into the save phase.
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
+        self.carriageway = None;
         self.mapped_trunks = None;
     }
 
@@ -812,6 +839,18 @@ impl<'a> WorldEditor<'a> {
             .is_some_and(|m| m.contains(x, z))
     }
 
+    /// True if a road for vehicles runs over this column (footways, paths and tracks
+    /// are not counted).
+    #[inline]
+    pub fn on_carriageway(&self, x: i32, z: i32) -> bool {
+        self.carriageway.as_ref().is_some_and(|m| m.contains(x, z))
+    }
+
+    /// The carriageway mask, while vegetation and signs are placed.
+    pub fn carriageway(&self) -> Option<&crate::floodfill_cache::CoordinateBitmap> {
+        self.carriageway.as_deref()
+    }
+
     /// ESA land-cover class at (x, z), or 0 where there is no land cover.
     #[inline]
     pub fn cover_class(&self, x: i32, z: i32) -> u8 {
@@ -851,6 +890,15 @@ impl<'a> WorldEditor<'a> {
                 z - self.ground_origin_z,
             )) == crate::land_cover::LC_WATER
         })
+    }
+
+    /// Land-cover water, or a lake, river or canal OSM maps where the land cover missed it.
+    pub fn is_mapped_water(&self, x: i32, z: i32) -> bool {
+        self.is_lc_water(x, z)
+            || self
+                .ground
+                .as_ref()
+                .is_some_and(|g| g.inland_water_mapped(self.ground_point(x, z)))
     }
 
     /// Whether land cover backs a speculative tree at (x, z), one no tag claims.
@@ -958,11 +1006,6 @@ impl<'a> WorldEditor<'a> {
         self.place_schematics = enabled;
     }
 
-    /// True if bundled schematic props should be placed (see `set_place_schematics`).
-    pub fn place_schematics(&self) -> bool {
-        self.place_schematics
-    }
-
     pub fn set_game_settings(
         &mut self,
         mode: crate::args::GameMode,
@@ -997,6 +1040,11 @@ impl<'a> WorldEditor<'a> {
     /// Attach the signage context (decal registry, styles, intersections).
     pub fn set_signage(&mut self, ctx: Arc<crate::element_processing::signage::SignageContext>) {
         self.signage = Some(ctx);
+    }
+
+    /// Whether a tree already stands in the slot at (x, z).
+    pub fn tree_slot_taken(&self, x: i32, z: i32) -> bool {
+        self.tree_slots.contains(&(x, z))
     }
 
     /// Claims the trunk slot (x, z); false when a tree already stands in it.
@@ -1051,12 +1099,35 @@ impl<'a> WorldEditor<'a> {
         self.traffic_signals.clone()
     }
 
+    pub fn set_crossings(
+        &mut self,
+        plan: Arc<crate::element_processing::level_crossings::CrossingPlan>,
+    ) {
+        self.crossings = Some(plan);
+    }
+
+    pub fn crossings(
+        &self,
+    ) -> Option<Arc<crate::element_processing::level_crossings::CrossingPlan>> {
+        self.crossings.clone()
+    }
+
     pub fn set_car_network(&mut self, net: Arc<crate::element_processing::cars::CarNetwork>) {
         self.car_network = Some(net);
     }
 
     pub fn car_network(&self) -> Option<Arc<crate::element_processing::cars::CarNetwork>> {
         self.car_network.clone()
+    }
+
+    /// Parks the moving cars' models rather than block cars, as on Java with moving
+    /// vehicles, where the resource pack carries them.
+    pub fn set_parked_car_models(&mut self, on: bool) {
+        self.parked_car_models = on;
+    }
+
+    pub fn parked_car_models(&self) -> bool {
+        self.parked_car_models
     }
 
     /// Detaches the signage context, so the caller can hold the only handle.
@@ -1250,6 +1321,12 @@ impl<'a> WorldEditor<'a> {
     /// Every item display currently in the world, as its raw NBT compound.
     #[cfg(test)]
     pub fn item_displays(&self) -> Vec<HashMap<String, Value>> {
+        self.entities_of("minecraft:item_display")
+    }
+
+    /// Every entity of one kind currently in the world, as its raw NBT compound.
+    #[cfg(test)]
+    pub fn entities_of(&self, kind: &str) -> Vec<HashMap<String, Value>> {
         let mut out = Vec::new();
         for region in self.world.regions.values() {
             for chunk in region.chunks.values() {
@@ -1258,8 +1335,7 @@ impl<'a> WorldEditor<'a> {
                 };
                 for entity in entities {
                     let Value::Compound(e) = entity else { continue };
-                    if matches!(e.get("id"), Some(Value::String(id)) if id == "minecraft:item_display")
-                    {
+                    if matches!(e.get("id"), Some(Value::String(id)) if id == kind) {
                         out.push(e.clone());
                     }
                 }
@@ -1800,6 +1876,16 @@ impl<'a> WorldEditor<'a> {
         std::mem::take(&mut self.lamp_columns)
     }
 
+    /// Record a bench or bin by its cells.
+    pub fn register_furniture(&mut self, cells: Vec<(i32, i32, i32)>) {
+        self.furniture.push(cells);
+    }
+
+    /// Every bench and bin recorded so far, clearing the record.
+    pub fn take_furniture(&mut self) -> Vec<Vec<(i32, i32, i32)>> {
+        std::mem::take(&mut self.furniture)
+    }
+
     /// Whether a hedge stands at (x, z).
     #[inline]
     pub fn is_hedge(&self, x: i32, z: i32) -> bool {
@@ -1813,6 +1899,14 @@ impl<'a> WorldEditor<'a> {
             return None;
         }
         self.support_columns.get(&(x, z)).copied()
+    }
+
+    /// Every support column standing in this editor, with its material.
+    pub fn support_columns(&self) -> Vec<((i32, i32), Block)> {
+        self.support_columns
+            .iter()
+            .map(|(&xz, &b)| (xz, b))
+            .collect()
     }
 
     /// Take this editor's road-surface overrides (tile editors hand theirs to the main editor).

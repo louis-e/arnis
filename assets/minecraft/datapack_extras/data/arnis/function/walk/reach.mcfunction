@@ -10,6 +10,9 @@ scoreboard players operation #stop arnis.walk %= #40 arnis.walk
 # A light to wait for, or a kerb to look along, before going on.
 execute if data storage arnis:walk p.g run function arnis:walk/light
 execute if score @s arnis.ww matches 1.. run return 0
+# A railway crossing a train has closed: wait until it opens.
+execute if data storage arnis:walk p.r run function arnis:walk/rail with storage arnis:walk p
+execute if score @s arnis.ww matches 1.. run return 0
 execute if data storage arnis:walk p.c run function arnis:walk/kerb
 execute if score @s arnis.ww matches 1.. run return 0
 # Now and then someone stops for a moment, and whoever is with them too.

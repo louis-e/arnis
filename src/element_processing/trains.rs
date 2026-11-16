@@ -9,13 +9,14 @@
 //! Distances are in blocks here and in thousandths of a block in the pack; a step is the
 //! two ticks between moves.
 
-use crate::bedrock_addon::{self, Fleet, Lamp};
+use crate::bedrock_addon::{self, Fleet};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::datapack::macro_coord;
 use crate::element_processing::ship_bodies::Vessel;
 use crate::element_processing::train_bodies::{self, Coach, Livery};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::vehicle_models::{self, Look};
 use fnv::FnvHashMap;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
@@ -71,6 +72,8 @@ pub(crate) enum Mode {
     SBahn,
     Rail,
     Water(Vessel),
+    /// An airfield's paths; `aircraft.rs` lays them out and times what flies them.
+    Air,
 }
 
 impl Mode {
@@ -111,6 +114,7 @@ impl Mode {
             Self::SBahn => 80.0,
             Self::Rail => 110.0,
             Self::Water(v) => v.cruise_kmh(),
+            Self::Air => 0.0,
         }
     }
 
@@ -122,6 +126,7 @@ impl Mode {
             Self::SBahn => (0.9, 0.9, 0.7),
             Self::Rail => (0.6, 0.7, 0.6),
             Self::Water(v) => v.accel(),
+            Self::Air => (0.0, 0.0, 0.0),
         }
     }
 
@@ -133,6 +138,7 @@ impl Mode {
             Self::SBahn => (22.0, 40.0),
             Self::Rail => (35.0, 60.0),
             Self::Water(v) => v.dwell_s(),
+            Self::Air => (0.0, 0.0),
         }
     }
 
@@ -143,7 +149,7 @@ impl Mode {
             Self::Metro => 150.0,
             Self::SBahn => 200.0,
             Self::Rail => 330.0,
-            Self::Water(_) => 600.0,
+            Self::Water(_) | Self::Air => 600.0,
         }
     }
 
@@ -230,6 +236,22 @@ pub(crate) struct Route {
     pub(crate) ys: Option<Vec<f64>>,
     /// How far over that block the vehicle stands: a rail's depth, or a water surface.
     pub(crate) lift: f64,
+    /// What an airfield's points say besides: an aircraft is turned and pitched as they
+    /// tell it, not along the line from one to the next.
+    pub(crate) air: Option<Air>,
+}
+
+/// How an aircraft is at each point of an airfield's route. The points are pieces of
+/// path laid end to end, so the way on from a point is its own to say.
+#[derive(Default)]
+pub(crate) struct Air {
+    /// The way the path runs on from the point: its yaw, and how steeply it climbs, in degrees.
+    pub(crate) yaw: Vec<f32>,
+    pub(crate) climb: Vec<f32>,
+    /// How far the aircraft's nose is up there, in degrees.
+    pub(crate) nose: Vec<f32>,
+    /// Whether its wheels are down.
+    pub(crate) gear: Vec<bool>,
 }
 
 impl Route {
@@ -274,12 +296,21 @@ impl Service {
     }
 }
 
+/// A track a service runs on past some spot.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TrackAt {
+    pub(crate) service: usize,
+    /// How far along the service's route the spot is, in blocks.
+    pub(crate) at: f64,
+    /// The way the route runs there.
+    pub(crate) dir: (f64, f64),
+    pub(crate) mode: Mode,
+}
+
 pub struct TrainNetwork {
     size: f64,
     routes: Vec<Route>,
     services: Vec<Service>,
-    /// Of `services`, how many run boats.
-    ships: usize,
 }
 
 pub(crate) fn hash(a: u64, b: u64) -> u64 {
@@ -300,7 +331,7 @@ pub(crate) fn angle_deg(a: (f64, f64), b: (f64, f64)) -> f64 {
 
 /// Most blocks a train moves in a step: under the 8 past its end the pack still clears a
 /// carriage at, and the 12 it looks for one within.
-const MAX_STEP: f64 = 7.9;
+pub(crate) const MAX_STEP: f64 = 7.9;
 
 /// Blocks a step at `kmh` on a world of `scale` blocks a metre.
 pub(crate) fn step_speed(kmh: f64, scale: f64) -> f64 {
@@ -354,21 +385,54 @@ impl TrainNetwork {
             size,
             routes,
             services,
-            ships: 0,
         }
     }
 
+    /// How many vehicles run on the routes `of` picks by what they carry.
+    fn count(&self, of: impl Fn(Mode) -> bool) -> usize {
+        self.services
+            .iter()
+            .filter(|s| of(self.routes[s.route].mode))
+            .map(|s| s.trains.len())
+            .sum()
+    }
+
     pub fn train_count(&self) -> usize {
-        self.services.iter().map(|s| s.trains.len()).sum::<usize>() - self.ship_count()
+        self.count(|mode| !matches!(mode, Mode::Water(_) | Mode::Air))
+    }
+
+    /// How many route points the pack has room for aircraft in: half of what the trains
+    /// leave, so the boats, which are found once the water is built, keep the other half.
+    pub fn room_for_aircraft(&self) -> usize {
+        MAX_POINTS.saturating_sub(self.points_held()) / 2
+    }
+
+    /// The points held for the routes that have something running on them.
+    fn points_held(&self) -> usize {
+        let mut seen = std::collections::BTreeSet::new();
+        self.services
+            .iter()
+            .filter(|s| seen.insert(s.route))
+            .map(|s| self.routes[s.route].points.len())
+            .sum()
+    }
+
+    /// Adds the aircraft `aircraft::AirPlan` planned: each airfield's route and what flies
+    /// and stands on it. The plan was made to fit `room_for_aircraft`.
+    pub(crate) fn add_aircraft(&mut self, fields: Vec<(Route, Vec<Service>)>) {
+        for (route, services) in fields {
+            let r = self.routes.len();
+            self.routes.push(route);
+            self.services
+                .extend(services.into_iter().map(|mut service| {
+                    service.route = r;
+                    service
+                }));
+        }
     }
 
     pub fn ship_count(&self) -> usize {
-        self.services
-            .iter()
-            .rev()
-            .take(self.ships)
-            .map(|s| s.trains.len())
-            .sum()
+        self.count(|mode| matches!(mode, Mode::Water(_)))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -377,12 +441,7 @@ impl TrainNetwork {
 
     /// Adds the boats `ships::ShipPlan` planned, each a route and what sails it.
     pub(crate) fn add_ships(&mut self, ships: Vec<(Route, Service)>) {
-        let points: usize = self
-            .services
-            .iter()
-            .map(|s| self.routes[s.route].points.len())
-            .sum();
-        let mut room = MAX_POINTS.saturating_sub(points);
+        let mut room = MAX_POINTS.saturating_sub(self.points_held());
         let mut boats = MAX_BOATS;
         for (route, mut service) in ships {
             if route.points.len() > room || boats == 0 {
@@ -394,8 +453,97 @@ impl TrainNetwork {
             service.route = self.routes.len();
             self.routes.push(route);
             self.services.push(service);
-            self.ships += 1;
         }
+    }
+
+    /// Where the trains run past each of `spots`, within `reach` blocks: per spot the
+    /// services whose route passes it, how far along the route, and which way the track
+    /// runs there. Boats and aircraft are left out.
+    pub(crate) fn tracks_at(&self, spots: &[(f64, f64)], reach: f64) -> Vec<Vec<TrackAt>> {
+        let cell = reach.max(1.0);
+        let key = |x: f64, z: f64| ((x / cell).floor() as i64, (z / cell).floor() as i64);
+        let mut grid: FnvHashMap<(i64, i64), Vec<usize>> = FnvHashMap::default();
+        for (k, &(x, z)) in spots.iter().enumerate() {
+            grid.entry(key(x, z)).or_default().push(k);
+        }
+        let mut out: Vec<Vec<TrackAt>> = vec![Vec::new(); spots.len()];
+        for (s, service) in self.services.iter().enumerate() {
+            let route = &self.routes[service.route];
+            if matches!(route.mode, Mode::Water(_) | Mode::Air) {
+                continue;
+            }
+            // The nearest point of this route to each spot it passes.
+            let mut nearest: BTreeMap<usize, (f64, usize)> = BTreeMap::new();
+            for (i, &(x, z)) in route.points.iter().enumerate() {
+                let (cx, cz) = key(x, z);
+                for dx in -1..=1 {
+                    for dz in -1..=1 {
+                        for &k in grid.get(&(cx + dx, cz + dz)).into_iter().flatten() {
+                            let far = (spots[k].0 - x).hypot(spots[k].1 - z);
+                            if far <= reach && nearest.get(&k).is_none_or(|&(best, _)| far < best) {
+                                nearest.insert(k, (far, i));
+                            }
+                        }
+                    }
+                }
+            }
+            let n = route.points.len();
+            let reach = HEADING_REACH as usize;
+            for (k, (_, i)) in nearest {
+                let (a, b) = (
+                    route.points[i.saturating_sub(reach)],
+                    route.points[(i + reach).min(n - 1)],
+                );
+                out[k].push(TrackAt {
+                    service: s,
+                    at: i as f64,
+                    dir: unit(b.0 - a.0, b.1 - a.1).unwrap_or((1.0, 0.0)),
+                    mode: route.mode,
+                });
+            }
+        }
+        out
+    }
+
+    /// When a train of service `s` is over the spot `at` blocks along its route, give or
+    /// take `half`: for each step of the service's timetable, counted on the clock every
+    /// timetable shares (`#now` in the pack, modulo the list's length), whether one of its
+    /// trains is there, nose to tail.
+    pub(crate) fn busy(&self, s: usize, at: f64, half: f64) -> Vec<bool> {
+        let service = &self.services[s];
+        let route = &self.routes[service.route];
+        let length = |c: &Coach| train_bodies::length_m(*c) * self.size;
+        let front = service.coaches.first().map_or(0.0, length) / 2.0;
+        let back = service.coaches.last().map_or(0.0, length) / 2.0;
+        let span = service.offsets.last().copied().unwrap_or(0.0);
+        let mm = |v: f64| (v * 1000.0).round() as i64;
+        // A train reaches this far behind its front carriage centre and ahead of it.
+        let (behind, ahead) = (mm(span + back + half), mm(front + half));
+        let at = mm(at);
+        let (_, lap) = service.reach(route);
+        let covers = |front: i64| {
+            if lap > 0 {
+                (at - (front - behind)).rem_euclid(lap) <= behind + ahead
+            } else {
+                front - behind <= at && at <= front + ahead
+            }
+        };
+        let n = service.timetable.len();
+        let mut busy = vec![false; n];
+        for &(phase, _) in &service.trains {
+            for (i, &front) in service.timetable.iter().enumerate() {
+                if covers(front as i64) {
+                    // The train is at step i of its timetable when the clock reads i - phase.
+                    busy[(i + n - phase % n) % n] = true;
+                }
+            }
+        }
+        busy
+    }
+
+    /// Whether the pack runs service `s`: its route has rails to stand on.
+    pub(crate) fn runs(&self, s: usize, rail_y: impl Fn(u64, i32, i32) -> Option<i32>) -> bool {
+        heights(&self.routes[self.services[s].route], &rail_y).is_some()
     }
 
     /// The pack functions: the routes and timetables in storage, one function per train
@@ -408,23 +556,28 @@ impl TrainNetwork {
         let mut out = Vec::new();
         let mut network = String::from("data modify storage arnis:trains tmp set value []\n");
         let mut all = String::new();
-        let mut bodies: FnvHashMap<String, Vec<train_bodies::Part>> = FnvHashMap::default();
+        let mut bodies: FnvHashMap<String, Look> = FnvHashMap::default();
         let mut doors: BTreeMap<String, train_bodies::Doors> = BTreeMap::new();
         doors.insert(
             train_bodies::NO_DOORS.to_string(),
-            train_bodies::doors(Coach::Tank(0)),
+            train_bodies::Doors::none(),
         );
         let mut carriage = 0usize;
+        // A route's points are stored once, however many services run on it.
+        let mut written = std::collections::BTreeSet::new();
         for (t, service) in self.services.iter().enumerate() {
             let route = &self.routes[service.route];
             let Some(ys) = heights(route, &rail_y) else {
                 continue;
             };
-            let r = t;
-            write_points(&mut network, r, route, &ys);
+            let r = service.route;
+            let flies = route.air.is_some();
+            if written.insert(r) {
+                write_points(&mut network, r, route, &ys);
+            }
             let _ = writeln!(
                 network,
-                "data modify storage arnis:trains s{r} set value [I;{}]",
+                "data modify storage arnis:trains s{t} set value [I;{}]",
                 service
                     .timetable
                     .iter()
@@ -435,16 +588,28 @@ impl TrainNetwork {
             let (visible, period) = service.reach(route);
             let middle = service.middle();
             for (k, &(phase, livery)) in service.trains.iter().enumerate() {
-                let name = format!("{r}_{k}");
+                let name = format!("{t}_{k}");
+                // One that never moves, as an aircraft that only stands, is where its one
+                // entry says without the clock being asked.
+                let now = match service.timetable[..] {
+                    [only] => format!(
+                        "data modify storage arnis:trains a set value {{r:{r},t:{t}}}\n\
+                         scoreboard players set #s arnis.train {only}\n"
+                    ),
+                    _ => format!(
+                        "scoreboard players operation #i arnis.train = #now arnis.train\n\
+                         scoreboard players add #i arnis.train {phase}\n\
+                         scoreboard players set #T arnis.train {}\n\
+                         scoreboard players operation #i arnis.train %= #T arnis.train\n\
+                         data modify storage arnis:trains a set value {{r:{r},t:{t}}}\n\
+                         execute store result storage arnis:trains a.i int 1 run scoreboard players get #i arnis.train\n\
+                         function arnis:trains/when with storage arnis:trains a\n",
+                        service.timetable.len()
+                    ),
+                };
                 let mut text = format!(
-                    "# Train {k} on route {r}: where its timetable says it is now.\n\
-                     scoreboard players operation #i arnis.train = #now arnis.train\n\
-                     scoreboard players add #i arnis.train {phase}\n\
-                     scoreboard players set #T arnis.train {}\n\
-                     scoreboard players operation #i arnis.train %= #T arnis.train\n\
-                     data modify storage arnis:trains a set value {{r:{r}}}\n\
-                     execute store result storage arnis:trains a.i int 1 run scoreboard players get #i arnis.train\n\
-                     function arnis:trains/when with storage arnis:trains a\n\
+                    "# Train {k} of service {t} on route {r}: where its timetable says it is now.\n\
+                     {now}\
                      scoreboard players set #L arnis.train {visible}\n\
                      scoreboard players set #P arnis.train {period}\n\
                      # Nothing to draw while the middle of the train is out of loaded chunks.\n\
@@ -452,25 +617,38 @@ impl TrainNetwork {
                      scoreboard players remove #sk arnis.train {}\n\
                      function arnis:trains/near\n\
                      execute unless score #go arnis.train matches 1 run return 0\n",
-                    service.timetable.len(),
                     (middle * 1000.0).round() as i64,
                 );
                 for (c, (&coach, &offset)) in
                     service.coaches.iter().zip(&service.offsets).enumerate()
                 {
-                    let parts = train_bodies::parts(coach, livery);
                     let key = train_bodies::key(coach, livery);
-                    bodies.entry(key.clone()).or_insert(parts);
+                    bodies
+                        .entry(key.clone())
+                        .or_insert_with(|| train_bodies::look(coach, livery));
                     let door_key = train_bodies::door_key(coach);
                     doors
                         .entry(door_key.clone())
                         .or_insert_with(|| train_bodies::doors(coach));
+                    // An aircraft is put by its route's own headings, and told its
+                    // model, which changes as its wheels go up and down.
+                    let (model, put) = if flies {
+                        (
+                            format!(
+                                ",m:\"{}\"",
+                                vehicle_models::item_model(&train_bodies::look(coach, livery))
+                            ),
+                            "air",
+                        )
+                    } else {
+                        (String::new(), "car")
+                    };
                     let _ = write!(
                         text,
                         "scoreboard players operation #sk arnis.train = #s arnis.train\n\
                          scoreboard players remove #sk arnis.train {}\n\
-                         data modify storage arnis:trains c set value {{r:{r},c:{},b:\"{key}\",d:\"{door_key}\"}}\n\
-                         function arnis:trains/car\n",
+                         data modify storage arnis:trains c set value {{r:{r},c:{},b:\"{key}\",d:\"{door_key}\"{model}}}\n\
+                         function arnis:trains/{put}\n",
                         (offset * 1000.0).round() as i64,
                         carriage + c,
                     );
@@ -503,14 +681,31 @@ impl TrainNetwork {
         let mut keys: Vec<&String> = bodies.keys().collect();
         keys.sort();
         for key in keys {
-            for (prefix, bare) in [("", false), ("ov121/", true)] {
-                out.push((
-                    format!("{prefix}data/arnis/function/trains/body/{key}.mcfunction"),
-                    train_bodies::summon_function(&bodies[key], self.size, bare),
-                ));
-            }
+            out.push((
+                format!("data/arnis/function/trains/body/{key}.mcfunction"),
+                train_bodies::summon_function(&bodies[key], self.size),
+            ));
         }
         out
+    }
+
+    /// Every look the trains of this network are drawn with, for the resource pack.
+    pub fn java_looks(&self) -> Vec<Look> {
+        let mut looks: Vec<Look> = self
+            .services
+            .iter()
+            .flat_map(|service| {
+                service.trains.iter().flat_map(|&(_, livery)| {
+                    service
+                        .coaches
+                        .iter()
+                        .map(move |&coach| train_bodies::look(coach, livery))
+                })
+            })
+            .collect();
+        looks.sort();
+        looks.dedup();
+        looks
     }
 
     /// What the Bedrock script runs the trains by, the same routes and timetables the pack
@@ -527,34 +722,59 @@ impl TrainNetwork {
         let mut bodies: Vec<bedrock_addon::Body> = Vec::new();
         let mut body_of: FnvHashMap<String, usize> = FnvHashMap::default();
         let mut carriage = 0usize;
-        let size = self.size as f32;
+        // A route is written once, however many services run on it.
+        let mut written: FnvHashMap<usize, usize> = FnvHashMap::default();
         for service in &self.services {
             let route = &self.routes[service.route];
             let Some(ys) = heights(route, &rail_y) else {
                 continue;
             };
-            let mut p = Vec::with_capacity(route.points.len() * 4);
-            let mut last = [0i64; 4];
-            for (i, &(x, z)) in route.points.iter().enumerate() {
-                let at = [
-                    (x * 100.0).round() as i64,
-                    ((ys[i] + route.lift) * 1000.0).round() as i64,
-                    (z * 100.0).round() as i64,
-                    (heading(route, i) * 10.0).round() as i64,
-                ];
-                p.extend((0..4).map(|k| at[k] - last[k]));
-                last = at;
-            }
-            let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
-            for &(x, z) in &route.points {
-                lo = (lo.0.min(x), lo.1.min(z));
-                hi = (hi.0.max(x), hi.1.max(z));
-            }
-            routes.push(json!({
-                "p": bedrock_addon::list(p),
-                "loop": route.shape == Shape::Loop,
-                "box": [lo.0.floor(), lo.1.floor(), hi.0.ceil(), hi.1.ceil()],
-            }));
+            let route_at = match written.get(&service.route) {
+                Some(&at) => at,
+                None => {
+                    let mut p = Vec::with_capacity(route.points.len() * 4);
+                    let mut last = [0i64; 4];
+                    for (i, &(x, z)) in route.points.iter().enumerate() {
+                        let yaw = match &route.air {
+                            Some(air) => f64::from(air.yaw[i]),
+                            None => heading(route, i),
+                        };
+                        let at = [
+                            (x * 100.0).round() as i64,
+                            ((ys[i] + route.lift) * 1000.0).round() as i64,
+                            (z * 100.0).round() as i64,
+                            (yaw * 10.0).round() as i64,
+                        ];
+                        p.extend((0..4).map(|k| at[k] - last[k]));
+                        last = at;
+                    }
+                    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+                    for &(x, z) in &route.points {
+                        lo = (lo.0.min(x), lo.1.min(z));
+                        hi = (hi.0.max(x), hi.1.max(z));
+                    }
+                    let mut data = json!({
+                        "p": bedrock_addon::list(p),
+                        "loop": route.shape == Shape::Loop,
+                        "box": [lo.0.floor(), lo.1.floor(), hi.0.ceil(), hi.1.ceil()],
+                    });
+                    // An airfield's points: the climb and the nose in tenths of a degree,
+                    // and the wheels, three to a point.
+                    if let Some(air) = &route.air {
+                        data["air"] =
+                            json!(bedrock_addon::list((0..route.points.len()).flat_map(|i| {
+                                [
+                                    (f64::from(air.climb[i]) * 10.0).round() as i64,
+                                    (f64::from(air.nose[i]) * 10.0).round() as i64,
+                                    i64::from(air.gear[i]),
+                                ]
+                            })));
+                    }
+                    routes.push(data);
+                    written.insert(service.route, routes.len() - 1);
+                    routes.len() - 1
+                }
+            };
             let (visible, period) = service.reach(route);
             let trains: Vec<serde_json::Value> = service
                 .trains
@@ -570,17 +790,13 @@ impl TrainNetwork {
                             let body = *body_of.entry(name.clone()).or_insert_with(|| {
                                 bodies.push(bedrock_addon::Body {
                                     name,
-                                    fleet: Fleet::Train,
-                                    shapes: train_bodies::parts(coach, livery)
-                                        .into_iter()
-                                        .map(|p| bedrock_addon::Shape {
-                                            block: p.block,
-                                            size: p.size.map(|v| v * size),
-                                            corner: p.corner.map(|v| v * size),
-                                            tilt: p.tilt,
-                                            lamp: if p.glow { Lamp::On } else { Lamp::Off },
-                                        })
-                                        .collect(),
+                                    fleet: if matches!(coach, Coach::Plane(_)) {
+                                        Fleet::Plane
+                                    } else {
+                                        Fleet::Train
+                                    },
+                                    look: train_bodies::look(coach, livery),
+                                    size: self.size,
                                 });
                                 bodies.len() - 1
                             });
@@ -596,7 +812,7 @@ impl TrainNetwork {
                 })
                 .collect();
             services.push(json!({
-                "route": routes.len() - 1,
+                "route": route_at,
                 "steps": bedrock_addon::list(run_lengths(&service.timetable)),
                 "count": service.timetable.len(),
                 "visible": visible,
@@ -721,18 +937,33 @@ fn run_lengths(values: &[i32]) -> Vec<i64> {
 }
 
 /// Writes a route's points into storage as `r<r>`, a list of `{x,y,z,h}` with the heading
-/// a yaw, in lines of a few hundred.
+/// a yaw, in lines of a few hundred. An airfield's points say besides how steeply the
+/// path climbs (`q`), how far the nose is down (`p`, as a pitch) and whether the wheels
+/// are down (`g`).
 fn write_points(out: &mut String, r: usize, route: &Route, ys: &[f64]) {
     let n = route.points.len();
     let point = |i: usize| {
         let (x, z) = route.points[i];
-        format!(
-            "{{x:{:.2}d,y:{:.3}d,z:{:.2}d,h:{:.1}f}}",
-            macro_coord(x),
-            ys[i] + route.lift,
-            macro_coord(z),
-            heading(route, i)
-        )
+        match &route.air {
+            Some(air) => format!(
+                "{{x:{:.2}d,y:{:.3}d,z:{:.2}d,h:{:.1}f,q:{:.1}f,p:{:.1}f,g:{}}}",
+                macro_coord(x),
+                ys[i] + route.lift,
+                macro_coord(z),
+                air.yaw[i],
+                // A pitch is positive downwards; level is written as 0, not -0.
+                -air.climb[i] + 0.0,
+                -air.nose[i] + 0.0,
+                u8::from(air.gear[i]),
+            ),
+            None => format!(
+                "{{x:{:.2}d,y:{:.3}d,z:{:.2}d,h:{:.1}f}}",
+                macro_coord(x),
+                ys[i] + route.lift,
+                macro_coord(z),
+                heading(route, i)
+            ),
+        }
     };
     let _ = writeln!(out, "data modify storage arnis:trains r{r} set value []");
     for chunk in (0..n).collect::<Vec<_>>().chunks(POINTS_PER_LINE) {
@@ -1111,6 +1342,7 @@ fn lay_out(
         ys: None,
         // On the rail, which is a sixteenth of a block deep.
         lift: RAIL_LIFT,
+        air: None,
     })
 }
 
@@ -1439,8 +1671,8 @@ fn route_kind(route: &Route, has_stops: bool, len_m: f64, seed: u64) -> Option<t
         Mode::Tram => Kind::Tram,
         Mode::Metro => Kind::Metro,
         Mode::SBahn => Kind::SBahn,
-        // Boats are planned in `ships.rs`.
-        Mode::Water(_) => return None,
+        // Boats are planned in `ships.rs`, aircraft in `aircraft.rs`.
+        Mode::Water(_) | Mode::Air => return None,
         Mode::Rail => {
             let roll = hash(seed, 3) % 100;
             if has_stops {
@@ -2235,9 +2467,8 @@ mod tests {
                 .name
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'));
-            for s in &body.shapes {
-                assert!(crate::bedrock_addon::palette_has(s.block), "{}", s.block);
-            }
+            // Its model is built; this panics on one that is not.
+            let _ = crate::vehicle_models::model(body.look.model);
         }
         // No rails laid, nothing to run.
         let (none, _) = net.bedrock_data(|_, _, _| None);
@@ -2292,5 +2523,54 @@ mod tests {
             .pack_functions(|_, _, _| None)
             .iter()
             .all(|(p, _)| !p.contains("/trains/t/")));
+    }
+
+    /// A level crossing closes by `busy`: it has to say a train is over a spot whenever
+    /// the pack draws a carriage there, and only when one is near.
+    #[test]
+    fn a_spot_on_a_line_is_busy_just_while_a_train_is_over_it() {
+        let elements = vec![track(1, line(1, (0, 1000), (2000, 1000), 20), "rail")];
+        let net = net(&elements);
+        let tracks = net.tracks_at(&[(1000.5, 1000.5), (1000.5, 1200.5)], 2.0);
+        assert!(tracks[1].is_empty(), "no track 200 blocks off the line");
+        let [t] = tracks[0][..] else {
+            panic!("one service passes the spot: {:?}", tracks[0]);
+        };
+        assert!(
+            (t.at - 1000.0).abs() <= 2.0 && t.dir.0.abs() > 0.99,
+            "{t:?}"
+        );
+        assert_eq!(t.mode, Mode::Rail);
+        let service = &net.services[t.service];
+        let (visible, lap) = service.reach(&net.routes[service.route]);
+        let reach = 3.0;
+        let busy = net.busy(t.service, t.at, reach);
+        let n = service.timetable.len();
+        assert_eq!(busy.len(), n);
+        assert!(busy.iter().any(|b| *b) && busy.iter().any(|b| !*b));
+        for (now, &busy) in busy.iter().enumerate() {
+            // Each carriage where the pack puts it at this reading of the clock.
+            let (mut over, mut near) = (false, false);
+            for &(phase, _) in &service.trains {
+                let front = service.timetable[(now + phase) % n] as i64;
+                for (coach, offset) in service.coaches.iter().zip(&service.offsets) {
+                    let mut at = front - (offset * 1000.0).round() as i64;
+                    if lap > 0 {
+                        at = at.rem_euclid(lap);
+                    }
+                    if at < 0 || at > visible {
+                        continue;
+                    }
+                    let off = (at as f64 / 1000.0 - t.at).abs();
+                    let half = train_bodies::length_m(*coach) * net.size / 2.0;
+                    over |= off <= reach;
+                    near |= off <= reach + half + COUPLING_M;
+                }
+            }
+            assert!(!over || busy, "a carriage on the spot at step {now}");
+            assert!(near || !busy, "no carriage near the spot at step {now}");
+        }
+        assert!(net.runs(t.service, |_, _, _| Some(64)));
+        assert!(!net.runs(t.service, |_, _, _| None));
     }
 }

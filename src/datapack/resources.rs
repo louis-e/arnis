@@ -24,13 +24,25 @@ const LANG_PATH: &str = "assets/arnis/lang/en_us.json";
 
 /// Adds the banner to `<world>/resources.zip`: into the pack Arnis already wrote there, or
 /// into a new one. A pack the user put there is left alone, and the menu shows no banner.
+#[cfg(test)]
 pub fn install_banner(world: &Path) -> Result<(), String> {
+    install(world, true, &[])
+}
+
+/// Adds the banner (if `banner`) and `files` to `<world>/resources.zip`, into the pack
+/// Arnis already wrote there or into a new one, replacing what it held under those names.
+/// A pack the user put there is left alone: without the banner the menu just looks plain,
+/// but files left out are an error.
+pub fn install(world: &Path, banner: bool, files: &[(String, Vec<u8>)]) -> Result<(), String> {
     let path = world.join("resources.zip");
     if path.exists() && !is_arnis_pack(&path) {
-        return Ok(());
+        if files.is_empty() {
+            return Ok(());
+        }
+        return Err("the world already has a resources.zip of its own".into());
     }
     let staged = path.with_extension("zip.tmp");
-    let written = write_pack(&path, &staged);
+    let written = write_pack(&path, &staged, banner, files);
     if let Err(e) = written {
         let _ = std::fs::remove_file(&staged);
         return Err(e);
@@ -38,7 +50,13 @@ pub fn install_banner(world: &Path) -> Result<(), String> {
     install_world_pack(&path, &staged)
 }
 
-fn write_pack(existing: &Path, staged: &Path) -> Result<(), String> {
+fn write_pack(
+    existing: &Path,
+    staged: &Path,
+    banner: bool,
+    files: &[(String, Vec<u8>)],
+) -> Result<(), String> {
+    let replaced: std::collections::HashSet<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
     let err = |e: zip::result::ZipError| e.to_string();
     let file = File::create(staged).map_err(|e| format!("create {}: {e}", staged.display()))?;
     let mut zip = ZipWriter::new(BufWriter::new(file));
@@ -50,10 +68,10 @@ fn write_pack(existing: &Path, staged: &Path) -> Result<(), String> {
         let mut old = ZipArchive::new(source).map_err(err)?;
         for i in 0..old.len() {
             let entry = old.by_index_raw(i).map_err(err)?;
-            if entry
-                .name()
-                .is_ok_and(|n| [FONT_PATH, TEXTURE_PATH, LANG_PATH].contains(&n.as_ref()))
-            {
+            if entry.name().is_ok_and(|n| {
+                (banner && [FONT_PATH, TEXTURE_PATH, LANG_PATH].contains(&n.as_ref()))
+                    || replaced.contains(n.as_ref())
+            }) {
                 continue;
             }
             zip.raw_copy_file(entry).map_err(err)?;
@@ -87,17 +105,25 @@ fn write_pack(existing: &Path, staged: &Path) -> Result<(), String> {
     });
     // Four empty lines above the glyph give its 40 pixels the room of five text lines.
     let lang = json!({ BANNER_KEY: format!("\n\n\n\n{GLYPH}") });
-    for (path, bytes, opts) in [
+    let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    let banner_files = [
         (FONT_PATH, font.to_string().into_bytes(), deflated),
-        (
-            TEXTURE_PATH,
-            BANNER_PNG.to_vec(),
-            SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
-        ),
+        (TEXTURE_PATH, BANNER_PNG.to_vec(), stored),
         (LANG_PATH, lang.to_string().into_bytes(), deflated),
-    ] {
-        zip.start_file(path, opts).map_err(err)?;
-        zip.write_all(&bytes).map_err(|e| e.to_string())?;
+    ];
+    for (path, bytes, opts) in banner_files.iter().filter(|_| banner) {
+        zip.start_file(*path, *opts).map_err(err)?;
+        zip.write_all(bytes).map_err(|e| e.to_string())?;
+    }
+    for (path, bytes) in files {
+        // PNGs are compressed already.
+        let opts = if path.ends_with(".png") {
+            stored
+        } else {
+            deflated
+        };
+        zip.start_file(path.as_str(), opts).map_err(err)?;
+        zip.write_all(bytes).map_err(|e| e.to_string())?;
     }
     let mut out = zip.finish().map_err(err)?;
     out.flush().map_err(|e| e.to_string())
@@ -154,6 +180,13 @@ mod tests {
         zip.write_all(b"{}").unwrap();
         zip.finish().unwrap();
         install_banner(dir.path()).unwrap();
+        assert_eq!(names(&pack), vec!["pack.mcmeta".to_string()]);
+        // Models it cannot carry are reported, not dropped without a word.
+        let models = vec![(
+            "assets/arnis/items/vehicle/x.json".to_string(),
+            b"{}".to_vec(),
+        )];
+        assert!(install(dir.path(), false, &models).is_err());
         assert_eq!(names(&pack), vec!["pack.mcmeta".to_string()]);
     }
 }

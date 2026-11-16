@@ -1,6 +1,6 @@
 # One 34 s cycle: east-west roads (a) and north-south roads (b) take turns.
 # A head that was out of view at a switch catches up first, so the switch below reaches it too.
-execute as @e[type=block_display,tag=arnis.tl] unless score @s arnis.tl = #tl_epoch arnis run function arnis:traffic/catch_up
+execute as @e[type=item_display,tag=arnis.tl] unless score @s arnis.tl = #tl_epoch arnis run function arnis:traffic/catch_up
 scoreboard players add #tl arnis 1
 execute if score #tl arnis matches 680.. run scoreboard players set #tl arnis 0
 execute if score #tl arnis matches 0 run function arnis:traffic/phase/a_go

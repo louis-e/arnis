@@ -13,7 +13,7 @@ pub use index::{Claim, InteriorUseIndex};
 pub use uses::{plan_interior, InteriorPlan, PlanInputs};
 
 use crate::block_definitions::*;
-use crate::element_processing::buildings::{cached_prop_block, BUILDING_PASSAGE_HEIGHT};
+use crate::element_processing::buildings::cached_prop_block;
 use crate::element_processing::subprocessor::buildings_loot::{themed_chest_loot, LootTheme};
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::world_editor::WorldEditor;
@@ -37,6 +37,8 @@ pub struct InteriorRequest<'a> {
     pub plan: &'a InteriorPlan,
     pub abandoned: bool,
     pub passages: &'a CoordinateBitmap,
+    /// Rows the passages are open for over the floor.
+    pub passage_height: i32,
     /// Doors in the outer wall at ground level.
     pub entrances: &'a [Entry],
     /// Corners of the outline's bounding box.
@@ -103,7 +105,7 @@ pub fn generate_building_interior(editor: &mut WorldEditor, req: &InteriorReques
     } else {
         None
     };
-    let passage_top = req.start_y_offset + BUILDING_PASSAGE_HEIGHT.min(req.building_height);
+    let passage_top = req.start_y_offset + req.passage_height.min(req.building_height);
     let homes_fit = max_x - min_x + 1 >= 8 && max_z - min_z + 1 >= 8 && own.len() > 100;
 
     for (i, &floor_rel) in req.floor_levels.iter().enumerate() {
@@ -499,6 +501,7 @@ mod tests {
         let ctx = BuildingContext {
             flood_fill_cache: &cache,
             building_passages: &passages,
+            rail_passages: crate::element_processing::railways::RailPassages::none(),
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
@@ -1011,6 +1014,7 @@ mod tests {
         let ctx = BuildingContext {
             flood_fill_cache: &cache,
             building_passages: &passages,
+            rail_passages: crate::element_processing::railways::RailPassages::none(),
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,

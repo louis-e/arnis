@@ -613,6 +613,7 @@ impl Block {
             524 => "redstone_block",
             525 => "stripped_warped_stem",
             526 => "stripped_warped_hyphae",
+            527 => "barrier",
             _ => return None,
         })
         // Block ids are u16 handles; keep the name and property tables in sync
@@ -1591,6 +1592,8 @@ pub const WARPED_STAIRS: Block = Block::new(523);
 pub const WARPED_TRAPDOOR: Block = Block::new(211);
 pub const STRIPPED_WARPED_STEM: Block = Block::new(525);
 pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(526);
+/// Invisible and solid: the cell of a thing built of displays, which has no body of its own.
+pub const BARRIER: Block = Block::new(527);
 pub const ORANGE_CONCRETE: Block = Block::new(145);
 pub const REDSTONE_LAMP: Block = Block::new(218);
 // Reuses the retired open-trapdoor slot.

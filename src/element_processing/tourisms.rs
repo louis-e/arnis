@@ -21,6 +21,11 @@ pub fn generate_tourisms(
         }
     }
 
+    if let Some(form) = crate::element_processing::statues::form(&element.tags) {
+        crate::element_processing::statues::place(editor, element, form);
+        return;
+    }
+
     if let Some(tourism_type) = element.tags.get("tourism") {
         let x: i32 = element.x;
         let z: i32 = element.z;

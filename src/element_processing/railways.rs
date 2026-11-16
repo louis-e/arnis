@@ -659,6 +659,150 @@ pub fn collect_at_grade_rail_mask(
     bitmap
 }
 
+/// Height a train takes over the floor where it runs through a building, and how far it
+/// reaches either side of the track, in metres.
+const TRAIN_HEADROOM_M: f64 = 5.5;
+const TRAIN_REACH_M: f64 = 2.0;
+/// Track a building has to hold, in metres, to count as running into it rather than
+/// clipping a corner.
+const RUNS_IN_M: f64 = 8.0;
+
+/// What track at ground level does in a building.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RailThrough {
+    None,
+    /// Takes a corner or an edge of it.
+    Clips,
+    /// Runs into it: a depot, a shed, a station hall.
+    Into,
+    /// Is mapped as passing underneath it, the building going on above.
+    Under,
+}
+
+/// Where track at ground level runs into or through buildings: the cells a train takes
+/// inside them, which the buildings leave open, and among those the cells of track mapped
+/// as passing under a building (`tunnel=building_passage`, `covered=yes`, a lower layer).
+pub struct RailPassages {
+    pub cells: CoordinateBitmap,
+    under: CoordinateBitmap,
+    /// The track itself, inside buildings.
+    track: CoordinateBitmap,
+    /// Rows a train needs over the floor.
+    pub height: i32,
+    /// Least cells of track inside a building for it to run into it.
+    runs_in: usize,
+}
+
+#[cfg(test)]
+static NO_RAIL_PASSAGES: RailPassages = RailPassages {
+    cells: CoordinateBitmap::new_empty(),
+    under: CoordinateBitmap::new_empty(),
+    track: CoordinateBitmap::new_empty(),
+    height: 0,
+    runs_in: usize::MAX,
+};
+
+impl RailPassages {
+    /// No track in any building, for tests that build a context by hand.
+    #[cfg(test)]
+    pub fn none() -> &'static Self {
+        &NO_RAIL_PASSAGES
+    }
+
+    /// What the track does in a building of the cells `area`.
+    pub fn through(&self, area: &[(i32, i32)]) -> RailThrough {
+        if self.cells.is_empty() {
+            return RailThrough::None;
+        }
+        let taken = self.cells.count_contained(area.iter());
+        if taken == 0 {
+            RailThrough::None
+        } else if area.iter().any(|&(x, z)| self.under.contains(x, z)) {
+            RailThrough::Under
+        } else if self.track.count_contained(area.iter()) >= self.runs_in {
+            RailThrough::Into
+        } else {
+            RailThrough::Clips
+        }
+    }
+}
+
+/// The cells inside buildings a train on track at ground level takes, for the buildings
+/// to open their walls and floors over, as they do for a road's `tunnel=building_passage`.
+pub fn collect_rail_passages(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+    building_footprints: &CoordinateBitmap,
+) -> RailPassages {
+    let reach = ((TRAIN_REACH_M * scale).round() as i32).max(1);
+    // The footprints hold what is inside the walls; the walls are the ring round them.
+    let near_building = |x: i32, z: i32, by: i32| {
+        (-by..=by).any(|dx| (-by..=by).any(|dz| building_footprints.contains(x + dx, z + dz)))
+    };
+    let mut cells: Option<CoordinateBitmap> = None;
+    let mut under: Option<CoordinateBitmap> = None;
+    let mut track: Option<CoordinateBitmap> = None;
+    if !building_footprints.is_empty() {
+        for element in elements {
+            let ProcessedElement::Way(way) = element else {
+                continue;
+            };
+            // Disused track a building has since been put over runs nowhere.
+            if !is_at_grade_track(way)
+                || matches!(
+                    way.tags.get("railway").map(String::as_str),
+                    Some("disused" | "miniature")
+                )
+            {
+                continue;
+            }
+            let tag = |key: &str| way.tags.get(key).map(String::as_str);
+            let passes_under = tag("tunnel") == Some("building_passage")
+                || tag("covered") == Some("yes")
+                || tag("layer")
+                    .and_then(|l| l.trim().parse::<i32>().ok())
+                    .is_some_and(|l| l < 0);
+            for (cx, cz) in build_smoothed_centerline(way) {
+                if building_footprints.contains(cx, cz) {
+                    track
+                        .get_or_insert_with(|| CoordinateBitmap::new(xzbbox))
+                        .set(cx, cz);
+                }
+                // Only where the train would touch the wall: track running past a building
+                // a block or more clear of its wall leaves it shut.
+                if !near_building(cx, cz, 2) {
+                    continue;
+                }
+                for dx in -reach..=reach {
+                    for dz in -reach..=reach {
+                        let (x, z) = (cx + dx, cz + dz);
+                        if !near_building(x, z, 1) {
+                            continue;
+                        }
+                        cells
+                            .get_or_insert_with(|| CoordinateBitmap::new(xzbbox))
+                            .set(x, z);
+                        if passes_under {
+                            under
+                                .get_or_insert_with(|| CoordinateBitmap::new(xzbbox))
+                                .set(x, z);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    RailPassages {
+        cells: cells.unwrap_or_else(CoordinateBitmap::new_empty),
+        under: under.unwrap_or_else(CoordinateBitmap::new_empty),
+        track: track.unwrap_or_else(CoordinateBitmap::new_empty),
+        height: ((TRAIN_HEADROOM_M * scale).ceil() as i32)
+            .max(crate::element_processing::buildings::BUILDING_PASSAGE_HEIGHT),
+        runs_in: (RUNS_IN_M * scale).max(3.0) as usize,
+    }
+}
+
 /// Adds every rendered rail-tunnel shell coordinate to the shared tunnel footprint.
 pub fn add_tunnel_footprint(
     elements: &[ProcessedElement],
@@ -1843,6 +1987,76 @@ mod tests {
         }
         // The floor, the interior placeholder.
         assert!(BORE_SHELL.contains(&POLISHED_DEEPSLATE) && BORE_SHELL.contains(&STONE_BRICKS));
+    }
+
+    /// Track along z from x = 0 to 79, tagged `railway=rail` and `tags`.
+    fn track_along(id: u64, z: i32, tags: &[(&str, &str)]) -> ProcessedElement {
+        let node = |i: u64, x: i32| ProcessedNode {
+            id: id * 10 + i,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        let mut all: HashMap<String, String> = tags
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        all.entry("railway".into()).or_insert_with(|| "rail".into());
+        ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes: vec![node(0, 0), node(1, 79)],
+            tags: all,
+        })
+    }
+
+    #[test]
+    fn track_opens_the_buildings_it_runs_into() {
+        let xz = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
+        let mut footprints = CoordinateBitmap::new(&xz);
+        for x in 20..=50 {
+            for z in 20..=40 {
+                footprints.set(x, z);
+            }
+        }
+        let area: Vec<(i32, i32)> = (20..=50)
+            .flat_map(|x| (20..=40).map(move |z| (x, z)))
+            .collect();
+        let through = |track: ProcessedElement| {
+            collect_rail_passages(&[track], &xz, 1.0, &footprints).through(&area)
+        };
+
+        // A train's room either side of the track, and only inside the building.
+        let rails = collect_rail_passages(&[track_along(1, 30, &[])], &xz, 1.0, &footprints);
+        assert!(rails.cells.contains(35, 28) && rails.cells.contains(35, 32));
+        assert!(!rails.cells.contains(35, 33) && !rails.cells.contains(10, 30));
+        assert_eq!(rails.height, 6);
+        assert_eq!(rails.through(&area), RailThrough::Into);
+
+        // Mapped as passing under, along an edge, over it on a bridge, or long out of use.
+        let under = track_along(2, 30, &[("tunnel", "building_passage")]);
+        assert_eq!(through(under), RailThrough::Under);
+        assert_eq!(through(track_along(3, 41, &[])), RailThrough::Clips);
+        // Running past the wall (z = 41) a block or more clear of it.
+        let past = collect_rail_passages(&[track_along(8, 43, &[])], &xz, 1.0, &footprints);
+        assert!(past.cells.is_empty(), "track beside a building opens it");
+        assert_eq!(
+            through(track_along(4, 30, &[("bridge", "yes")])),
+            RailThrough::None
+        );
+        assert_eq!(
+            through(track_along(5, 30, &[("railway", "disused")])),
+            RailThrough::None
+        );
+
+        // Higher at a bigger scale, at least as high as a road's passage at a small one.
+        assert_eq!(
+            collect_rail_passages(&[track_along(6, 30, &[])], &xz, 2.0, &footprints).height,
+            11
+        );
+        assert_eq!(
+            collect_rail_passages(&[track_along(7, 30, &[])], &xz, 0.5, &footprints).height,
+            crate::element_processing::buildings::BUILDING_PASSAGE_HEIGHT
+        );
     }
 
     fn test_editor(xzbbox: &XZBBox) -> WorldEditor<'_> {

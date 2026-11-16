@@ -1,9 +1,8 @@
 //! Local Archive: runs louis-e/arnis-tiles to bake Geofabrik country extracts
 //! into a local tile archive folder that `--osm-tiles-url <folder>` reads.
 //!
-//! arnis-tiles is a separate program: the release bundles it as a Tauri
-//! sidecar next to the Arnis executable, and a dev build finds it on PATH or
-//! at the path set in the window.
+//! arnis-tiles is a separate program and is not shipped with Arnis: it is
+//! found next to the Arnis executable or on PATH.
 
 use std::ffi::OsStr;
 use std::io::{BufRead, Read};
@@ -22,8 +21,7 @@ const EXE: &str = if cfg!(windows) {
     "arnis-tiles"
 };
 
-/// The arnis-tiles executable: next to this one (where the bundle puts the
-/// sidecar), then on PATH.
+/// The arnis-tiles executable: next to this one, then on PATH.
 pub fn locate() -> Option<PathBuf> {
     let exe_dir = std::env::current_exe()
         .ok()

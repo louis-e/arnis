@@ -5,11 +5,10 @@
 
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::deterministic_rng::element_rng;
+use crate::element_processing::statues;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
-use rand::Rng;
 
 /// Generate historic structures from node elements
 pub fn generate_historic(editor: &mut WorldEditor, node: &ProcessedNode) {
@@ -53,9 +52,6 @@ fn generate_memorial(editor: &mut WorldEditor, node: &ProcessedNode) {
     let x = node.x;
     let z = node.z;
 
-    // Use deterministic RNG for consistent results
-    let mut rng = element_rng(node.id);
-
     // Get memorial subtype
     let memorial_type = node
         .tags
@@ -79,19 +75,9 @@ fn generate_memorial(editor: &mut WorldEditor, node: &ProcessedNode) {
             }
         }
         "statue" | "sculpture" | "bust" => {
-            // Statue on a pedestal
-            editor.set_block(STONE_BRICKS, x, 1, z, None, None);
-            editor.set_block(CHISELED_STONE_BRICKS, x, 2, z, None, None);
-
-            // Use polished andesite for bronze/metal statue appearance
-            let statue_block = if rng.random_bool(0.5) {
-                POLISHED_ANDESITE
-            } else {
-                POLISHED_DIORITE
-            };
-            editor.set_block(statue_block, x, 3, z, None, None);
-            editor.set_block(statue_block, x, 4, z, None, None);
-            editor.set_block(STONE_BRICK_WALL, x, 5, z, None, None);
+            if let Some(form) = statues::form(&node.tags) {
+                statues::place(editor, node, form);
+            }
         }
         "stone" | "stolperstein" => {
             // Simple memorial stone embedded in ground
@@ -155,38 +141,15 @@ fn generate_memorial(editor: &mut WorldEditor, node: &ProcessedNode) {
     }
 }
 
-/// Generate a monument (larger than memorial)
+/// A monument: a column on a stepped base, ten blocks tall unless mapped otherwise. A
+/// figure stands on it only where the tags say it is a statue or a column.
 fn generate_monument(editor: &mut WorldEditor, node: &ProcessedNode) {
-    let x = node.x;
-    let z = node.z;
-
-    // Monuments are typically larger structures
-    let height = node
-        .tags
-        .get("height")
-        .and_then(|h| h.parse::<i32>().ok())
-        .unwrap_or(10)
-        .clamp(5, 20);
-
-    // Large base platform
-    for dx in -2..=2 {
-        for dz in -2..=2 {
-            editor.set_block(STONE_BRICKS, x + dx, 1, z + dz, None, None);
-        }
-    }
-    for dx in -1..=1 {
-        for dz in -1..=1 {
-            editor.set_block(STONE_BRICKS, x + dx, 2, z + dz, None, None);
-        }
-    }
-
-    // Main structure
-    for y in 3..height {
-        editor.set_block(POLISHED_ANDESITE, x, y, z, None, None);
-    }
-
-    // Decorative top
-    editor.set_block(CHISELED_STONE_BRICKS, x, height, z, None, None);
+    let height = statues::height(&node.tags).unwrap_or(10.0);
+    let figure = matches!(
+        node.tags.get("memorial").map(String::as_str),
+        Some("statue" | "column")
+    );
+    statues::column(editor, node, height.clamp(5.0, 20.0), figure);
 }
 
 /// Generate a wayside cross

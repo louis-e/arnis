@@ -107,7 +107,7 @@ impl CoordinateBitmap {
     }
 
     /// Creates a zero-size bitmap that contains nothing and allocates no memory.
-    pub fn new_empty() -> Self {
+    pub const fn new_empty() -> Self {
         Self {
             bits: Vec::new(),
             min_x: 0,
@@ -181,6 +181,25 @@ impl CoordinateBitmap {
             return (self.bits[byte_index] >> bit_offset) & 1 == 1;
         }
         false
+    }
+
+    /// Marks every coordinate `other` marks. Both cover the same bounds, or either is empty.
+    pub fn union_with(&mut self, other: &CoordinateBitmap) {
+        if other.is_empty() {
+            return;
+        }
+        if self.bits.is_empty() {
+            *self = other.clone();
+            return;
+        }
+        debug_assert!(
+            self.min_x == other.min_x && self.min_z == other.min_z && self.width == other.width,
+            "bitmaps over different bounds"
+        );
+        for (a, b) in self.bits.iter_mut().zip(&other.bits) {
+            *a |= *b;
+        }
+        self.count = self.bits.iter().map(|b| b.count_ones() as usize).sum();
     }
 
     /// Checks if a coordinate is inside the bitmap and not set yet.
@@ -306,7 +325,7 @@ impl CoordinateBitmap {
 pub type BuildingFootprintBitmap = CoordinateBitmap;
 
 /// Type alias for the road surface bitmap used by amenity processors.
-/// Built by `highways::collect_road_surface_coords` using the same Bresenham +
+/// Built by `highways::collect_road_and_carriageway_coords` using the same Bresenham +
 /// block_range geometry as the renderer, so every placed road/path block coordinate
 /// is marked as 1 and everything else is 0.
 pub type RoadMaskBitmap = CoordinateBitmap;

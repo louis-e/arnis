@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::decals::DecalKey;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::get_nearest_road_block;
 use crate::element_processing::signage;
 use crate::element_processing::street_furniture;
@@ -18,12 +19,37 @@ use rand::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// Takes down benches and bins the water fill reached, as on a shore or a stream they overlap.
+pub fn drop_furniture_in_water(editor: &mut WorldEditor) {
+    for cells in editor.take_furniture() {
+        // A copy in a neighbour tile's margin, where no water is laid, is left to the owner.
+        let (mx, _, mz) = cells[cells.len() / 2];
+        let wet = !editor.owns(mx, mz)
+            || cells.iter().any(|&(x, y, z)| {
+                editor.check_for_block_absolute(x, y - 1, z, Some(&[WATER]), None)
+            });
+        if wet {
+            for &(x, y, z) in &cells {
+                editor.set_block_absolute(
+                    AIR,
+                    x,
+                    y,
+                    z,
+                    Some(&[OAK_STAIRS, OAK_SLAB_TOP, CAULDRON]),
+                    None,
+                );
+            }
+        }
+    }
+}
+
 pub fn generate_amenities(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     road_mask: &RoadMaskBitmap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
@@ -39,10 +65,27 @@ pub fn generate_amenities(
     }
 
     if let Some(amenity_type) = element.tags().get("amenity") {
-        let first_node: Option<XZPoint> = element
+        let mut first_node: Option<XZPoint> = element
             .nodes()
             .map(|n: &crate::osm_parser::ProcessedNode| XZPoint::new(n.x, n.z))
             .next();
+        // Furniture mapped on a bridge stands on its deck; anything else there would end up under it.
+        let deck = first_node
+            .filter(|_| matches!(element, ProcessedElement::Node(_)))
+            .and_then(|pt| bridge_surface.nearest_deck_cell(pt.x, pt.z, 1));
+        if let Some(((x, z), _)) = deck {
+            if !matches!(
+                amenity_type.as_str(),
+                "bench" | "waste_basket" | "waste_disposal"
+            ) {
+                return;
+            }
+            first_node = Some(XZPoint::new(x, z));
+        }
+        // Absolute Y one above the ground or deck at a cell.
+        let above = |editor: &WorldEditor, x: i32, z: i32| {
+            deck.map_or_else(|| editor.get_absolute_y(x, 1, z), |(_, y)| y + 1)
+        };
         match amenity_type.as_str() {
             "recycling" => {
                 let is_container = element
@@ -95,9 +138,13 @@ pub fn generate_amenities(
             "waste_disposal" | "waste_basket" => {
                 // Place a cauldron for waste disposal or waste basket
                 if let Some(pt) = first_node {
-                    editor.set_block(CAULDRON, pt.x, 1, pt.z, None, None);
-                    let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
-                    place_furniture_decals(editor, element.tags(), pt.x, abs_y, pt.z);
+                    let abs_y = above(editor, pt.x, pt.z);
+                    editor.set_block_absolute(CAULDRON, pt.x, abs_y, pt.z, None, None);
+                    editor.register_furniture(vec![(pt.x, abs_y, pt.z)]);
+                    // One mapped in the water likely goes with it, which its frames would outlive.
+                    if deck.is_some() || !editor.is_mapped_water(pt.x, pt.z) {
+                        place_furniture_decals(editor, element.tags(), pt.x, abs_y, pt.z);
+                    }
                 }
             }
             "vending_machine" | "atm" => {
@@ -142,7 +189,14 @@ pub fn generate_amenities(
                     let mut rng = element_rng(element.id());
                     let road_pos = get_nearest_road_block(pt.x, pt.z, 4, road_mask);
 
-                    let use_east_west = if let Some((rx, rz)) = road_pos {
+                    // On a deck the bench lies along it where only one way round fits.
+                    let fits = |dx: i32, dz: i32| {
+                        bridge_surface.contains(pt.x - dx, pt.z - dz)
+                            && bridge_surface.contains(pt.x + dx, pt.z + dz)
+                    };
+                    let use_east_west = if deck.is_some() && fits(1, 0) != fits(0, 1) {
+                        fits(1, 0)
+                    } else if let Some((rx, rz)) = road_pos {
                         let dx = (rx - pt.x).abs();
                         let dz = (rz - pt.z).abs();
                         dz >= dx
@@ -163,7 +217,7 @@ pub fn generate_amenities(
                         (StairFacing::North, StairFacing::South, 0, 1)
                     };
 
-                    let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    let abs_y = above(editor, pt.x, pt.z);
                     let bench_blacklist = [OAK_LOG, SPRUCE_LOG];
                     //place bench
                     let stair_a = top_stair(create_stair_with_properties(
@@ -180,7 +234,14 @@ pub fn generate_amenities(
                         Some(&bench_blacklist),
                     );
 
-                    editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, Some(&bench_blacklist));
+                    editor.set_block_absolute(
+                        OAK_SLAB_TOP,
+                        pt.x,
+                        abs_y,
+                        pt.z,
+                        None,
+                        Some(&bench_blacklist),
+                    );
 
                     let stair_b = top_stair(create_stair_with_properties(
                         OAK_STAIRS,
@@ -195,6 +256,11 @@ pub fn generate_amenities(
                         None,
                         Some(&bench_blacklist),
                     );
+                    editor.register_furniture(vec![
+                        (pt.x - dx, abs_y, pt.z - dz),
+                        (pt.x, abs_y, pt.z),
+                        (pt.x + dx, abs_y, pt.z + dz),
+                    ]);
                 }
             }
             "shelter" => {
@@ -995,7 +1061,14 @@ mod tests {
             z: 20,
         });
         let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"]);
-        generate_amenities(&mut editor, &node, &args, &FloodFillCache::new(), road);
+        generate_amenities(
+            &mut editor,
+            &node,
+            &args,
+            &FloodFillCache::new(),
+            road,
+            &BridgeSurfaceMap::empty(),
+        );
         let entry = ctx.registry.get(&key).unwrap();
         let ids: Vec<i32> = (0..entry.rows).map(|r| entry.tile_id(0, r)).collect();
         let mut frames: Vec<(i32, i32, i32)> = editor
@@ -1052,5 +1125,70 @@ mod tests {
             machine_frames(&[("amenity", "atm")], &road, DecalKey::Machine("atm"), true);
         assert_eq!(frames.len(), 6, "{frames:?}");
         assert!(frames.iter().all(|&(x, _, _)| x != 21), "{frames:?}");
+    }
+
+    /// Furniture of `amenity` at (x, 20), with `decks` for the bridge surface.
+    fn place_furniture(editor: &mut WorldEditor, amenity: &str, x: i32, decks: &BridgeSurfaceMap) {
+        let road = RoadMaskBitmap::new(&XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap());
+        let node = ProcessedElement::Node(ProcessedNode {
+            id: x as u64,
+            tags: tag_map(&[("amenity", amenity)]),
+            x,
+            z: 20,
+        });
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"]);
+        generate_amenities(editor, &node, &args, &FloodFillCache::new(), &road, decks);
+    }
+
+    #[test]
+    fn benches_and_bins_the_water_reached_are_taken_down() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        let decks = BridgeSurfaceMap::empty();
+        for (amenity, x) in [
+            ("bench", 10),
+            ("waste_basket", 15),
+            ("bench", 25),
+            ("waste_basket", 30),
+        ] {
+            place_furniture(&mut editor, amenity, x, &decks);
+        }
+        // The fill reaches the first two only.
+        for x in 8..=17 {
+            for z in 18..=22 {
+                editor.set_block_absolute(WATER, x, 0, z, None, None);
+            }
+        }
+        drop_furniture_in_water(&mut editor);
+        let at = |x: i32| editor.get_block_absolute(x, 1, 20);
+        assert_eq!(at(10), None);
+        assert_eq!(at(15), None);
+        assert_eq!(at(25), Some(OAK_SLAB_TOP));
+        assert_eq!(at(30), Some(CAULDRON));
+    }
+
+    #[test]
+    fn a_bench_mapped_on_a_bridge_stands_on_its_deck() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        // Decks one cell wide, running east and south, which only take a bench along them.
+        let mut decks = BridgeSurfaceMap::empty();
+        for i in 15..=25 {
+            decks.insert_deck(i - 10, 20, 6);
+            decks.insert_deck(30, i, 6);
+        }
+        place_furniture(&mut editor, "bench", 10, &decks);
+        place_furniture(&mut editor, "bench", 30, &decks);
+        place_furniture(&mut editor, "drinking_water", 12, &decks);
+        assert_eq!(editor.get_block_absolute(10, 7, 20), Some(OAK_SLAB_TOP));
+        for (x, z) in [(9, 20), (11, 20), (30, 19), (30, 21)] {
+            assert_eq!(
+                editor.get_block_absolute(x, 7, z),
+                Some(OAK_STAIRS),
+                "{x} {z}"
+            );
+        }
+        assert_eq!(editor.get_block_absolute(10, 1, 20), None);
+        assert!((0..=8).all(|y| editor.get_block_absolute(12, y, 20).is_none()));
     }
 }

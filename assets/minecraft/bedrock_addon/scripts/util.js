@@ -2,6 +2,23 @@ import { system, world } from "@minecraft/server";
 
 const RAD = Math.PI / 180;
 
+/**
+ * How far a vehicle stands over the spot it is drawn at, in blocks; its geometry hangs as
+ * far under it. An entity is lit by the block it is in, and one gliding up a step or a
+ * slope would cut into the ground for a moment and go dark. As `vehicle_models::LIFT`.
+ */
+export const LIFT = 1;
+
+/** Where a vehicle drawn at `at` stands. */
+export function raised(at) {
+  return { x: at.x, y: at.y + LIFT, z: at.z };
+}
+
+/** The spot a vehicle standing at `at` is drawn at. */
+export function lowered(at) {
+  return { x: at.x, y: at.y - LIFT, z: at.z };
+}
+
 /** The yaw that faces along (dx, dz): 0 is south, 90 west. */
 export function yawOf(dx, dz) {
   return Math.atan2(-dx, dz) / RAD;
@@ -88,16 +105,17 @@ export class Glide {
     this.pending = new Map();
   }
 
+  /** From the spot `from` to the spot `to`, the entity standing `LIFT` over each. */
   move(entity, from, to, yaw) {
     const rotation = { x: 0, y: yaw };
-    const target = { x: to.x, y: to.y, z: to.z };
+    const target = raised(to);
     if (distance(from, to) > 16) {
       // A jump, not a step.
       entity.teleport(target, { rotation });
       this.pending.delete(entity.id);
       return;
     }
-    const half = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, z: (from.z + to.z) / 2 };
+    const half = raised({ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, z: (from.z + to.z) / 2 });
     entity.teleport(half, { rotation });
     this.pending.set(entity.id, { entity, target, rotation });
   }

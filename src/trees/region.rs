@@ -248,9 +248,12 @@ fn build_pools(
     })
 }
 
+/// Whether a model, turned a number of quarter turns, fits where it is asked for.
+pub type Fits<'a> = &'a dyn Fn(usize, u8) -> bool;
+
 /// What a caller already knows about the slot it is asking for.
 #[derive(Clone, Copy, Default)]
-pub struct SlotRequest {
+pub struct SlotRequest<'a> {
     /// Model height in blocks the slot asks for, when anything measured it.
     pub want_height: Option<i32>,
     /// The caller fixed the density itself, so skip the pack's grove noise.
@@ -263,6 +266,8 @@ pub struct SlotRequest {
     pub wet_ground: bool,
     /// Beside a sand beach, where the mix's palms line the shore.
     pub beach: bool,
+    /// Which models fit the ground, as beside a road; `None` takes any.
+    pub fits: Option<Fits<'a>>,
 }
 
 /// What OSM says about a mapped tree.
@@ -274,6 +279,70 @@ pub struct MappedRequest<'a> {
     pub want_height: Option<i32>,
     pub eco: Option<Ecoregion>,
     pub beach: bool,
+}
+
+/// What a mapped tree grows as: its own pool, which is its genus, its leaf type or else
+/// its habitat's community, and the model picked from it.
+pub struct MappedPick<'a> {
+    lib: &'a RegionLibrary,
+    own: Cow<'a, Community>,
+    own_no_palms: bool,
+    choice: Choice,
+    /// The habitat's community, where it is not the own pool already.
+    community: Option<&'a Community>,
+    no_palms: bool,
+    x: i32,
+    z: i32,
+    height: i32,
+    /// The model picked for the tree.
+    pub model: usize,
+    /// Quarter turns the model is tried in first.
+    pub rot: u8,
+}
+
+impl MappedPick<'_> {
+    /// The model picked, then the rest of its species, then the rest of its pool,
+    /// nearest height and slimmest trunk first.
+    pub fn own_models(&self) -> Vec<usize> {
+        let mut models = vec![self.model];
+        models.extend(
+            self.lib
+                .stand_ins(&self.own, &self.choice, self.own_no_palms),
+        );
+        models
+    }
+
+    /// The habitat community's models in the same order, for where nothing of its own fits.
+    pub fn community_models(&self) -> Vec<usize> {
+        let Some(c) = self.community else {
+            return Vec::new();
+        };
+        let Some(choice) =
+            self.lib
+                .choose_in_community(c, self.x, self.z, self.height, self.no_palms)
+        else {
+            return Vec::new();
+        };
+        let mut models = vec![choice.picked];
+        models.extend(self.lib.stand_ins(c, &choice, self.no_palms));
+        models
+    }
+}
+
+/// The first turn, from `rot` on, in which model `i` fits.
+pub fn turn_to_fit(i: usize, rot: u8, fits: Fits) -> Option<u8> {
+    (0..4).map(|k| (rot + k) % 4).find(|&r| fits(i, r))
+}
+
+/// What `choose_in_community` settled on, for finding its stand-ins.
+struct Choice {
+    picked: usize,
+    /// Index of the picked model's species in the community.
+    species: usize,
+    /// Height the pick was judged by.
+    want: i32,
+    /// Whether the community had a model the size cap allows.
+    any_capped: bool,
 }
 
 pub struct RegionLibrary {
@@ -993,21 +1062,30 @@ impl RegionLibrary {
         })
     }
 
+    /// Whether model `i` may be picked: no palm where they are kept out, and within the
+    /// size cap unless nothing of the community is.
+    fn candidate(&self, i: usize, no_palms: bool, any_capped: bool) -> bool {
+        !(no_palms && self.palm[i]) && (!any_capped || self.size_allowed(self.entries[i].1))
+    }
+
     /// The model of `c` closest to `want` blocks. The species is rolled among
     /// those with a model that close, then the trunk width roll picks within it.
     /// Past the size cap only where nothing under it is left: a tree beats a hole.
-    fn pick_in_community(
+    fn choose_in_community(
         &self,
         c: &Community,
         x: i32,
         z: i32,
         want: i32,
         no_palms: bool,
-    ) -> Option<usize> {
+    ) -> Option<Choice> {
         let usable = |i: usize| !(no_palms && self.palm[i]);
-        let capped = |i: usize| usable(i) && self.size_allowed(self.entries[i].1);
-        let any_capped = c.species.iter().flatten().any(|&i| capped(i));
-        let cand = |i: usize| if any_capped { capped(i) } else { usable(i) };
+        let any_capped = c
+            .species
+            .iter()
+            .flatten()
+            .any(|&i| usable(i) && self.size_allowed(self.entries[i].1));
+        let cand = |i: usize| self.candidate(i, no_palms, any_capped);
         // Nothing under the cap: the community's smallest come closest to it.
         let want = if any_capped {
             want
@@ -1074,7 +1152,67 @@ impl RegionLibrary {
             group = pool;
         }
         let h = coord_hash(x + 313, z + 727) as usize;
-        Some(group[h % group.len()])
+        Some(Choice {
+            picked: group[h % group.len()],
+            species: chosen,
+            want,
+            any_capped,
+        })
+    }
+
+    /// What stands in for a pick that does not fit, as beside a road: the rest of its
+    /// species, then the community's other species, nearest height and slimmest trunk first.
+    fn stand_ins(&self, c: &Community, choice: &Choice, no_palms: bool) -> Vec<usize> {
+        let cand = |i: usize| i != choice.picked && self.candidate(i, no_palms, choice.any_capped);
+        let order = |i: &usize| {
+            (
+                (self.entries[*i].0.height - choice.want).abs(),
+                self.entries[*i].2,
+                *i,
+            )
+        };
+        let mut own: Vec<usize> = c.species[choice.species]
+            .iter()
+            .copied()
+            .filter(|&i| cand(i))
+            .collect();
+        own.sort_unstable_by_key(order);
+        let mut rest: Vec<usize> = c
+            .species
+            .iter()
+            .enumerate()
+            .filter(|&(k, _)| k != choice.species)
+            .flat_map(|(_, sp)| sp.iter().copied())
+            .filter(|&i| cand(i))
+            .collect();
+        rest.sort_unstable_by_key(order);
+        own.extend(rest);
+        own
+    }
+
+    /// The model `choose_in_community` picks, and how it is turned. Where it fits in no
+    /// turn, its stand-ins are tried in order.
+    #[allow(clippy::too_many_arguments)]
+    fn pick_in_community(
+        &self,
+        c: &Community,
+        x: i32,
+        z: i32,
+        want: i32,
+        no_palms: bool,
+        rot: u8,
+        fits: Option<Fits>,
+    ) -> Option<(usize, u8)> {
+        let choice = self.choose_in_community(c, x, z, want, no_palms)?;
+        let Some(fits) = fits else {
+            return Some((choice.picked, rot));
+        };
+        if let Some(r) = turn_to_fit(choice.picked, rot, fits) {
+            return Some((choice.picked, r));
+        }
+        self.stand_ins(c, &choice, no_palms)
+            .into_iter()
+            .find_map(|i| turn_to_fit(i, rot, fits).map(|r| (i, r)))
     }
 
     /// Choose a community for `habitat_hint`; on a montane cell lowland/wet swap to conifer.
@@ -1240,8 +1378,8 @@ impl RegionLibrary {
                     .or_else(|| vanilla.then(|| self.pick_vanilla(mix, want, sx, sz)))
             }
         });
-        let (community, idx): (&Community, Option<usize>) = if let Some(c) = from_mix {
-            (c, self.pick_in_community(c, sx, sz, height, no_palms))
+        let community: &Community = if let Some(c) = from_mix {
+            c
         } else if blend >= 97 {
             let n = self.realm_pack.own;
             if n == 0 {
@@ -1249,19 +1387,16 @@ impl RegionLibrary {
             }
             let ci = (coord_hash(sx + 5, sz + 9) % n as u64) as usize;
             let c = &self.realm_pack.communities[ci];
-            let c = if self.fits(c, height, no_palms) {
+            if self.fits(c, height, no_palms) {
                 c
             } else {
                 self.pick_community(&self.realm_pack, hint, sx, sz, montane)
-            };
-            (c, self.pick_in_community(c, sx, sz, height, no_palms))
+            }
         } else {
             let sprinkle = (blend >= 67 && !self.vanilla_pack.is_empty())
                 .then(|| self.pick_community(&self.vanilla_pack, hint, sx, sz, montane))
                 .filter(|c| self.fits(c, height, no_palms));
-            let c = sprinkle
-                .unwrap_or_else(|| self.pick_community(&self.realm_pack, hint, sx, sz, montane));
-            (c, self.pick_in_community(c, sx, sz, height, no_palms))
+            sprinkle.unwrap_or_else(|| self.pick_community(&self.realm_pack, hint, sx, sz, montane))
         };
         // The grove noise invents clearings, which would thin the same trees
         // twice when the caller already measured the density.
@@ -1272,13 +1407,15 @@ impl RegionLibrary {
                 return None;
             }
         }
-        let idx = idx?;
         let rot = (coord_hash(sx ^ 0x5bd1, sz ^ 0x9e37) % 4) as u8;
+        let (idx, rot) =
+            self.pick_in_community(community, sx, sz, height, no_palms, rot, req.fits)?;
         Some((sx, sz, idx, rot))
     }
 
     /// A mapped tree keeps its position and is never thinned. Its genus comes first,
     /// then the community's species of its leaf type.
+    #[cfg(test)]
     pub fn pick_mapped(
         &self,
         x: i32,
@@ -1287,43 +1424,25 @@ impl RegionLibrary {
         elev_y: i32,
         req: MappedRequest,
     ) -> Option<(i32, i32, usize, u8)> {
+        self.mapped_pick(x, z, hint, elev_y, req)
+            .map(|p| (x, z, p.model, p.rot))
+    }
+
+    /// What a mapped tree grows as. Its genus comes first, then the community's species
+    /// of its leaf type, then the community.
+    pub fn mapped_pick<'a>(
+        &'a self,
+        x: i32,
+        z: i32,
+        hint: Habitat,
+        elev_y: i32,
+        req: MappedRequest,
+    ) -> Option<MappedPick<'a>> {
         let rot = (coord_hash(x ^ 0x5bd1, z ^ 0x9e37) % 4) as u8;
         let mix = req.eco.and_then(|e| self.mixes.get(&e.id));
         let no_palms = !self.palms_at(mix);
         let height =
             self.capped_height(req.want_height.unwrap_or_else(|| self.default_height(x, z)));
-        let pick = |species: Vec<Vec<usize>>, no_palms: bool| {
-            if species.is_empty() {
-                return None;
-            }
-            let pool = Community {
-                name: String::new(),
-                habitat: hint,
-                species,
-                names: Vec::new(),
-                genera: Vec::new(),
-                density: 0,
-            };
-            self.pick_in_community(&pool, x, z, height, no_palms)
-        };
-        let mix_communities = || {
-            mix.into_iter()
-                .flat_map(|m| &m.communities)
-                .map(|&c| &self.realm_pack.communities[c])
-        };
-        // A mapped genus is what stands there, planted palm or not.
-        if let Some(genus) = req.genus {
-            let same = |g: &str| g.eq_ignore_ascii_case(genus);
-            if let Some(idx) = pick(species_where(mix_communities(), same), false) {
-                return Some((x, z, idx, rot));
-            }
-            for pack in [&self.realm_pack, &self.vanilla_pack] {
-                if let Some(idx) = pick(species_where(&pack.communities, same), false) {
-                    return Some((x, z, idx, rot));
-                }
-            }
-        }
-
         let montane =
             self.is_montane(elev_y) && crate::ground_generation::value_noise_01(x, z, 64) < 0.6;
         let want = Want {
@@ -1343,24 +1462,73 @@ impl RegionLibrary {
         let community = beach
             .or_else(|| mix.and_then(|m| self.pick_from_mix(m, want, x, z, height, no_palms)))
             .unwrap_or_else(|| self.pick_community(&self.realm_pack, hint, x, z, montane));
-        let idx = match req.conifer {
-            Some(conifer) => {
-                let of_type = |g: &str| crate::trees::mapped::is_conifer_genus(g) == conifer;
-                pick(species_where([community], of_type), no_palms)
-                    .or_else(|| pick(species_where(mix_communities(), of_type), no_palms))
-                    .or_else(|| {
-                        pick(
-                            species_where(&self.realm_pack.communities, of_type),
-                            no_palms,
-                        )
-                    })
-                    .or_else(|| self.pick_in_community(community, x, z, height, no_palms))
+        let pick = |own: Cow<'a, Community>, own_no_palms: bool, fallback: bool| {
+            let choice = self.choose_in_community(&own, x, z, height, own_no_palms)?;
+            Some(MappedPick {
+                lib: self,
+                model: choice.picked,
+                own,
+                own_no_palms,
+                choice,
+                community: fallback.then_some(community),
+                no_palms,
+                x,
+                z,
+                height,
+                rot,
+            })
+        };
+        let pool = |species: Vec<Vec<usize>>| {
+            (!species.is_empty()).then(|| {
+                Cow::Owned(Community {
+                    name: String::new(),
+                    habitat: hint,
+                    species,
+                    names: Vec::new(),
+                    genera: Vec::new(),
+                    density: 0,
+                })
+            })
+        };
+        let mix_communities = || {
+            mix.into_iter()
+                .flat_map(|m| &m.communities)
+                .map(|&c| &self.realm_pack.communities[c])
+        };
+        // A mapped genus is what stands there, planted palm or not.
+        if let Some(genus) = req.genus {
+            let same = |g: &str| g.eq_ignore_ascii_case(genus);
+            let found = pool(species_where(mix_communities(), same))
+                .and_then(|p| pick(p, false, true))
+                .or_else(|| {
+                    [&self.realm_pack, &self.vanilla_pack]
+                        .into_iter()
+                        .find_map(|pack| {
+                            pool(species_where(&pack.communities, same))
+                                .and_then(|p| pick(p, false, true))
+                        })
+                });
+            if found.is_some() {
+                return found;
             }
-            None => self.pick_in_community(community, x, z, height, no_palms),
         }
-        // A mapped tree always stands, even if only a palm is left to stand for it.
-        .or_else(|| self.pick_in_community(community, x, z, height, false))?;
-        Some((x, z, idx, rot))
+        let of_type = req.conifer.and_then(|conifer| {
+            let of_type = |g: &str| crate::trees::mapped::is_conifer_genus(g) == conifer;
+            pool(species_where([community], of_type))
+                .and_then(|p| pick(p, no_palms, true))
+                .or_else(|| {
+                    pool(species_where(mix_communities(), of_type))
+                        .and_then(|p| pick(p, no_palms, true))
+                })
+                .or_else(|| {
+                    pool(species_where(&self.realm_pack.communities, of_type))
+                        .and_then(|p| pick(p, no_palms, true))
+                })
+        });
+        of_type
+            .or_else(|| pick(Cow::Borrowed(community), no_palms, false))
+            // A mapped tree always stands, even if only a palm is left to stand for it.
+            .or_else(|| pick(Cow::Borrowed(community), false, false))
     }
 
     pub fn report(&self) {
@@ -1471,6 +1639,77 @@ mod tests {
         }
     }
 
+    /// A fit check that takes every model changes no pick. One that refuses the turn
+    /// picked turns the model; one that refuses the model gets a stand-in, the same
+    /// species first, and only one that refuses everything leaves the slot empty.
+    #[test]
+    fn a_model_that_does_not_fit_gives_way_to_one_that_does() {
+        let src = TreePackSource::embedded("eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false)
+            .expect("load eur");
+        let species_of = |idx: usize| {
+            [&lib.realm_pack, &lib.vanilla_pack]
+                .iter()
+                .flat_map(|p| &p.communities)
+                .flat_map(|c| &c.species)
+                .find(|sp| sp.contains(&idx))
+                .cloned()
+                .unwrap_or_default()
+        };
+        let (mut picks, mut same_species) = (0, 0);
+        for k in 0..300 {
+            let (x, z) = (k * 11 % 997 * 5, k * 7 % 991 * 5);
+            let req = SlotRequest {
+                density_decided: true,
+                ..Default::default()
+            };
+            let Some((sx, sz, idx, rot)) = lib.pick_slot(x, z, Habitat::Lowland, 0, req) else {
+                continue;
+            };
+            picks += 1;
+            let any = |_: usize, _: u8| true;
+            let all = SlotRequest {
+                fits: Some(&any),
+                ..req
+            };
+            assert_eq!(
+                lib.pick_slot(x, z, Habitat::Lowland, 0, all),
+                Some((sx, sz, idx, rot))
+            );
+            let other_turn = |i: usize, r: u8| !(i == idx && r == rot);
+            let turned = SlotRequest {
+                fits: Some(&other_turn),
+                ..req
+            };
+            assert_eq!(
+                lib.pick_slot(x, z, Habitat::Lowland, 0, turned),
+                Some((sx, sz, idx, (rot + 1) % 4))
+            );
+            let other_model = |i: usize, _: u8| i != idx;
+            let stand_in = SlotRequest {
+                fits: Some(&other_model),
+                ..req
+            };
+            if let Some((_, _, i, _)) = lib.pick_slot(x, z, Habitat::Lowland, 0, stand_in) {
+                assert_ne!(i, idx);
+                if species_of(idx).contains(&i) {
+                    same_species += 1;
+                }
+            }
+            let none = |_: usize, _: u8| false;
+            let nothing = SlotRequest {
+                fits: Some(&none),
+                ..req
+            };
+            assert_eq!(lib.pick_slot(x, z, Habitat::Lowland, 0, nothing), None);
+        }
+        assert!(picks > 100, "{picks} picks");
+        assert!(
+            same_species * 2 > picks,
+            "a species' own models stand in first: {same_species} of {picks}"
+        );
+    }
+
     /// Entry indices of every pack species whose genus passes `keep`.
     fn entries_where(lib: &RegionLibrary, keep: impl Fn(&str) -> bool) -> Vec<usize> {
         [&lib.realm_pack, &lib.vanilla_pack]
@@ -1543,6 +1782,37 @@ mod tests {
                 !conifers.contains(&idx),
                 "a broadleaf never becomes a conifer"
             );
+        }
+    }
+
+    /// Where a mapped lime's model does not fit, every model it may move as is a lime, the
+    /// one picked first; only after those come the community's, and an untagged tree,
+    /// whose own pool is its community, has nothing further to fall back on.
+    #[test]
+    fn a_mapped_tree_keeps_its_genus_before_its_community() {
+        let src = TreePackSource::embedded("eur");
+        let lib = RegionLibrary::load(&src, 1.0, -62, 1.0, SizeFilter::default(), false).unwrap();
+        let tilia = entries_where(&lib, |g| g == "Tilia");
+        for k in 0..200 {
+            let (x, z) = (k * 13, k * 29);
+            let lime = MappedRequest {
+                genus: Some("Tilia"),
+                ..Default::default()
+            };
+            let pick = lib.mapped_pick(x, z, Habitat::Lowland, 0, lime).unwrap();
+            let own = pick.own_models();
+            assert_eq!(own[0], pick.model);
+            assert!(
+                own.iter().all(|i| tilia.contains(i)),
+                "only limes of its own"
+            );
+            assert!(!pick.community_models().is_empty());
+
+            let untagged = lib
+                .mapped_pick(x, z, Habitat::Lowland, 0, MappedRequest::default())
+                .unwrap();
+            assert!(untagged.own_models().len() > 1);
+            assert!(untagged.community_models().is_empty());
         }
     }
 

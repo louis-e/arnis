@@ -202,6 +202,17 @@ fn facing_to_wallmounted(facing: &str) -> u8 {
     }
 }
 
+/// A flat pane or bar turned along the run its Java connections name: facedir 0 along x,
+/// 1 along z.
+fn conv_flat(props: Option<&Value>, name: &'static str) -> LuantiNode {
+    let joined = |side: &str| prop_eq(props, side, "true");
+    let along_z = (joined("north") || joined("south")) && !(joined("east") || joined("west"));
+    LuantiNode {
+        name,
+        param2: u8::from(along_z),
+    }
+}
+
 /// A multiface block on the first face it covers → wallmounted param2 (see above; here the
 /// property already names the surface).
 fn multiface_to_wallmounted(props: Option<&Value>) -> u8 {
@@ -337,7 +348,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         33 => "mcl_colorblocks:hardened_clay_green",
         34 => "mcl_wool:green",
         35 => "mcl_farming:hay_block",
-        36 => "mcl_panes:bar_flat",
+        36 => return conv_flat(props, "mcl_panes:bar_flat"),
         37 => "mcl_core:ironblock",
         38 => "mcl_amethyst:calcite",
         39 => "mcl_colorblocks:concrete_yellow",
@@ -492,11 +503,11 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         189 => "mcl_flowers:fern",
         190 => "mcl_colorblocks:concrete_lime",
         191 => "mcl_colorblocks:concrete_blue",
-        192 => "mcl_panes:pane_grey_flat",
+        192 => return conv_flat(props, "mcl_panes:pane_grey_flat"),
         193 => "mcl_stairs:slab_granite_smooth",
         194 => "mcl_fences:spruce_fence_gate",
         195 => "mcl_copper:block", // WAXED_COPPER_BLOCK
-        196 => "mcl_panes:pane_natural_flat",
+        196 => return conv_flat(props, "mcl_panes:pane_natural_flat"),
         197 => "mcl_flowers:double_fern",
         198 => "mcl_flowers:double_fern_top",
         199 => "mcl_copper:block_exposed", // WAXED_EXPOSED_COPPER
@@ -590,7 +601,12 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         257 => "mcl_grindstone:grindstone",
         258 => "mcl_minecarts:rail",
         259 => "mcl_wool:red",
-        260 => "mcl_core:ladder",
+        260 => {
+            return LuantiNode {
+                name: "mcl_core:ladder",
+                param2: facing_to_wallmounted(prop_str(props, "facing").unwrap_or("north")),
+            }
+        }
         261 => "mcl_wool:yellow",
         265 => "mcl_stairs:slab_cobble",
         266 => "mcl_fences:nether_brick_fence",
@@ -665,7 +681,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         336 => "mcl_smoker:smoker",
         337 => "mcl_core:redsandstonesmooth2",
         338 => "mcl_stairs:slab_redsandstonesmooth2",
-        339 => "mcl_panes:pane_blue_flat",
+        339 => return conv_flat(props, "mcl_panes:pane_blue_flat"),
         340 => "mcl_wool:cyan",
         341 => "mcl_wool:silver_carpet",
         342 => "mcl_stairs:slab_mossycobble",
@@ -895,6 +911,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         524 => "mcl_redstone_torch:redstoneblock",
         525 => "mcl_trees:stripped_warped",
         526 => "mcl_trees:bark_stripped_warped",
+        // Only Java worlds hold a hydrant's invisible cell; Luanti has no barrier node.
+        527 => "air",
         _ => "mcl_core:stone",
     };
     LuantiNode {
@@ -919,6 +937,30 @@ mod tests {
     /// The fallback arm is silent -- an unmapped block turns into stone in the
     /// exported world rather than failing. Walk the whole palette so that adding
     /// a block without a Mineclonia node fails here instead of in someone's map.
+    #[test]
+    fn ladders_hang_on_their_wall_and_bars_follow_their_run() {
+        use crate::block_definitions::{IRON_BARS, LADDER};
+        let props = |pairs: &[(&str, &str)]| {
+            Value::Compound(
+                pairs
+                    .iter()
+                    .map(|&(k, v)| (k.to_string(), Value::String(v.to_string())))
+                    .collect(),
+            )
+        };
+        // A ladder facing north hangs on the wall to its south, Luanti's -z.
+        let ladder = to_mineclonia_node(LADDER, Some(&props(&[("facing", "north")])));
+        assert_eq!((ladder.name, ladder.param2), ("mcl_core:ladder", 5));
+        let east = to_mineclonia_node(LADDER, Some(&props(&[("facing", "east")])));
+        assert_eq!(east.param2, 3);
+        let bar =
+            |pairs: &[(&str, &str)]| to_mineclonia_node(IRON_BARS, Some(&props(pairs))).param2;
+        assert_eq!(bar(&[("east", "true"), ("west", "true")]), 0);
+        assert_eq!(bar(&[("north", "true"), ("south", "true")]), 1);
+        assert_eq!(bar(&[("north", "true"), ("east", "true")]), 0);
+        assert_eq!(to_mineclonia_node(IRON_BARS, None).param2, 0);
+    }
+
     #[test]
     fn open_iron_trapdoors_stay_open() {
         use crate::block_definitions::IRON_TRAPDOOR;

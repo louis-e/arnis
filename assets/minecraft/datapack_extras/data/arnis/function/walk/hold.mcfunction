@@ -1,3 +1,4 @@
+execute if entity @s[tag=arnis.w_rail] run return run function arnis:walk/rail_hold
 execute if entity @s[tag=arnis.w_red1] if score #tl arnis matches 0..159 run return run function arnis:walk/go
 execute if entity @s[tag=arnis.w_red2] if score #tl arnis matches 340..499 run return run function arnis:walk/go
 execute if entity @s[tag=arnis.w_kerb] store result score #gap arnis.walk run function arnis:walk/gap

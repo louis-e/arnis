@@ -422,6 +422,12 @@ impl Ground {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_land_cover_test(mut self, land_cover: LandCoverData) -> Self {
+        self.land_cover = Some(land_cover);
+        self
+    }
+
+    #[cfg(test)]
     pub(crate) fn new_flat_canopy_test(
         canopy: CanopyData,
         world_width: usize,

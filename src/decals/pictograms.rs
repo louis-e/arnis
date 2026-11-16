@@ -23,7 +23,6 @@ macro_rules! pictograms {
 
 pictograms!(
     "bus_stop",
-    "hydrant",
     "information",
     "metro_m",
     "metro_s",

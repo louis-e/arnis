@@ -22,6 +22,11 @@ const DT_MAX: u8 = u8::MAX;
 
 /// Maximum water carve depth, in blocks (the deepest tier).
 pub(crate) const MAX_WATER_DEPTH: i32 = 6;
+/// Height over the terrain a still surface can stand, which a pier is run down from.
+const PIERCE_REACH: i32 = 20;
+/// Carve depth of mapped water the land cover missed, past a shelf this wide on its banks.
+const MAPPED_DEPTH: i32 = 2;
+const MAPPED_SHELF: i32 = 2;
 
 /// Room a tunnel needs under the deepest bed, on top of the floor the carve leaves it. That
 /// bed lies on `min_y() + 1`; a bore keeping its cover under it needs it at `min_y() + 9`.
@@ -661,6 +666,30 @@ fn depth_over_bore(editor: &WorldEditor, x: i32, z: i32, water_y: i32, depth: i3
     }
 }
 
+/// Water laid under a support after it stood, as a `natural=water` fill the carve never
+/// revisits: the pier or plinth runs on through it to the bed.
+pub fn pierce_support_columns(editor: &mut WorldEditor) {
+    let wet = |e: &WorldEditor, x, y, z| e.check_for_block_absolute(x, y, z, Some(&[WATER]), None);
+    for ((x, z), block) in editor.support_columns() {
+        let ground = editor.get_ground_level(x, z);
+        let foot = (ground - MAX_WATER_DEPTH - 1..=ground + PIERCE_REACH)
+            .rev()
+            .find(|&y| {
+                wet(editor, x, y, z)
+                    && editor
+                        .get_block_absolute(x, y + 1, z)
+                        .is_some_and(|b| b != AIR && b != WATER)
+            });
+        let Some(mut y) = foot else {
+            continue;
+        };
+        while y > min_y() && wet(editor, x, y, z) {
+            editor.set_block_absolute(block, x, y, z, Some(&[WATER]), None);
+            y -= 1;
+        }
+    }
+}
+
 /// Place the underwater stack: water column, a layered bed, dunes and vegetation.
 pub fn carve_water_column(
     editor: &mut WorldEditor,
@@ -676,15 +705,25 @@ pub fn carve_water_column(
         "water carve depth {depth} exceeds the max tier {MAX_WATER_DEPTH}"
     );
     let mut depth = carve_depth(depth, water_y);
+    // Water OSM maps where the land cover has none, as a town's canals, still gets depth.
+    let missed = depth == 0 && !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
+    if missed {
+        depth = carve_depth(mapped_depth(editor, x, z), water_y);
+    }
     // Opt-in beds leave water that stands over a lower neighbour one block deep, or more
     // of its side would show than the default bed does.
     if depth > 0 && bwf.deeper_than_crust && editor.water_stands_over_neighbour(x, z, water_y) {
         depth = 0;
     }
-    // Bridge piers continue down to the bed.
+    // Bridge piers continue down to the bed, on the ground the beds beside them stand on.
     if let Some(pier) = editor.support_column(x, z) {
         for dy in 0..=depth {
             editor.set_block_absolute(pier, x, water_y - dy, z, None, Some(&[]));
+        }
+        let bed_y = water_y - depth - 1;
+        let fill_from = (bed_y - 12).max(min_y() + 1);
+        if fill_from <= bed_y {
+            editor.fill_column_absolute(STONE, x, z, fill_from, bed_y, true);
         }
         return;
     }
@@ -697,7 +736,9 @@ pub fn carve_water_column(
     let is_river = bwf.is_river(x, z);
 
     // Keep the bed plain near causeways so blobs/dunes/veg don't clutter piers.
-    let near_bridge = depth >= 2 && !road_mask.is_empty() && bridge_adjacent(road_mask, x, z);
+    // A canal's bed stays plain, as it does by a bridge.
+    let near_bridge =
+        depth >= 2 && (missed || (!road_mask.is_empty() && bridge_adjacent(road_mask, x, z)));
 
     // Layered bed: gravel base with noise-driven sand/clay/dirt patches over stone.
     let (top_block, under_block) = match depth {
@@ -911,6 +952,18 @@ pub(crate) fn clear_tree_within(
         ] {
             stack.push((cx + dx, cy + dy, cz + dz));
         }
+    }
+}
+
+/// Depth of mapped water the land cover missed: deeper past a shelf along its banks.
+fn mapped_depth(editor: &WorldEditor, x: i32, z: i32) -> i32 {
+    let interior = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        .iter()
+        .all(|&(dx, dz)| editor.is_mapped_water(x + dx * MAPPED_SHELF, z + dz * MAPPED_SHELF));
+    if interior {
+        MAPPED_DEPTH
+    } else {
+        1
     }
 }
 
@@ -1403,7 +1456,33 @@ mod tests {
         for y in 1..=5 {
             assert!(editor.check_for_block_absolute(10, y, 10, Some(&[STONE_BRICKS]), None));
         }
+        assert!(editor.check_for_block_absolute(10, 0, 10, Some(&[STONE]), None));
         assert!(editor.check_for_block_absolute(11, 5, 10, Some(&[WATER]), None));
+    }
+
+    #[test]
+    fn water_laid_under_a_plinth_after_it_stood_gives_way_to_it() {
+        use crate::block_definitions::{GRAVEL, POLISHED_ANDESITE, STONE_BRICKS};
+        use crate::coordinate_system::geographic::LLBBox;
+        let bbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor =
+            WorldEditor::new(std::path::PathBuf::from("/dev/null/unused"), &bbox, llbbox);
+        // A floor over two blocks of water at (10, 10); the same water open beside it.
+        for x in [10, 11] {
+            editor.set_block_absolute(GRAVEL, x, -3, 10, None, None);
+            editor.set_block_absolute(WATER, x, -2, 10, None, None);
+            editor.set_block_absolute(WATER, x, -1, 10, None, None);
+        }
+        editor.set_block_absolute(POLISHED_ANDESITE, 10, 0, 10, None, None);
+        editor.register_support_column(10, 10, STONE_BRICKS);
+        editor.register_support_column(11, 10, STONE_BRICKS);
+        pierce_support_columns(&mut editor);
+        for y in [-2, -1] {
+            assert!(editor.check_for_block_absolute(10, y, 10, Some(&[STONE_BRICKS]), None));
+            assert!(editor.check_for_block_absolute(11, y, 10, Some(&[WATER]), None));
+        }
+        assert!(editor.check_for_block_absolute(10, -3, 10, Some(&[GRAVEL]), None));
     }
 
     /// A lake 100 blocks across, flat at Y 0, deep enough in the middle for the deepest bed.

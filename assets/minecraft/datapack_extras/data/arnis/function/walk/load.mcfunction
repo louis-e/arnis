@@ -14,6 +14,10 @@ scoreboard objectives add arnis.wr dummy
 scoreboard objectives add arnis.wq dummy
 scoreboard objectives add arnis.wy dummy
 scoreboard objectives add arnis.wk dummy
+# The railway crossing a walker waits at, and the crossings' states, which xing/check keeps
+# where trains close them and which read as open where none do.
+scoreboard objectives add arnis.wx dummy
+scoreboard objectives add arnis.xing dummy
 scoreboard players set #lcg_a arnis.walk 1103515245
 scoreboard players set #lcg_c arnis.walk 12345
 scoreboard players set #65536 arnis.walk 65536

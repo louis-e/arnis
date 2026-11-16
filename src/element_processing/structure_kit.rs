@@ -278,7 +278,8 @@ pub fn display_beam(
     editor.add_block_display(mid[0], mid[1], mid[2], seed, extra);
 }
 
-fn rotate(q: [f64; 4], v: P3) -> P3 {
+/// `v` turned by the unit quaternion `q` (x, y, z, w).
+pub(crate) fn rotate(q: [f64; 4], v: P3) -> P3 {
     let (qx, qy, qz, qw) = (q[0], q[1], q[2], q[3]);
     // v + 2w(q x v) + 2 q x (q x v)
     let t = [

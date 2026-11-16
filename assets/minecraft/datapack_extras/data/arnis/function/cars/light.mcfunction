@@ -1,3 +1,9 @@
+# A stop line has a point for cars and one further back for buses and trucks, so that each
+# stands with its front at the line: the other kind drives on to its own.
+execute if data entity @s data{k:1b} if entity @s[tag=arnis.car.long] run return 0
+execute if data entity @s data{k:2b} if entity @s[tag=!arnis.car.long] run return 0
+# Group 3 is a level crossing's stop, which waits for that crossing rather than a light.
+execute if data entity @s data{g:3b} run return run function arnis:cars/crossing with entity @s data
 # Amber counts as red: only a green group drives over its stop line.
 scoreboard players set #red arnis.car 1
 execute if data entity @s data{g:1b} if score #tl arnis matches 0..239 run scoreboard players set #red arnis.car 0
