@@ -9261,17 +9261,15 @@ const TILE_FAMILIES: [Block; 5] = [TILE_RED, TILE_BRICK, TILE_DARK, TILE_BROWN, 
 
 type RoofPool = &'static [(Block, u8)];
 
-/// Bavaria, Austria, Switzerland, Berlin: bright clay tile, then anthracite and
-/// grey concrete tile, fibre cement and brown tile. With the halls, churches
-/// and post-war roofs that draw from other pools, a town comes out about half
-/// red, as aerial photos of eight Bavarian areas show (54%).
+/// Bavaria, Austria, Switzerland, Berlin: bright clay tile, some slate. Aerial
+/// photos show a town about half red, but a village drawn half grey reads as
+/// the north; halls and post-war roofs take other pools and bring it down.
 const CENTRAL_ROOFS: RoofPool = &[
-    (TILE_RED, 52),
-    (TILE_BRICK, 9),
+    (TILE_RED, 55),
+    (TILE_BRICK, 10),
     (TILE_BROWN, 12),
     (TILE_ORANGE, 5),
     (SLATE, 13),
-    (SLATE_DARK, 9),
 ];
 
 /// Saxony, Thuringia, Bohemia, Silesia: darker red Biberschwanz tile.
@@ -23711,7 +23709,7 @@ mod style_tests {
     // About half the pitched roofs of Bavaria are red tile; none of the halls
     // and sheds of an industrial estate or a retail park are.
     #[test]
-    fn central_roofs_are_half_red_and_halls_never() {
+    fn central_roofs_are_mostly_red_and_halls_never() {
         let red = |b: Block| matches!(b, TILE_RED | TILE_BRICK | TILE_ORANGE | TILE_DARK);
         let ctx = |district, attached| RoofContext {
             materials: MaterialRegion::Central,
@@ -23731,10 +23729,10 @@ mod style_tests {
             );
             reds += usize::from(red(roof));
         }
-        // Red takes about seven in ten draws here; the halls, civic and
-        // modern roofs that draw elsewhere bring the share in a town down
-        // to about half.
-        assert!((1250..=1600).contains(&reds), "{reds} of 2000 red");
+        // Red takes about four in five draws here, as the town's tile; the
+        // halls, civic and modern roofs that draw elsewhere bring the share in
+        // a town down.
+        assert!((1450..=1800).contains(&reds), "{reds} of 2000 red");
         for category in [
             BuildingCategory::Industrial,
             BuildingCategory::Warehouse,
