@@ -100,6 +100,8 @@ pub struct BuildingContext<'a> {
     pub group_members: &'a FnvHashMap<u64, Vec<u64>>,
     /// building:part relations of a housing block, which take its storey height.
     pub housing_relation_parts: &'a crate::osm_parser::HousingRelationParts,
+    /// Untagged buildings and the wall height of the tagged ones they share a wall with.
+    pub neighbour_heights: &'a crate::element_processing::buildings::NeighbourHeights,
     /// Tenants and surrounding areas per building, for interiors.
     pub interior_uses: &'a InteriorUseIndex,
 }
@@ -474,6 +476,7 @@ mod tests {
                 building_footprints: footprints,
                 group_members: &self.groups,
                 housing_relation_parts: &self.housing,
+                neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
                 interior_uses: InteriorUseIndex::empty(),
             }
         }

@@ -289,6 +289,7 @@ fn process_element(
     part_groups: &PartGroups,
     housing_relation_parts: &HousingRelationParts,
     group_members: &FnvHashMap<u64, Vec<u64>>,
+    neighbour_heights: &buildings::NeighbourHeights,
     still_surfaces: &water_areas::StillWaterSurfaces,
     interior_uses: &InteriorUseIndex,
     barrier_clearance: &barriers::RoadClearance,
@@ -363,6 +364,7 @@ fn process_element(
                     building_footprints,
                     group_members,
                     housing_relation_parts,
+                    neighbour_heights,
                     interior_uses,
                 };
                 let anchor =
@@ -693,6 +695,7 @@ fn process_element(
                     building_footprints,
                     group_members,
                     housing_relation_parts,
+                    neighbour_heights,
                     interior_uses,
                 };
                 buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
@@ -1443,6 +1446,8 @@ pub fn generate_world_with_options(
         map
     };
 
+    let neighbour_heights = buildings::tagged_neighbour_heights(&elements);
+
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
     let bridge_structures = bridges::BridgeStructureMap::build(
@@ -2097,6 +2102,7 @@ pub fn generate_world_with_options(
                     &part_groups,
                     &housing_parts,
                     &group_members,
+                    &neighbour_heights,
                     &still_surfaces,
                     &interior_uses,
                     &barrier_clearance,
@@ -2542,6 +2548,7 @@ pub fn generate_world_with_options(
                 &part_groups,
                 &housing_parts,
                 &group_members,
+                &neighbour_heights,
                 &still_surfaces,
                 &interior_uses,
                 &barrier_clearance,
