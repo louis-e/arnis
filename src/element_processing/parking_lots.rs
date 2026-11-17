@@ -1,6 +1,7 @@
 //! Surface parking lots: the asphalt, rows of stalls, lamps and parked cars. Rows run along
 //! the world axis nearer to the parking aisles mapped in the lot, or to the long side of the
-//! smallest rectangle around the lot where none are.
+//! smallest rectangle around the lot where none are. A lot turned further from the axes is
+//! laid out as lots always were, in rows along x on the world's grid.
 
 use crate::args::Args;
 use crate::block_definitions::*;
@@ -19,6 +20,9 @@ const STALL_WIDTH: i32 = 4;
 const STALL_LENGTH: i32 = 8;
 /// The aisle behind each row of stalls.
 const AISLE_WIDTH: i32 = 5;
+/// How far, in degrees, a lot may be turned from the nearer world axis and still have its
+/// rows put on that axis.
+const SNAP_DEG: f64 = 15.0;
 const ROW_PERIOD: i32 = STALL_LENGTH + AISLE_WIDTH;
 
 /// Tag `orient_parking_lots` leaves on a lot with a parking aisle in it: the direction its
@@ -65,14 +69,21 @@ impl StallGrid {
         (-self.v.0).atan2(self.v.1).to_degrees()
     }
 
-    /// The world axis nearer to `u`. Stall lines drawn at any other angle, even 45 degrees,
-    /// break into steps of one and two blocks.
-    fn axis(u: (f64, f64)) -> (f64, f64) {
-        if u.0.abs() >= u.1.abs() {
+    /// The world axis nearer to `u`, if `u` is within `SNAP_DEG` of it. Stall lines drawn
+    /// at any other angle, even 45 degrees, break into steps of one and two blocks.
+    fn axis(u: (f64, f64)) -> Option<(f64, f64)> {
+        let a = if u.0.abs() >= u.1.abs() {
             (u.0.signum(), 0.0)
         } else {
             (0.0, u.1.signum())
-        }
+        };
+        let cos = (u.0 * a.0 + u.1 * a.1) / u.0.hypot(u.1);
+        (cos >= SNAP_DEG.to_radians().cos()).then_some(a)
+    }
+
+    /// Rows along x on the world's grid, which a lot turned too far for its own axis takes.
+    fn world() -> Self {
+        Self::along((1.0, 0.0), (0.0, 0.0))
     }
 
     /// Rows along `u`, with a row of stalls starting at `origin`.
@@ -140,7 +151,8 @@ fn convex_hull(mut points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 }
 
 /// Rows along the world axis nearer to the long side of the smallest rectangle around the
-/// outline, from where the lot begins. A lot cut by the edge of the area is measured as drawn, but
+/// outline, from where the lot begins, or the world's rows where that side is turned further
+/// than `SNAP_DEG` from it. A lot cut by the edge of the area is measured as drawn, but
 /// does not turn with that edge: a side the clip ran along it, between two points it added,
 /// gives no direction. Turned by its mapped corners alone, a lot mostly outside the area
 /// took whatever angle the few corners left inside gave, and its stalls ran across the
@@ -187,7 +199,9 @@ fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
             break;
         }
     }
-    let u = StallGrid::axis(best?.1);
+    let Some(u) = StallGrid::axis(best?.1) else {
+        return Some(StallGrid::world());
+    };
     let grid = StallGrid::along(u, (0.0, 0.0));
     let (a0, b0) = (span(grid.u).0, span(grid.v).0);
     Some(StallGrid::along(
@@ -204,7 +218,10 @@ fn stall_grid(way: &ProcessedWay) -> Option<StallGrid> {
             .filter_map(|s| s.parse().ok())
             .collect();
         match v[..] {
-            [ux, uz, x, z] => Some(StallGrid::from_aisle(StallGrid::axis((ux, uz)), (x, z))),
+            [ux, uz, x, z] => Some(
+                StallGrid::axis((ux, uz))
+                    .map_or_else(StallGrid::world, |u| StallGrid::from_aisle(u, (x, z))),
+            ),
             _ => None,
         }
     });
@@ -468,12 +485,14 @@ pub fn generate_parking_lot(
         return;
     };
     // Laid out along mapped aisles, whose lanes run down the grid's aisles.
-    let on_aisles = way.tags.contains_key(AISLE_TAG);
+    let world = grid == StallGrid::world();
+    let on_aisles = way.tags.contains_key(AISLE_TAG) && !world;
 
     for &(x, z) in &lot {
         // Stall sides on the left of each stall, a line across its front, and the stall
         // ends at the aisle; the aisles keep the bare asphalt, and so do the lanes of a road
         // the lot is mapped around. A mapped aisle's lanes reach to the stall ends' line.
+        // The world's rows, which no lane runs along, are painted whole, as they always were.
         let (a, b) = grid.local(x, z);
         let across = (a.floor() as i32).rem_euclid(STALL_WIDTH);
         let along = (b.floor() as i32).rem_euclid(ROW_PERIOD);
@@ -482,7 +501,7 @@ pub fn generate_parking_lot(
         } else {
             along == STALL_LENGTH
         };
-        let lanes = editor.on_carriageway(x, z) && !(on_aisles && along == STALL_LENGTH);
+        let lanes = !world && editor.on_carriageway(x, z) && !(on_aisles && along == STALL_LENGTH);
         if line && !lanes {
             editor.set_block(WHITE_CONCRETE, x, 0, z, Some(LOT_SURFACES), None);
         }
@@ -608,9 +627,9 @@ mod tests {
 
     #[test]
     fn a_turned_lot_keeps_its_rows_on_the_world_axes() {
-        // A 40 x 20 lot turned 30 degrees, then 60: rows along the nearer axis, where the
+        // A 40 x 20 lot turned 10 degrees, then 80: rows along the nearer axis, where the
         // stall lines stay straight.
-        for (deg, along) in [(30f64, (1.0, 0.0)), (60.0, (0.0, 1.0))] {
+        for (deg, along) in [(10f64, (1.0, 0.0)), (80.0, (0.0, 1.0))] {
             let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
             let at = |a: f64, b: f64| {
                 (
@@ -627,9 +646,29 @@ mod tests {
                 assert!(a > -1.0 && b > -1.0, "{a} {b}");
             }
         }
+        // Turned 30 or 60 degrees, it is laid out on the world's rows, as lots always were.
+        for deg in [30f64, 45.0, 60.0] {
+            let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let at = |a: f64, b: f64| {
+                (
+                    (a * c - b * s).round() as i32,
+                    (a * s + b * c).round() as i32,
+                )
+            };
+            let lot = ring(&[at(0.0, 0.0), at(40.0, 0.0), at(40.0, 20.0), at(0.0, 20.0)]);
+            assert_eq!(rectangle_grid(&lot), Some(StallGrid::world()), "{deg}");
+        }
         // A mapped aisle turns the rows no more than the outline does.
-        let grid = StallGrid::from_aisle(StallGrid::axis((0.9, 0.44)), (10.5, 20.5));
-        assert!(close(grid.u, (1.0, 0.0)));
+        let aisle = |u: (f64, f64)| ProcessedWay {
+            id: 1,
+            nodes: ring(&[(0, 0), (40, 0), (40, 20), (0, 20)]),
+            tags: HashMap::from([(AISLE_TAG.to_string(), format!("{} {} 10.5 20.5", u.0, u.1))]),
+        };
+        assert!(close(
+            stall_grid(&aisle((0.99, 0.14))).unwrap().u,
+            (1.0, 0.0)
+        ));
+        assert_eq!(stall_grid(&aisle((0.9, 0.44))), Some(StallGrid::world()));
     }
 
     #[test]
