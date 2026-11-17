@@ -10,6 +10,8 @@ use crate::element_processing::surfaces::{get_blocks_for_surface, semirandom_sur
 use crate::floodfill_cache::{in_hole, FloodFillCache, Holes};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use fnv::FnvHashMap;
+use rayon::prelude::*;
 use std::collections::HashMap;
 
 /// Width of a stall, its line included, and its length, which fits the bundled cars.
@@ -202,56 +204,84 @@ struct Stretch {
     mid: (f64, f64),
 }
 
-fn is_closed(nodes: &[ProcessedNode]) -> bool {
-    nodes.len() >= 4
-        && nodes[0].x == nodes[nodes.len() - 1].x
-        && nodes[0].z == nodes[nodes.len() - 1].z
+/// Side of the cells aisle segments are bucketed by, in blocks.
+const AISLE_CELL: i32 = 64;
+
+/// The parking aisles' segments, bucketed by the cells their bounds touch.
+struct AisleIndex<'a> {
+    segments: Vec<(&'a ProcessedNode, &'a ProcessedNode)>,
+    cells: FnvHashMap<(i32, i32), Vec<u32>>,
 }
 
-/// Turns each parking lot to the parking aisles mapped inside it: the direction most of their
-/// length runs in, recorded on the lot for `generate_parking_lot` with a point on the longest
-/// aisle that way. Returns the number of lots turned.
-pub fn orient_parking_lots(elements: &mut [ProcessedElement]) -> usize {
-    let aisles: Vec<&ProcessedWay> = elements
-        .iter()
-        .filter_map(|e| match e {
-            ProcessedElement::Way(w)
-                if w.tags.get("service").map(String::as_str) == Some("parking_aisle")
-                    && w.tags.contains_key("highway") =>
+impl<'a> AisleIndex<'a> {
+    fn build(elements: &'a [ProcessedElement]) -> Self {
+        let mut index = Self {
+            segments: Vec::new(),
+            cells: FnvHashMap::default(),
+        };
+        for element in elements {
+            let ProcessedElement::Way(w) = element else {
+                continue;
+            };
+            if w.tags.get("service").map(String::as_str) != Some("parking_aisle")
+                || !w.tags.contains_key("highway")
             {
-                Some(w)
+                continue;
             }
-            _ => None,
-        })
-        .collect();
-    if aisles.is_empty() {
-        return 0;
+            for pair in w.nodes.windows(2) {
+                let i = index.segments.len() as u32;
+                index.segments.push((&pair[0], &pair[1]));
+                let (x0, x1) = (pair[0].x.min(pair[1].x), pair[0].x.max(pair[1].x));
+                let (z0, z1) = (pair[0].z.min(pair[1].z), pair[0].z.max(pair[1].z));
+                for cx in x0.div_euclid(AISLE_CELL)..=x1.div_euclid(AISLE_CELL) {
+                    for cz in z0.div_euclid(AISLE_CELL)..=z1.div_euclid(AISLE_CELL) {
+                        index.cells.entry((cx, cz)).or_default().push(i);
+                    }
+                }
+            }
+        }
+        index
     }
-    // The direction most of the aisle inside the rings runs in, within 10 degrees, and the
-    // longest stretch that way to put an aisle on.
-    let aisle_in = |rings: &[&[ProcessedNode]]| -> Option<String> {
-        let (x0, z0, x1, z1) = rings.iter().flat_map(|r| r.iter()).fold(
+
+    /// Segments whose cells overlap the bounds, each once.
+    fn near(&self, (x0, z0, x1, z1): (i32, i32, i32, i32)) -> Vec<u32> {
+        let mut found: Vec<u32> = Vec::new();
+        for cx in x0.div_euclid(AISLE_CELL)..=x1.div_euclid(AISLE_CELL) {
+            for cz in z0.div_euclid(AISLE_CELL)..=z1.div_euclid(AISLE_CELL) {
+                if let Some(list) = self.cells.get(&(cx, cz)) {
+                    found.extend_from_slice(list);
+                }
+            }
+        }
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
+    /// The direction most of the aisle inside the rings runs in, within 10 degrees, and the
+    /// longest stretch that way to put an aisle on, as `AISLE_TAG` records them.
+    fn aisle_in(&self, rings: &[&[ProcessedNode]]) -> Option<String> {
+        let bounds = rings.iter().flat_map(|r| r.iter()).fold(
             (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
             |(a, b, c, d), n| (a.min(n.x), b.min(n.z), c.max(n.x), d.max(n.z)),
         );
+        let (x0, z0, x1, z1) = bounds;
         let in_box = |n: &ProcessedNode| n.x >= x0 && n.x <= x1 && n.z >= z0 && n.z <= z1;
         let mut stretches: Vec<Stretch> = Vec::new();
-        for aisle in &aisles {
-            for pair in aisle.nodes.windows(2) {
-                let (a, b) = (&pair[0], &pair[1]);
-                let mid = (f64::from(a.x + b.x) / 2.0, f64::from(a.z + b.z) / 2.0);
-                let d = (f64::from(b.x - a.x), f64::from(b.z - a.z));
-                let len = d.0.hypot(d.1);
-                if len >= 1.0
-                    && (in_box(a) || in_box(b))
-                    && rings.iter().any(|r| ring_contains(r, mid.0, mid.1))
-                {
-                    stretches.push(Stretch {
-                        len,
-                        u: (d.0 / len, d.1 / len),
-                        mid,
-                    });
-                }
+        for i in self.near(bounds) {
+            let (a, b) = self.segments[i as usize];
+            let mid = (f64::from(a.x + b.x) / 2.0, f64::from(a.z + b.z) / 2.0);
+            let d = (f64::from(b.x - a.x), f64::from(b.z - a.z));
+            let len = d.0.hypot(d.1);
+            if len >= 1.0
+                && (in_box(a) || in_box(b))
+                && rings.iter().any(|r| ring_contains(r, mid.0, mid.1))
+            {
+                stretches.push(Stretch {
+                    len,
+                    u: (d.0 / len, d.1 / len),
+                    mid,
+                });
             }
         }
         let alike = 10f64.to_radians().cos();
@@ -273,28 +303,46 @@ pub fn orient_parking_lots(elements: &mut [ProcessedElement]) -> usize {
             best.mid.0 + 0.5,
             best.mid.1 + 0.5
         ))
-    };
-    let turns: Vec<(usize, String)> = elements
+    }
+}
+
+fn is_closed(nodes: &[ProcessedNode]) -> bool {
+    nodes.len() >= 4
+        && nodes[0].x == nodes[nodes.len() - 1].x
+        && nodes[0].z == nodes[nodes.len() - 1].z
+}
+
+/// Turns each parking lot to the parking aisles mapped inside it: the direction most of their
+/// length runs in, recorded on the lot for `generate_parking_lot` with a point on the longest
+/// aisle that way. Returns the number of lots turned.
+pub fn orient_parking_lots(elements: &mut [ProcessedElement]) -> usize {
+    let aisles = AisleIndex::build(elements);
+    if aisles.segments.is_empty() {
+        return 0;
+    }
+    // The outer rings of every surface lot, by element.
+    let lots: Vec<(usize, Vec<&[ProcessedNode]>)> = elements
         .iter()
         .enumerate()
         .filter_map(|(i, element)| {
-            let tag = match element {
+            let rings: Vec<&[ProcessedNode]> = match element {
                 ProcessedElement::Way(w) if is_surface_lot(&w.tags) && is_closed(&w.nodes) => {
-                    aisle_in(&[&w.nodes[..]])
+                    vec![&w.nodes[..]]
                 }
-                ProcessedElement::Relation(r) if is_surface_lot(&r.tags) => {
-                    let rings: Vec<&[ProcessedNode]> = r
-                        .members
-                        .iter()
-                        .filter(|m| m.role == ProcessedMemberRole::Outer && is_closed(&m.way.nodes))
-                        .map(|m| &m.way.nodes[..])
-                        .collect();
-                    (!rings.is_empty()).then(|| aisle_in(&rings)).flatten()
-                }
-                _ => None,
+                ProcessedElement::Relation(r) if is_surface_lot(&r.tags) => r
+                    .members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer && is_closed(&m.way.nodes))
+                    .map(|m| &m.way.nodes[..])
+                    .collect(),
+                _ => Vec::new(),
             };
-            tag.map(|t| (i, t))
+            (!rings.is_empty()).then_some((i, rings))
         })
+        .collect();
+    let turns: Vec<(usize, String)> = lots
+        .par_iter()
+        .filter_map(|(i, rings)| aisles.aisle_in(rings).map(|tag| (*i, tag)))
         .collect();
     for (i, tag) in &turns {
         match &mut elements[*i] {
@@ -575,6 +623,42 @@ mod tests {
             ProcessedElement::Way(aisle(2, (5, 10), (25, 10))),
             ProcessedElement::Way(aisle(3, (40, 2), (40, 28))),
             ProcessedElement::Way(aisle(4, (100, 0), (100, 90))),
+        ];
+        assert_eq!(orient_parking_lots(&mut elements), 1);
+        let ProcessedElement::Way(lot) = &elements[0] else {
+            unreachable!()
+        };
+        let grid = stall_grid(lot).unwrap();
+        assert!(close((grid.u.0.abs(), grid.u.1.abs()), (0.0, 1.0)));
+    }
+
+    #[test]
+    fn an_aisle_across_several_cells_counts_once() {
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let aisle = |id: u64, a: (i32, i32), b: (i32, i32)| {
+            ProcessedElement::Way(ProcessedWay {
+                id,
+                nodes: vec![node(id * 10, a.0, a.1), node(id * 10 + 1, b.0, b.1)],
+                tags: tags(&[("highway", "service"), ("service", "parking_aisle")]),
+            })
+        };
+        let mut elements = vec![
+            ProcessedElement::Way(ProcessedWay {
+                id: 1,
+                nodes: ring(&[(50, 0), (150, 0), (150, 40), (50, 40)]),
+                tags: tags(&[("amenity", "parking")]),
+            }),
+            // 90 blocks east to west, over three cells of the index...
+            aisle(2, (55, 20), (145, 20)),
+            // ...against 108 north to south.
+            aisle(3, (70, 2), (70, 38)),
+            aisle(4, (100, 2), (100, 38)),
+            aisle(5, (130, 2), (130, 38)),
         ];
         assert_eq!(orient_parking_lots(&mut elements), 1);
         let ProcessedElement::Way(lot) = &elements[0] else {
