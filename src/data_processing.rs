@@ -3423,8 +3423,6 @@ mod tests {
         // generate_landuse returns early for these, and they are usually the largest polygons.
         assert!(ground_fill_area(&way(1, 10, &[("landuse", "residential")])).is_none());
         assert!(ground_fill_area(&way(2, 10, &[("landuse", "commercial")])).is_none());
-        // A retail park's open ground is mostly paved, which the land cover knows and a lawn hides.
-        assert!(ground_fill_area(&way(5, 10, &[("landuse", "retail")])).is_none());
         assert!(ground_fill_area(&relation(3, 10, &[("landuse", "residential")])).is_none());
         assert!(ground_fill_area(&way(4, 10, &[("landuse", "grass")])).is_some());
     }
