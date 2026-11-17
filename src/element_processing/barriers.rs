@@ -5,7 +5,7 @@ use crate::element_processing::connected_blocks::{
     four_connected_line, is_connectable, place_connected, place_gate,
 };
 use crate::element_processing::highways::{
-    highway_block_range, is_carriageway, parse_width_tag_m, surface_highway_type,
+    highway_block_range, is_carriageway, parse_width_tag_m, stamp_radius, surface_highway_type,
     tunnel_renders_at_surface,
 };
 use crate::floodfill_cache::CoordinateBitmap;
@@ -583,7 +583,9 @@ impl RoadClearance {
             if is_bridge_way(way) {
                 continue;
             }
-            let reach = highway_block_range(highway_type, &way.tags, scale) as f32 + 0.5;
+            // As far as the disc stamp reaches off a centreline cell, and that cell off the
+            // line between the nodes: on a shallow diagonal the edge cells lie past half + 0.5.
+            let reach = stamp_radius(highway_block_range(highway_type, &way.tags, scale)) + 0.5;
             let carriageway = is_carriageway(highway_type);
             // Every cell the stamp covers lies this close to a sample, in both axes.
             let margin = reach + SAMPLE_STEP / 2.0;
