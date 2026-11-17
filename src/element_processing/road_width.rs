@@ -117,9 +117,18 @@ fn parking_depth_m(orientation: Option<&str>) -> f64 {
     }
 }
 
+/// Whether any tag's key starts with `prefix`. The parking and cycle lane lookups build
+/// their keys one by one; most ways carry none of them and skip that.
+fn any_key(tags: &HashMap<String, String>, prefix: &str) -> bool {
+    tags.keys().any(|k| k.starts_with(prefix))
+}
+
 /// Metres the cars parked on one side take, `side` being "left" or "right", and of that
 /// the part in bays set into the sidewalk, which a road's `width` leaves out.
 fn parking_side_m(tags: &HashMap<String, String>, side: &str) -> (f64, f64) {
+    if !any_key(tags, "parking:") {
+        return (0.0, 0.0);
+    }
     let get = |key: String| tags.get(&key).map(String::as_str);
     // parking:<side>=<position>, parking:<side>:orientation=*, parking:<side>:width=*.
     let street = |suffix: &str| {
@@ -163,6 +172,9 @@ pub(crate) fn parking_orientation(
     tags: &HashMap<String, String>,
     side: &str,
 ) -> Option<&'static str> {
+    if !any_key(tags, "parking:") {
+        return None;
+    }
     let get = |key: String| tags.get(&key).map(String::as_str);
     let kind = |o: Option<&str>| match o {
         Some("diagonal") => "diagonal",
@@ -221,6 +233,9 @@ fn one_way(tags: &HashMap<String, String>) -> bool {
 /// Metres of cycle lanes kept for bicycles on the carriageway, both sides together:
 /// `cycleway:<side>=lane` with `cycleway:<side>:lane=exclusive`, and its `:width` if given.
 fn cycle_lanes_m(tags: &HashMap<String, String>) -> f64 {
+    if !any_key(tags, "cycleway") {
+        return 0.0;
+    }
     let get = |key: String| tags.get(&key).map(String::as_str);
     ["left", "right"]
         .into_iter()
