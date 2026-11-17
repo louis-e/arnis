@@ -2280,7 +2280,8 @@ fn generate_highways_internal(
                                 let set_z: i32 = z + dz;
                                 if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
                                     && (building_footprints.contains(set_x, set_z)
-                                        || editor.keeps_its_ground(set_x, set_z))
+                                        || editor.keeps_its_ground(set_x, set_z)
+                                        || editor.on_mapped_path(set_x, set_z))
                                 {
                                     continue;
                                 }
@@ -3614,12 +3615,13 @@ pub(crate) fn stamps_square(way: &ProcessedWay) -> bool {
     is_bridge_way(way) && lays_deck(way)
 }
 
-/// The half-width a road keeps where a building stands against it, or a verge with its
-/// grass or a street tree, when narrower than the road: its lanes inside the parking rows, a
-/// two-way street with a sidewalk the width it would have without one. What the road gains
-/// past that, as in a narrow old-town street whose house fronts are mapped wider than they
-/// stand, stops at the walls instead of paving the ground floors, and leaves the verge
-/// green. None for a road paved whole: a bridge deck, or a passage through a building.
+/// The half-width a road keeps where a building stands against it, a verge with its grass
+/// or a street tree, or a sidewalk mapped as its own way, when narrower than the road: its
+/// lanes inside the parking rows, a two-way street with a sidewalk the width it would have
+/// without one. What the road gains past that, as in a narrow old-town street whose house
+/// fronts are mapped wider than they stand, stops at the walls instead of paving the ground
+/// floors, leaves the verge green and the sidewalk paved. None for a road paved whole: a
+/// bridge deck, or a passage through a building.
 pub(crate) fn wall_core(way: &ProcessedWay, highway_type: &str, scale: f64) -> Option<i32> {
     if stamps_square(way) || way.tags.get("tunnel").map(String::as_str) == Some("building_passage")
     {
@@ -3752,16 +3754,32 @@ pub fn collect_road_and_carriageway_coords(
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
     building_footprints: &CoordinateBitmap,
-) -> (CoordinateBitmap, CoordinateBitmap) {
+) -> (CoordinateBitmap, CoordinateBitmap, CoordinateBitmap) {
     let mut roads = CoordinateBitmap::new(xzbbox);
     let mut carriageways = CoordinateBitmap::new(xzbbox);
+    let mut paths = CoordinateBitmap::new(xzbbox);
     let editor = Some(editor);
+    // The sidewalks and paths first, which the roads beside them then stop at.
     stamp_highway_surfaces(
         elements,
         editor,
         scale,
         water_detail,
         building_footprints,
+        None,
+        |carriageway, x, z| {
+            if !carriageway {
+                paths.set(x, z);
+            }
+        },
+    );
+    stamp_highway_surfaces(
+        elements,
+        editor,
+        scale,
+        water_detail,
+        building_footprints,
+        Some(&paths),
         |carriageway, x, z| {
             roads.set(x, z);
             if carriageway {
@@ -3769,16 +3787,29 @@ pub fn collect_road_and_carriageway_coords(
             }
         },
     );
-    (roads, carriageways)
+    (roads, carriageways, paths)
+}
+
+/// A sidewalk, footpath or cycle path mapped as its own way, which a road's parking rows
+/// and second lane stop at: not a crossing, which runs across the road.
+pub(crate) fn is_mapped_path(way: &ProcessedWay, highway_type: &str) -> bool {
+    !is_carriageway(highway_type)
+        && !way.tags.contains_key("crossing")
+        && !["footway", "cycleway", "path"]
+            .iter()
+            .any(|k| way.tags.get(*k).is_some_and(|v| v == "crossing"))
 }
 
 /// Hands `stamp` every road and path surface cell, with whether its way carries vehicles.
+/// Without `paths`, only the sidewalks and paths mapped as their own ways; with them,
+/// every way, a road's parking rows and second lane stopping at those paths.
 fn stamp_highway_surfaces(
     elements: &[ProcessedElement],
     editor: Option<&WorldEditor>,
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
     building_footprints: &CoordinateBitmap,
+    paths: Option<&CoordinateBitmap>,
     mut stamp: impl FnMut(bool, i32, i32),
 ) {
     // A way that meets a bridge is its ramp or its approach, and keeps its surface.
@@ -3808,6 +3839,9 @@ fn stamp_highway_surfaces(
         let Some(highway_type) = surface_highway_type(way) else {
             continue;
         };
+        if paths.is_none() && !is_mapped_path(way, highway_type) {
+            continue;
+        }
         if !tunnel_renders_at_surface(way, editor, scale) {
             continue;
         }
@@ -3853,7 +3887,8 @@ fn stamp_highway_surfaces(
                     }
                     if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
                         && (building_footprints.contains(bx + dx, bz + dz)
-                            || editor.is_some_and(|e| e.keeps_its_ground(bx + dx, bz + dz)))
+                            || editor.is_some_and(|e| e.keeps_its_ground(bx + dx, bz + dz))
+                            || paths.is_some_and(|p| p.contains(bx + dx, bz + dz)))
                     {
                         continue;
                     }
@@ -6243,6 +6278,41 @@ mod tests {
         let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0, Default::default());
         assert!(!mask.contains(30, 20), "a pier is a deck, not a road");
         assert!(mask.contains(30, 40));
+    }
+
+    #[test]
+    fn a_street_widens_up_to_its_mapped_sidewalk_not_over_it() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let street = [("highway", "residential"), ("sidewalk:both", "separate")];
+        let elems = vec![
+            line_way(1, &[(10, 50), (110, 50)], &street),
+            // Its north sidewalk, mapped as its own way three blocks off its middle.
+            line_way(
+                2,
+                &[(10, 53), (110, 53)],
+                &[("highway", "footway"), ("footway", "sidewalk")],
+            ),
+            // A crossing over it runs across the road.
+            line_way(
+                3,
+                &[(30, 40), (30, 60)],
+                &[("highway", "footway"), ("footway", "crossing")],
+            ),
+        ];
+        let (roads, lanes, paths) = collect_road_and_carriageway_coords(
+            &elems,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+            &CoordinateBitmap::new_empty(),
+        );
+        // Two lanes, seven blocks, where nothing is mapped beside it; the second lane stops
+        // at the sidewalk, which stays one.
+        assert!(lanes.contains(60, 47) && lanes.contains(60, 52));
+        assert!(!lanes.contains(60, 53) && paths.contains(60, 53) && roads.contains(60, 53));
+        assert!(!paths.contains(30, 47) && lanes.contains(30, 47));
     }
 
     fn line_way(id: u64, points: &[(i32, i32)], tags: &[(&str, &str)]) -> ProcessedElement {

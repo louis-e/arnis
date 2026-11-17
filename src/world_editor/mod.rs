@@ -244,6 +244,9 @@ pub struct WorldEditor<'a> {
     /// The vehicular part of the roads, where trees keep their trunks out and leave
     /// more headroom than over a footway. Shared via Arc with the tile editors.
     carriageway: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// The sidewalks and paths mapped as their own ways, which a road's parking rows and
+    /// second lane stop at. Shared via Arc with the tile editors.
+    mapped_paths: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     /// Where `man_made=crane` stands, shared via Arc with the tile editors.
@@ -372,6 +375,7 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             carriageway: None,
+            mapped_paths: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -448,6 +452,7 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             carriageway: None,
+            mapped_paths: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -524,6 +529,7 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             carriageway: None,
+            mapped_paths: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -679,11 +685,17 @@ impl<'a> WorldEditor<'a> {
         self.carriageway = Some(mask);
     }
 
-    /// Drops the sealed-surface and carriageway masks and the mapped trunks once
+    /// Sets the mapped sidewalk and path mask (shared across the main and tile editors).
+    pub fn set_mapped_paths(&mut self, mask: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.mapped_paths = Some(mask);
+    }
+
+    /// Drops the sealed-surface, carriageway and path masks and the mapped trunks once
     /// every vegetation pass is done, so none is carried into the save phase.
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
         self.carriageway = None;
+        self.mapped_paths = None;
         self.mapped_trunks = None;
     }
 
@@ -836,6 +848,13 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn on_carriageway(&self, x: i32, z: i32) -> bool {
         self.carriageway.as_ref().is_some_and(|m| m.contains(x, z))
+    }
+
+    /// True if a sidewalk or path mapped as its own way runs over this column, not a
+    /// crossing.
+    #[inline]
+    pub fn on_mapped_path(&self, x: i32, z: i32) -> bool {
+        self.mapped_paths.as_ref().is_some_and(|m| m.contains(x, z))
     }
 
     /// The carriageway mask, while vegetation and signs are placed.
