@@ -1,5 +1,5 @@
-//! Surface parking lots: the asphalt, rows of stalls turned to the lot, lamps and parked
-//! cars. Rows run along the parking aisles mapped in the lot, or along the long side of the
+//! Surface parking lots: the asphalt, rows of stalls, lamps and parked cars. Rows run along
+//! the world axis nearer to the parking aisles mapped in the lot, or to the long side of the
 //! smallest rectangle around the lot where none are.
 
 use crate::args::Args;
@@ -63,6 +63,16 @@ impl StallGrid {
     /// Facing of a car parked in a stall, as Minecraft yaw: its length runs along `v`.
     fn yaw(&self) -> f64 {
         (-self.v.0).atan2(self.v.1).to_degrees()
+    }
+
+    /// The world axis nearer to `u`. Stall lines drawn at any other angle, even 45 degrees,
+    /// break into steps of one and two blocks.
+    fn axis(u: (f64, f64)) -> (f64, f64) {
+        if u.0.abs() >= u.1.abs() {
+            (u.0.signum(), 0.0)
+        } else {
+            (0.0, u.1.signum())
+        }
     }
 
     /// Rows along `u`, with a row of stalls starting at `origin`.
@@ -129,8 +139,8 @@ fn convex_hull(mut points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     hull
 }
 
-/// Rows along the long side of the smallest rectangle around the outline, from the corner
-/// where its first row begins. A lot cut by the edge of the area is measured as drawn, but
+/// Rows along the world axis nearer to the long side of the smallest rectangle around the
+/// outline, from where the lot begins. A lot cut by the edge of the area is measured as drawn, but
 /// does not turn with that edge: a side the clip ran along it, between two points it added,
 /// gives no direction. Turned by its mapped corners alone, a lot mostly outside the area
 /// took whatever angle the few corners left inside gave, and its stalls ran across the
@@ -177,7 +187,7 @@ fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
             break;
         }
     }
-    let (_, u) = best?;
+    let u = StallGrid::axis(best?.1);
     let grid = StallGrid::along(u, (0.0, 0.0));
     let (a0, b0) = (span(grid.u).0, span(grid.v).0);
     Some(StallGrid::along(
@@ -194,7 +204,7 @@ fn stall_grid(way: &ProcessedWay) -> Option<StallGrid> {
             .filter_map(|s| s.parse().ok())
             .collect();
         match v[..] {
-            [ux, uz, x, z] => Some(StallGrid::from_aisle((ux, uz), (x, z))),
+            [ux, uz, x, z] => Some(StallGrid::from_aisle(StallGrid::axis((ux, uz)), (x, z))),
             _ => None,
         }
     });
@@ -597,24 +607,29 @@ mod tests {
     }
 
     #[test]
-    fn rows_turn_with_a_turned_lot() {
-        // A 40 x 20 lot turned 30 degrees.
-        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
-        let at = |a: f64, b: f64| {
-            (
-                (a * c - b * s).round() as i32,
-                (a * s + b * c).round() as i32,
-            )
-        };
-        let lot = ring(&[at(0.0, 0.0), at(40.0, 0.0), at(40.0, 20.0), at(0.0, 20.0)]);
-        let grid = rectangle_grid(&lot).unwrap();
-        let angle = grid.u.1.atan2(grid.u.0).to_degrees().rem_euclid(180.0);
-        assert!((angle - 30.0).abs() < 3.0, "{angle}");
-        // Every corner of the lot is at or past the grid's start.
-        for n in &lot {
-            let (a, b) = grid.local(n.x, n.z);
-            assert!(a > -1.0 && b > -1.0, "{a} {b}");
+    fn a_turned_lot_keeps_its_rows_on_the_world_axes() {
+        // A 40 x 20 lot turned 30 degrees, then 60: rows along the nearer axis, where the
+        // stall lines stay straight.
+        for (deg, along) in [(30f64, (1.0, 0.0)), (60.0, (0.0, 1.0))] {
+            let (c, s) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let at = |a: f64, b: f64| {
+                (
+                    (a * c - b * s).round() as i32,
+                    (a * s + b * c).round() as i32,
+                )
+            };
+            let lot = ring(&[at(0.0, 0.0), at(40.0, 0.0), at(40.0, 20.0), at(0.0, 20.0)]);
+            let grid = rectangle_grid(&lot).unwrap();
+            assert!(close((grid.u.0.abs(), grid.u.1.abs()), along), "{deg}");
+            // Every corner of the lot is at or past the grid's start.
+            for n in &lot {
+                let (a, b) = grid.local(n.x, n.z);
+                assert!(a > -1.0 && b > -1.0, "{a} {b}");
+            }
         }
+        // A mapped aisle turns the rows no more than the outline does.
+        let grid = StallGrid::from_aisle(StallGrid::axis((0.9, 0.44)), (10.5, 20.5));
+        assert!(close(grid.u, (1.0, 0.0)));
     }
 
     #[test]
