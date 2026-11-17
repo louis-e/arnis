@@ -1986,8 +1986,13 @@ impl BridgeSurfaceMap {
     ) -> Self {
         let parts = bridge_decks::plan(elements, structures, &self, editor, scale);
         for p in parts.values() {
-            self.railings
-                .extend(p.rails.iter().chain(&p.lamps).map(|&(x, z, y)| ((x, z), y)));
+            // Two structures can rail one cell; the higher curb keeps it, in any map order.
+            for &(x, z, y) in p.rails.iter().chain(&p.lamps) {
+                self.railings
+                    .entry((x, z))
+                    .and_modify(|r| *r = (*r).max(y))
+                    .or_insert(y);
+            }
             for &(x, z, y) in &p.fills {
                 self.cells
                     .entry((x, z))

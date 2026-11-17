@@ -596,6 +596,9 @@ fn plan_structure(
     };
 
     // The ring of cells round the decks, each at the level of the deck beside it.
+    // Between two decks at one level the lower way id draws it, as on the deck: the
+    // map's order changes from run to run, and the drawing way decides whether its
+    // railing or another way's cable goes in first.
     let mut ring: HashMap<(i32, i32), DeckCell> = HashMap::new();
     for (&(x, z), &c) in &all {
         for dx in -1..=1 {
@@ -606,7 +609,7 @@ fn plan_structure(
                 }
                 ring.entry(n)
                     .and_modify(|r| {
-                        if c.y > r.y {
+                        if c.y > r.y || (c.y == r.y && c.way < r.way) {
                             *r = c;
                         }
                     })
@@ -1245,6 +1248,34 @@ mod tests {
             .filter(|r| (41..=43).contains(&r.1) && (20..80).contains(&r.0))
             .count();
         assert_eq!(rails_between, 0);
+    }
+
+    #[test]
+    fn where_two_decks_meet_the_lower_way_id_draws_the_railing_every_run() {
+        // A footbridge mapped as two ways end to end: the railing cells at the joint touch
+        // both decks at one level. Each plan gets its maps fresh, in a new order.
+        let tags = &[("highway", "footway"), ("bridge", "yes")];
+        let owners = || {
+            let a = way(1, tags, &[(10, 40), (50, 40)]);
+            let b = way(2, tags, &[(50, 40), (90, 40)]);
+            let (_, surface) = build(&[a, b], VALLEY, &[]);
+            let mut owners = std::collections::BTreeMap::new();
+            for id in [1, 2] {
+                for r in &surface.parts_of(id).expect("parts").rails {
+                    owners.insert((r.0, r.1), id);
+                }
+            }
+            owners
+        };
+        let first = owners();
+        let joint: Vec<_> = first.iter().filter(|(c, _)| c.0 == 51).collect();
+        assert!(!joint.is_empty(), "railings past the joint: {first:?}");
+        for (cell, &id) in joint {
+            assert_eq!(id, 1, "railing at {cell:?}");
+        }
+        for _ in 0..16 {
+            assert_eq!(owners(), first);
+        }
     }
 
     #[test]
