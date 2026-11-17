@@ -35,6 +35,33 @@ pub struct PointLayout {
     pub offset: [f64; 3],
 }
 
+/// The shortest record of each LAS point format, 0 to 10.
+const MIN_RECORD: [usize; 11] = [20, 28, 26, 34, 57, 63, 30, 36, 38, 59, 67];
+
+impl PointLayout {
+    /// Whether the records are of a known format and long enough to hold it,
+    /// as reading them takes for granted.
+    pub fn check(&self) -> Result<(), String> {
+        match MIN_RECORD.get(usize::from(self.format)) {
+            Some(&min) if self.record_len >= min => Ok(()),
+            _ => Err(format!(
+                "point format {} in records of {} bytes",
+                self.format, self.record_len
+            )),
+        }
+    }
+}
+
+/// Deepest octree level read: a kilometre cube's nodes there are a sixteenth
+/// of a millimetre across, so anything deeper is not a real hierarchy.
+pub const MAX_LEVEL: i32 = 24;
+/// Most points one node may hold, and the most bytes it may take compressed
+/// and decoded.
+const MAX_NODE_POINTS: u64 = 10_000_000;
+const MAX_NODE_BYTES: u64 = 256 << 20;
+/// Largest hierarchy page read.
+const MAX_PAGE_BYTES: u64 = 16 << 20;
+
 /// The `copc` info record: the octree's root cube and first hierarchy page.
 #[derive(Clone, Copy, Debug)]
 pub struct Info {
@@ -120,14 +147,19 @@ fn parse_header(h: &[u8]) -> Result<(Header, u64), String> {
     if format < 6 {
         return Err(format!("COPC point format {format}"));
     }
+    let layout = PointLayout {
+        format,
+        record_len,
+        scale,
+        offset,
+    };
+    layout.check()?;
+    if info.root_size > MAX_PAGE_BYTES {
+        return Err(format!("a hierarchy page of {} bytes", info.root_size));
+    }
     Ok((
         Header {
-            layout: PointLayout {
-                format,
-                record_len,
-                scale,
-                offset,
-            },
+            layout,
             bounds,
             wkt,
             info,
@@ -166,7 +198,10 @@ fn overlap(a: Rect, b: Rect) -> f64 {
 /// as (level, x, y, offset, size).
 type Page = (Vec<Node>, Vec<(i32, i32, i32, u64, u64)>);
 
-fn parse_page(d: &[u8]) -> Page {
+/// The entries of a hierarchy page, or what is out of range in them: a level
+/// past [`MAX_LEVEL`], a node past the size limits, a range past the end of
+/// any file.
+fn parse_page(d: &[u8]) -> Result<Page, String> {
     let mut nodes = Vec::new();
     let mut pages = Vec::new();
     for e in d.as_chunks::<32>().0 {
@@ -175,20 +210,36 @@ fn parse_page(d: &[u8]) -> Page {
         let offset = u64::from_le_bytes(e[16..24].try_into().unwrap());
         let size = i32_at(24);
         let count = i32_at(28);
-        if count == -1 && size > 0 {
-            pages.push((level, x, y, offset, size as u64));
-        } else if count > 0 && size > 0 {
+        if size <= 0 || !(count == -1 || count > 0) {
+            continue;
+        }
+        let size = size as u64;
+        if !(0..=MAX_LEVEL).contains(&level) || offset.checked_add(size).is_none() {
+            return Err(format!(
+                "a hierarchy entry at level {level}, {size} bytes at {offset}"
+            ));
+        }
+        if count == -1 {
+            if size > MAX_PAGE_BYTES {
+                return Err(format!("a hierarchy page of {size} bytes"));
+            }
+            pages.push((level, x, y, offset, size));
+        } else {
+            let count = count as u64;
+            if count > MAX_NODE_POINTS || size > MAX_NODE_BYTES {
+                return Err(format!("a node of {count} points in {size} bytes"));
+            }
             nodes.push(Node {
                 level,
                 x,
                 y,
                 offset,
-                size: size as u64,
-                count: count as u64,
+                size,
+                count,
             });
         }
     }
-    (nodes, pages)
+    Ok((nodes, pages))
 }
 
 /// The shallowest level whose points, with all above it, give `target` points a
@@ -290,12 +341,19 @@ pub fn open(
         let page = fetch::get_range(client, url, offset, size).map_err(Failure::of_part)?;
         requests += 1;
         fetch::count_laser_bytes(page.len() as u64);
-        let (n, p) = parse_page(&page);
+        let (n, p) = parse_page(&page).map_err(Failure::Unusable)?;
         nodes.extend(n);
         pages.extend(p);
         if requests > 200 {
             return Err(Failure::Other("hierarchy too large".into()));
         }
+    }
+    let record = header.layout.record_len as u64;
+    if let Some(n) = nodes.iter().find(|n| n.count * record > MAX_NODE_BYTES) {
+        return Err(Failure::Unusable(format!(
+            "a node of {} points of {record} bytes",
+            n.count
+        )));
     }
     Ok((header, nodes, requests, window))
 }
@@ -488,12 +546,51 @@ mod tests {
             page.extend_from_slice(&size.to_le_bytes());
             page.extend_from_slice(&count.to_le_bytes());
         }
-        let (nodes, pages) = parse_page(&page);
+        let (nodes, pages) = parse_page(&page).unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(
             (nodes[0].offset, nodes[0].size, nodes[0].count),
             (500, 120, 40)
         );
         assert_eq!(pages, vec![(1, 1, 0, 900, 64)]);
+    }
+
+    #[test]
+    fn hierarchy_entries_out_of_range_are_refused() {
+        let entry = |l: i32, off: u64, size: i32, count: i32| {
+            let mut e = Vec::new();
+            for v in [l, 0, 0, 0] {
+                e.extend_from_slice(&v.to_le_bytes());
+            }
+            e.extend_from_slice(&off.to_le_bytes());
+            e.extend_from_slice(&size.to_le_bytes());
+            e.extend_from_slice(&count.to_le_bytes());
+            e
+        };
+        assert!(parse_page(&entry(i32::MAX, 0, 10, 5)).is_err());
+        assert!(parse_page(&entry(3, u64::MAX - 5, 10, 5)).is_err());
+        assert!(parse_page(&entry(3, 0, 10, i32::MAX)).is_err());
+        assert!(parse_page(&entry(3, 0, 10, 5)).is_ok());
+        // Records too short for their format are refused before any is read.
+        let short = PointLayout {
+            format: 6,
+            record_len: 0,
+            scale: [1.0; 3],
+            offset: [0.0; 3],
+        };
+        assert!(short.check().is_err());
+        assert!(PointLayout {
+            record_len: 30,
+            ..short
+        }
+        .check()
+        .is_ok());
+        assert!(PointLayout {
+            format: 11,
+            record_len: 99,
+            ..short
+        }
+        .check()
+        .is_err());
     }
 }

@@ -197,11 +197,18 @@ pub fn tile(
             return cached;
         }
     };
-    if layout.width != TILE * PX_PER_M || layout.samples < 3 {
+    // The blocks are taken to be 256 pixels square on a tile of 5000, read as
+    // 3 or 4 samples a pixel, with an offset and a size for each.
+    let across = layout.width.div_ceil(256);
+    if layout.width != TILE * PX_PER_M
+        || layout.tile_w != 256
+        || layout.tile_h != 256
+        || !(3..=4).contains(&layout.samples)
+        || layout.offsets.len() < across * across
+    {
         eprintln!("Warning: aerial photo {te}_{tn} has an unexpected layout");
         return cached;
     }
-    let across = layout.width.div_ceil(layout.tile_w);
     let mut t = match cached {
         Some(t) if t.blocks_across == across => t,
         _ => PhotoTile::new(across),
@@ -469,6 +476,11 @@ fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, 
     }
     for (tag, typ, count, at) in arrays {
         let size = if typ == 3 { 2 } else { 4 };
+        // A tile of 5000 pixels in blocks of 256 has 400; a count far past
+        // that is not a photo tile of this kind.
+        if count > 1 << 16 {
+            return Err(format!("a table of {count} blocks"));
+        }
         let bytes = if count * size <= 4 {
             return Err("single-tile TIFF".into());
         } else if at as usize + count * size <= head.len() {
@@ -476,6 +488,9 @@ fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, 
         } else {
             get_range(client, url, u64::from(at), (count * size) as u64)?
         };
+        if bytes.len() < count * size {
+            return Err("short block table".into());
+        }
         let vals: Vec<u64> = (0..count)
             .map(|i| {
                 if size == 2 {
@@ -504,17 +519,39 @@ fn fetch_block(
     l: &Layout,
     i: usize,
 ) -> Result<Vec<u8>, String> {
-    let data = get_range(client, url, l.offsets[i], l.counts[i])?;
+    let (Some(&offset), Some(&count)) = (l.offsets.get(i), l.counts.get(i)) else {
+        return Err("block past the table".into());
+    };
     let expected = l.tile_w * l.tile_h * l.samples;
+    // A block is a few hundred kilobytes; a size past that is not one.
+    if count > 4 * expected as u64 {
+        return Err(format!("a block of {count} bytes"));
+    }
+    let data = get_range(client, url, offset, count)?;
+    // Decoded only as far as a block reaches, whatever the data would expand to.
     let mut px = match l.compression {
         1 => data,
-        5 => weezl::decode::Decoder::with_tiff_size_switch(weezl::BitOrder::Msb, 8)
-            .decode(&data)
-            .map_err(|e| e.to_string())?,
+        5 => {
+            let mut dec = weezl::decode::Decoder::with_tiff_size_switch(weezl::BitOrder::Msb, 8);
+            let mut out = vec![0u8; expected];
+            let (mut inp, mut filled) = (&data[..], 0);
+            while filled < expected {
+                let r = dec.decode_bytes(inp, &mut out[filled..]);
+                filled += r.consumed_out;
+                inp = &inp[r.consumed_in..];
+                match r.status.map_err(|e| e.to_string())? {
+                    weezl::LzwStatus::Ok if r.consumed_in + r.consumed_out > 0 => {}
+                    _ => break,
+                }
+            }
+            out.truncate(filled);
+            out
+        }
         8 | 32946 => {
             use std::io::Read;
             let mut out = Vec::with_capacity(expected);
             flate2::read::ZlibDecoder::new(&data[..])
+                .take(expected as u64)
                 .read_to_end(&mut out)
                 .map_err(|e| e.to_string())?;
             out

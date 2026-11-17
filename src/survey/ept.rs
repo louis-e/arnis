@@ -95,6 +95,10 @@ pub fn parse_page(info: &Info, page: &serde_json::Value, window: Rect) -> (Vec<N
         else {
             continue;
         };
+        // Past this no survey goes; levels are counted through one by one.
+        if !(0..=super::copc::MAX_LEVEL).contains(&level) {
+            continue;
+        }
         if !meets(node_rect(info, level, x, y), window) {
             continue;
         }
@@ -251,8 +255,10 @@ pub fn decode(data: &[u8]) -> Result<(PointLayout, Vec<u8>), String> {
         scale: [f64_at(131), f64_at(139), f64_at(147)],
         offset: [f64_at(155), f64_at(163), f64_at(171)],
     };
-    let class_at = if format >= 6 { 16 } else { 15 };
-    if record_len <= class_at || count > 10_000_000 {
+    layout.check()?;
+    // A node holds some tens of thousands of points; the bound keeps a
+    // header that says otherwise from asking for gigabytes.
+    if count > 10_000_000 || count * record_len as u64 > 256 << 20 {
         return Err(format!(
             "unexpected point records ({record_len} bytes, {count})"
         ));

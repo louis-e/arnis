@@ -639,25 +639,28 @@ fn measure_file(
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let hdr = read_header(&mut file)?;
     let layout = hdr.layout;
-    let class_at = if layout.format >= 6 { 16 } else { 15 };
-    if layout.record_len < class_at + 1 {
-        return Err(format!(
-            "unexpected point record of {} bytes",
-            layout.record_len
-        ));
-    }
+    layout.check()?;
     let mut m = Measure::new(source, te, tn, (0, 0, TILE, TILE));
     file.seek(SeekFrom::Start(hdr.point_offset))
         .map_err(|e| e.to_string())?;
-    const BATCH: usize = 50_000;
-    let mut buf = vec![0u8; BATCH * layout.record_len];
+    // Points a batch of an uncompressed file, at most 64 MB of them.
+    let plain = 50_000.min((64 << 20) / layout.record_len);
+    let mut buf = vec![0u8; plain * layout.record_len];
     let mut left = hdr.count;
     match &hdr.laszip {
         Some(vlr) => {
             let vlr = laz::LazVlr::read_from(&vlr[..]).map_err(|e| e.to_string())?;
             // Sixteen chunks a batch, decoded side by side: a 20-million-point
-            // tile measures in about 3 s instead of 15.
-            let batch = (u64::from(vlr.chunk_size()).max(1) * 16) as usize;
+            // tile measures in about 3 s instead of 15. Chunks of their own
+            // sizes (u32::MAX) or past reason are read in batches of a size
+            // of ours, and no batch takes more than 256 MB.
+            let chunk = u64::from(vlr.chunk_size());
+            let batch = if (1..=1_000_000).contains(&chunk) {
+                chunk * 16
+            } else {
+                800_000
+            };
+            let batch = batch.min((256 << 20) / layout.record_len as u64) as usize;
             buf.resize(batch * layout.record_len, 0);
             let reader = std::io::BufReader::new(file);
             let mut dec =
@@ -674,7 +677,7 @@ fn measure_file(
         None => {
             let mut reader = std::io::BufReader::new(file);
             while left > 0 {
-                let n = left.min(BATCH as u64) as usize;
+                let n = left.min(plain as u64) as usize;
                 let out = &mut buf[..n * layout.record_len];
                 reader.read_exact(out).map_err(|e| e.to_string())?;
                 out.chunks_exact(layout.record_len)
