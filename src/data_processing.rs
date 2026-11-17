@@ -404,7 +404,12 @@ fn process_element(
                     building_footprints,
                 );
                 if signage {
-                    signage::generate_highway_way_signage(editor, way, building_footprints);
+                    signage::generate_highway_way_signage(
+                        editor,
+                        way,
+                        building_footprints,
+                        road_mask,
+                    );
                 }
             } else if way.tags.get("amenity").map(String::as_str) == Some("fuel") {
                 fuel_stations::generate_station(

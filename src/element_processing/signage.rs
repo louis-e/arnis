@@ -1528,6 +1528,7 @@ pub fn generate_highway_way_signage(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
     footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
 ) {
     let Some(ctx) = editor.signage() else {
         return;
@@ -1600,6 +1601,7 @@ pub fn generate_highway_way_signage(
             key,
             false,
             footprints,
+            road_mask,
         );
         return;
     }
@@ -1615,6 +1617,7 @@ pub fn generate_highway_way_signage(
             key,
             reversed,
             footprints,
+            road_mask,
         );
         if !oneway && len >= 60 {
             place_roadside_sign(
@@ -1627,6 +1630,7 @@ pub fn generate_highway_way_signage(
                 key,
                 true,
                 footprints,
+                road_mask,
             );
         }
     }
@@ -1643,6 +1647,7 @@ pub fn generate_highway_way_signage(
                 key,
                 false,
                 footprints,
+                road_mask,
             );
         } else {
             place_roadside_sign(
@@ -1655,6 +1660,7 @@ pub fn generate_highway_way_signage(
                 key,
                 true,
                 footprints,
+                road_mask,
             );
         }
     }
@@ -1671,6 +1677,7 @@ pub fn generate_highway_way_signage(
                 key,
                 false,
                 footprints,
+                road_mask,
             );
         }
         let mut pos = 250;
@@ -1685,6 +1692,7 @@ pub fn generate_highway_way_signage(
                 key,
                 false,
                 footprints,
+                road_mask,
             );
             pos += 250;
         }
@@ -1703,6 +1711,7 @@ fn place_roadside_sign(
     key: &DecalKey,
     reverse: bool,
     footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
 ) {
     if cells.len() < 3 {
         return;
@@ -1725,9 +1734,11 @@ fn place_roadside_sign(
         dx = -dx;
         dz = -dz;
     }
-    // Kerb side of the direction of travel: first free cell past the carriageway edge.
+    // Kerb side of the direction of travel: the first free cell past the carriageway edge
+    // that is off the sidewalk and the paths, where walkers would have to step round the
+    // post, or else the first free one.
     let (px, pz) = kerb_side(ctx.region, (dx, dz));
-    let Some((sx, sz, ground)) = (0..5)
+    let free: Vec<(i32, i32, i32)> = (0..5)
         .map(|k| {
             let offset = (half_width + 2 + k) as f64;
             (
@@ -1735,9 +1746,14 @@ fn place_roadside_sign(
                 z + (pz * offset).round() as i32,
             )
         })
-        .find_map(|(sx, sz)| {
+        .filter_map(|(sx, sz)| {
             post_ground(editor, footprints, sx, sz, POST_SHAFT + 1).map(|g| (sx, sz, g))
         })
+        .collect();
+    let Some(&(sx, sz, ground)) = free
+        .iter()
+        .find(|&&(sx, sz, _)| !road_mask.contains(sx, sz))
+        .or(free.first())
     else {
         return;
     };
