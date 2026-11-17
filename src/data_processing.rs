@@ -1446,7 +1446,7 @@ pub fn generate_world_with_options(
         map
     };
 
-    let neighbour_heights = buildings::tagged_neighbour_heights(&elements);
+    let neighbour_heights = buildings::tagged_neighbour_heights(&elements, args.scale);
 
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);

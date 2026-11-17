@@ -16,12 +16,23 @@ use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::osm_parser::ProcessedNode;
 use fnv::FnvHashSet;
-use std::time::Duration;
 
 /// Narrowest the stepped walls may stand apart, walls included, in blocks:
 /// a shed or a garage would have little left inside. A terraced house
 /// narrower than this keeps its width, as only its front and back step in.
 pub(crate) const MIN_INSET_SPAN: i32 = 5;
+
+/// Fewest rings of cells, from the edge in to the middle, a building the step
+/// made narrower must keep: nine blocks across, walls included. A detached
+/// house a block in on every side read as a narrow tower under its roof and
+/// lost the door on its gable end, so below this it keeps its walls and the
+/// eave hangs past them, as before the step.
+pub(crate) const MIN_SHRUNK_RINGS: i32 = 5;
+
+/// Fewest blocks per metre the walls step in at. Coarser, a block of eave is
+/// more than a real one and the step eats small buildings and narrow wings,
+/// so the walls stay on the outline.
+pub(crate) const MIN_INSET_SCALE: f64 = 0.75;
 
 /// Share of the footprint the walls may give up to the eave.
 const MAX_INSET_LOSS: f64 = 0.5;
@@ -54,8 +65,10 @@ fn ring_cells(nodes: &[ProcessedNode]) -> impl Iterator<Item = (i32, i32)> + '_ 
 }
 
 /// Which edges of a closed ring stand free, with no other building within two
-/// cells outward along most of them: those step in under the eave, the others
-/// are party walls and stay on the outline. `own` is the building's own fill.
+/// cells outward anywhere along them: those step in under the eave. The
+/// others are party walls, or run past a neighbour for part of their length,
+/// and stay on the outline, so no gap opens beside the neighbour. `own` is
+/// the building's own fill.
 pub(crate) fn free_edges(
     nodes: &[ProcessedNode],
     own: &FnvHashSet<(i32, i32)>,
@@ -70,17 +83,14 @@ pub(crate) fn free_edges(
             if (nx, nz) == (0, 0) {
                 return true;
             }
-            let cells = bresenham_line(a.x, 0, a.z, b.x, 0, b.z);
-            let party = cells
+            !bresenham_line(a.x, 0, a.z, b.x, 0, b.z)
                 .iter()
-                .filter(|&&(x, _, z)| {
+                .any(|&(x, _, z)| {
                     (1..=2).any(|d| {
                         let c = (x + nx * d, z + nz * d);
                         footprints.contains(c.0, c.1) && !own.contains(&c)
                     })
                 })
-                .count();
-            party * 2 < cells.len()
         })
         .collect()
 }
@@ -208,15 +218,57 @@ pub(crate) fn inset_ring(nodes: &[ProcessedNode], step: &[bool]) -> Option<Vec<P
     Some(out)
 }
 
+/// Rings of cells from the edge of a set in to its middle: half its narrowest
+/// width, rounded up, whichever way the outline is turned.
+fn rings(cells: &FnvHashSet<(i32, i32)>) -> i32 {
+    const SIDES: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+    let mut ring: Vec<(i32, i32)> = cells
+        .iter()
+        .copied()
+        .filter(|&(x, z)| {
+            SIDES
+                .iter()
+                .any(|&(dx, dz)| !cells.contains(&(x + dx, z + dz)))
+        })
+        .collect();
+    let mut seen: FnvHashSet<(i32, i32)> = ring.iter().copied().collect();
+    let mut depth = 0;
+    while !ring.is_empty() {
+        depth += 1;
+        let mut inner = Vec::new();
+        for &(x, z) in &ring {
+            for &(dx, dz) in &SIDES {
+                let c = (x + dx, z + dz);
+                if cells.contains(&c) && seen.insert(c) {
+                    inner.push(c);
+                }
+            }
+        }
+        ring = inner;
+    }
+    depth
+}
+
+/// Width along x and along z of a set of cells, in blocks.
+fn spans(cells: &FnvHashSet<(i32, i32)>) -> (i32, i32) {
+    let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    for &(x, z) in cells {
+        (min_x, max_x) = (min_x.min(x), max_x.max(x));
+        (min_z, max_z) = (min_z.min(z), max_z.max(z));
+    }
+    (max_x - min_x + 1, max_z - min_z + 1)
+}
+
 /// The building's walls stepped in along its free edges, or None where it
 /// keeps them on the outline: no edge free, stepped walls closer than `MIN_INSET_SPAN`, a
-/// ring too sharp to move, or more than half the footprint lost. `fill` is the
-/// outline's footprint (courtyards removed).
+/// small building made narrower than `MIN_SHRUNK_RINGS`, a wing so
+/// narrow its walls would meet with no room between, a ring too sharp to move,
+/// or more than half the footprint lost. `fill` is the outline's footprint
+/// (courtyards removed).
 pub(crate) fn inset_outline(
     nodes: &[ProcessedNode],
     fill: &[(i32, i32)],
     footprints: &CoordinateBitmap,
-    timeout: Option<&Duration>,
 ) -> Option<OutlineInset> {
     if fill.is_empty() {
         return None;
@@ -236,20 +288,35 @@ pub(crate) fn inset_outline(
         return None;
     }
     let coords: Vec<(i32, i32)> = ring.iter().map(|n| (n.x, n.z)).collect();
-    let inner: Vec<(i32, i32)> = flood_fill_area(&coords, timeout)
+    // No wall-clock timeout: the ring is no bigger than the outline, whose
+    // fill is already cached, and a fill cut short in one tile but not the
+    // next would step half a building in.
+    let inner: Vec<(i32, i32)> = flood_fill_area(&coords, None)
         .into_iter()
         .filter(|c| own.contains(c))
         .collect();
     // The stepped footprint, walls included, against the outline's.
+    let walls: FnvHashSet<(i32, i32)> = ring_cells(&ring).collect();
     let mut stepped: FnvHashSet<(i32, i32)> = inner.iter().copied().collect();
-    stepped.extend(ring_cells(&ring));
-    let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
-    for &(x, z) in &stepped {
-        (min_x, max_x) = (min_x.min(x), max_x.max(x));
-        (min_z, max_z) = (min_z.min(z), max_z.max(z));
-    }
+    // A wall with no room beside it is a fin: the two sides of a wing three
+    // or four blocks wide stepped in onto each other.
+    let fin = walls.iter().any(|&(x, z)| {
+        !(-1..=1).any(|dx| {
+            (-1..=1).any(|dz| {
+                let c = (x + dx, z + dz);
+                stepped.contains(&c) && !walls.contains(&c)
+            })
+        })
+    });
+    stepped.extend(walls);
+    let (sx, sz) = spans(&stepped);
+    // Made narrower than a house the step suits.
+    let stepped_rings = rings(&stepped);
+    let cramped = stepped_rings < MIN_SHRUNK_RINGS && stepped_rings < rings(&outline);
     if inner.is_empty()
-        || (max_x - min_x + 1).min(max_z - min_z + 1) < MIN_INSET_SPAN
+        || fin
+        || cramped
+        || sx.min(sz) < MIN_INSET_SPAN
         || (stepped.len() as f64) < (1.0 - MAX_INSET_LOSS) * outline.len() as f64
     {
         return None;
@@ -283,35 +350,88 @@ mod tests {
 
     #[test]
     fn a_free_standing_house_steps_in_one_block_on_every_side() {
-        let way = rect_way(1, 10, 10, 20, 18, &[("building", "house")]);
+        let way = rect_way(1, 10, 10, 24, 22, &[("building", "house")]);
         let fill = fill_of(&way.nodes);
-        let footprints = bitmap_with_rect(&bbox(), 10, 10, 20, 18);
-        let inset = inset_outline(&way.nodes, &fill, &footprints, None).unwrap();
+        let footprints = bitmap_with_rect(&bbox(), 10, 10, 24, 22);
+        let inset = inset_outline(&way.nodes, &fill, &footprints).unwrap();
         assert_eq!(
             corners(&inset.nodes),
-            vec![(11, 11), (19, 11), (19, 17), (11, 17), (11, 11)]
+            vec![(11, 11), (23, 11), (23, 21), (11, 21), (11, 11)]
         );
         // Inside the walls, as a flood fill gives it.
-        assert_eq!(inset.fill.len(), 7 * 5);
-        assert_eq!(inset.strip.len(), 11 * 9 - 9 * 7);
+        assert_eq!(inset.fill.len(), 11 * 9);
+        assert_eq!(inset.strip.len(), 15 * 13 - 13 * 11);
     }
 
     #[test]
     fn a_party_wall_stays_on_the_shared_line() {
-        // A terraced house with its neighbour east of it, sharing x = 20.
-        let way = rect_way(1, 10, 10, 20, 18, &[("building", "house")]);
+        // A terraced house with its neighbour east of it, sharing x = 22.
+        let way = rect_way(1, 10, 10, 22, 22, &[("building", "house")]);
         let fill = fill_of(&way.nodes);
-        let mut footprints = bitmap_with_rect(&bbox(), 10, 10, 20, 18);
-        for x in 20..=30 {
-            for z in 10..=18 {
+        let mut footprints = bitmap_with_rect(&bbox(), 10, 10, 22, 22);
+        for x in 22..=32 {
+            for z in 10..=22 {
                 footprints.set(x, z);
             }
         }
-        let inset = inset_outline(&way.nodes, &fill, &footprints, None).unwrap();
+        let inset = inset_outline(&way.nodes, &fill, &footprints).unwrap();
         assert_eq!(
             corners(&inset.nodes),
-            vec![(11, 11), (20, 11), (20, 17), (11, 17), (11, 11)]
+            vec![(11, 11), (22, 11), (22, 21), (11, 21), (11, 11)]
         );
+    }
+
+    #[test]
+    fn a_wall_partly_beside_a_neighbour_stays_on_the_line() {
+        // A garage against the north end of the house's east side only.
+        let way = rect_way(1, 10, 10, 22, 22, &[("building", "house")]);
+        let fill = fill_of(&way.nodes);
+        let mut footprints = bitmap_with_rect(&bbox(), 10, 10, 22, 22);
+        for x in 23..=27 {
+            for z in 10..=12 {
+                footprints.set(x, z);
+            }
+        }
+        let inset = inset_outline(&way.nodes, &fill, &footprints).unwrap();
+        assert_eq!(
+            corners(&inset.nodes),
+            vec![(11, 11), (22, 11), (22, 21), (11, 21), (11, 11)]
+        );
+    }
+
+    #[test]
+    fn a_wing_too_narrow_for_a_room_keeps_its_walls() {
+        // An L whose wing is three, then four, blocks wide: stepped in, its
+        // two side walls would meet or stand back to back.
+        for wing in [12, 13] {
+            let nodes: Vec<ProcessedNode> = [
+                (10, 10),
+                (30, 10),
+                (30, 20),
+                (wing, 20),
+                (wing, 30),
+                (10, 30),
+                (10, 10),
+            ]
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, z))| ProcessedNode {
+                id: i as u64,
+                tags: Default::default(),
+                x,
+                z,
+            })
+            .collect();
+            let fill = fill_of(&nodes);
+            let mut footprints = bitmap_with_rect(&bbox(), 10, 10, 30, 20);
+            for &(x, z) in &fill {
+                footprints.set(x, z);
+            }
+            assert!(
+                inset_outline(&nodes, &fill, &footprints).is_none(),
+                "{wing}"
+            );
+        }
     }
 
     #[test]
@@ -319,12 +439,43 @@ mod tests {
         let shed = rect_way(1, 10, 10, 14, 20, &[("building", "shed")]);
         let fill = fill_of(&shed.nodes);
         let footprints = bitmap_with_rect(&bbox(), 10, 10, 14, 20);
-        assert!(inset_outline(&shed.nodes, &fill, &footprints, None).is_none());
+        assert!(inset_outline(&shed.nodes, &fill, &footprints).is_none());
 
         let mid = rect_way(2, 10, 10, 20, 18, &[("building", "house")]);
         let fill = fill_of(&mid.nodes);
         let footprints = bitmap_with_rect(&bbox(), 0, 0, 40, 40);
-        assert!(inset_outline(&mid.nodes, &fill, &footprints, None).is_none());
+        assert!(inset_outline(&mid.nodes, &fill, &footprints).is_none());
+    }
+
+    #[test]
+    fn a_small_detached_house_keeps_its_walls() {
+        // 11 by 9 would stand 9 by 7, 15 by 10 would be 8 deep: both keep
+        // their walls, and a turned 9 m house too, wider on the grid.
+        for (id, x1, z1) in [(1, 20, 18), (2, 24, 19)] {
+            let way = rect_way(id, 10, 10, x1, z1, &[("building", "house")]);
+            let fill = fill_of(&way.nodes);
+            let footprints = bitmap_with_rect(&bbox(), 10, 10, x1, z1);
+            assert!(
+                inset_outline(&way.nodes, &fill, &footprints).is_none(),
+                "{id}"
+            );
+        }
+        let nodes: Vec<ProcessedNode> = [(10, 10), (18, 10), (19, 17), (11, 18), (10, 10)]
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, z))| ProcessedNode {
+                id: i as u64,
+                tags: Default::default(),
+                x,
+                z,
+            })
+            .collect();
+        let fill = fill_of(&nodes);
+        let mut footprints = bitmap_with_rect(&bbox(), 0, 0, 0, 0);
+        for &(x, z) in &fill {
+            footprints.set(x, z);
+        }
+        assert!(inset_outline(&nodes, &fill, &footprints).is_none());
     }
 
     #[test]
@@ -332,7 +483,7 @@ mod tests {
         let way = rect_way(1, 10, 10, 15, 22, &[("building", "terrace")]);
         let fill = fill_of(&way.nodes);
         let footprints = bitmap_with_rect(&bbox(), 0, 10, 40, 22);
-        let inset = inset_outline(&way.nodes, &fill, &footprints, None).unwrap();
+        let inset = inset_outline(&way.nodes, &fill, &footprints).unwrap();
         assert_eq!(
             corners(&inset.nodes),
             vec![(10, 11), (15, 11), (15, 21), (10, 21), (10, 11)]

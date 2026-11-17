@@ -329,6 +329,7 @@ impl OvertureHints {
         Some(crate::element_processing::buildings::HeightHint {
             height_m: hint.height_m,
             levels: hint.num_floors.map(f64::from),
+            footprint_m2: None,
         })
     }
 }
