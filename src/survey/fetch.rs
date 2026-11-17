@@ -17,6 +17,31 @@ pub fn count_laser_bytes(n: u64) {
     LASER_BYTES.fetch_add(n, Ordering::Relaxed);
 }
 
+/// The laser bytes downloaded in this process past which a run stops reading.
+static LASER_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
+
+/// What a read stopped by the limit fails with.
+pub const PAST_LIMIT: &str = "past the download limit";
+
+/// Lets the run download `bytes` more of laser data from here.
+pub fn limit_laser_bytes(bytes: u64) {
+    LASER_LIMIT.store(laser_bytes().saturating_add(bytes), Ordering::Relaxed);
+}
+
+/// Whether the run has downloaded more laser data than it may.
+pub fn past_laser_limit() -> bool {
+    laser_bytes() > LASER_LIMIT.load(Ordering::Relaxed)
+}
+
+/// `Err` once past the limit, for a reader to stop on before its next request.
+pub fn within_laser_limit() -> Result<(), Failure> {
+    if past_laser_limit() {
+        Err(Failure::Other(PAST_LIMIT.into()))
+    } else {
+        Ok(())
+    }
+}
+
 /// Square metres of laser tiles read in this process, for the log.
 static LASER_AREA: AtomicU64 = AtomicU64::new(0);
 

@@ -491,9 +491,21 @@ fn read_whole(
             return Err(other(format!("HTTP {}", resp.status())));
         }
         let mut file = std::fs::File::create(&tmp.0).map_err(|e| other(e.to_string()))?;
-        let n = resp.copy_to(&mut file).map_err(|e| other(e.to_string()))?;
+        // Counted as it comes, so the download limit stops it part-way.
+        let mut buf = vec![0u8; 1 << 16];
+        loop {
+            let n = resp
+                .read(&mut buf)
+                .map_err(|e| other(fetch::read_failure(&e)))?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n])
+                .map_err(|e| other(e.to_string()))?;
+            fetch::count_laser_bytes(n as u64);
+            fetch::within_laser_limit()?;
+        }
         file.flush().map_err(|e| other(e.to_string()))?;
-        fetch::count_laser_bytes(n);
         fetch::count_laser_area(1e6);
     }
     let measured = {

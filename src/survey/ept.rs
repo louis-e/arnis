@@ -214,6 +214,7 @@ pub fn read(
         chosen
             .par_iter()
             .map(|n| {
+                fetch::within_laser_limit()?;
                 let data = fetch::get_bytes(client, &format!("{base}/ept-data/{}.laz", n.key()))
                     .map_err(Failure::of_part)?;
                 fetch::count_laser_bytes(data.len() as u64);

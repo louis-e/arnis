@@ -391,6 +391,7 @@ pub fn read(
         ranges
             .par_iter()
             .map(|(start, len, group)| {
+                fetch::within_laser_limit()?;
                 let data = fetch::get_range(client, url, *start, *len).map_err(Failure::of_part)?;
                 fetch::count_laser_bytes(data.len() as u64);
                 if data.len() as u64 != *len {

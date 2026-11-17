@@ -294,6 +294,8 @@ fn over_limit(need_mb: u32, max_mb: u32) {
         crate::progress::MESSAGE_ONLY,
         &format!("{OVER_LIMIT} {need_mb} {max_mb}"),
     );
+    // A prewarm leaves them out of the cache too.
+    crate::net::note_uncached("laser scans");
 }
 
 /// The limit to suggest for `need_mb`: the window's next step (1, 2 or 5 GB),
@@ -363,7 +365,17 @@ pub fn fetch_survey_data(
         }
     };
     // Heights read only the laser's roofs; lawns and trees need the photo too.
-    let mut inputs = mosaic(&client, &plan, features.garden || features.trees)?;
+    // The sizes above are the server's or an estimate; the bytes that come are
+    // held to the limit as well, and past it the area goes without.
+    fetch::limit_laser_bytes(u64::from(max_mb) * 1_000_000);
+    let inputs = mosaic(&client, &plan, features.garden || features.trees);
+    if fetch::past_laser_limit() {
+        // At least this much; the tiles that came are cached for a next run.
+        let got_mb = (fetch::laser_bytes() - bytes0).div_ceil(1_000_000) as u32;
+        over_limit(got_mb, max_mb);
+        return None;
+    }
+    let mut inputs = inputs?;
     if !plan.sheet.classes.unsorted.is_empty() {
         classify::crowns_not_roofs(&mut inputs);
     }
