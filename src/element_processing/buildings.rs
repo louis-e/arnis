@@ -10343,6 +10343,51 @@ fn curtain_frame_for(glass: Block) -> Block {
     }
 }
 
+/// What a building's own wall tags say of glass: `Some(true)` when one of
+/// them is glass, `Some(false)` when they name another material, `None`
+/// when none is mapped. A glass roof or a glass sibling says nothing about
+/// the colour of a stone facade.
+fn walls_mapped_glass(tags: &HashMap<String, String>) -> Option<bool> {
+    let mut materials = [
+        "building:material",
+        "building:facade:material",
+        "facade:material",
+    ]
+    .iter()
+    .filter_map(|key| tags.get(*key))
+    .map(|m| matches!(m.trim().to_ascii_lowercase().as_str(), "glass" | "mirror"))
+    .peekable();
+    materials.peek()?;
+    Some(materials.any(|glass| glass))
+}
+
+fn mapped_colour(tags: &HashMap<String, String>) -> Option<(u8, u8, u8)> {
+    tags.get("building:colour")
+        .or_else(|| tags.get("colour"))
+        .and_then(|c| color_text_to_rgb_tuple(c))
+}
+
+/// The tint of glass walls mapped with a colour.
+fn mapped_glass_tint(tags: &HashMap<String, String>) -> Option<Block> {
+    (walls_mapped_glass(tags) == Some(true))
+        .then(|| mapped_colour(tags).map(glass_for_colour))
+        .flatten()
+}
+
+/// The glass a glass roof takes over a glass curtain wall. The facade is
+/// three window rows to one wall row, so it takes the window glass, not the
+/// band's; but a tint mapped on the walls is the colour of the whole skin,
+/// its sloped faces too (Salesforce Tower: white glass up to the crown).
+fn curtain_roof_glass(tags: &HashMap<String, String>, wall: Block, window: Block) -> Option<Block> {
+    if !(is_glass_wall(wall) && is_glass_wall(window)) {
+        None
+    } else if mapped_glass_tint(tags) == Some(wall) {
+        Some(wall)
+    } else {
+        Some(window)
+    }
+}
+
 /// Wall and window glass of a building whose walls are tagged as glass: the
 /// tint follows a mapped `building:colour`, on the panes of a grid tower too.
 fn glass_palette(
@@ -10351,26 +10396,12 @@ fn glass_palette(
     wall_block: Block,
     window_block: Block,
 ) -> (Block, Block) {
-    // The element's own walls: a glass roof or a glass sibling says nothing
-    // about the colour of a stone facade.
-    let mut materials = [
-        "building:material",
-        "building:facade:material",
-        "facade:material",
-    ]
-    .iter()
-    .filter_map(|key| element.tags.get(*key))
-    .map(|m| matches!(m.trim().to_ascii_lowercase().as_str(), "glass" | "mirror"));
-    let first_material = materials.next();
-    let glass_tagged = first_material == Some(true) || materials.any(|glass| glass);
+    let walls_glass = walls_mapped_glass(&element.tags);
+    let glass_tagged = walls_glass == Some(true);
     // A mapped metal or stone part of a glass tower, such as a crown ring,
     // keeps the wall its tags gave it.
-    let other_material = first_material.is_some() && !glass_tagged;
-    let colour = element
-        .tags
-        .get("building:colour")
-        .or_else(|| element.tags.get("colour"))
-        .and_then(|c| color_text_to_rgb_tuple(c));
+    let other_material = walls_glass == Some(false);
+    let colour = mapped_colour(&element.tags);
     let colour_glass = colour.map(glass_for_colour);
     let tint = colour_glass.filter(|_| glass_tagged);
     // With no glass mapped, a warm colour (tan, buff, red) describes stone
@@ -16052,10 +16083,7 @@ fn generate_building_roof(
     let modeled_part_roof = element.tags.contains_key("building:part")
         && (element.tags.contains_key("roof:colour") || element.tags.contains_key("roof:material"));
 
-    // A glass curtain wall is three window rows to one wall row, so a glass
-    // roof continuing it takes the window glass, not the band's.
-    let curtain_glass = (is_glass_wall(config.wall_block) && is_glass_wall(config.window_block))
-        .then_some(config.window_block);
+    let curtain_glass = curtain_roof_glass(&element.tags, config.wall_block, config.window_block);
 
     let trim = RoofTrim {
         gable_block: (!is_glass_wall(config.wall_block)).then_some(config.wall_block),
@@ -22851,6 +22879,34 @@ mod style_tests {
             ),
             (LIGHT_GRAY_CONCRETE, GLASS)
         );
+    }
+
+    /// The glass roof of a curtain wall carries the wall's mapped tint up its
+    /// sloped faces; with no tint mapped it keeps the window glass.
+    #[test]
+    fn a_tinted_curtain_wall_keeps_its_tint_on_the_roof() {
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let white = tags(&[
+            ("building:part", "yes"),
+            ("building:material", "glass"),
+            ("building:colour", "#FFFFFF"),
+        ]);
+        let tint = mapped_glass_tint(&white).unwrap();
+        assert_eq!(
+            curtain_roof_glass(&white, tint, BLACK_STAINED_GLASS),
+            Some(tint)
+        );
+        let plain = tags(&[("building:part", "yes"), ("building:material", "glass")]);
+        assert_eq!(
+            curtain_roof_glass(&plain, GRAY_STAINED_GLASS, BLACK_STAINED_GLASS),
+            Some(BLACK_STAINED_GLASS)
+        );
+        assert_eq!(curtain_roof_glass(&white, BRICK, BLACK_STAINED_GLASS), None);
     }
 
     /// Offices, shops and towers stand on concrete floors, which their glass
