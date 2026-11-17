@@ -156,11 +156,22 @@ pub struct Plan {
     pub rect: (f64, f64, f64, f64),
     /// Megabytes of laser data not yet cached, estimated.
     pub download_mb: u32,
-    /// The tiles of a source read in whole files that are not yet cached.
+    /// The tiles that lack some of what the area wants.
     pub missing: Vec<(i32, i32)>,
 }
 
 impl Plan {
+    /// Square kilometres of the rectangle.
+    pub fn area_km2(&self) -> f64 {
+        let (e0, n0, e1, n1) = self.rect;
+        (e1 - e0) * (n1 - n0) / 1e6
+    }
+
+    /// Whether the area is past the size the survey runs for.
+    pub fn too_large(&self) -> bool {
+        self.area_km2() > MAX_AREA_KM2
+    }
+
     /// The blocks of a tile the rectangle needs.
     pub fn want(&self, (te, tn): (i32, i32)) -> Vec<bool> {
         laser::blocks_for(te, tn, self.rect)
@@ -214,28 +225,24 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
     if let Laser::Whole { .. } = sheet.laser {
         tiles.retain(|&t| !sliver(t, rect));
     }
-    // Each tile's cache is read whole to check it: side by side.
+    // Square kilometres each tile lacks of what the area wants, from the start
+    // of its cache file: side by side.
     use rayon::prelude::*;
-    let mut missing = Vec::new();
+    let lacking: Vec<f64> = tiles
+        .par_iter()
+        .map(|&(te, tn)| laser::missing_km2(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect)))
+        .collect();
+    let missing: Vec<(i32, i32)> = tiles
+        .iter()
+        .zip(&lacking)
+        .filter(|(_, &km2)| km2 > 0.0)
+        .map(|(&t, _)| t)
+        .collect();
     let download_mb = match sheet.laser {
-        Laser::Whole { tile_mb, .. } => {
-            missing = tiles
-                .par_iter()
-                .copied()
-                .filter(|&(te, tn)| {
-                    !laser::is_cached(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect))
-                })
-                .collect();
-            missing.len() as u32 * tile_mb
-        }
+        // Read whole: a tile missing any block costs its whole file.
+        Laser::Whole { tile_mb, .. } => missing.len() as u32 * tile_mb,
         Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
-            let missing: Vec<f64> = tiles
-                .par_iter()
-                .map(|&(te, tn)| {
-                    laser::missing_km2(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect))
-                })
-                .collect();
-            let km2: f64 = missing.iter().sum();
+            let km2: f64 = lacking.iter().sum();
             (km2 * f64::from(mb_per_km2)).ceil() as u32
         }
     };
@@ -322,10 +329,10 @@ pub fn fetch_survey_data(
     }
     let plan = plan(bbox)?;
     let (e0, n0, e1, n1) = plan.rect;
-    let area_km2 = (e1 - e0) * (n1 - n0) / 1e6;
-    if area_km2 > MAX_AREA_KM2 {
+    if plan.too_large() {
         println!(
-            "Laser data skipped: the area is {area_km2:.0} km², it is used for up to {MAX_AREA_KM2:.0}"
+            "Laser data skipped: the area is {:.0} km², it is used for up to {MAX_AREA_KM2:.0}",
+            plan.area_km2()
         );
         return None;
     }
@@ -475,7 +482,7 @@ fn mosaic(
     let uncached = || {
         plan.tiles
             .iter()
-            .any(|&t| laser::cached(&root, &plan.sheet, t.0, t.1, &plan.want(t)).is_none())
+            .any(|&t| !laser::is_cached(&root, &plan.sheet, t.0, t.1, &plan.want(t)))
     };
     match locate {
         Locate::Urls(f) => {

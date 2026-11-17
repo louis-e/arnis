@@ -222,23 +222,22 @@ pub fn plan(root: &Path, args: &Args, bbox: LLBBox) -> DataPlan {
     // Laser tiles are kept as their measurements, a fraction of the download, so
     // what is missing is estimated from the source's tile size (or its download
     // per square kilometre, for sources read in part), not the cache.
+    // Left out where the run would go without laser data: an area past the
+    // size it is used for, or one whose download is past the limit.
     if args.lidar_features().is_some() {
-        if let Some(p) = crate::survey::plan_in(&root.join(crate::survey::CACHE_DIR), &bbox) {
-            let dir = root.join(crate::survey::CACHE_DIR);
-            let (mut cached, mut bytes) = (0usize, 0u64);
-            for &(te, tn) in &p.tiles {
-                let f = crate::survey::laser::cache_path(&dir, &p.sheet, te, tn);
-                if let Ok(m) = std::fs::metadata(&f) {
-                    cached += 1;
-                    bytes += m.len();
-                } else if crate::survey::laser::is_cached(&dir, &p.sheet, te, tn, &p.want((te, tn)))
-                {
-                    cached += 1;
-                }
+        let dir = root.join(crate::survey::CACHE_DIR);
+        if let Some(p) = crate::survey::plan_in(&dir, &bbox)
+            .filter(|p| !p.too_large() && p.download_mb <= args.lidar_max_mb)
+        {
+            // A tile is cached when it holds every block the area wants.
+            let mut bytes = 0u64;
+            for t in p.tiles.iter().filter(|t| !p.missing.contains(t)) {
+                let f = crate::survey::laser::cache_path(&dir, &p.sheet, t.0, t.1);
+                bytes += std::fs::metadata(&f).map_or(0, |m| m.len());
             }
             out.items.push(Item {
                 source: "laser",
-                cached,
+                cached: p.tiles.len() - p.missing.len(),
                 cached_bytes: bytes,
                 total: p.tiles.len(),
                 missing_bytes: Some(u64::from(p.download_mb) * 1_000_000),

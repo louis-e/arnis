@@ -108,7 +108,7 @@ impl LaserTile {
     }
 
     fn has(&self, want: &[bool]) -> bool {
-        want.iter().zip(&self.blocks).all(|(&w, &b)| !w || b)
+        covers(&self.blocks, want)
     }
 
     fn write(&self, path: &Path) -> std::io::Result<()> {
@@ -139,10 +139,16 @@ impl LaserTile {
         std::fs::rename(tmp, path)
     }
 
-    /// Read a cached tile, each layer straight from the decompressor. `None`
-    /// unless the file is whole and of this version and density.
-    fn read(path: &Path) -> Option<Self> {
+    /// Which blocks a cached tile holds and the file they came from, read
+    /// from the start of the file alone: what a check needs, without
+    /// decompressing the 9 MB of layers after it. `None` unless it is of this
+    /// version and density.
+    fn read_head(path: &Path) -> Option<(Vec<bool>, String)> {
         let mut d = zstd::Decoder::new(std::fs::File::open(path).ok()?).ok()?;
+        Self::head(&mut d)
+    }
+
+    fn head(d: &mut impl Read) -> Option<(Vec<bool>, String)> {
         let nb = BLOCKS * BLOCKS;
         let mut head = vec![0u8; 9 + nb + 2];
         d.read_exact(&mut head).ok()?;
@@ -153,7 +159,14 @@ impl LaserTile {
         let olen = usize::from(u16::from_le_bytes([head[9 + nb], head[10 + nb]]));
         let mut origin = vec![0u8; olen];
         d.read_exact(&mut origin).ok()?;
-        let origin = String::from_utf8(origin).ok()?;
+        Some((blocks, String::from_utf8(origin).ok()?))
+    }
+
+    /// Read a cached tile, each layer straight from the decompressor. `None`
+    /// unless the file is whole and of this version and density.
+    fn read(path: &Path) -> Option<Self> {
+        let mut d = zstd::Decoder::new(std::fs::File::open(path).ok()?).ok()?;
+        let (blocks, origin) = Self::head(&mut d)?;
         let mut layer = |len: usize| {
             let mut v = vec![0u8; len];
             d.read_exact(&mut v).ok().map(|_| v)
@@ -241,15 +254,9 @@ fn known_absent(root: &Path, source: &Sheet, te: i32, tn: i32) -> bool {
         .is_some_and(|age| age.as_secs() < ABSENT_DAYS * 86_400)
 }
 
-/// The tile from the cache alone, when it holds every block wanted (or the tile
-/// is known absent).
-pub fn cached(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> Option<Fetched> {
-    if let Some(t) = LaserTile::read(&cache_path(root, source, te, tn)) {
-        if t.has(want) {
-            return Some(Fetched::Tile(Box::new(t)));
-        }
-    }
-    known_absent(root, source, te, tn).then_some(Fetched::Absent)
+/// Whether `blocks` holds every block wanted.
+fn covers(blocks: &[bool], want: &[bool]) -> bool {
+    want.iter().zip(blocks).all(|(&w, &b)| !w || b)
 }
 
 /// Square kilometres of the wanted blocks not yet cached.
@@ -257,7 +264,7 @@ pub fn missing_km2(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool])
     if known_absent(root, source, te, tn) {
         return 0.0;
     }
-    let have = LaserTile::read(&cache_path(root, source, te, tn)).map(|t| t.blocks);
+    let have = LaserTile::read_head(&cache_path(root, source, te, tn)).map(|(blocks, _)| blocks);
     let missing = want
         .iter()
         .enumerate()
@@ -266,9 +273,12 @@ pub fn missing_km2(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool])
     missing as f64 * (BLOCK * BLOCK) as f64 / 1e6
 }
 
-/// Whether the tile costs no download for the blocks wanted.
+/// Whether the tile costs no download for the blocks wanted (its cache file's
+/// start says it holds them all, or the source has no such tile).
 pub fn is_cached(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> bool {
-    cached(root, source, te, tn, want).is_some()
+    LaserTile::read_head(&cache_path(root, source, te, tn))
+        .is_some_and(|(blocks, _)| covers(&blocks, want))
+        || known_absent(root, source, te, tn)
 }
 
 /// The tile's measurements over the blocks wanted, from the cache or else read
@@ -284,12 +294,18 @@ pub fn tile(
     want: &[bool],
     urls: &[String],
 ) -> Result<Fetched, String> {
-    if let Some(f) = cached(root, source, te, tn, want) {
-        return Ok(f);
+    let path = cache_path(root, source, te, tn);
+    // Read once: what it holds is either all that is wanted or the start a
+    // COPC read adds to.
+    let mut have = LaserTile::read(&path);
+    if have.as_ref().is_some_and(|t| t.has(want)) {
+        return Ok(Fetched::Tile(Box::new(have.take().unwrap())));
+    }
+    if known_absent(root, source, te, tn) {
+        return Ok(Fetched::Absent);
     }
     crate::net::ensure_online("laser scans")?;
     std::fs::create_dir_all(root.join(source.dir())).map_err(|e| e.to_string())?;
-    let path = cache_path(root, source, te, tn);
     // Absent only when the server has none of the tile's files.
     let mut all_missing = !urls.is_empty();
     for url in urls {
@@ -299,7 +315,8 @@ pub fn tile(
                 // A COPC or EPT tile decodes as it downloads: a turn at both.
                 let _download = DOWNLOADS.enter(DOWNLOADS_AT_ONCE);
                 let _decode = DECODES.enter(decodes_at_once());
-                let mut t = LaserTile::read(&path)
+                let mut t = have
+                    .take()
                     .filter(|t| t.origin == *url)
                     .unwrap_or_else(|| LaserTile::empty(url));
                 read_copc(client, source, te, tn, want, url, &mut t).map(|_| t)
