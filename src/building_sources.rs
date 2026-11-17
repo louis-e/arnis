@@ -65,7 +65,7 @@ pub fn merge(
         println!("  No additional buildings from Overture Maps for this area");
     }
 
-    let measured = crate::survey::elements::merge(
+    let (measured, on_paved) = crate::survey::elements::merge(
         crate::survey::elements::candidates(ground, xzbbox),
         parsed_elements,
         scale,
@@ -76,6 +76,11 @@ pub fn merge(
             measured.len().to_string().bright_white().bold()
         );
         parsed_elements.extend(measured);
+    }
+    if on_paved > 0 {
+        println!(
+            "  Left out {on_paved} on roads, tracks, squares or car parks, as vehicles or stalls"
+        );
     }
 }
 

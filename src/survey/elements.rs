@@ -105,16 +105,33 @@ pub fn candidates(ground: &Ground, xzbbox: &XZBBox) -> Vec<ProcessedElement> {
     out
 }
 
+/// A centreline segment and how far from it a candidate may not stand, in blocks.
+type Line = ((f64, f64), (f64, f64), f64);
+
+/// Railway tracks whose wagons stand on the ground of the world.
+const TRACKS: &[&str] = &[
+    "rail",
+    "light_rail",
+    "tram",
+    "subway",
+    "narrow_gauge",
+    "preserved",
+    "monorail",
+    "funicular",
+];
+
 /// Side of the cells the mapped roads are bucketed in.
 const PAVED_CELL: i32 = 32;
 
 /// Where the survey's sheds and pools cannot stand: the mapped roads and paths as wide as
-/// they are drawn, and the squares and car parks mapped as areas. On these the laser sees
-/// parked vans, market stalls and awnings, and a square's paving can read as a pool.
+/// they are drawn, railway tracks as wide as a wagon, and the squares, car parks, bus
+/// stations and railway yards mapped as areas. On these the laser sees parked vans,
+/// buses, wagons, market stalls and awnings, and a square's paving can read as a pool.
 struct Paved {
-    /// Centreline segments of the roads and paths, each with the reach of its surface.
-    lines: Vec<((f64, f64), (f64, f64), f64)>,
-    /// Outlines of the squares and car parks.
+    /// Centreline segments of the roads, paths and tracks, each with the reach of its
+    /// surface.
+    lines: Vec<Line>,
+    /// Outlines of the squares, car parks, bus stations and railway yards.
     areas: Vec<Vec<(f64, f64)>>,
     /// Indices into `lines` by `PAVED_CELL` cell.
     buckets: FnvHashMap<(i32, i32), Vec<usize>>,
@@ -138,9 +155,14 @@ impl Paved {
         };
         let is_area = |t: &HashMap<String, String>| {
             (t.contains_key("highway") && t.get("area").map(String::as_str) == Some("yes"))
-                || (t.get("amenity").map(String::as_str) == Some("parking")
-                    && !t.contains_key("building"))
+                || (matches!(
+                    t.get("amenity").map(String::as_str),
+                    Some("parking" | "bus_station")
+                ) && !t.contains_key("building"))
+                || t.get("landuse").map(String::as_str) == Some("railway")
         };
+        // A wagon is some 3 m across, so half of that and the half block a road gets.
+        let track_reach = (1.5 * scale).max(1.0) + 0.5;
         let mut paved = Paved {
             lines: Vec::new(),
             areas: Vec::new(),
@@ -154,6 +176,14 @@ impl Paved {
             match el {
                 ProcessedElement::Way(w) if is_area(t) && closed(w) => {
                     paved.areas.push(w.nodes.iter().map(xz).collect());
+                }
+                ProcessedElement::Way(w)
+                    if t.get("railway")
+                        .is_some_and(|r| TRACKS.contains(&r.as_str())) =>
+                {
+                    for pair in w.nodes.windows(2) {
+                        paved.lines.push((xz(&pair[0]), xz(&pair[1]), track_reach));
+                    }
                 }
                 ProcessedElement::Way(w) => {
                     let Some(kind) = t.get("highway") else {
@@ -232,12 +262,13 @@ fn ring_contains(ring: &[(f64, f64)], x: f64, z: f64) -> bool {
 
 /// Keep the candidates that meet nothing mapped: sheds clear of every building,
 /// pools clear of every building and every mapped pool, and both off the mapped roads,
-/// squares and car parks, at the roads' drawn width for the world's `scale`.
+/// tracks, squares and car parks (see [`Paved`]), at the roads' drawn width for the
+/// world's `scale`. Also returns how many were left out for standing on those.
 pub fn merge(
     candidates: Vec<ProcessedElement>,
     existing: &[ProcessedElement],
     scale: f64,
-) -> Vec<ProcessedElement> {
+) -> (Vec<ProcessedElement>, usize) {
     let paved = Paved::of(existing, scale);
     let bbox_of = |w: &ProcessedWay| {
         let xs = w.nodes.iter().map(|n| n.x);
@@ -273,7 +304,8 @@ pub fn merge(
             ProcessedElement::Node(_) => {}
         }
     }
-    candidates
+    let mut on_paved = 0;
+    let kept = candidates
         .into_iter()
         .filter(|el| {
             let ProcessedElement::Way(w) = el else {
@@ -292,14 +324,16 @@ pub fn merge(
                 .map(|p| (f64::from(p.x) + 0.5, f64::from(p.z) + 0.5))
                 .chain(std::iter::once(centre))
                 .any(|(x, z)| paved.covers(x, z));
-            !on_paving
-                && !blockers.iter().any(|&(ba, bb, bc, bd, building)| {
-                    let overlaps = a <= bc && c >= ba && b <= bd && d >= bb;
-                    // A shed only yields to buildings; a pool to buildings and pools.
-                    overlaps && (building || is_pool)
-                })
+            let mapped = blockers.iter().any(|&(ba, bb, bc, bd, building)| {
+                let overlaps = a <= bc && c >= ba && b <= bd && d >= bb;
+                // A shed only yields to buildings; a pool to buildings and pools.
+                overlaps && (building || is_pool)
+            });
+            on_paved += usize::from(on_paving && !mapped);
+            !on_paving && !mapped
         })
-        .collect()
+        .collect();
+    (kept, on_paved)
 }
 
 /// Convex hull of the cells, counter-clockwise, through block coordinates: an
@@ -400,6 +434,7 @@ mod tests {
             way(ID_BASE + 1024, &[("building", "shed")], 32, 31, 34, 33), // on a mapped pool
         ];
         let kept: Vec<u64> = merge(cands, &existing, 1.0)
+            .0
             .into_iter()
             .map(|e| match e {
                 ProcessedElement::Way(w) => w.id,
@@ -463,6 +498,7 @@ mod tests {
             ), // in a garden
         ];
         let kept: Vec<u64> = merge(cands, &existing, 1.0)
+            .0
             .into_iter()
             .map(|e| match e {
                 ProcessedElement::Way(w) => w.id,
@@ -470,5 +506,43 @@ mod tests {
             })
             .collect();
         assert_eq!(kept, vec![ID_BASE + 256, ID_BASE + 1024]);
+    }
+
+    // A wagon standing on a siding and a bus in its station are no sheds; a shed
+    // behind the station is.
+    #[test]
+    fn nothing_stands_on_tracks_or_in_bus_stations() {
+        let track = ProcessedElement::Way(ProcessedWay {
+            id: 1,
+            nodes: [(1, 0), (2, 100)]
+                .iter()
+                .map(|&(id, x)| ProcessedNode {
+                    id,
+                    tags: HashMap::new(),
+                    x,
+                    z: 20,
+                })
+                .collect(),
+            tags: [("railway", "rail"), ("service", "siding")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
+        let existing = vec![track, way(2, &[("amenity", "bus_station")], 0, 40, 30, 70)];
+        let cands = vec![
+            way(ID_BASE, &[("building", "shed")], 10, 19, 22, 21), // the wagon
+            way(ID_BASE + 256, &[("building", "garage")], 10, 50, 22, 53), // the bus
+            way(ID_BASE + 512, &[("building", "shed")], 40, 50, 43, 53), // behind
+        ];
+        let (kept, on_paved) = merge(cands, &existing, 1.0);
+        let kept: Vec<u64> = kept
+            .into_iter()
+            .map(|e| match e {
+                ProcessedElement::Way(w) => w.id,
+                _ => 0,
+            })
+            .collect();
+        assert_eq!(kept, vec![ID_BASE + 512]);
+        assert_eq!(on_paved, 2);
     }
 }
