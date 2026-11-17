@@ -13696,6 +13696,12 @@ pub fn generate_buildings(
             )
         };
 
+    if building_height > multiply_scale(GARDEN_HOUSE_MAX_HEIGHT, scale_factor) {
+        for &(x, z) in &cached_floor_area {
+            editor.mark_ground(crate::world_editor::GroundMark::Tall, x, z);
+        }
+    }
+
     // A building going up is a frame of slabs and columns, not a finished shell.
     if BuildingCondition::from_tags(&element.tags) == BuildingCondition::Construction
         && min_level_offset == 0
@@ -13735,6 +13741,17 @@ pub fn generate_buildings(
         region,
     );
     let preset = BuildingStylePreset::for_category(category);
+    if has_garden_grounds(
+        category,
+        building_height,
+        cached_footprint_size,
+        scale_factor,
+    ) && min_level_offset == 0
+    {
+        for &(x, z) in &cached_floor_area {
+            editor.mark_ground(crate::world_editor::GroundMark::Dwelling, x, z);
+        }
+    }
 
     // Street/neighbor classification: party walls, fronting streets, corner.
     // Sibling part cells: exempt from party-wall detection and kept clear of
@@ -15959,6 +15976,26 @@ fn generate_setback_crown(
     }
 
     true
+}
+
+/// Tallest a dwelling with a garden stands, in blocks at full scale: four storeys.
+const GARDEN_HOUSE_MAX_HEIGHT: i32 = 16;
+
+/// A house or other dwelling of at most four storeys and about 800 m², whose grounds are a garden.
+fn has_garden_grounds(
+    category: BuildingCategory,
+    height: i32,
+    footprint_cells: usize,
+    scale_factor: f64,
+) -> bool {
+    matches!(
+        category,
+        BuildingCategory::House
+            | BuildingCategory::Residential
+            | BuildingCategory::Farm
+            | BuildingCategory::Default
+    ) && height <= multiply_scale(GARDEN_HOUSE_MAX_HEIGHT, scale_factor)
+        && (footprint_cells as f64) <= 800.0 * scale_factor * scale_factor
 }
 
 fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
@@ -20383,6 +20420,33 @@ mod height_tests {
 #[cfg(test)]
 mod style_tests {
     use super::*;
+
+    #[test]
+    fn only_low_small_homes_have_garden_grounds() {
+        use BuildingCategory::*;
+        for home in [House, Residential, Farm, Default] {
+            assert!(has_garden_grounds(home, 12, 300, 1.0), "{home:?}");
+        }
+        // A garage compound or a shed alone marks no garden.
+        for other in [
+            Commercial,
+            Office,
+            Industrial,
+            School,
+            Religious,
+            TallBuilding,
+            Garage,
+            Shed,
+        ] {
+            assert!(!has_garden_grounds(other, 12, 300, 1.0), "{other:?}");
+        }
+        // Five storeys or a block of flats' footprint is no house with a garden.
+        assert!(!has_garden_grounds(Residential, 20, 300, 1.0));
+        assert!(!has_garden_grounds(Residential, 12, 2000, 1.0));
+        // At half scale both limits shrink with the world.
+        assert!(has_garden_grounds(House, 8, 190, 0.5));
+        assert!(!has_garden_grounds(House, 10, 190, 0.5));
+    }
 
     #[test]
     fn archetype_truth_table() {

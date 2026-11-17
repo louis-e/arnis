@@ -50,6 +50,11 @@ const SALT_TALL_SWARD: u32 = 0x5A7D_0002;
 const SALT_WETLAND_POOLS: u32 = 0x9001_5E75;
 const SALT_PAVING_WEAR: u32 = 0xBA7E_3EA1;
 const SALT_PAVING_KIND: u32 = 0xBA7E_3EA2;
+const SALT_GARDEN: u32 = 0x6A2D_E001;
+const SALT_GARDEN_SWARD: u32 = 0x6A2D_E002;
+const SALT_PATIO: u32 = 0x6A2D_E003;
+/// Share of the wild sward a mown park lawn keeps, as short grass only.
+const MOWN_SWARD: f64 = 0.25;
 
 /// Per-chunk cache of ground Y values.
 ///
@@ -284,6 +289,7 @@ pub fn generate_ground_region(
     let tree_spacing = editor.tree_slot_spacing();
     let tree_pack = editor.tree_pack();
     let terrain_enabled = ground.elevation_enabled;
+    let garden_reach = GardenReach::at(args.scale);
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -388,6 +394,8 @@ pub fn generate_ground_region(
                     ground.local_lat(point).unwrap_or(center_lat).abs()
                 })
             };
+            // Dwellings' gardens, worked out on the chunk's first built-up column.
+            let mut gardens: Option<Option<Box<[bool; 256]>>> = None;
             // Fallen rock is only looked for where the relief could hold a cliff.
             let talus_field = (terrain_enabled && planetary_body.is_none())
                 .then(|| {
@@ -705,8 +713,22 @@ pub fn generate_ground_region(
                             };
                             let talus_block =
                                 terrain_surface::talus_palette(x, z, talus, cover_here, rock);
-                            // Whether the cascade below laid this column's forest floor.
+                            // Whether the cascade below laid this column's forest floor or garden.
                             let mut floored = false;
+                            let mut gardened = false;
+                            let garden_here = cover_here == land_cover::LC_BUILT_UP
+                                && gardens
+                                    .get_or_insert_with(|| {
+                                        garden_columns(
+                                            editor,
+                                            building_footprints,
+                                            garden_reach,
+                                            chunk_x,
+                                            chunk_z,
+                                        )
+                                    })
+                                    .as_ref()
+                                    .is_some_and(|g| g[((z & 15) * 16 + (x & 15)) as usize]);
                             // Forest cover outside measured clearings, or open cover inside a stand.
                             let floor_here = forest_floor.filter(|_| match cover_here {
                                 land_cover::LC_TREE_COVER => ground
@@ -795,6 +817,15 @@ pub fn generate_ground_region(
                                             }
                                             _ => (FARMLAND, DIRT),
                                         },
+                                        land_cover::LC_BUILT_UP if garden_here => {
+                                            gardened = true;
+                                            garden_surface(
+                                                x,
+                                                z,
+                                                climate,
+                                                rock == terrain_surface::Rock::Red,
+                                            )
+                                        }
                                         // Ground reads the flag from args; roads and roofs read the
                                         // process flag set from the same args (surfaces::patches).
                                         land_cover::LC_BUILT_UP if args.surface_patches => {
@@ -1085,7 +1116,17 @@ pub fn generate_ground_region(
                                     None,
                                 );
                             // Trees can also grow through stone surfaces (urban tree cover)
+                            // A garden holds trees whatever ground its climate gives it.
                             let ground_allows_trees = ground_is_natural
+                                || (gardened
+                                    && !sealed
+                                    && editor.check_for_block_absolute(
+                                        x,
+                                        ground_y,
+                                        z,
+                                        Some(&[surface_block]),
+                                        None,
+                                    ))
                                 || (!sealed
                                     && editor.check_for_block_absolute(
                                         x,
@@ -1142,7 +1183,11 @@ pub fn generate_ground_region(
                                     Some(&[COARSE_DIRT]),
                                     None,
                                 );
-                                let sward = climate_sward(climate) * if worn { 0.5 } else { 1.0 };
+                                // A mown lawn keeps a short sward: no tall grass, no wild bushes.
+                                let mown = editor.is_lawn(x, z);
+                                let sward = climate_sward(climate)
+                                    * if worn { 0.5 } else { 1.0 }
+                                    * if mown { MOWN_SWARD } else { 1.0 };
                                 // Litter carries ferns alone; the sward under a crown thins out.
                                 let litter = floored
                                     && editor.check_for_block_absolute(
@@ -1241,9 +1286,44 @@ pub fn generate_ground_region(
                                             );
                                         }
                                     }
+                                    // A garden: a lawn with the odd tuft, flower and shrub.
+                                    land_cover::LC_BUILT_UP
+                                        if gardened && ground_is_natural && !mown =>
+                                    {
+                                        let roll = rng.random_range(0..1000);
+                                        if roll < 8 {
+                                            crate::ground_decoration::place_scattered_flower(
+                                                editor,
+                                                x,
+                                                z,
+                                                crate::ground_decoration::FlowerSetting::Garden,
+                                            );
+                                        } else if roll < 12 {
+                                            crate::element_processing::bush::place_bush(
+                                                editor,
+                                                x,
+                                                z,
+                                                crate::element_processing::bush::BushKind::Garden,
+                                            );
+                                        } else if undergrowth_roll(
+                                            x,
+                                            z,
+                                            0.06 * sward,
+                                            SALT_GARDEN_SWARD,
+                                        ) {
+                                            editor.set_block_absolute(
+                                                GRASS,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
                                     land_cover::LC_SHRUBLAND if ground_is_natural => {
                                         let choice = rng.random_range(0..100);
-                                        if choice < 2 {
+                                        if choice < 2 && !mown {
                                             crate::element_processing::bush::place_bush(
                                                 editor,
                                                 x,
@@ -1274,7 +1354,11 @@ pub fn generate_ground_region(
                                             && undergrowth_roll(x, z, 0.55 * sward, SALT_SWARD) =>
                                     {
                                         let stand = patch_noise(x, z, 9, SALT_TALL_SWARD) > 0.8;
-                                        let tall_share = if stand { 35 } else { 4 };
+                                        let tall_share = match (mown, stand) {
+                                            (true, _) => 0,
+                                            (false, true) => 35,
+                                            (false, false) => 4,
+                                        };
                                         if rng.random_range(0..100) < tall_share {
                                             editor.set_block_absolute(
                                                 TALL_GRASS_BOTTOM,
@@ -1617,6 +1701,104 @@ pub fn generate_ground_region(
     ground_pb.finish();
 }
 
+/// How far a garden looks around it, in blocks at the run's scale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GardenReach {
+    /// Coarse cells to the nearest low dwelling, or tall building: about 12 m. At most 7,
+    /// so it stays inside the 32-block halo a One World piece builds past its seam.
+    cells: i32,
+    /// Blocks from mapped paving that stay paved: about 3 m.
+    pave: i32,
+    /// Blocks from a wall a patio takes: about 1 m.
+    wall: i32,
+}
+
+impl GardenReach {
+    const MAX_PAVE: i32 = 6;
+
+    fn at(scale: f64) -> Self {
+        let blocks = |m: f64, most: i32| ((m * scale).round() as i32).clamp(1, most);
+        let cell = f64::from(crate::floodfill_cache::CoarseMask::CELL);
+        Self {
+            cells: ((12.0 * scale / cell).ceil() as i32).clamp(1, 7),
+            pave: blocks(3.0, Self::MAX_PAVE),
+            wall: blocks(1.0, 2),
+        }
+    }
+}
+
+/// A chunk's garden columns, if any: near a low dwelling, off paving, footprints and city blocks.
+fn garden_columns(
+    editor: &WorldEditor,
+    footprints: &BuildingFootprintBitmap,
+    reach: GardenReach,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> Option<Box<[bool; 256]>> {
+    const MOST: i32 = 16 + 2 * GardenReach::MAX_PAVE;
+    use crate::world_editor::GroundMark;
+    let dwellings = editor.ground_marks(GroundMark::Dwelling)?;
+    let tall = editor.ground_marks(GroundMark::Tall);
+    let commercial = editor.ground_marks(GroundMark::Commercial);
+    let (pave, wall, cells) = (reach.pave, reach.wall, reach.cells);
+    let side = 16 + 2 * pave;
+    let (x0, z0) = (chunk_x << 4, chunk_z << 4);
+    let mut paved = [false; (MOST * MOST) as usize];
+    let mut built = [false; (MOST * MOST) as usize];
+    for dz in 0..side {
+        for dx in 0..side {
+            let (x, z) = (x0 + dx - pave, z0 + dz - pave);
+            paved[(dz * side + dx) as usize] = editor.surface_is_sealed(x, z);
+            built[(dz * side + dx) as usize] = footprints.contains(x, z);
+        }
+    }
+    let mut out = Box::new([false; 256]);
+    let mut any = false;
+    for cz in (0..16).step_by(4) {
+        for cx in (0..16).step_by(4) {
+            let (x, z) = (x0 + cx, z0 + cz);
+            if !dwellings.any_near(x, z, cells)
+                || tall.is_some_and(|m| m.any_near(x, z, cells))
+                || commercial.is_some_and(|m| m.contains(x, z))
+            {
+                continue;
+            }
+            for lz in cz..cz + 4 {
+                for lx in cx..cx + 4 {
+                    if built[((lz + pave) * side + lx + pave) as usize] {
+                        continue;
+                    }
+                    let paved_near = (0..=2 * pave).any(|dz| {
+                        (0..=2 * pave).any(|dx| paved[((lz + dz) * side + lx + dx) as usize])
+                    });
+                    let at_wall = (pave - wall..=pave + wall).any(|dz| {
+                        (pave - wall..=pave + wall)
+                            .any(|dx| built[((lz + dz) * side + lx + dx) as usize])
+                    });
+                    let patio = at_wall && ground_noise(x0 + lx, z0 + lz, 9, SALT_PATIO) < 0.5;
+                    if !paved_near && !patio {
+                        out[(lz * 16 + lx) as usize] = true;
+                        any = true;
+                    }
+                }
+            }
+        }
+    }
+    any.then_some(out)
+}
+
+/// Surface of a garden: the climate's own ground, else a lawn worn bare in patches.
+fn garden_surface(x: i32, z: i32, climate: crate::climate::Climate, red: bool) -> (Block, Block) {
+    if let Some(p) = climate.surface_palette(land_cover::LC_GRASSLAND, x, z, red) {
+        return p;
+    }
+    if ground_noise(x, z, 6, SALT_GARDEN) < 0.07 {
+        (COARSE_DIRT, DIRT)
+    } else {
+        (GRASS_BLOCK, DIRT)
+    }
+}
+
 /// What carpets the floor of a temperate forest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ForestFloor {
@@ -1897,6 +2079,131 @@ mod tests {
         // The stand's edge row still has crowns on three sides.
         assert!(in_closed_stand(&ground, XZPoint::new(64, 40)));
         assert!(!in_closed_stand(&ground, XZPoint::new(40, 40)));
+    }
+
+    fn garden_editor<'a>(bbox: &'a XZBBox, sealed: &[(i32, i32)]) -> WorldEditor<'a> {
+        use crate::coordinate_system::geographic::LLBBox;
+        let llbbox = LLBBox::new(48.0, 11.0, 48.01, 11.01).unwrap();
+        let mut editor = WorldEditor::new(std::env::temp_dir(), bbox, llbbox);
+        let mut mask = crate::floodfill_cache::CoordinateBitmap::new(bbox);
+        for &(x, z) in sealed {
+            mask.set(x, z);
+        }
+        editor.set_sealed_surface(std::sync::Arc::new(mask));
+        editor
+    }
+
+    #[test]
+    fn gardens_lie_behind_houses_away_from_paving() {
+        use crate::world_editor::GroundMark;
+        let bbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        // A street along z = 0..=1, a house at x 4..12, z 6..12.
+        let street: Vec<(i32, i32)> = (0..64).flat_map(|x| [(x, 0), (x, 1)]).collect();
+        let mut footprints = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
+        let mut editor = garden_editor(&bbox, &street);
+        assert!(
+            garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).is_none(),
+            "no house, no garden"
+        );
+        for x in 4..12 {
+            for z in 6..12 {
+                editor.mark_ground(GroundMark::Dwelling, x, z);
+                footprints.set(x, z);
+            }
+        }
+        let g = garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).expect("a garden");
+        let at = |x: i32, z: i32| g[(z * 16 + x) as usize];
+        assert!(at(8, 14), "behind the house");
+        assert!(!at(8, 8), "inside the house");
+        assert!(!at(8, 3) && !at(14, 4), "beside the street");
+        assert!(at(14, 5), "four blocks from the street");
+        // A tower among the houses makes it a city block, paved as before.
+        editor.mark_ground(GroundMark::Tall, 6, 14);
+        assert!(garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).is_none());
+        // So does commercial land, where it lies.
+        let mut editor = garden_editor(&bbox, &street);
+        for x in 4..12 {
+            for z in 6..12 {
+                editor.mark_ground(GroundMark::Dwelling, x, z);
+            }
+        }
+        for x in 0..8 {
+            for z in 12..16 {
+                editor.mark_ground(GroundMark::Commercial, x, z);
+            }
+        }
+        let g = garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).expect("a garden");
+        assert!(!g[14 * 16 + 4] && g[14 * 16 + 9]);
+    }
+
+    /// The reaches are lengths, so they follow the scale, and the dwelling reach stays
+    /// inside the halo a One World piece builds past its seam.
+    #[test]
+    fn garden_reach_follows_the_scale() {
+        let at = |scale| {
+            let r = GardenReach::at(scale);
+            (r.cells, r.pave, r.wall)
+        };
+        assert_eq!(at(1.0), (3, 3, 1));
+        assert_eq!(at(0.5), (2, 2, 1));
+        assert_eq!(at(0.25), (1, 1, 1));
+        assert_eq!(at(2.0), (6, 6, 2));
+        for scale in [0.1, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0] {
+            let r = GardenReach::at(scale);
+            let farthest = (r.cells + 1) * crate::floodfill_cache::CoarseMask::CELL - 1;
+            assert!(farthest < crate::one_world::PIECE_HALO_BLOCKS, "{scale}");
+            assert!((1..=GardenReach::MAX_PAVE).contains(&r.pave));
+        }
+        // At half scale a garden lies as far from the street, in metres, as at full scale.
+        let bbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let street: Vec<(i32, i32)> = (0..64).map(|x| (x, 0)).collect();
+        let footprints = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
+        let mut editor = garden_editor(&bbox, &street);
+        editor.mark_ground(crate::world_editor::GroundMark::Dwelling, 8, 8);
+        let g = garden_columns(&editor, &footprints, GardenReach::at(0.5), 0, 0).unwrap();
+        assert!(!g[2 * 16 + 8] && g[3 * 16 + 8]);
+        let g = garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).unwrap();
+        assert!(!g[3 * 16 + 8] && g[4 * 16 + 8]);
+    }
+
+    #[test]
+    fn mapped_woods_stay_unmown_inside_parks() {
+        use crate::world_editor::GroundMark;
+        let bbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let mut editor = garden_editor(&bbox, &[]);
+        assert!(!editor.is_lawn(4, 4));
+        for x in 0..32 {
+            for z in 0..32 {
+                editor.mark_ground(GroundMark::Lawn, x, z);
+            }
+        }
+        for x in 16..32 {
+            for z in 0..32 {
+                editor.mark_ground(GroundMark::Wild, x, z);
+            }
+        }
+        assert!(editor.is_lawn(4, 4) && !editor.is_lawn(20, 4) && !editor.is_lawn(40, 4));
+    }
+
+    #[test]
+    fn gardens_are_lawn_or_the_climate_ground() {
+        use crate::climate::Climate;
+        let mut lawn = 0;
+        for x in 0..200 {
+            for z in 0..200 {
+                let (top, under) = garden_surface(x * 2, z * 2, Climate::Temperate, false);
+                assert!(top == GRASS_BLOCK || top == COARSE_DIRT);
+                assert_eq!(under, DIRT);
+                lawn += i32::from(top == GRASS_BLOCK);
+            }
+        }
+        assert!(lawn > 36_000, "{lawn} of 40000 lawn");
+        // A desert garden is its own dry ground, as the climate lays it.
+        let dry = garden_surface(10, 10, Climate::HotDesert, false);
+        assert_eq!(
+            Some(dry),
+            Climate::HotDesert.surface_palette(land_cover::LC_GRASSLAND, 10, 10, false)
+        );
     }
 
     #[test]

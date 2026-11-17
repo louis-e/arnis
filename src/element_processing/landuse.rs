@@ -206,9 +206,17 @@ fn landuse_area(
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     let plants_here = crate::element_processing::natural::piece_plants_at(args);
     let woods_by_cell = crate::element_processing::natural::woods_by_cell(args);
+    let mark = match landuse_tag.as_str() {
+        "forest" | "meadow" => Some(crate::world_editor::GroundMark::Wild),
+        "commercial" | "retail" => Some(crate::world_editor::GroundMark::Commercial),
+        _ => None,
+    };
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
             continue;
+        }
+        if let Some(kind) = mark {
+            editor.mark_ground(kind, x, z);
         }
         // A tile reads the whole area, but nothing lands outside its editor; only the
         // per-cell draw has to happen there, so the cells it owns see the same sequence.
@@ -279,6 +287,13 @@ fn landuse_area(
             }
         } else if !is_protected {
             editor.set_block(actual_block, x, 0, z, None, None);
+        }
+        // Not `landuse=grass`, which is also mapped on rural meadows.
+        if matches!(landuse_tag.as_str(), "village_green" | "recreation_ground")
+            && !editor.surface_is_sealed(x, z)
+            && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+        {
+            editor.mark_ground(crate::world_editor::GroundMark::Lawn, x, z);
         }
 
         // Nothing is scattered on land-cover water: the depth carve turns these
