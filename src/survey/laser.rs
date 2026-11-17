@@ -54,6 +54,10 @@ pub const TARGET_DENSITY: f64 = 7.0;
 
 /// A tile the source does not have is asked for again after this long.
 const ABSENT_DAYS: u64 = 30;
+/// Blocks a lookup found nothing for are looked up again after this long: a
+/// lookup is one small request, and an index that answered empty in a hiccup,
+/// or had not listed a delivery yet, is not believed for long.
+const LOOKUP_ABSENT_DAYS: u64 = 7;
 
 pub struct LaserTile {
     pub n_all: Vec<u8>,
@@ -257,15 +261,49 @@ pub fn noted_whole(root: &Path, source: &Sheet, (te, tn): (i32, i32)) -> bool {
     whole_marker(root, source, te, tn).exists()
 }
 
-fn known_absent(root: &Path, source: &Sheet, te: i32, tn: i32) -> bool {
-    if !fixed_addresses(source) {
-        return false;
-    }
-    std::fs::metadata(absent_marker(root, source, te, tn))
+/// Whether the file at `path` was last written within `days`.
+fn fresh(path: &Path, days: u64) -> bool {
+    std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.elapsed().ok())
-        .is_some_and(|age| age.as_secs() < ABSENT_DAYS * 86_400)
+        .is_some_and(|age| age.as_secs() < days * 86_400)
+}
+
+/// The blocks of tile (`te`, `tn`) the source is known not to have, while its
+/// marker is fresh: all of them where the tile's fixed address had no file
+/// (an empty marker), else those a lookup found nothing for (a byte each).
+fn absent_blocks(root: &Path, source: &Sheet, te: i32, tn: i32) -> Option<Vec<bool>> {
+    let path = absent_marker(root, source, te, tn);
+    if fixed_addresses(source) {
+        return fresh(&path, ABSENT_DAYS).then(|| vec![true; BLOCKS * BLOCKS]);
+    }
+    if !fresh(&path, LOOKUP_ABSENT_DAYS) {
+        return None;
+    }
+    let bytes = std::fs::read(&path).ok()?;
+    (bytes.len() == BLOCKS * BLOCKS).then(|| bytes.iter().map(|&b| b != 0).collect())
+}
+
+/// Notes that the source has nothing for `blocks` of tile (`te`, `tn`): the
+/// whole tile where its address is fixed, else those blocks besides any
+/// noted before, as a lookup answers only for the part of a tile it is asked
+/// about. A later run then needs no lookup or download for them, offline too.
+pub fn mark_absent(root: &Path, source: &Sheet, (te, tn): (i32, i32), blocks: &[bool]) {
+    if !blocks.contains(&true) || std::fs::create_dir_all(root.join(source.dir())).is_err() {
+        return;
+    }
+    let path = absent_marker(root, source, te, tn);
+    if fixed_addresses(source) {
+        let _ = std::fs::write(path, b"");
+        return;
+    }
+    let mut mask =
+        absent_blocks(root, source, te, tn).unwrap_or_else(|| vec![false; BLOCKS * BLOCKS]);
+    for (m, &b) in mask.iter_mut().zip(blocks) {
+        *m |= b;
+    }
+    let _ = std::fs::write(path, mask.iter().map(|&b| u8::from(b)).collect::<Vec<u8>>());
 }
 
 /// Whether `blocks` holds every block wanted.
@@ -273,33 +311,38 @@ fn covers(blocks: &[bool], want: &[bool]) -> bool {
     want.iter().zip(blocks).all(|(&w, &b)| !w || b)
 }
 
-/// Square kilometres of the wanted blocks not yet cached.
-pub fn missing_km2(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> f64 {
-    if known_absent(root, source, te, tn) {
-        return 0.0;
-    }
+/// The wanted blocks neither cached nor known absent: what a run would read.
+pub fn lacking(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> Vec<bool> {
+    let gone = absent_blocks(root, source, te, tn);
     let have = LaserTile::read_head(&cache_path(root, source, te, tn)).map(|(blocks, _)| blocks);
-    let missing = want
-        .iter()
+    let had = |b: &Option<Vec<bool>>, i: usize| b.as_ref().is_some_and(|b| b[i]);
+    want.iter()
         .enumerate()
-        .filter(|&(i, &w)| w && !have.as_ref().is_some_and(|h| h[i]))
+        .map(|(i, &w)| w && !had(&have, i) && !had(&gone, i))
+        .collect()
+}
+
+/// Square kilometres of the wanted blocks not yet cached (nor known absent).
+pub fn missing_km2(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> f64 {
+    let missing = lacking(root, source, te, tn, want)
+        .iter()
+        .filter(|&&b| b)
         .count();
     missing as f64 * (BLOCK * BLOCK) as f64 / 1e6
 }
 
-/// Whether the tile costs no download for the blocks wanted (its cache file's
-/// start says it holds them all, or the source has no such tile).
+/// Whether the tile costs no download for the blocks wanted: its cache file's
+/// start says it holds them, or the source is known to have none of them.
 pub fn is_cached(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> bool {
-    LaserTile::read_head(&cache_path(root, source, te, tn))
-        .is_some_and(|(blocks, _)| covers(&blocks, want))
-        || known_absent(root, source, te, tn)
+    !lacking(root, source, te, tn, want).contains(&true)
 }
 
 /// The tile's measurements over the blocks wanted, from the cache or else read
 /// from the first of `urls` the server has. No URLs means the source has
 /// nothing for this area there. A file this reader cannot use is passed over
 /// with a warning; one that fails part-way fails the tile, and nothing of it
-/// is cached.
+/// is cached. Where no file is had or usable, that is noted (see
+/// [`mark_absent`]) so the next runs do not ask again for a while.
 pub fn tile(
     client: &reqwest::blocking::Client,
     root: &Path,
@@ -315,13 +358,26 @@ pub fn tile(
     if have.as_ref().is_some_and(|t| t.has(want)) {
         return Ok(Fetched::Tile(Box::new(have.take().unwrap())));
     }
-    if known_absent(root, source, te, tn) {
+    // What the source may have of what is wanted; what is cached of it is
+    // all there is where the rest is known absent.
+    let gone = absent_blocks(root, source, te, tn).unwrap_or_default();
+    let need: Vec<bool> = want
+        .iter()
+        .enumerate()
+        .map(|(i, &w)| w && !gone.get(i).is_some_and(|&g| g))
+        .collect();
+    if !need.contains(&true) {
+        return Ok(Fetched::Absent);
+    }
+    if let Some(t) = have.take_if(|t| t.has(&need)) {
+        return Ok(Fetched::Tile(Box::new(t)));
+    }
+    // A lookup that did not list the tile (see `survey::locate`, which notes so).
+    if urls.is_empty() {
         return Ok(Fetched::Absent);
     }
     crate::net::ensure_online("laser scans")?;
     std::fs::create_dir_all(root.join(source.dir())).map_err(|e| e.to_string())?;
-    // Absent only when the server has none of the tile's files.
-    let mut all_missing = !urls.is_empty();
     for url in urls {
         let got = match source.laser {
             Laser::Whole { .. } => read_whole(client, root, source, te, tn, url),
@@ -349,16 +405,13 @@ pub fn tile(
             Err(Failure::Missing) => continue,
             Err(Failure::Unusable(e)) => {
                 eprintln!("Warning: laser scan {te}_{tn} passed over: {e}");
-                all_missing = false;
             }
             Err(Failure::Other(e)) => return Err(format!("{url}: {e}")),
         }
     }
-    // A lookup's answer is for the area's part of the tile: another area may
-    // find files there, so only a fixed address that is missing is marked.
-    if all_missing && fixed_addresses(source) {
-        let _ = std::fs::write(absent_marker(root, source, te, tn), b"");
-    }
+    // None of the tile's files is on the server, or none this reader can use
+    // (as it could not on any later run either).
+    mark_absent(root, source, (te, tn), &need);
     Ok(Fetched::Absent)
 }
 
@@ -555,7 +608,7 @@ fn read_whole(
             measure_file(&tmp.0, source, te, tn, url)
         }
     };
-    measured.map_err(other)
+    measured
 }
 
 /// Most a zipped tile may unpack to: Switzerland's hold one LAS file of a few
@@ -563,10 +616,13 @@ fn read_whole(
 const MAX_UNZIPPED: u64 = 4 << 30;
 
 /// Unpack the LAS or LAZ file in the zip at `from` to `to`, at most
-/// [`MAX_UNZIPPED`] of it, whatever the zip says its size is.
-fn unzip(from: &Path, to: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(from).map_err(|e| e.to_string())?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+/// [`MAX_UNZIPPED`] of it, whatever the zip says its size is. A zip that came
+/// whole but holds no such file, or one too large, is [`Failure::Unusable`]:
+/// it would be every time.
+fn unzip(from: &Path, to: &Path) -> Result<(), Failure> {
+    let unusable = |e: String| Failure::Unusable(e);
+    let file = std::fs::File::open(from).map_err(|e| Failure::Other(e.to_string()))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| unusable(e.to_string()))?;
     let i = (0..zip.len())
         .find(|&i| {
             zip.name_for_index(i).and_then(Result::ok).is_some_and(|n| {
@@ -574,18 +630,31 @@ fn unzip(from: &Path, to: &Path) -> Result<(), String> {
                 n.ends_with(".las") || n.ends_with(".laz")
             })
         })
-        .ok_or("no LAS file in the zip")?;
-    let entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        .ok_or_else(|| unusable("no LAS file in the zip".into()))?;
+    let entry = zip.by_index(i).map_err(|e| unusable(e.to_string()))?;
     if entry.size() > MAX_UNZIPPED {
-        return Err(format!("a zipped file of {} bytes", entry.size()));
+        return Err(unusable(format!("a zipped file of {} bytes", entry.size())));
     }
-    let mut out = std::io::BufWriter::new(std::fs::File::create(to).map_err(|e| e.to_string())?);
-    let n =
-        std::io::copy(&mut entry.take(MAX_UNZIPPED + 1), &mut out).map_err(|e| e.to_string())?;
+    let mut out = std::io::BufWriter::new(
+        std::fs::File::create(to).map_err(|e| Failure::Other(e.to_string()))?,
+    );
+    let n = std::io::copy(&mut entry.take(MAX_UNZIPPED + 1), &mut out).map_err(io_failure)?;
     if n > MAX_UNZIPPED {
-        return Err("a zipped file larger than it says".into());
+        return Err(unusable("a zipped file larger than it says".into()));
     }
-    out.flush().map_err(|e| e.to_string())
+    out.flush().map_err(|e| Failure::Other(e.to_string()))
+}
+
+/// A failure reading a downloaded file: one that ends early or holds what it
+/// should not is [`Failure::Unusable`] (the same file would fail the same way
+/// again), anything else, such as a full disk, [`Failure::Other`].
+fn io_failure(e: std::io::Error) -> Failure {
+    match e.kind() {
+        std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::InvalidData => {
+            Failure::Unusable(e.to_string())
+        }
+        _ => Failure::Other(e.to_string()),
+    }
 }
 
 /// A download in progress, removed when dropped.
@@ -696,12 +765,12 @@ struct Header {
     laszip: Option<Vec<u8>>,
 }
 
-fn read_header(file: &mut std::fs::File) -> Result<Header, String> {
+fn read_header(file: &mut std::fs::File) -> Result<Header, Failure> {
     let mut h = vec![0u8; 375];
-    file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-    let got = file.read(&mut h).map_err(|e| e.to_string())?;
+    file.seek(SeekFrom::Start(0)).map_err(io_failure)?;
+    let got = file.read(&mut h).map_err(io_failure)?;
     if got < 227 || &h[..4] != b"LASF" {
-        return Err("not a LAS/LAZ file".into());
+        return Err(Failure::Unusable("not a LAS/LAZ file".into()));
     }
     let u16_at = |o: usize| u16::from_le_bytes([h[o], h[o + 1]]);
     let u32_at = |o: usize| u32::from_le_bytes(h[o..o + 4].try_into().unwrap());
@@ -722,14 +791,14 @@ fn read_header(file: &mut std::fs::File) -> Result<Header, String> {
     let mut pos = header_size;
     for _ in 0..n_vlrs {
         let mut vh = [0u8; 54];
-        file.seek(SeekFrom::Start(pos)).map_err(|e| e.to_string())?;
-        file.read_exact(&mut vh).map_err(|e| e.to_string())?;
+        file.seek(SeekFrom::Start(pos)).map_err(io_failure)?;
+        file.read_exact(&mut vh).map_err(io_failure)?;
         let user = String::from_utf8_lossy(&vh[2..18]);
         let record_id = u16::from_le_bytes([vh[18], vh[19]]);
         let len = u16::from_le_bytes([vh[20], vh[21]]) as usize;
         if user.trim_end_matches('\0') == "laszip encoded" && record_id == 22204 {
             let mut data = vec![0u8; len];
-            file.read_exact(&mut data).map_err(|e| e.to_string())?;
+            file.read_exact(&mut data).map_err(io_failure)?;
             laszip = Some(data);
         }
         pos += 54 + len as u64;
@@ -747,28 +816,30 @@ fn read_header(file: &mut std::fs::File) -> Result<Header, String> {
     })
 }
 
-/// Decode a downloaded tile and reduce it to its per-metre measurements.
+/// Decode a downloaded tile and reduce it to its per-metre measurements. A
+/// file this reader cannot use, or one whose points end before its header
+/// says, is [`Failure::Unusable`].
 fn measure_file(
     path: &Path,
     source: &Sheet,
     te: i32,
     tn: i32,
     url: &str,
-) -> Result<LaserTile, String> {
-    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+) -> Result<LaserTile, Failure> {
+    let mut file = std::fs::File::open(path).map_err(|e| Failure::Other(e.to_string()))?;
     let hdr = read_header(&mut file)?;
     let layout = hdr.layout;
-    layout.check()?;
+    layout.check().map_err(Failure::Unusable)?;
     let mut m = Measure::new(source, te, tn, (0, 0, TILE, TILE));
     file.seek(SeekFrom::Start(hdr.point_offset))
-        .map_err(|e| e.to_string())?;
+        .map_err(io_failure)?;
     // Points a batch of an uncompressed file, at most 64 MB of them.
     let plain = 50_000.min((64 << 20) / layout.record_len);
     let mut buf = vec![0u8; plain * layout.record_len];
     let mut left = hdr.count;
     match &hdr.laszip {
         Some(vlr) => {
-            let vlr = laz::LazVlr::read_from(&vlr[..]).map_err(|e| e.to_string())?;
+            let vlr = laz::LazVlr::read_from(&vlr[..]).map_err(laz_failure)?;
             // Sixteen chunks a batch, decoded side by side: a 20-million-point
             // tile measures in about 3 s instead of 15. Chunks of their own
             // sizes (u32::MAX) or past reason are read in batches of a size
@@ -782,12 +853,11 @@ fn measure_file(
             let batch = batch.min((256 << 20) / layout.record_len as u64) as usize;
             buf.resize(batch * layout.record_len, 0);
             let reader = std::io::BufReader::new(file);
-            let mut dec =
-                laz::ParLasZipDecompressor::new(reader, vlr).map_err(|e| e.to_string())?;
+            let mut dec = laz::ParLasZipDecompressor::new(reader, vlr).map_err(laz_failure)?;
             while left > 0 {
                 let n = left.min(batch as u64) as usize;
                 let out = &mut buf[..n * layout.record_len];
-                dec.decompress_many(out).map_err(|e| e.to_string())?;
+                dec.decompress_many(out).map_err(laz_failure)?;
                 out.chunks_exact(layout.record_len)
                     .for_each(|rec| m.add(&layout, rec));
                 left -= n as u64;
@@ -798,7 +868,7 @@ fn measure_file(
             while left > 0 {
                 let n = left.min(plain as u64) as usize;
                 let out = &mut buf[..n * layout.record_len];
-                reader.read_exact(out).map_err(|e| e.to_string())?;
+                reader.read_exact(out).map_err(io_failure)?;
                 out.chunks_exact(layout.record_len)
                     .for_each(|rec| m.add(&layout, rec));
                 left -= n as u64;
@@ -808,6 +878,15 @@ fn measure_file(
     let mut t = m.finish(url);
     t.blocks = vec![true; BLOCKS * BLOCKS];
     Ok(t)
+}
+
+/// A LAZ decoder's failure, as [`io_failure`] sorts a read's: past a read of
+/// the disk, a file that will not decode would not on any later run either.
+fn laz_failure(e: laz::LasZipError) -> Failure {
+    match e {
+        laz::LasZipError::IoError(e) => io_failure(e),
+        e => Failure::Unusable(e.to_string()),
+    }
 }
 
 /// Above-ground point flags.
@@ -1367,6 +1446,123 @@ mod tests {
         more[1] = true;
         assert!(!back.has(&more));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("arnis-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        root
+    }
+
+    #[test]
+    fn a_lookup_notes_only_the_blocks_it_found_nothing_for() {
+        let root = temp_root("absent-lookup");
+        let swiss = Sheet::at(&super::super::switzerland::SWITZERLAND, 8.28);
+        let (mut west, mut east) = (vec![false; BLOCKS * BLOCKS], vec![false; BLOCKS * BLOCKS]);
+        west[0] = true;
+        east[9] = true;
+        assert!(!is_cached(&root, &swiss, 2663, 1210, &west));
+        mark_absent(&root, &swiss, (2663, 1210), &west);
+        // Asked about again, the west block costs nothing and reads as absent,
+        // without a request; the east block another area wants is still open.
+        assert!(is_cached(&root, &swiss, 2663, 1210, &west));
+        assert_eq!(missing_km2(&root, &swiss, 2663, 1210, &west), 0.0);
+        assert!(!is_cached(&root, &swiss, 2663, 1210, &east));
+        let client = reqwest::blocking::Client::new();
+        let got = tile(&client, &root, &swiss, (2663, 1210), &west, &[]).unwrap();
+        assert!(matches!(got, Fetched::Absent));
+        // Noted again, the blocks add up.
+        mark_absent(&root, &swiss, (2663, 1210), &east);
+        let both: Vec<bool> = west.iter().zip(&east).map(|(&a, &b)| a || b).collect();
+        assert!(is_cached(&root, &swiss, 2663, 1210, &both));
+        // Past its days, asked again.
+        let marker = absent_marker(&root, &swiss, 2663, 1210);
+        let old = std::time::SystemTime::now()
+            - std::time::Duration::from_secs((LOOKUP_ABSENT_DAYS + 1) * 86_400);
+        let f = std::fs::File::options().write(true).open(&marker).unwrap();
+        f.set_modified(old).unwrap();
+        assert!(!is_cached(&root, &swiss, 2663, 1210, &west));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_fixed_address_without_a_file_is_absent_whole() {
+        let root = temp_root("absent-fixed");
+        let bavaria = Sheet::at(&super::super::bavaria::BAVARIA, 11.9);
+        let mut one = vec![false; BLOCKS * BLOCKS];
+        one[55] = true;
+        mark_absent(&root, &bavaria, (714, 5353), &one);
+        assert!(is_cached(
+            &root,
+            &bavaria,
+            714,
+            5353,
+            &[true; BLOCKS * BLOCKS]
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn what_is_cached_serves_where_the_rest_is_absent() {
+        let root = temp_root("absent-partial");
+        let swiss = Sheet::at(&super::super::switzerland::SWITZERLAND, 8.28);
+        let url = "https://example.org/a.copc.laz";
+        let mut t = LaserTile::empty(url);
+        t.n_all.iter_mut().for_each(|v| *v = 7);
+        t.blocks[0] = true;
+        std::fs::create_dir_all(root.join(swiss.dir())).unwrap();
+        t.write(&cache_path(&root, &swiss, 2663, 1210)).unwrap();
+        let mut gone = vec![false; BLOCKS * BLOCKS];
+        gone[1] = true;
+        mark_absent(&root, &swiss, (2663, 1210), &gone);
+        let mut want = gone.clone();
+        want[0] = true;
+        assert!(is_cached(&root, &swiss, 2663, 1210, &want));
+        let client = reqwest::blocking::Client::new();
+        match tile(&client, &root, &swiss, (2663, 1210), &want, &[]).unwrap() {
+            Fetched::Tile(t) => assert_eq!(t.n_all[0], 7),
+            Fetched::Absent => panic!("the cached block is had"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_whole_file_that_cannot_be_used_is_unusable() {
+        let root = temp_root("unusable");
+        std::fs::create_dir_all(&root).unwrap();
+        let bavaria = Sheet::at(&super::super::bavaria::BAVARIA, 11.9);
+        let unusable = |r: Result<LaserTile, Failure>| matches!(r, Err(Failure::Unusable(_)));
+        // Not a LAS file.
+        let junk = root.join("junk.laz");
+        std::fs::write(&junk, vec![7u8; 4096]).unwrap();
+        assert!(unusable(measure_file(&junk, &bavaria, 714, 5353, "u")));
+        // A header that counts ten points of 20 bytes and none that follow.
+        let mut h = vec![0u8; 227];
+        h[..4].copy_from_slice(b"LASF");
+        h[24] = 1;
+        h[25] = 2;
+        h[94..96].copy_from_slice(&227u16.to_le_bytes());
+        h[96..100].copy_from_slice(&227u32.to_le_bytes());
+        h[105..107].copy_from_slice(&20u16.to_le_bytes());
+        h[107..111].copy_from_slice(&10u32.to_le_bytes());
+        for o in [131, 139, 147] {
+            h[o..o + 8].copy_from_slice(&0.01f64.to_le_bytes());
+        }
+        let short = root.join("short.las");
+        std::fs::write(&short, &h).unwrap();
+        assert!(unusable(measure_file(&short, &bavaria, 714, 5353, "u")));
+        // A zip without a LAS file in it.
+        let zipped = root.join("t.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zipped).unwrap());
+        w.start_file("readme.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        w.write_all(b"no points").unwrap();
+        w.finish().unwrap();
+        assert!(matches!(
+            unzip(&zipped, &root.join("t.las")),
+            Err(Failure::Unusable(_))
+        ));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

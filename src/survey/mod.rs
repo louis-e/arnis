@@ -181,6 +181,42 @@ impl Plan {
     pub fn want(&self, (te, tn): (i32, i32)) -> Vec<bool> {
         laser::blocks_for(te, tn, self.rect)
     }
+
+    /// Counts again what the tiles lack, against the cache in `root`: after a
+    /// lookup noted some absent (see [`locate`]).
+    fn recount(&mut self, root: &std::path::Path) {
+        (self.missing, self.download_mb) = lacking(root, &self.sheet, &self.tiles, self.rect);
+    }
+}
+
+/// The tiles of `tiles` that lack some of what `rect` wants, and the megabytes
+/// estimated for them, side by side from the start of each cache file.
+fn lacking(
+    root: &std::path::Path,
+    sheet: &Sheet,
+    tiles: &[(i32, i32)],
+    rect: source::Rect,
+) -> (Vec<(i32, i32)>, u32) {
+    use rayon::prelude::*;
+    let km2: Vec<f64> = tiles
+        .par_iter()
+        .map(|&(te, tn)| laser::missing_km2(root, sheet, te, tn, &laser::blocks_for(te, tn, rect)))
+        .collect();
+    let missing: Vec<(i32, i32)> = tiles
+        .iter()
+        .zip(&km2)
+        .filter(|(_, &km2)| km2 > 0.0)
+        .map(|(&t, _)| t)
+        .collect();
+    let download_mb = match sheet.laser {
+        // Read whole: a tile missing any block costs its whole file.
+        Laser::Whole { tile_mb, .. } => missing.len() as u32 * tile_mb,
+        Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
+            let km2: f64 = km2.iter().sum();
+            (km2 * f64::from(mb_per_km2)).ceil() as u32
+        }
+    };
+    (missing, download_mb)
 }
 
 pub fn plan(bbox: &LLBBox) -> Option<Plan> {
@@ -236,27 +272,7 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
         }
         Laser::Ept { .. } => {}
     }
-    // Square kilometres each tile lacks of what the area wants, from the start
-    // of its cache file: side by side.
-    use rayon::prelude::*;
-    let lacking: Vec<f64> = tiles
-        .par_iter()
-        .map(|&(te, tn)| laser::missing_km2(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect)))
-        .collect();
-    let missing: Vec<(i32, i32)> = tiles
-        .iter()
-        .zip(&lacking)
-        .filter(|(_, &km2)| km2 > 0.0)
-        .map(|(&t, _)| t)
-        .collect();
-    let download_mb = match sheet.laser {
-        // Read whole: a tile missing any block costs its whole file.
-        Laser::Whole { tile_mb, .. } => missing.len() as u32 * tile_mb,
-        Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
-            let km2: f64 = lacking.iter().sum();
-            (km2 * f64::from(mb_per_km2)).ceil() as u32
-        }
-    };
+    let (missing, download_mb) = lacking(root, &sheet, &tiles, rect);
     Some(Plan {
         sheet,
         tiles,
@@ -382,6 +398,7 @@ pub fn fetch_survey_data(
         .build()
         .ok()?;
     let urls = locate(&client, &plan)?;
+    plan.recount(&cache_root());
     // A tile found zipped is read whole: left out where only the margin reaches
     // it, as a source read in whole files leaves it out.
     let grazed = |t: &(i32, i32)| sliver(*t, plan.rect) && zip_url(&urls, *t).is_some();
@@ -504,6 +521,10 @@ type Urls = std::collections::HashMap<(i32, i32), Vec<String>>;
 /// or one lookup over the whole rectangle. Addresses cost nothing to work
 /// out, so every tile has them (a cached one never uses them); the lookup is
 /// made only when some tile is not cached. `None` when it cannot be made.
+///
+/// A lookup's answer is noted in the cache: the tiles it did not list as
+/// absent for the blocks the area wants (a lookup answers only for its part
+/// of a tile). [`Plan::recount`] then counts what is left.
 fn locate(client: &reqwest::blocking::Client, plan: &Plan) -> Option<Urls> {
     let root = cache_root();
     let mut urls = Urls::default();
@@ -520,43 +541,45 @@ fn locate(client: &reqwest::blocking::Client, plan: &Plan) -> Option<Urls> {
                 urls.insert((te, tn), f(te, tn));
             }
         }
-        Locate::Lookup(f) if uncached() => {
+        Locate::Lookup(f) => {
+            if !uncached() {
+                return Some(urls);
+            }
             if let Err(e) = crate::net::ensure_online("laser scans") {
                 eprintln!("Warning: {e}");
                 return None;
             }
-            match f(client, &plan.sheet, plan.rect) {
-                // Nothing at all is more likely a gap in the index (or a
-                // hiccup) than a reason to mark every tile absent for weeks.
-                Ok(found) if found.is_empty() => {
-                    println!("Laser data: {} has no scans here yet", plan.sheet.name);
-                    return None;
-                }
-                Ok(found) => {
-                    // A tile listed more than once is made of several files,
-                    // read together as one (a line each).
-                    let mut parts: std::collections::BTreeMap<(i32, i32), Vec<String>> =
-                        Default::default();
-                    for (t, u) in found {
-                        parts.entry(t).or_default().push(u);
-                    }
-                    for (t, mut p) in parts {
-                        p.sort();
-                        p.dedup();
-                        let u = p.join("\n");
-                        // For later runs, which may make no lookup (see `plan_in`).
-                        laser::note_whole(&root, &plan.sheet, t, laser::is_zip(&u));
-                        urls.insert(t, vec![u]);
-                    }
-                }
+            let found = match f(client, &plan.sheet, plan.rect) {
+                Ok(found) => found,
                 Err(e) => {
                     eprintln!("Warning: laser scan index unavailable: {e}");
                     crate::net::note_uncached("laser scans");
                     return None;
                 }
+            };
+            // A tile listed more than once is made of several files, read
+            // together as one (a line each).
+            let mut parts: std::collections::BTreeMap<(i32, i32), Vec<String>> = Default::default();
+            for (t, u) in found {
+                parts.entry(t).or_default().push(u);
+            }
+            for (t, mut p) in parts {
+                p.sort();
+                p.dedup();
+                let u = p.join("\n");
+                // For later runs, which may make no lookup (see `plan_in`).
+                laser::note_whole(&root, &plan.sheet, t, laser::is_zip(&u));
+                urls.insert(t, vec![u]);
+            }
+            for &t in plan.tiles.iter().filter(|t| !urls.contains_key(t)) {
+                let none = laser::lacking(&root, &plan.sheet, t.0, t.1, &plan.want(t));
+                laser::mark_absent(&root, &plan.sheet, t, &none);
+            }
+            if urls.is_empty() {
+                println!("Laser data: {} has no scans here yet", plan.sheet.name);
+                return None;
             }
         }
-        Locate::Lookup(_) => {}
     }
     Some(urls)
 }
