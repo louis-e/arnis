@@ -159,7 +159,6 @@ impl ElevationProvider for PlanetaryDem {
             heights_meters: heights,
             // One archive per body, at one resolution.
             source_pixels: None,
-            fine_terrain: None,
         })
     }
 }

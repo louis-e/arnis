@@ -493,7 +493,6 @@ pub fn fetch_elevation_data(
     let RawElevationGrid {
         heights_meters: mut height_grid,
         source_pixels,
-        fine_terrain,
     } = raw;
     let (bbox_height_m, bbox_width_m) = geo_distance(bbox.min(), bbox.max());
     // A One World area smooths with the metres per cell of its frame, not of its own
@@ -537,10 +536,6 @@ pub fn fetch_elevation_data(
     // alone, long enough that a 7-10 m urban embankment (Munich Isar,
     // Vienna Donaukanal) becomes a slope-tier-free ramp instead of a
     // cliff with stepped stone walls.
-    //
-    // Both are for coarse surface models. Over LiDAR terrain, as the provider's
-    // coverage tells it, they fade out: its quay walls and steps are real
-    // (measured on Bavarian DGM1).
     const BUILT_UP_SIGMA_M: f64 = 30.0;
     const COASTAL_PULL_M: f64 = 25.0;
     let (built_up_sigma_cells, coastal_pull_cells) = if m_per_cell > 0.0 {
@@ -561,7 +556,6 @@ pub fn fetch_elevation_data(
             built_up_sigma_cells,
             coastal_pull_cells,
             m_per_cell,
-            fine_terrain.as_ref(),
             &|f| emit_gui_progress_update(14.0 + f * 2.0, "Processing elevation..."),
         );
     }

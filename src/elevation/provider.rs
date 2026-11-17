@@ -7,64 +7,6 @@ pub struct RawElevationGrid {
     pub heights_meters: Vec<Vec<f64>>,
     /// The source resolution behind the heights, where the provider knows it per place.
     pub source_pixels: Option<SourcePixels>,
-    /// Where the heights certainly come from a laser-scanned terrain model, where the
-    /// provider can tell.
-    pub fine_terrain: Option<FineTerrain>,
-}
-
-/// Where a grid's heights certainly come from a fine terrain model (a national LiDAR
-/// survey), on a lattice of every `step`-th grid cell. Lattice point (i, j) stands for grid
-/// cell (i * step, j * step), the last row and column clamped to the grid's edge.
-/// Coverage changes along survey borders, so a coarse lattice resolves it well enough.
-pub struct FineTerrain {
-    step: usize,
-    cols: usize,
-    rows: usize,
-    fine: Vec<bool>,
-}
-
-impl FineTerrain {
-    /// `fine` holds `rows` rows of `cols` lattice points.
-    pub fn new(step: usize, cols: usize, rows: usize, fine: Vec<bool>) -> Self {
-        assert_eq!(fine.len(), cols * rows, "lattice size");
-        Self {
-            step: step.max(1),
-            cols,
-            rows,
-            fine,
-        }
-    }
-
-    /// Lattice points across and down for a grid of `w` x `h` cells.
-    pub fn dims(w: usize, h: usize, step: usize) -> (usize, usize) {
-        let step = step.max(1);
-        (
-            w.saturating_sub(1).div_ceil(step) + 1,
-            h.saturating_sub(1).div_ceil(step) + 1,
-        )
-    }
-
-    pub fn step(&self) -> usize {
-        self.step
-    }
-
-    pub fn cols(&self) -> usize {
-        self.cols
-    }
-
-    pub fn rows(&self) -> usize {
-        self.rows
-    }
-
-    #[inline]
-    pub fn at(&self, i: usize, j: usize) -> bool {
-        self.fine[j * self.cols + i]
-    }
-
-    /// Lattice points that are fine.
-    pub fn count(&self) -> usize {
-        self.fine.iter().filter(|&&f| f).count()
-    }
 }
 
 /// The source pixel size in metres behind every grid cell, as runs along each row: what
@@ -107,13 +49,6 @@ impl SourcePixels {
     /// Runs of grid row `gz`.
     pub fn row(&self, gz: usize) -> &SourceRow {
         &self.rows[gz]
-    }
-
-    /// Source pixel in metres behind grid cell (gx, gz); infinity where nothing was read.
-    pub fn at(&self, gx: usize, gz: usize) -> f32 {
-        let runs = self.rows[gz].runs();
-        let n = runs.partition_point(|&(start, _)| start as usize <= gx);
-        n.checked_sub(1).map_or(f32::INFINITY, |i| runs[i].1)
     }
 }
 
