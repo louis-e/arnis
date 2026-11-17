@@ -1421,6 +1421,7 @@ pub fn generate_world_with_options(
         carriageways: carriageway,
         paths: mapped_paths,
         cut: road_cut,
+        junctions: road_junctions,
     } = highways::collect_road_and_carriageway_coords(
         &elements,
         &editor,
@@ -1452,6 +1453,8 @@ pub fn generate_world_with_options(
     editor.set_carriageway(Arc::clone(&carriageway));
     let mapped_paths = Arc::new(mapped_paths);
     editor.set_mapped_paths(Arc::clone(&mapped_paths));
+    let road_junctions = Arc::new(road_junctions);
+    editor.set_junctions(Arc::clone(&road_junctions));
     // Indexed up front, so a construction site skips its own crane whichever renders first.
     let mapped_cranes = Arc::new(man_made::mapped_crane_points(&elements));
     editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
@@ -2082,6 +2085,7 @@ pub fn generate_world_with_options(
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
             tile_editor.set_carriageway(Arc::clone(&carriageway));
             tile_editor.set_mapped_paths(Arc::clone(&mapped_paths));
+            tile_editor.set_junctions(Arc::clone(&road_junctions));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));

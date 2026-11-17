@@ -156,6 +156,38 @@ fn parking_side_m(tags: &HashMap<String, String>, side: &str) -> (f64, f64) {
     (depth, if bays { depth } else { 0.0 })
 }
 
+/// How the cars parked on one side of the road itself stand, `side` being "left" or
+/// "right" of the way: "parallel", "diagonal" or "perpendicular"; None where none park on
+/// the road there.
+pub(crate) fn parking_orientation(
+    tags: &HashMap<String, String>,
+    side: &str,
+) -> Option<&'static str> {
+    let get = |key: String| tags.get(&key).map(String::as_str);
+    let kind = |o: Option<&str>| match o {
+        Some("diagonal") => "diagonal",
+        Some("perpendicular") => "perpendicular",
+        _ => "parallel",
+    };
+    let street = |suffix: &str| {
+        get(format!("parking:{side}{suffix}")).or_else(|| get(format!("parking:both{suffix}")))
+    };
+    if let Some(position) = street("") {
+        return (street_parking_share(position) > 0.0).then(|| kind(street(":orientation")));
+    }
+    let lane = |suffix: &str| {
+        get(format!("parking:lane:{side}{suffix}"))
+            .or_else(|| get(format!("parking:lane:both{suffix}")))
+    };
+    let orientation = match lane("") {
+        Some(o @ ("parallel" | "diagonal" | "perpendicular")) => o,
+        Some("marked") => "parallel",
+        _ => return None,
+    };
+    let share = lane(&format!(":{orientation}")).map_or(1.0, lane_parking_share);
+    (share > 0.0).then(|| kind(Some(orientation)))
+}
+
 /// Metres taken by parked cars, both sides together, and of that the part in bays.
 fn parking_m(tags: &HashMap<String, String>) -> (f64, f64) {
     let (l, r) = (parking_side_m(tags, "left"), parking_side_m(tags, "right"));
@@ -522,6 +554,25 @@ mod tests {
             .chain([("cycleway:right:width", "1")])
             .collect();
         assert_eq!(halves("residential", &narrow).kerb, 3);
+    }
+
+    #[test]
+    fn parking_sides_tell_how_the_cars_stand() {
+        let t = tags(&[
+            ("parking:left", "lane"),
+            ("parking:left:orientation", "perpendicular"),
+            ("parking:right", "no"),
+        ]);
+        assert_eq!(parking_orientation(&t, "left"), Some("perpendicular"));
+        assert_eq!(parking_orientation(&t, "right"), None);
+        let both = tags(&[("parking:both", "half_on_kerb")]);
+        assert_eq!(parking_orientation(&both, "right"), Some("parallel"));
+        let old = tags(&[
+            ("parking:lane:right", "diagonal"),
+            ("parking:lane:right:diagonal", "on_street"),
+        ]);
+        assert_eq!(parking_orientation(&old, "right"), Some("diagonal"));
+        assert_eq!(parking_orientation(&old, "left"), None);
     }
 
     #[test]

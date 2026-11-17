@@ -247,6 +247,8 @@ pub struct WorldEditor<'a> {
     /// The sidewalks and paths mapped as their own ways, which a road's parking rows and
     /// second lane stop at. Shared via Arc with the tile editors.
     mapped_paths: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// Where three or more road arms meet, packed and sorted: nobody parks across their mouths.
+    junctions: Option<Arc<Vec<u64>>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     /// Where `man_made=crane` stands, shared via Arc with the tile editors.
@@ -376,6 +378,7 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             carriageway: None,
             mapped_paths: None,
+            junctions: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -453,6 +456,7 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             carriageway: None,
             mapped_paths: None,
+            junctions: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -530,6 +534,7 @@ impl<'a> WorldEditor<'a> {
             sealed_surface: None,
             carriageway: None,
             mapped_paths: None,
+            junctions: None,
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
@@ -688,6 +693,19 @@ impl<'a> WorldEditor<'a> {
     /// Sets the mapped sidewalk and path mask (shared across the main and tile editors).
     pub fn set_mapped_paths(&mut self, mask: Arc<crate::floodfill_cache::CoordinateBitmap>) {
         self.mapped_paths = Some(mask);
+    }
+
+    /// Sets the road junctions, packed and sorted (shared across the main and tile editors).
+    pub fn set_junctions(&mut self, junctions: Arc<Vec<u64>>) {
+        self.junctions = Some(junctions);
+    }
+
+    /// True if three or more road arms meet at (x, z).
+    pub fn is_junction(&self, x: i32, z: i32) -> bool {
+        let packed = (u64::from(x as u32) << 32) | u64::from(z as u32);
+        self.junctions
+            .as_ref()
+            .is_some_and(|j| j.binary_search(&packed).is_ok())
     }
 
     /// Drops the sealed-surface, carriageway and path masks and the mapped trunks once

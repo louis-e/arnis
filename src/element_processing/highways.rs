@@ -1938,6 +1938,29 @@ fn generate_highways_internal(
             let lane_range = highway_lane_range(highway_type, &way.tags, scale_factor);
             // Decks keep the square their railings are laid out from; the masks read the same.
             let square_stamp = stamps_square(way);
+            // The rows of cars parked across the kerb or at an angle, marked a stall apart from
+            // the kerb to the lane edge: the side, +1 right of the way or -1 left. A row along
+            // the kerb stays bare, as most are.
+            let stall_rows: Vec<f32> = if is_carriageway(highway_type) {
+                [("right", 1.0f32), ("left", -1.0)]
+                    .into_iter()
+                    .filter(|&(side, _)| {
+                        road_width::parking_orientation(&way.tags, side)
+                            .is_some_and(|o| o != "parallel")
+                    })
+                    .map(|(_, sign)| sign)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let stall_period = ((STALL_M * scale_factor).round() as i64).max(2);
+            // Nobody parks across a junction's mouth.
+            let junction_nodes: Vec<(i32, i32)> = way
+                .nodes
+                .iter()
+                .filter(|n| editor.is_junction(n.x, n.z))
+                .map(|n| (n.x, n.z))
+                .collect();
             // How far the road paves into a building standing against it, or a verge.
             let kept_by_walls = wall_core(way, highway_type, scale_factor);
             // Whether the stamp of the centreline cell (dx, dz) back leaves (x, z) unpaved.
@@ -2772,6 +2795,76 @@ fn generate_highways_internal(
                                         };
                                         if white {
                                             paint(editor, WHITE_CONCRETE, sx, sz, block_types);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Stall lines across the parking rows, one stall apart, kerb to
+                            // lane edge; none off the road's own asphalt, on another road's
+                            // lanes, by a junction or a crossing.
+                            if !stall_rows.is_empty() && lane_range < block_range {
+                                let along = if args.one_world_run.is_some() {
+                                    if dir_horizontal {
+                                        i64::from(*x) * i64::from((x2 - x1).signum())
+                                    } else {
+                                        i64::from(*z) * i64::from((z2 - z1).signum())
+                                    }
+                                } else {
+                                    way_marks.map_or(t as i64, |m| m.dash_phase(t))
+                                };
+                                let clear_of_junctions = junction_nodes.iter().all(|&(jx, jz)| {
+                                    let (dx, dz) = (*x - jx, *z - jz);
+                                    let gap = block_range + TURN_SWEEP;
+                                    dx * dx + dz * dz > gap * gap
+                                });
+                                let clear_of_marks = way_marks.is_none_or(|m| {
+                                    (t.saturating_sub(1)..=t + 1).all(|k| !m.in_gap(k))
+                                        && m.marks.iter().all(|mark| mark.t.abs_diff(t) > 1)
+                                });
+                                if along.rem_euclid(stall_period) == 0
+                                    && clear_of_junctions
+                                    && clear_of_marks
+                                {
+                                    // Square to the kerb, or along the grid where the road
+                                    // runs near it, so a line stays one row.
+                                    let gridded = ux.abs().min(uz.abs()) < 0.42;
+                                    let across = |dx: i32, dz: i32| {
+                                        if !gridded {
+                                            (dx as f32 * ux + dz as f32 * uz).abs() <= 0.5
+                                        } else if ux.abs() > uz.abs() {
+                                            dx == 0
+                                        } else {
+                                            dz == 0
+                                        }
+                                    };
+                                    let reach =
+                                        stamp_reach(block_range, square_stamp, perp_x, perp_z);
+                                    let r = block_range + 1;
+                                    for &sign in &stall_rows {
+                                        for dx in -r..=r {
+                                            for dz in -r..=r {
+                                                let p = sign
+                                                    * (dx as f32 * perp_x + dz as f32 * perp_z);
+                                                if !across(dx, dz)
+                                                    || p <= lane_range as f32 + 0.5
+                                                    || p > reach + 0.01
+                                                {
+                                                    continue;
+                                                }
+                                                let (sx, sz) = (*x + dx, *z + dz);
+                                                if !editor.on_carriageway(sx, sz)
+                                                    && !cut_here(editor, dx, dz, sx, sz)
+                                                {
+                                                    paint(
+                                                        editor,
+                                                        WHITE_CONCRETE,
+                                                        sx,
+                                                        sz,
+                                                        block_types,
+                                                    );
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -3789,6 +3882,7 @@ pub fn collect_road_and_carriageway_coords(
         }
         _ => false,
     });
+    let junctions = road_junctions(elements);
     let mut paths = CoordinateBitmap::new_empty();
     if widens {
         let mut found = CoordinateBitmap::new(xzbbox);
@@ -3837,6 +3931,7 @@ pub fn collect_road_and_carriageway_coords(
         carriageways,
         paths,
         cut: CutCells(cut),
+        junctions,
     }
 }
 
@@ -3852,6 +3947,8 @@ pub struct RoadCoords {
     /// The cells a road's stamp covers but leaves unpaved beside it, which no other way
     /// paves.
     pub cut: CutCells,
+    /// Where three or more road arms meet, packed and sorted, as `road_junctions` finds them.
+    pub junctions: Vec<u64>,
 }
 
 /// Cells a road's stamp covers but `cut_beside` leaves unpaved, packed and sorted.
@@ -3883,6 +3980,40 @@ pub(crate) fn cut_beside(
                 footprints.contains(sx, sz) || in_core(sx, sz)
             })
         })
+}
+
+/// How far past a road's kerb, from a junction node, the cars turning there sweep the
+/// corner, where nobody parks.
+const TURN_SWEEP: i32 = 4;
+
+/// The width along the kerb of a stall marked in a row of cars parked across the kerb or at
+/// an angle.
+const STALL_M: f64 = 2.5;
+
+/// Where three or more road arms meet, as packed cells: the junctions across whose mouths
+/// nobody parks. A way's middle node is two arms of it, an end one.
+pub(crate) fn road_junctions(elements: &[ProcessedElement]) -> Vec<u64> {
+    let mut arms: FnvHashMap<u64, u8> = FnvHashMap::default();
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        if !surface_highway_type(way).is_some_and(is_carriageway) {
+            continue;
+        }
+        let last = way.nodes.len().saturating_sub(1);
+        for (i, n) in way.nodes.iter().enumerate() {
+            let a = arms.entry(pack_xz(n.x, n.z)).or_default();
+            *a = a.saturating_add(u8::from(i > 0) + u8::from(i < last));
+        }
+    }
+    let mut out: Vec<u64> = arms
+        .into_iter()
+        .filter(|&(_, a)| a >= 3)
+        .map(|(c, _)| c)
+        .collect();
+    out.sort_unstable();
+    out
 }
 
 /// How far from a centreline cell the disc stamp of half-width `half` reaches.
@@ -6293,6 +6424,115 @@ mod tests {
         assert!(editor.keeps_its_ground(trunk.0 + 1, trunk.1 + 1, open));
         assert!(!editor.keeps_its_ground(trunk.0 + 2, trunk.1, open));
         assert!(!editor.keeps_its_ground(trunk.0 + 1, trunk.1, |x, z| (x, z) == trunk));
+    }
+
+    /// Cars parked across the kerb get a stall line every stall, kerb to lane edge, on their
+    /// side only; the lanes stay bare.
+    #[test]
+    fn parking_rows_are_marked_a_stall_apart() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let mut editor = tunnel_editor(&xzbbox, flat_ground());
+        let street = way_between(
+            1,
+            (10, 30),
+            (110, 30),
+            &[
+                ("highway", "residential"),
+                ("oneway", "yes"),
+                ("parking:right", "lane"),
+                ("parking:right:orientation", "perpendicular"),
+            ],
+        );
+        // Running a cell north for every four east: its lines run square to the grid.
+        let slanted = way_between(
+            2,
+            (10, 70),
+            (110, 45),
+            &[
+                ("highway", "residential"),
+                ("oneway", "yes"),
+                ("parking:right", "lane"),
+                ("parking:right:orientation", "diagonal"),
+            ],
+        );
+        // Cars parked along the kerb get no marks.
+        let along = way_between(
+            3,
+            (10, 100),
+            (110, 100),
+            &[
+                ("highway", "residential"),
+                ("parking:both", "lane"),
+                ("parking:both:orientation", "parallel"),
+            ],
+        );
+        let halves = road_width::road_halves("residential", &street.tags, 1.0);
+        let elems = vec![
+            ProcessedElement::Way(street.clone()),
+            ProcessedElement::Way(slanted),
+            ProcessedElement::Way(along.clone()),
+        ];
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let endpoints = collect_tunnel_internal_endpoints(&elems, &xzbbox);
+        let portals = test_portals(&editor, &elems, &endpoints);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        for element in &elems {
+            generate_highways(
+                &mut editor,
+                element,
+                &args,
+                &HighwayConnectivityMap::new(),
+                &FloodFillCache::new(),
+                &empty,
+                &structures,
+                &surface,
+                &endpoints,
+                &portals,
+                &empty,
+                &mut Vec::new(),
+                &RoadMarkingIndex::default(),
+                &empty,
+            );
+        }
+        let white = |x: i32, z: i32| editor.check_for_block(x, 0, z, Some(&[WHITE_CONCRETE]));
+        // Heading east, the right is south: the row is z = 30 + lanes + 1 ..= 30 + kerb.
+        let row = 30 + halves.lanes + 1..=30 + halves.kerb;
+        let marked: Vec<i32> = (20..100)
+            .filter(|&x| row.clone().all(|z| white(x, z)))
+            .collect();
+        assert!(marked.len() >= 20, "{marked:?}");
+        assert!(marked.windows(2).all(|w| w[1] - w[0] == 3), "{marked:?}");
+        // The lanes and the other side are left bare.
+        for x in 20..100 {
+            for z in 30 - halves.kerb..=30 + halves.lanes {
+                assert!(!white(x, z), "({x}, {z})");
+            }
+        }
+        // On the slanted street every line keeps to one column, a stall from the next.
+        let lines: Vec<(i32, i32)> = (20..100)
+            .flat_map(|x| (40..80).map(move |z| (x, z)))
+            .filter(|&(x, z)| white(x, z))
+            .collect();
+        assert!(lines.len() >= 20, "{lines:?}");
+        for &(x, z) in &lines {
+            assert!(
+                !white(x - 1, z) && !white(x + 1, z),
+                "({x}, {z}) in {lines:?}"
+            );
+        }
+        // The street with cars along its kerbs is bare but for its lane line.
+        let parallel = road_width::road_halves("residential", &along.tags, 1.0);
+        for x in 20..100 {
+            for z in 100 - parallel.kerb..=100 + parallel.kerb {
+                if (z - 100).abs() > 0 {
+                    assert!(!white(x, z), "({x}, {z})");
+                }
+            }
+        }
     }
 
     /// The renderer leaves unpaved what the masks leave out: the second lane of a street
