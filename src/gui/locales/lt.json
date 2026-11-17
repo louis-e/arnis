@@ -855,6 +855,6 @@
   "measured_heights_tip": "Pastatams, kurie OpenStreetMap neturi nei aukščio, nei aukštų, suteikia lazerio išmatuotą aukštį ir plokščius stogus, kur jis juos matė.",
   "lidar_limit": "Atsisiuntimo riba",
   "lidar_limit_desc": "Daugiausia, kiek lazerio duomenų atsisiunčia vienas paleidimas.",
-  "lidar_limit_tip": "Daugiausia, kiek lazerio duomenų atsisiunčia vienas paleidimas. Talpykloje esantys neskaičiuojami. Viršijus tęsiama be jų. Vienas km² – apie 100 MB.",
+  "lidar_limit_tip": "Daugiausia, kiek lazerio duomenų atsisiunčia vienas paleidimas. Talpykloje esantys neskaičiuojami. Viršijus tęsiama be jų. Vienas km² – apie 100–300 MB.",
   "lidar_over_limit": "Lazerio duomenys praleisti: sričiai reikia apie {mb} MB, daugiau nei Atsisiuntimo riba ({limit} MB). Padidinkite: Generacijos nustatymai > Išplėstiniai > Lazerio duomenys."
 }

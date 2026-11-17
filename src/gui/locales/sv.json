@@ -855,6 +855,6 @@
   "measured_heights_tip": "Ger byggnader utan höjd eller våningar i OpenStreetMap den höjd lasern mätte, och platta tak där den såg dem.",
   "lidar_limit": "Nedladdningsgräns",
   "lidar_limit_desc": "Mest laserdata en körning laddar ner.",
-  "lidar_limit_tip": "Mest laserdata en körning laddar ner. Cachade skanningar räknas inte. Över gränsen fortsätter körningen utan dem. En km² är cirka 100 MB.",
+  "lidar_limit_tip": "Mest laserdata en körning laddar ner. Cachade skanningar räknas inte. Över gränsen fortsätter körningen utan dem. En km² är cirka 100–300 MB.",
   "lidar_over_limit": "Laserdata hoppades över: området behöver omkring {mb} MB, mer än Nedladdningsgräns på {limit} MB. Höj den under Anpassningsinställningar > Avancerat > Laserdata."
 }

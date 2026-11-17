@@ -13,7 +13,7 @@
 //!
 //! Downloads are bounded: only tiles inside the source's outline, only the photo
 //! blocks the area touches, results cached per tile, and a limit on what one run
-//! may fetch of the laser scans (`--lidar-max-mb`).
+//! may fetch of the laser scans and photos (`--lidar-max-mb`, 1 GB by default).
 //!
 //! `ARNIS_LASER_DEBUG=1` prints, to stderr, each COPC or EPT tile's read (level,
 //! nodes, requests, megabytes, points a square metre) and the time and resident

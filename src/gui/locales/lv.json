@@ -855,6 +855,6 @@
   "measured_heights_tip": "Ēkām, kurām OpenStreetMap nav ne augstuma, ne stāvu, piešķir lāzera izmērīto augstumu un plakanus jumtus, kur tas tos redzēja.",
   "lidar_limit": "Lejupielādes limits",
   "lidar_limit_desc": "Cik daudz lāzera datu lejupielādē viena palaišana.",
-  "lidar_limit_tip": "Cik daudz lāzera datu lejupielādē viena palaišana. Kešatmiņā esošie neskaitās. Pārsniedzot palaišana turpinās bez tiem. Viens km² ir ap 100 MB.",
+  "lidar_limit_tip": "Cik daudz lāzera datu lejupielādē viena palaišana. Kešatmiņā esošie neskaitās. Pārsniedzot palaišana turpinās bez tiem. Viens km² ir ap 100–300 MB.",
   "lidar_over_limit": "Lāzera dati izlaisti: apgabalam vajag ap {mb} MB, vairāk nekā Lejupielādes limits ({limit} MB). Palieliniet to: Personalizācijas iestatījumi > Papildu > Lāzera dati."
 }

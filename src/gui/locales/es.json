@@ -855,6 +855,6 @@
   "measured_heights_tip": "Da a los edificios sin altura ni plantas en OpenStreetMap la altura medida por el láser, y tejados planos donde los vio.",
   "lidar_limit": "Límite de descarga",
   "lidar_limit_desc": "Lo máximo que descarga una generación en datos láser.",
-  "lidar_limit_tip": "Lo máximo que descarga una generación en datos láser. Los escaneos en caché no cuentan. Por encima, sigue sin ellos. Un km² son unos 100 MB.",
+  "lidar_limit_tip": "Lo máximo que descarga una generación en datos láser. Los escaneos en caché no cuentan. Por encima, sigue sin ellos. Un km² son unos 100–300 MB.",
   "lidar_over_limit": "Datos láser omitidos: el área necesita unos {mb} MB, más que el Límite de descarga de {limit} MB. Auméntalo en Configuración de personalización > Avanzado > Datos láser."
 }

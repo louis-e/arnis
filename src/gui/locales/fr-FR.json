@@ -855,6 +855,6 @@
   "measured_heights_tip": "Donne aux bâtiments sans hauteur ni étages dans OpenStreetMap la hauteur mesurée par le laser, et des toits plats là où il les a vus.",
   "lidar_limit": "Limite de téléchargement",
   "lidar_limit_desc": "Maximum téléchargé par génération pour le laser.",
-  "lidar_limit_tip": "Maximum téléchargé par génération pour les données laser. Les scans en cache ne comptent pas. Au-delà, la génération continue sans eux. Un km² fait environ 100 Mo.",
+  "lidar_limit_tip": "Maximum téléchargé par génération pour les données laser. Les scans en cache ne comptent pas. Au-delà, la génération continue sans eux. Un km² fait environ 100–300 Mo.",
   "lidar_over_limit": "Données laser ignorées : la zone demande environ {mb} MB, plus que la Limite de téléchargement de {limit} MB. Augmentez-la dans Paramètres de personnalisation > Avancé > Données laser."
 }

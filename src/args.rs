@@ -226,9 +226,9 @@ pub struct Args {
     #[arg(long = "measured-heights", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub measured_heights: bool,
 
-    /// Most a run may download for --lidar, in megabytes of laser scans not yet
-    /// cached. Past it the run goes on without them.
-    #[arg(long = "lidar-max-mb", default_value_t = 500)]
+    /// Most a run may download for --lidar, in megabytes of laser scans and aerial
+    /// photos not yet cached. Past it the run goes on without them.
+    #[arg(long = "lidar-max-mb", default_value_t = 1000)]
     pub lidar_max_mb: u32,
 
     /// Add building footprints from Overture Maps that are missing in OpenStreetMap.

@@ -3882,7 +3882,7 @@ function liveLaser(id) {
 
 function lidarLimitMb() {
   const btn = document.querySelector('#lidar-limit-group .segment.active');
-  return parseInt(btn?.dataset.lidarLimit || '500', 10);
+  return parseInt(btn?.dataset.lidarLimit || '1000', 10);
 }
 
 // Advanced settings that only work with another one grey out while it is off, as the gameplay rows do,

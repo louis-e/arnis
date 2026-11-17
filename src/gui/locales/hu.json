@@ -855,6 +855,6 @@
   "measured_heights_tip": "Az OpenStreetMapben magasság és szintszám nélküli épületek a lézer mérte magasságot kapják, és lapos tetőt, ahol a lézer azt látott.",
   "lidar_limit": "Letöltési korlát",
   "lidar_limit_desc": "Legfeljebb ennyi lézeradatot tölt le egy futás.",
-  "lidar_limit_tip": "Legfeljebb ennyi lézeradatot tölt le egy futás. A gyorsítótárazott szkenek nem számítanak. Felette nélkülük fut tovább. Egy négyzetkilométer kb. 100 MB.",
+  "lidar_limit_tip": "Legfeljebb ennyi lézeradatot tölt le egy futás. A gyorsítótárazott szkenek nem számítanak. Felette nélkülük fut tovább. Egy négyzetkilométer kb. 100–300 MB.",
   "lidar_over_limit": "A lézeradatok kimaradtak: a terület kb. {mb} MB-ot igényel, többet, mint a Letöltési korlát ({limit} MB). Növeld itt: Testreszabási lehetőségek > Haladó > Lézeradatok."
 }

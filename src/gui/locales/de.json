@@ -855,6 +855,6 @@
   "measured_heights_tip": "Gibt Gebäuden, die in OpenStreetMap weder Höhe noch Stockwerke haben, die vom Laser gemessene Höhe und Flachdächer, wo er sie sah.",
   "lidar_limit": "Download-Limit",
   "lidar_limit_desc": "Höchstens so viel lädt ein Lauf an Laserdaten.",
-  "lidar_limit_tip": "Höchstens so viel lädt ein Lauf an Laserdaten. Zwischengespeicherte Scans zählen nicht. Darüber läuft er ohne sie weiter. Ein Quadratkilometer sind etwa 100 MB.",
+  "lidar_limit_tip": "Höchstens so viel lädt ein Lauf an Laserdaten. Zwischengespeicherte Scans zählen nicht. Darüber läuft er ohne sie weiter. Ein Quadratkilometer sind etwa 100–300 MB.",
   "lidar_over_limit": "Laserdaten übersprungen: Das Gebiet braucht etwa {mb} MB, mehr als das Download-Limit von {limit} MB. Erhöhen unter Einstellungen > Erweitert > Laserdaten."
 }

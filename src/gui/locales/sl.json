@@ -855,6 +855,6 @@
   "measured_heights_tip": "Stavbam brez višine in etaž v OpenStreetMap da višino, ki jo je izmeril laser, in ravne strehe, kjer jih je videl.",
   "lidar_limit": "Omejitev prenosa",
   "lidar_limit_desc": "Največ, kar en zagon prenese laserskih podatkov.",
-  "lidar_limit_tip": "Največ, kar en zagon prenese laserskih podatkov. Predpomnjeni skeni ne štejejo. Nad mejo zagon teče brez njih. En km² je okoli 100 MB.",
+  "lidar_limit_tip": "Največ, kar en zagon prenese laserskih podatkov. Predpomnjeni skeni ne štejejo. Nad mejo zagon teče brez njih. En km² je okoli 100–300 MB.",
   "lidar_over_limit": "Laserski podatki izpuščeni: območje potrebuje približno {mb} MB, več kot Omejitev prenosa ({limit} MB). Povečajte jo v Nastavitve prilagajanja > Napredno > Laserski podatki."
 }
