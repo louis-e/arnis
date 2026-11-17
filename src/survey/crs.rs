@@ -84,7 +84,15 @@ impl Crs {
             Crs::Lv95 => 2056,
             Crs::Lest97 => 3301,
             Crs::Luref => 2169,
-            Crs::Nad83Utm(zone) => 26900 + u32::from(zone),
+            // NAD83's UTM codes stop at zone 23 (26901-26923; past them are
+            // state planes). The western Aleutians have codes of their own,
+            // Guam and the Northern Marianas NAD83(MA11)'s; anything else
+            // takes WGS 84's, a metre or so away.
+            Crs::Nad83Utm(zone @ 1..=23) => 26900 + u32::from(zone),
+            Crs::Nad83Utm(55) => 8693,
+            Crs::Nad83Utm(59) => 3372,
+            Crs::Nad83Utm(60) => 3373,
+            Crs::Nad83Utm(zone) => 32600 + u32::from(zone),
             Crs::WebMercator => 3857,
         }
     }
@@ -678,6 +686,10 @@ mod tests {
             0.01,
         );
         assert_eq!(Crs::Nad83Utm(17).epsg(), 26917);
+        // Past zone 23, 269xx are state planes.
+        assert_eq!(Crs::Nad83Utm(55).epsg(), 8693);
+        assert_eq!(Crs::Nad83Utm(60).epsg(), 3373);
+        assert_eq!(Crs::Nad83Utm(40).epsg(), 32640);
         assert_eq!(utm_zone(-83.76), 17);
         assert_eq!(utm_zone(-122.33), 10);
         assert_eq!(utm_zone(11.9), 32);
