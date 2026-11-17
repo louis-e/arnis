@@ -28,8 +28,10 @@
 //! each cell, filled under buildings and dense hedges from around them.
 
 use super::copc::{self, PointLayout};
+use super::crs::{Affine, Crs};
+use super::ept;
 use super::fetch::{self, Failure};
-use super::source::{Laser, Rect, Source};
+use super::source::{Laser, Rect, Sheet};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -200,15 +202,16 @@ pub enum Fetched {
     Absent,
 }
 
-pub fn cache_path(root: &Path, source: &Source, te: i32, tn: i32) -> PathBuf {
-    root.join(source.id).join(format!("tile_{te}_{tn}.bin"))
+pub fn cache_path(root: &Path, source: &Sheet, te: i32, tn: i32) -> PathBuf {
+    root.join(source.dir()).join(format!("tile_{te}_{tn}.bin"))
 }
 
-fn absent_marker(root: &Path, source: &Source, te: i32, tn: i32) -> PathBuf {
-    root.join(source.id).join(format!("tile_{te}_{tn}.absent"))
+fn absent_marker(root: &Path, source: &Sheet, te: i32, tn: i32) -> PathBuf {
+    root.join(source.dir())
+        .join(format!("tile_{te}_{tn}.absent"))
 }
 
-fn known_absent(root: &Path, source: &Source, te: i32, tn: i32) -> bool {
+fn known_absent(root: &Path, source: &Sheet, te: i32, tn: i32) -> bool {
     std::fs::metadata(absent_marker(root, source, te, tn))
         .and_then(|m| m.modified())
         .ok()
@@ -218,7 +221,7 @@ fn known_absent(root: &Path, source: &Source, te: i32, tn: i32) -> bool {
 
 /// The tile from the cache alone, when it holds every block wanted (or the tile
 /// is known absent).
-pub fn cached(root: &Path, source: &Source, te: i32, tn: i32, want: &[bool]) -> Option<Fetched> {
+pub fn cached(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> Option<Fetched> {
     if let Some(t) = LaserTile::read(&cache_path(root, source, te, tn)) {
         if t.has(want) {
             return Some(Fetched::Tile(Box::new(t)));
@@ -228,7 +231,7 @@ pub fn cached(root: &Path, source: &Source, te: i32, tn: i32, want: &[bool]) -> 
 }
 
 /// Square kilometres of the wanted blocks not yet cached.
-pub fn missing_km2(root: &Path, source: &Source, te: i32, tn: i32, want: &[bool]) -> f64 {
+pub fn missing_km2(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> f64 {
     if known_absent(root, source, te, tn) {
         return 0.0;
     }
@@ -242,7 +245,7 @@ pub fn missing_km2(root: &Path, source: &Source, te: i32, tn: i32, want: &[bool]
 }
 
 /// Whether the tile costs no download for the blocks wanted.
-pub fn is_cached(root: &Path, source: &Source, te: i32, tn: i32, want: &[bool]) -> bool {
+pub fn is_cached(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> bool {
     cached(root, source, te, tn, want).is_some()
 }
 
@@ -252,7 +255,7 @@ pub fn is_cached(root: &Path, source: &Source, te: i32, tn: i32, want: &[bool]) 
 pub fn tile(
     client: &reqwest::blocking::Client,
     root: &Path,
-    source: &Source,
+    source: &Sheet,
     (te, tn): (i32, i32),
     want: &[bool],
     urls: &[String],
@@ -261,12 +264,12 @@ pub fn tile(
         return Ok(f);
     }
     crate::net::ensure_online("laser scans")?;
-    std::fs::create_dir_all(root.join(source.id)).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(root.join(source.dir())).map_err(|e| e.to_string())?;
     let path = cache_path(root, source, te, tn);
     for url in urls {
         let got = match source.laser {
             Laser::Whole { .. } => read_whole(client, root, source, te, tn, url),
-            Laser::Copc { .. } => {
+            Laser::Copc { .. } | Laser::Ept { .. } => {
                 let mut t = LaserTile::read(&path)
                     .filter(|t| t.origin == *url)
                     .unwrap_or_else(|| LaserTile::empty(url));
@@ -289,10 +292,13 @@ pub fn tile(
     Ok(Fetched::Absent)
 }
 
-/// Read the COPC tile over the wanted blocks it lacks and fold them into `t`.
+/// Read the COPC tile (or EPT survey) over the wanted blocks `t` lacks and fold
+/// them into it. `url` may name several files, a line each (a tile whose
+/// survey's files do not follow the grid's kilometres); it is missing only
+/// when all of them are.
 fn read_copc(
     client: &reqwest::blocking::Client,
-    source: &Source,
+    source: &Sheet,
     te: i32,
     tn: i32,
     want: &[bool],
@@ -325,6 +331,7 @@ fn read_copc(
         te0 + cells.2 as f64,
         tn1 - cells.1 as f64,
     );
+    let centre = ((window.0 + window.2) / 2.0, (window.1 + window.3) / 2.0);
     let m = Mutex::new(Measure::new(source, te, tn, cells));
     let visit = |layout: &PointLayout, recs: &[u8]| {
         let mut m = m.lock().unwrap_or_else(|e| e.into_inner());
@@ -334,15 +341,54 @@ fn read_copc(
     };
     // A tile made of several files (one line each) is read from all of them
     // that exist; a file it does not reach costs only its header.
+    let area = (window.2 - window.0) * (window.3 - window.1);
     let mut found = false;
-    for part in url.split('\n') {
-        let stats = match copc::read(client, part, window, target_density(), 4, &visit) {
+    for file in url.split('\n') {
+        let stats = match source.laser {
+            // EPT points are in Web Mercator: carried onto the grid by a map
+            // fitted over the window, and the window asked for in Mercator.
+            Laser::Ept { .. } => {
+                let f = Affine::fit(Crs::WebMercator, source.crs, centre, 250.0);
+                m.lock().unwrap_or_else(|e| e.into_inner()).to_grid = Some(f);
+                ept::read(
+                    client,
+                    file,
+                    f.inverse().rect(window),
+                    target_density(),
+                    8,
+                    &visit,
+                )
+            }
+            // Files that name their own grid: carried across where it is not
+            // the area's.
+            Laser::Copc { own_grid: true, .. } => {
+                let place = |wkt: Option<&str>| -> Result<Option<Affine>, String> {
+                    let crs = wkt
+                        .and_then(super::crs::from_wkt)
+                        .ok_or_else(|| "a grid this reader does not know".to_string())?;
+                    let f =
+                        (crs != source.crs).then(|| Affine::fit(crs, source.crs, centre, 250.0));
+                    m.lock().unwrap_or_else(|e| e.into_inner()).to_grid = f;
+                    Ok(f)
+                };
+                copc::read(client, file, window, target_density(), 4, &place, &visit)
+            }
+            _ => copc::read(
+                client,
+                file,
+                window,
+                target_density(),
+                4,
+                &|_| Ok(None),
+                &visit,
+            ),
+        };
+        let stats = match stats {
             Ok(s) => s,
-            Err(Failure::Missing) if url.contains('\n') => continue,
+            Err(Failure::Missing) => continue,
             Err(e) => return Err(e),
         };
         found = true;
-        let area = (window.2 - window.0) * (window.3 - window.1);
         if std::env::var_os("ARNIS_LASER_DEBUG").is_some() {
             eprintln!(
                 "laser {te}_{tn}: level {} nodes {} requests {} {:.1} MB {:.1} pts/m² over {:.2} km²",
@@ -358,7 +404,7 @@ fn read_copc(
     if !found {
         return Err(Failure::Missing);
     }
-    fetch::count_laser_area((window.2 - window.0) * (window.3 - window.1));
+    fetch::count_laser_area(area);
     let measured = m
         .into_inner()
         .unwrap_or_else(|e| e.into_inner())
@@ -371,14 +417,14 @@ fn read_copc(
 fn read_whole(
     client: &reqwest::blocking::Client,
     root: &Path,
-    source: &Source,
+    source: &Sheet,
     te: i32,
     tn: i32,
     url: &str,
 ) -> Result<LaserTile, Failure> {
     // Download to a temporary file: the decoder needs to seek to the chunk table.
     let tmp = root
-        .join(source.id)
+        .join(source.dir())
         .join(format!("tile_{te}_{tn}.laz.part{}", std::process::id()));
     let other = |e: String| Failure::Other(e);
     {
@@ -466,7 +512,7 @@ fn read_header(file: &mut std::fs::File) -> Result<Header, String> {
 /// Decode a downloaded tile and reduce it to its per-metre measurements.
 fn measure_file(
     path: &Path,
-    source: &Source,
+    source: &Sheet,
     te: i32,
     tn: i32,
     url: &str,
@@ -526,10 +572,14 @@ fn measure_file(
 /// Above-ground point flags.
 const BUILDING: u8 = 1;
 const PLANT: u8 = 2;
+/// Of a class the source leaves unsorted.
+const UNSORTED: u8 = 4;
+/// Height over which unsorted returns can be a roof.
+const ROOF_MIN_M: f32 = 2.5;
 
 /// Points gathered over a window of a tile, before they are boiled down.
 struct Measure<'a> {
-    source: &'a Source,
+    source: &'a Sheet,
     /// The tile's west and north edges in grid metres.
     e0: f64,
     n1: f64,
@@ -543,10 +593,12 @@ struct Measure<'a> {
     ground: Vec<(u32, u16)>,
     /// Building and object returns: (cell, z, flags).
     above: Vec<(u32, f32, u8)>,
+    /// Where the points come in another grid, the map onto the tile's.
+    to_grid: Option<Affine>,
 }
 
 impl<'a> Measure<'a> {
-    fn new(source: &'a Source, te: i32, tn: i32, window: (usize, usize, usize, usize)) -> Self {
+    fn new(source: &'a Sheet, te: i32, tn: i32, window: (usize, usize, usize, usize)) -> Self {
         Measure {
             source,
             e0: f64::from(te) * 1000.0,
@@ -561,14 +613,18 @@ impl<'a> Measure<'a> {
             gz_sum: vec![0.0; CELLS],
             ground: Vec::new(),
             above: Vec::new(),
+            to_grid: None,
         }
     }
 
     fn add(&mut self, l: &PointLayout, rec: &[u8]) {
         let xi = i32::from_le_bytes(rec[0..4].try_into().unwrap());
         let yi = i32::from_le_bytes(rec[4..8].try_into().unwrap());
-        let x = f64::from(xi) * l.scale[0] + l.offset[0];
-        let y = f64::from(yi) * l.scale[1] + l.offset[1];
+        let mut x = f64::from(xi) * l.scale[0] + l.offset[0];
+        let mut y = f64::from(yi) * l.scale[1] + l.offset[1];
+        if let Some(f) = &self.to_grid {
+            (x, y) = f.apply(x, y);
+        }
         let col = (x - self.e0).floor();
         let row = (self.n1 - y).floor();
         let (c0, r0, c1, r1) = self.window;
@@ -599,13 +655,19 @@ impl<'a> Measure<'a> {
         } else if classes.building.contains(&class) {
             self.above.push((cell, z as f32, BUILDING));
         } else if classes.object.contains(&class) {
+            let passes = nret > 1 && ret < nret;
             let plant = if classes.vegetation.is_empty() {
-                nret > 1 && ret < nret
+                passes
             } else {
-                classes.vegetation.contains(&class)
+                classes.vegetation.contains(&class) || (passes && classes.unsorted.contains(&class))
+            };
+            let unsorted = if classes.unsorted.contains(&class) {
+                UNSORTED
+            } else {
+                0
             };
             self.above
-                .push((cell, z as f32, if plant { PLANT } else { 0 }));
+                .push((cell, z as f32, unsorted | if plant { PLANT } else { 0 }));
         }
     }
 
@@ -643,11 +705,12 @@ impl<'a> Measure<'a> {
         let mut n_obj = vec![0u32; CELLS];
         let mut n_bld = vec![0u32; CELLS];
         let mut n_veg = vec![0u32; CELLS];
-        let heights: Vec<(u32, f32, u8)> = above
+        let mut heights: Vec<(u32, f32, u8)> = above
             .iter()
             .map(|&(c, z, f)| (c, z - ground_z[c as usize], f))
             .filter(|&(_, h, f)| f & BUILDING != 0 || h > 0.25)
             .collect();
+        find_roofs(&mut heights);
         for &(c, _, f) in &heights {
             if f & BUILDING != 0 {
                 n_bld[c as usize] += 1;
@@ -706,6 +769,39 @@ fn grow_by_one(m: &[bool]) -> Vec<bool> {
         }
     }
     out
+}
+
+/// Scans that leave buildings among the unsorted returns (no building point in
+/// the whole window, while there are unsorted ones) have their roofs found
+/// here: a cell whose unsorted returns over 2.5 m are nearly all the last of
+/// their pulse is hard and solid, a roof; a crown lets part of the pulse
+/// through. Those returns then count as building points.
+fn find_roofs(heights: &mut [(u32, f32, u8)]) {
+    if heights.iter().any(|&(_, _, f)| f & BUILDING != 0)
+        || !heights.iter().any(|&(_, _, f)| f & UNSORTED != 0)
+    {
+        return;
+    }
+    let mut tall = std::collections::HashMap::<u32, (u32, u32)>::new();
+    for &(c, h, f) in heights.iter() {
+        if f & UNSORTED != 0 && h >= ROOF_MIN_M {
+            let e = tall.entry(c).or_default();
+            e.0 += 1;
+            if f & PLANT != 0 {
+                e.1 += 1;
+            }
+        }
+    }
+    for p in heights.iter_mut() {
+        let (c, h, f) = *p;
+        if f & UNSORTED != 0 && f & PLANT == 0 && h >= ROOF_MIN_M {
+            if let Some(&(n, plants)) = tall.get(&c) {
+                if n >= 2 && 4 * plants < n {
+                    p.2 = BUILDING;
+                }
+            }
+        }
+    }
 }
 
 /// Values grouped by cell with a counting sort, sorted within each cell.
@@ -822,6 +918,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn roofs_are_found_only_where_the_scan_left_buildings_unsorted() {
+        let u = UNSORTED;
+        // Cell 1: a roof (single returns at 6 m). Cell 2: a crown (most returns
+        // pass through). Cell 3: a hedge under 2.5 m.
+        let pts = vec![
+            (1, 6.0, u),
+            (1, 6.1, u),
+            (1, 6.2, u),
+            (2, 8.0, u | PLANT),
+            (2, 7.5, u | PLANT),
+            (2, 9.0, u),
+            (3, 1.5, u),
+            (3, 1.6, u),
+        ];
+        let mut h = pts.clone();
+        find_roofs(&mut h);
+        assert!(h[..3].iter().all(|p| p.2 == BUILDING));
+        assert_eq!(&h[3..], &pts[3..]);
+        // A scan that sorts its buildings out is left alone.
+        let mut h = pts.clone();
+        h.push((9, 7.0, BUILDING));
+        find_roofs(&mut h);
+        assert_eq!(&h[..8], &pts[..]);
+        // So is a source without unsorted classes.
+        let mut h: Vec<(u32, f32, u8)> = pts.iter().map(|&(c, z, f)| (c, z, f & !u)).collect();
+        let before = h.clone();
+        find_roofs(&mut h);
+        assert_eq!(h, before);
+    }
+
+    #[test]
     fn blocks_cover_the_rectangle_and_no_more() {
         // Tile 358_6687: 358_000..359_000 E, 6_687_000..6_688_000 N. A rectangle
         // over its north-east corner, 150 m by 250 m.
@@ -887,7 +1014,7 @@ mod tests {
 
     #[test]
     fn outline_marks_turn_the_last_returns_over_them_into_roof() {
-        let src = &super::super::nrw::NRW;
+        let src = &Sheet::at(&super::super::nrw::NRW, 7.0);
         let layout = PointLayout {
             format: 1,
             record_len: 28,

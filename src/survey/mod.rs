@@ -2,9 +2,9 @@
 //! guessed, from open airborne laser scans and aerial photographs.
 //!
 //! Where a source covers the area (see [`source::SOURCES`]: Bavaria, North
-//! Rhine-Westphalia, France, the Netherlands, Switzerland, Estonia, Luxembourg),
-//! the parts of its laser tiles and photos the area
-//! needs are read ([`copc`] reads cloud-optimised tiles in part), boiled down to
+//! Rhine-Westphalia, France, the Netherlands, Switzerland, Estonia, Luxembourg,
+//! the United States, Canada), the parts of its laser tiles and photos the area
+//! needs are read ([`copc`] and [`ept`] read octrees in part), boiled down to
 //! a few numbers per square metre ([`laser`], [`photo`]), classified per metre
 //! on the source's own grid ([`classify`], [`crs`]) and sampled onto the world's
 //! block grid the same way the canopy map is. The ground pass reads it for columns no mapped feature
@@ -16,15 +16,18 @@
 //! may fetch (`--garden-detail-max-mb`).
 
 pub mod bavaria;
+pub mod canada;
 pub mod classify;
 pub mod copc;
 pub mod crs;
 pub mod elements;
+pub mod ept;
 pub mod estonia;
 pub mod fetch;
 pub mod france;
 pub mod grid;
 pub mod heights;
+pub mod index;
 pub mod laser;
 pub mod luxembourg;
 pub mod netherlands;
@@ -33,10 +36,11 @@ pub mod photo;
 pub mod place;
 pub mod source;
 pub mod switzerland;
+pub mod usa;
 pub mod utm;
 
 use crate::coordinate_system::geographic::LLBBox;
-use source::{Laser, Locate, Source};
+use source::{Laser, Locate, Sheet};
 use std::path::PathBuf;
 
 pub use place::{Cell, Kind};
@@ -115,7 +119,8 @@ pub fn clear_cache() -> crate::elevation::cache::CacheClearStats {
 
 /// The source, its tiles and the grid rectangle a bbox needs, or why not.
 pub struct Plan {
-    pub source: &'static Source,
+    /// The source on the area's grid.
+    pub sheet: Sheet,
     pub tiles: Vec<(i32, i32)>,
     /// West, south, east, north in the source's grid metres, whole metres.
     pub rect: (f64, f64, f64, f64),
@@ -137,6 +142,7 @@ pub fn plan(bbox: &LLBBox) -> Option<Plan> {
 /// [`plan`] against the laser cache in `root`.
 pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
     let source = source::for_bbox(bbox)?;
+    let sheet = Sheet::at(source, (bbox.min().lng() + bbox.max().lng()) / 2.0);
     let corners = [
         (bbox.min().lat(), bbox.min().lng()),
         (bbox.min().lat(), bbox.max().lng()),
@@ -145,7 +151,7 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
     ];
     let (mut e0, mut n0, mut e1, mut n1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
     for (lat, lon) in corners {
-        let (e, n) = source.crs.forward(lat, lon);
+        let (e, n) = sheet.crs.forward(lat, lon);
         e0 = e0.min(e);
         n0 = n0.min(n);
         e1 = e1.max(e);
@@ -157,29 +163,29 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
         (e1 + MARGIN_M).ceil(),
         (n1 + MARGIN_M).ceil(),
     );
-    let tiles = source.tiles(rect);
-    let download_mb = match source.laser {
+    let tiles = sheet.tiles(rect);
+    let download_mb = match sheet.laser {
         Laser::Whole { tile_mb, .. } => {
             tiles
                 .iter()
                 .filter(|&&(te, tn)| {
-                    !laser::is_cached(root, source, te, tn, &laser::blocks_for(te, tn, rect))
+                    !laser::is_cached(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect))
                 })
                 .count() as u32
                 * tile_mb
         }
-        Laser::Copc { mb_per_km2, .. } => {
+        Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
             let km2: f64 = tiles
                 .iter()
                 .map(|&(te, tn)| {
-                    laser::missing_km2(root, source, te, tn, &laser::blocks_for(te, tn, rect))
+                    laser::missing_km2(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect))
                 })
                 .sum();
             (km2 * f64::from(mb_per_km2)).ceil() as u32
         }
     };
     Some(Plan {
-        source,
+        sheet,
         tiles,
         rect,
         download_mb,
@@ -217,7 +223,7 @@ pub fn fetch_survey_data(
     }
     println!(
         "Fetching laser data ({} laser scans, {} tile{})...",
-        plan.source.name,
+        plan.sheet.name,
         plan.tiles.len(),
         if plan.tiles.len() == 1 { "" } else { "s" }
     );
@@ -228,7 +234,10 @@ pub fn fetch_survey_data(
         .ok()?;
     let (bytes0, area0) = (fetch::laser_bytes(), fetch::laser_area_m2());
     // Heights read only the laser's roofs; lawns and trees need the photo too.
-    let inputs = mosaic(&client, &plan, features.garden || features.trees)?;
+    let mut inputs = mosaic(&client, &plan, features.garden || features.trees)?;
+    if !plan.sheet.classes.unsorted.is_empty() {
+        classify::crowns_not_roofs(&mut inputs);
+    }
     let (bytes, area) = (
         fetch::laser_bytes() - bytes0,
         fetch::laser_area_m2() - area0,
@@ -241,7 +250,7 @@ pub fn fetch_survey_data(
             bytes as f64 / area as f64
         );
     }
-    let (thresholds, how) = classify::calibrate(&inputs, plan.source.intensity_defaults);
+    let (thresholds, how) = classify::calibrate(&inputs, plan.sheet.intensity_defaults);
     println!(
         "Laser data: {:.0} points a square metre, lawn intensity from the {}",
         classify::median_density(&inputs),
@@ -266,7 +275,7 @@ pub fn fetch_survey_data(
         let lat = bbox.max().lat() + lat_step * gz as f64;
         for gx in 0..grid_w {
             let lon = bbox.min().lng() + lon_step * gx as f64;
-            let (e, n) = plan.source.crs.forward(lat, lon);
+            let (e, n) = plan.sheet.crs.forward(lat, lon);
             let (col, row) = ((e - e0).floor(), (n1 - n).floor());
             if col < 0.0 || row < 0.0 || col >= w as f64 || row >= h as f64 {
                 continue;
@@ -275,7 +284,7 @@ pub fn fetch_survey_data(
             cells[gz * grid_w + gx] = [o.class, o.height_q, o.color[0], o.color[1], o.color[2]];
         }
     }
-    println!("Laser data: {}", plan.source.attribution);
+    println!("Laser data: {}", plan.sheet.attribution);
     let data = SurveyData {
         cells,
         width: grid_w,
@@ -309,7 +318,8 @@ fn mosaic(
         n_obj: vec![0; n],
         n_bld: vec![0; n],
         n_veg: vec![0; n],
-        laser_plants: plan.source.laser_plants,
+        laser_plants: plan.sheet.laser_plants,
+        strict_pools: plan.sheet.strict_pools,
         h_obj: vec![0.0; n],
         h_bld: vec![0.0; n],
         i_gnd: vec![0.0; n],
@@ -327,10 +337,11 @@ fn mosaic(
         .tiles
         .iter()
         .copied()
-        .filter(|&t| laser::cached(&root, plan.source, t.0, t.1, &plan.want(t)).is_none())
+        .filter(|&t| laser::cached(&root, &plan.sheet, t.0, t.1, &plan.want(t)).is_none())
         .collect();
     let mut urls: std::collections::HashMap<(i32, i32), Vec<String>> = Default::default();
-    let (Laser::Whole { locate, .. } | Laser::Copc { locate, .. }) = &plan.source.laser;
+    let (Laser::Whole { locate, .. } | Laser::Copc { locate, .. } | Laser::Ept { locate, .. }) =
+        &plan.sheet.laser;
     match locate {
         Locate::Urls(f) => {
             for &(te, tn) in &uncached {
@@ -342,11 +353,11 @@ fn mosaic(
                 eprintln!("Warning: {e}");
                 return None;
             }
-            match f(client, plan.rect) {
+            match f(client, &plan.sheet, plan.rect) {
                 // Nothing at all is more likely a gap in the index (or a
                 // hiccup) than a reason to mark every tile absent for weeks.
                 Ok(found) if found.is_empty() => {
-                    println!("Laser data: {} has no scans here yet", plan.source.name);
+                    println!("Laser data: {} has no scans here yet", plan.sheet.name);
                     return None;
                 }
                 Ok(found) => {
@@ -385,7 +396,7 @@ fn mosaic(
                 let u = urls.get(&t).unwrap_or(&none);
                 (
                     t,
-                    laser::tile(client, &root, plan.source, t, &plan.want(t), u),
+                    laser::tile(client, &root, &plan.sheet, t, &plan.want(t), u),
                 )
             })
             .collect()
@@ -432,7 +443,7 @@ fn mosaic(
             let r1 = ((tn1 - n0).min(1000.0)) as usize;
             (
                 (te, tn),
-                photo::tile(client, &root, plan.source, te, tn, (c0, r0, c1, r1)),
+                photo::tile(client, &root, &plan.sheet, te, tn, (c0, r0, c1, r1)),
             )
         })
         .collect();

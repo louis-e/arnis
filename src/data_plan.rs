@@ -227,11 +227,11 @@ pub fn plan(root: &Path, args: &Args, bbox: LLBBox) -> DataPlan {
             let dir = root.join(crate::survey::CACHE_DIR);
             let (mut cached, mut bytes) = (0usize, 0u64);
             for &(te, tn) in &p.tiles {
-                let f = crate::survey::laser::cache_path(&dir, p.source, te, tn);
+                let f = crate::survey::laser::cache_path(&dir, &p.sheet, te, tn);
                 if let Ok(m) = std::fs::metadata(&f) {
                     cached += 1;
                     bytes += m.len();
-                } else if crate::survey::laser::is_cached(&dir, p.source, te, tn, &p.want((te, tn)))
+                } else if crate::survey::laser::is_cached(&dir, &p.sheet, te, tn, &p.want((te, tn)))
                 {
                     cached += 1;
                 }

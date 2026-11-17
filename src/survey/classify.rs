@@ -39,6 +39,8 @@ pub struct Inputs {
     ///
     /// [`Source::laser_plants`]: super::source::Source::laser_plants
     pub laser_plants: bool,
+    /// Whether a pool needs cells the laser returned nothing from.
+    pub strict_pools: bool,
     /// Metres above the ground.
     pub h_obj: Vec<f32>,
     pub h_bld: Vec<f32>,
@@ -213,6 +215,22 @@ pub fn split_intensity(vals: &mut [f32]) -> Option<f32> {
     clear.then(|| lo + (t + 1) as f32 * (hi - lo) / BINS as f32)
 }
 
+/// Building points the photo sees green are crowns: for sources whose roofs
+/// may be guessed from the pulse (see `laser::find_roofs`), where an evergreen
+/// crown returns as few pulses through as a roof, such cells count their
+/// building points as objects again.
+pub fn crowns_not_roofs(inp: &mut Inputs) {
+    for c in 0..inp.w * inp.h {
+        let green = inp.photo[c] && (inp.green_f[c] >= 0.35 || inp.exg[c] > 0.04);
+        if green && inp.n_bld[c] > 0 {
+            inp.n_obj[c] = inp.n_obj[c].saturating_add(inp.n_bld[c]);
+            inp.h_obj[c] = inp.h_obj[c].max(inp.h_bld[c]);
+            inp.n_bld[c] = 0;
+            inp.h_bld[c] = 0.0;
+        }
+    }
+}
+
 pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     let (w, h) = (inp.w, inp.h);
     let n = w * h;
@@ -267,15 +285,24 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
 
     // Pools: clearly blue in the photo, and water swallows the laser, so a pool
     // also has far fewer returns than the ground around it. A blue car has neither.
+    // Where the source says so (see [`Source::strict_pools`]) only a cell
+    // with no return at all counts as water.
+    //
+    // [`Source::strict_pools`]: super::source::Source::strict_pools
     let blue: Vec<bool> = (0..n)
         .map(|c| inp.photo[c] && inp.blue[c] > 0.03 && inp.lum[c] > 80.0 && !obj[c] && !building[c])
         .collect();
+    let dry_from = if inp.strict_pools {
+        0.0
+    } else {
+        0.6 * median_all
+    };
     let (lab, k) = label(&blue, w, h, true);
     if k > 0 {
         let sh = shapes(&lab, k, w);
         let mut wet = vec![0.0f64; k as usize + 1];
         for c in 0..n {
-            if lab[c] != 0 && f32::from(inp.n_all[c]) <= 0.6 * median_all {
+            if lab[c] != 0 && f32::from(inp.n_all[c]) <= dry_from {
                 wet[lab[c] as usize] += 1.0;
             }
         }
@@ -558,6 +585,7 @@ mod tests {
             n_bld: vec![0; n],
             n_veg: vec![0; n],
             laser_plants: false,
+            strict_pools: false,
             h_obj: vec![0.0; n],
             h_bld: vec![0.0; n],
             i_gnd: vec![1780.0; n],
@@ -623,6 +651,53 @@ mod tests {
         }
         let out = classify(&inp, (1450.0, 1600.0));
         assert_eq!(out[9 * w + 9].class, POOL);
+    }
+
+    #[test]
+    fn a_strict_source_needs_no_returns_at_all_for_a_pool() {
+        let (w, h) = (20, 20);
+        let mut inp = blank(w, h);
+        inp.strict_pools = true;
+        inp.n_all = vec![4; w * h];
+        for z in 8..11 {
+            for x in 8..12 {
+                let c = z * w + x;
+                inp.blue[c] = 0.06;
+                inp.exg[c] = -0.05;
+                inp.green_f[c] = 0.0;
+                // Two returns of four: chance at this density, not water.
+                inp.n_all[c] = 2;
+            }
+        }
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert!(out.iter().all(|o| o.class != POOL));
+        for z in 8..11 {
+            for x in 8..12 {
+                inp.n_all[z * w + x] = 0;
+            }
+        }
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert_eq!(out[9 * w + 9].class, POOL);
+    }
+
+    #[test]
+    fn green_roofs_of_a_guess_are_crowns() {
+        let (w, h) = (10, 10);
+        let mut inp = blank(w, h);
+        // A green cell and a grey one, both with building points.
+        for (c, green) in [(11, true), (55, false)] {
+            inp.n_bld[c] = 5;
+            inp.h_bld[c] = 9.0;
+            inp.n_obj[c] = 1;
+            inp.h_obj[c] = 4.0;
+            if !green {
+                inp.exg[c] = -0.02;
+                inp.green_f[c] = 0.0;
+            }
+        }
+        crowns_not_roofs(&mut inp);
+        assert_eq!((inp.n_bld[11], inp.n_obj[11], inp.h_obj[11]), (0, 6, 9.0));
+        assert_eq!((inp.n_bld[55], inp.n_obj[55]), (5, 1));
     }
 
     #[test]

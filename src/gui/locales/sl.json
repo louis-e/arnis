@@ -845,7 +845,7 @@
   "settings_search_empty": "Nobena nastavitev se ne ujema.",
   "lidar": "Laserski podatki",
   "lidar_desc": "Izmerjene podrobnosti, kjer regija objavlja skene. Poskusno.",
-  "lidar_tip": "Bere odprte laserske skene in letalske posnetke za podrobnosti, ki jih OpenStreetMap nima, kjer jih regija objavlja. Ne za One World ali območja nad 16 km². Pokriva Bavarsko, Severno Porenje-Vestfalijo, Francijo, Nizozemsko, Luksemburg, Estonijo in del Švice. Poskusno.",
+  "lidar_tip": "Bere odprte laserske skene in letalske posnetke za podrobnosti, ki jih OpenStreetMap nima, kjer jih regija objavlja. Ne za One World ali območja nad 16 km². Pokriva Bavarsko, Severno Porenje-Vestfalijo, Francijo, Nizozemsko, Luksemburg, Estonijo, del Švice, večji del ZDA in del Kanade. Poskusno.",
   "measured_trees": "Izmerjena drevesa",
   "measured_trees_desc": "Drevesa tam, kjer jih je videl laser, v njihovi višini.",
   "measured_trees_tip": "Postavi drevesa tja, kjer jih je videl laser, v izmerjeni višini, namesto globalnega zemljevida krošenj. Tudi kartirana drevesa dobijo izmerjeno višino.",

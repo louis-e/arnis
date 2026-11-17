@@ -10,7 +10,7 @@
 //!   returns count as plants beside it.
 
 use super::crs::Crs;
-use super::source::{Laser, LaserClasses, Locate, Photo, Source};
+use super::source::{Grid, Laser, LaserClasses, Locate, Photo, Source};
 
 /// The European Netherlands, simplified to about a kilometre and pushed out by
 /// about two. From OpenStreetMap (relation 47796), © OpenStreetMap contributors,
@@ -236,11 +236,12 @@ const OUTLINE: &[&[(f64, f64)]] = &[&[
 pub static NETHERLANDS: Source = Source {
     id: "netherlands",
     name: "AHN",
-    crs: Crs::RdNew,
+    grid: Grid::Fixed(Crs::RdNew),
     outline: OUTLINE,
     laser: Laser::Copc {
         locate: Locate::Urls(laser_urls),
         mb_per_km2: 130,
+        own_grid: false,
     },
     photo: Photo::Wms {
         url: "https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0",
@@ -254,8 +255,10 @@ pub static NETHERLANDS: Source = Source {
         object: &[1],
         vegetation: &[],
         footprint: &[],
+        unsorted: &[],
     },
     laser_plants: true,
+    strict_pools: false,
     attribution: "AHN (CC0 / CC BY 4.0), Beeldmateriaal Nederland via PDOK (CC BY 4.0)",
 };
 

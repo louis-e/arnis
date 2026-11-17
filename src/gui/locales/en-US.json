@@ -845,7 +845,7 @@
   "settings_search_empty": "No setting matches.",
   "lidar": "Laser Data",
   "lidar_desc": "Measured detail where a region publishes its scans. Experimental.",
-  "lidar_tip": "Reads open laser scans and aerial photos for detail OpenStreetMap lacks, where a region publishes them. Not used for One World or areas over 16 km². Covers Bavaria, North Rhine-Westphalia, France, the Netherlands, Luxembourg, Estonia and parts of Switzerland. Experimental.",
+  "lidar_tip": "Reads open laser scans and aerial photos for detail OpenStreetMap lacks, where a region publishes them. Not used for One World or areas over 16 km². Covers Bavaria, North Rhine-Westphalia, France, the Netherlands, Luxembourg, Estonia, parts of Switzerland, much of the US and parts of Canada. Experimental.",
   "measured_trees": "Measured Trees",
   "measured_trees_desc": "Trees where the laser saw them, at their height.",
   "measured_trees_tip": "Places trees where the laser saw them, at their measured height, instead of the global canopy map. Mapped trees take the measured height too.",

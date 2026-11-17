@@ -19,7 +19,7 @@
 //! credited as "Geobasis NRW".
 
 use super::crs::Crs;
-use super::source::{Laser, LaserClasses, Locate, Photo, Source};
+use super::source::{Grid, Laser, LaserClasses, Locate, Photo, Source};
 
 /// The state, simplified to about a kilometre and pushed out by about two.
 /// From OpenStreetMap (relation 62761), © OpenStreetMap contributors, ODbL.
@@ -429,7 +429,7 @@ const OUTLINE: &[&[(f64, f64)]] = &[&[
 pub static NRW: Source = Source {
     id: "nrw",
     name: "Geobasis NRW",
-    crs: Crs::Utm(32),
+    grid: Grid::Fixed(Crs::Utm(32)),
     outline: OUTLINE,
     laser: Laser::Whole {
         locate: Locate::Urls(laser_url),
@@ -447,8 +447,10 @@ pub static NRW: Source = Source {
         object: &[1, 20],
         vegetation: &[],
         footprint: &[26],
+        unsorted: &[],
     },
     laser_plants: true,
+    strict_pools: false,
     attribution: "Geobasis NRW (dl-de/zero-2.0)",
 };
 

@@ -99,6 +99,14 @@ export const licenseText = `
 <p>In Luxembourg they read the <a href="https://data.public.lu/en/datasets/lidar-2024-releve-3d-du-territoire-luxembourgeois/" target="_blank" rel="noopener noreferrer">LiDAR 2024</a> point clouds and the orthophoto of the Administration du cadastre et de la topographie through <a href="https://data.public.lu/" target="_blank" rel="noopener noreferrer">data.public.lu</a> and <a href="https://www.geoportail.lu/" target="_blank" rel="noopener noreferrer">geoportail.lu</a>, released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>.</p>
 </div>
 <div class="credit">
+<h4>US Laser Scans and Aerial Photos</h4>
+<p>In the United States they read the U.S. Geological Survey's <a href="https://www.usgs.gov/3d-elevation-program" target="_blank" rel="noopener noreferrer">3D Elevation Program</a> point clouds, as published on the <a href="https://registry.opendata.aws/usgs-lidar/" target="_blank" rel="noopener noreferrer">USGS 3DEP open bucket</a>, and USDA <a href="https://naip-usdaonline.hub.arcgis.com/" target="_blank" rel="noopener noreferrer">NAIP</a> aerial photos through the USGS National Map. Both are in the public domain; courtesy of the U.S. Geological Survey and the USDA Farm Production and Conservation Business Center. The outlines of the United States and Canada are simplified from <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener noreferrer">Natural Earth</a> (public domain).</p>
+</div>
+<div class="credit">
+<h4>Canadian Laser Scans</h4>
+<p>In Canada they read Natural Resources Canada's <a href="https://open.canada.ca/data/en/dataset/7069387e-9986-4297-9f55-0288e9676947" target="_blank" rel="noopener noreferrer">CanElevation point clouds</a>. Contains information licensed under the <a href="https://open.canada.ca/en/open-government-licence-canada" target="_blank" rel="noopener noreferrer">Open Government Licence &ndash; Canada</a>.</p>
+</div>
+<div class="credit">
 <h4>Koppen-Geiger Climate Data</h4>
 <p>Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" target="_blank" rel="noopener noreferrer">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
 </div>

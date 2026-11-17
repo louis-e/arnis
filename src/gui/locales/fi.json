@@ -845,7 +845,7 @@
   "settings_search_empty": "Ei vastaavia asetuksia.",
   "lidar": "Laserdata",
   "lidar_desc": "Mitatut yksityiskohdat, missä alue julkaisee keilauksensa. Kokeellinen.",
-  "lidar_tip": "Lukee avoimia laserkeilauksia ja ilmakuvia OpenStreetMapista puuttuviin yksityiskohtiin, missä alue ne julkaisee. Ei One Worldissa eikä yli 16 km² alueilla. Kattaa Baijerin, Nordrhein-Westfalenin, Ranskan, Alankomaat, Luxemburgin, Viron ja osan Sveitsiä. Kokeellinen.",
+  "lidar_tip": "Lukee avoimia laserkeilauksia ja ilmakuvia OpenStreetMapista puuttuviin yksityiskohtiin, missä alue ne julkaisee. Ei One Worldissa eikä yli 16 km² alueilla. Kattaa Baijerin, Nordrhein-Westfalenin, Ranskan, Alankomaat, Luxemburgin, Viron, osan Sveitsiä, suuren osan Yhdysvaltoja ja osan Kanadaa. Kokeellinen.",
   "measured_trees": "Mitatut puut",
   "measured_trees_desc": "Puut siellä, missä laser ne näki, oikeassa korkeudessa.",
   "measured_trees_tip": "Sijoittaa puut sinne, missä laser ne näki, mitattuun korkeuteen, maailmanlaajuisen latvuskartan sijaan. Kartoitetut puut saavat myös mitatun korkeuden.",

@@ -21,7 +21,7 @@
 
 use super::crs::Crs;
 use super::fetch;
-use super::source::{Laser, LaserClasses, Locate, Photo, Rect, Source, TileUrls};
+use super::source::{Grid, Laser, LaserClasses, Locate, Photo, Rect, Sheet, Source, TileUrls};
 
 const DATASET: &str =
     "https://data.public.lu/api/1/datasets/lidar-2024-releve-3d-du-territoire-luxembourgeois/";
@@ -184,11 +184,12 @@ const OUTLINE: &[&[(f64, f64)]] = &[&[
 pub static LUXEMBOURG: Source = Source {
     id: "luxembourg",
     name: "LiDAR 2024 Luxembourg",
-    crs: Crs::Luref,
+    grid: Grid::Fixed(Crs::Luref),
     outline: OUTLINE,
     laser: Laser::Copc {
         locate: Locate::Lookup(lookup),
         mb_per_km2: 330,
+        own_grid: false,
     },
     photo: Photo::Wms {
         url: "https://wms.geoportail.lu/opendata/service",
@@ -202,8 +203,10 @@ pub static LUXEMBOURG: Source = Source {
         object: &[1, 3, 4, 5],
         vegetation: &[3, 4, 5],
         footprint: &[],
+        unsorted: &[],
     },
     laser_plants: true,
+    strict_pools: false,
     attribution: "Administration du cadastre et de la topographie, Luxembourg (CC0)",
 };
 
@@ -218,7 +221,11 @@ fn zip_of(e: i32, n: i32) -> (i32, i32) {
 
 /// Every 1 km tile over the rectangle and its four 500 m pieces, each named
 /// `{zip}#at={offset}` where it starts inside its zip.
-fn lookup(client: &reqwest::blocking::Client, (e0, n0, e1, n1): Rect) -> Result<TileUrls, String> {
+fn lookup(
+    client: &reqwest::blocking::Client,
+    _: &Sheet,
+    (e0, n0, e1, n1): Rect,
+) -> Result<TileUrls, String> {
     let record = fetch::get_json(client, DATASET)?;
     let zips: std::collections::HashMap<String, String> = record["resources"]
         .as_array()

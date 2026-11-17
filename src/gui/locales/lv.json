@@ -845,7 +845,7 @@
   "settings_search_empty": "Neviens iestatījums neatbilst.",
   "lidar": "Lāzera dati",
   "lidar_desc": "Izmērītas detaļas, kur reģions publicē skenējumus. Eksperimentāli.",
-  "lidar_tip": "Nolasa atvērtus lāzerskenējumus un aerofoto detaļām, kuru trūkst OpenStreetMap, kur reģions tos publicē. Neizmanto One World un teritorijām virs 16 km². Aptver Bavāriju, Ziemeļreinu-Vestfāleni, Franciju, Nīderlandi, Luksemburgu, Igauniju un daļu Šveices. Eksperimentāli.",
+  "lidar_tip": "Nolasa atvērtus lāzerskenējumus un aerofoto detaļām, kuru trūkst OpenStreetMap, kur reģions tos publicē. Neizmanto One World un teritorijām virs 16 km². Aptver Bavāriju, Ziemeļreinu-Vestfāleni, Franciju, Nīderlandi, Luksemburgu, Igauniju, daļu Šveices, lielāko daļu ASV un daļu Kanādas. Eksperimentāli.",
   "measured_trees": "Izmērīti koki",
   "measured_trees_desc": "Koki tur, kur lāzers tos redzēja, to augstumā.",
   "measured_trees_tip": "Novieto kokus tur, kur lāzers tos redzēja, izmērītajā augstumā, globālās vainagu kartes vietā. Arī iezīmētie koki iegūst izmērīto augstumu.",

@@ -18,7 +18,7 @@
 //! Maa- ja Ruumiamet open data licence (free use with attribution).
 
 use super::crs::Crs;
-use super::source::{Laser, LaserClasses, Locate, Photo, Rect, Source, TileUrls};
+use super::source::{Grid, Laser, LaserClasses, Locate, Photo, Rect, Sheet, Source, TileUrls};
 
 const PAGE: &str = "https://geoportaal.maaruum.ee/index.php?lang_id=1&plugin_act=otsing";
 
@@ -229,7 +229,7 @@ const OUTLINE: &[&[(f64, f64)]] = &[&[
 pub static ESTONIA: Source = Source {
     id: "estonia",
     name: "Maa- ja Ruumiamet",
-    crs: Crs::Lest97,
+    grid: Grid::Fixed(Crs::Lest97),
     outline: OUTLINE,
     laser: Laser::Whole {
         locate: Locate::Lookup(lookup),
@@ -247,8 +247,10 @@ pub static ESTONIA: Source = Source {
         object: &[1, 5],
         vegetation: &[5],
         footprint: &[],
+        unsorted: &[],
     },
     laser_plants: true,
+    strict_pools: false,
     attribution: "Maa- ja Ruumiamet (open data licence)",
 };
 
@@ -259,7 +261,11 @@ fn sheet(e_km: i32, n_km: i32) -> i32 {
 
 /// The latest regular flight of each sheet over the rectangle, from the
 /// sheets' pages.
-fn lookup(client: &reqwest::blocking::Client, (e0, n0, e1, n1): Rect) -> Result<TileUrls, String> {
+fn lookup(
+    client: &reqwest::blocking::Client,
+    _: &Sheet,
+    (e0, n0, e1, n1): Rect,
+) -> Result<TileUrls, String> {
     let mut out = Vec::new();
     for te in (e0 / 1000.0).floor() as i32..=((e1 - 1e-6) / 1000.0).floor() as i32 {
         for tn in (n0 / 1000.0).floor() as i32..=((n1 - 1e-6) / 1000.0).floor() as i32 {

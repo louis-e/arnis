@@ -204,9 +204,10 @@ pub struct Args {
 
     /// Use open airborne laser scans and aerial photos where a region publishes them
     /// (Bavaria, North Rhine-Westphalia, France, the Netherlands, Luxembourg, Estonia,
-    /// parts of Switzerland). Off by default: the first run of an area downloads 50 to
-    /// 330 MB a square kilometre. The features below follow it. Never used for One
-    /// World pieces, and skipped for areas over 16 km² or past --lidar-max-mb.
+    /// parts of Switzerland, much of the United States, parts of Canada). Off by
+    /// default: the first run of an area downloads 50 to 330 MB a square kilometre.
+    /// The features below follow it. Never used for One World pieces, and skipped
+    /// for areas over 16 km² or past --lidar-max-mb.
     #[arg(long = "lidar", default_value_t = false, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub lidar: bool,
 
