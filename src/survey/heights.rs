@@ -17,8 +17,9 @@
 //! the measured metres.
 //!
 //! An outline the laser mostly saw as something else (built after the scan, or
-//! mapped where nothing stands) is left alone, and so is a roof past the 51 m
-//! the survey records: its height is unknown, and Overture's may be right.
+//! mapped where nothing stands) is left alone. A roof at the 51 m the survey
+//! records at most may stand higher: such a building waits for Overture's
+//! height and gets the 51 m only where Overture has none.
 
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::ground::Ground;
@@ -32,13 +33,27 @@ const MIN_BLOCKS: usize = 8;
 /// may stand any height above it.
 const SATURATED: f32 = 51.0;
 
-/// Fill measured heights in place; returns how many buildings got one.
-pub fn apply(elements: &mut [ProcessedElement], ground: &Ground, xzbbox: &XZBBox) -> usize {
+/// A building whose roof reached the highest height the survey records: its
+/// place in the elements and what was measured, for [`apply_deferred`].
+pub struct Deferred {
+    index: usize,
+    height: f32,
+    flat: bool,
+}
+
+/// Fill measured heights in place; returns how many buildings got one, and
+/// the buildings left for after Overture's heights.
+pub fn apply(
+    elements: &mut [ProcessedElement],
+    ground: &Ground,
+    xzbbox: &XZBBox,
+) -> (usize, Vec<Deferred>) {
+    let mut deferred = Vec::new();
     if !ground.has_laser() || !ground.laser_heights_wanted() {
-        return 0;
+        return (0, deferred);
     }
     let mut filled = 0;
-    for el in elements.iter_mut() {
+    for (index, el) in elements.iter_mut().enumerate() {
         let ProcessedElement::Way(way) = el else {
             continue;
         };
@@ -51,23 +66,55 @@ pub fn apply(elements: &mut [ProcessedElement], ground: &Ground, xzbbox: &XZBBox
             continue;
         }
         if let Some((height, flat)) = measure(way, ground, xzbbox) {
-            let kind = t.get("building").map(String::as_str).unwrap_or("yes");
-            match storeys(kind, height) {
-                Some(levels) => way
-                    .tags
-                    .insert("building:levels".to_string(), levels.to_string()),
-                None => way
-                    .tags
-                    .insert("height".to_string(), format!("{height:.1}")),
-            };
-            if flat && !way.tags.contains_key("roof:shape") {
-                way.tags
-                    .insert("roof:shape".to_string(), "flat".to_string());
+            if height >= SATURATED {
+                deferred.push(Deferred {
+                    index,
+                    height,
+                    flat,
+                });
+            } else {
+                fill(way, height, flat);
+                filled += 1;
             }
+        }
+    }
+    (filled, deferred)
+}
+
+/// The deferred buildings that still have no height (Overture had none for
+/// them) get what was measured; returns how many.
+pub fn apply_deferred(elements: &mut [ProcessedElement], deferred: Vec<Deferred>) -> usize {
+    let mut filled = 0;
+    for d in deferred {
+        let Some(ProcessedElement::Way(way)) = elements.get_mut(d.index) else {
+            continue;
+        };
+        if !way.tags.contains_key("height") && !way.tags.contains_key("building:levels") {
+            fill(way, d.height, d.flat);
             filled += 1;
         }
     }
     filled
+}
+
+fn fill(way: &mut ProcessedWay, height: f32, flat: bool) {
+    let kind = way
+        .tags
+        .get("building")
+        .map(String::as_str)
+        .unwrap_or("yes");
+    match storeys(kind, height) {
+        Some(levels) => way
+            .tags
+            .insert("building:levels".to_string(), levels.to_string()),
+        None => way
+            .tags
+            .insert("height".to_string(), format!("{height:.1}")),
+    };
+    if flat && !way.tags.contains_key("roof:shape") {
+        way.tags
+            .insert("roof:shape".to_string(), "flat".to_string());
+    }
 }
 
 /// (height in metres, flat roof) for one outline, if the laser saw it.
@@ -104,9 +151,6 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<(f32,
     roof.sort_by(f32::total_cmp);
     let at = |q: f64| roof[((roof.len() - 1) as f64 * q).round() as usize];
     let (eave, top) = (at(0.1), at(0.95));
-    if top >= SATURATED {
-        return None;
-    }
     if top - eave < 1.0 {
         Some((top, true))
     } else {
@@ -212,11 +256,34 @@ mod tests {
     }
 
     #[test]
-    fn a_roof_past_the_highest_height_recorded_is_left_alone() {
+    fn a_roof_at_the_highest_height_recorded_waits_for_overture() {
+        let tagged = |els: &[ProcessedElement]| els[0].tags().get("height").cloned();
+        let office = |mut w: ProcessedWay| {
+            w.tags.insert("building".into(), "office".into());
+            ProcessedElement::Way(w)
+        };
         let (ground, way, xzbbox) = roof(150);
-        assert_eq!(measure(&way, &ground, &xzbbox), Some((30.0, true)));
+        let mut els = vec![office(way)];
+        assert_eq!(apply(&mut els, &ground, &xzbbox).0, 1);
+        assert_eq!(tagged(&els).as_deref(), Some("30.0"));
+
         let (ground, way, xzbbox) = roof(255);
-        assert_eq!(measure(&way, &ground, &xzbbox), None);
+        let mut els = vec![office(way)];
+        let (filled, deferred) = apply(&mut els, &ground, &xzbbox);
+        assert_eq!((filled, deferred.len()), (0, 1));
+        assert_eq!(tagged(&els), None);
+        // Overture knew its height: that stays.
+        let mut known = els.clone();
+        if let ProcessedElement::Way(w) = &mut known[0] {
+            w.tags.insert("height".into(), "112".into());
+        }
+        let (_, deferred) = apply(&mut els, &ground, &xzbbox);
+        assert_eq!(apply_deferred(&mut known, deferred), 0);
+        assert_eq!(tagged(&known).as_deref(), Some("112"));
+        // It did not: the 51 m measured.
+        let (_, deferred) = apply(&mut els, &ground, &xzbbox);
+        assert_eq!(apply_deferred(&mut els, deferred), 1);
+        assert_eq!(tagged(&els).as_deref(), Some("51.0"));
     }
 
     #[test]

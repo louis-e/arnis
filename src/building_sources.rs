@@ -35,16 +35,19 @@ pub fn merge(
         ..
     } = overture;
 
-    let measured_heights = crate::survey::heights::apply(parsed_elements, ground, xzbbox);
+    // A roof at the highest height the survey records waits for Overture's.
+    let (mut measured_heights, deferred) =
+        crate::survey::heights::apply(parsed_elements, ground, xzbbox);
+
+    // Before the footprints are merged: Overture's own ways carry their tags.
+    let enriched = overture_hints.apply(parsed_elements);
+    measured_heights += crate::survey::heights::apply_deferred(parsed_elements, deferred);
     if measured_heights > 0 {
         println!(
             "  Measured heights for {} buildings from laser scans",
             measured_heights.to_string().bright_white().bold()
         );
     }
-
-    // Before the footprints are merged: Overture's own ways carry their tags.
-    let enriched = overture_hints.apply(parsed_elements);
     if enriched > 0 {
         println!(
             "  Filled heights on {} OSM buildings from Overture Maps",
