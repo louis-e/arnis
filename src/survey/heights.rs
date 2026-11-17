@@ -17,9 +17,10 @@
 //! the measured metres.
 //!
 //! An outline the laser mostly saw as something else (built after the scan, or
-//! mapped where nothing stands) is left alone. A roof at the 51 m the survey
-//! records at most may stand higher: such a building waits for Overture's
-//! height and gets the 51 m only where Overture has none.
+//! mapped where nothing stands) is left alone. A roof whose top reaches the
+//! 51 m the survey records at most may stand higher, whatever its eaves: such
+//! a building waits for Overture's height and gets what was measured only
+//! where Overture has none.
 
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::ground::Ground;
@@ -33,8 +34,8 @@ const MIN_BLOCKS: usize = 8;
 /// may stand any height above it.
 const SATURATED: f32 = 51.0;
 
-/// A building whose roof reached the highest height the survey records: its
-/// place in the elements and what was measured, for [`apply_deferred`].
+/// A building whose roof's top reached the highest height the survey records:
+/// its place in the elements and what was measured, for [`apply_deferred`].
 pub struct Deferred {
     index: usize,
     height: f32,
@@ -65,8 +66,8 @@ pub fn apply(
         {
             continue;
         }
-        if let Some((height, flat)) = measure(way, ground, xzbbox) {
-            if height >= SATURATED {
+        if let Some(Measured { height, flat, top }) = measure(way, ground, xzbbox) {
+            if top >= SATURATED {
                 deferred.push(Deferred {
                     index,
                     height,
@@ -117,8 +118,18 @@ fn fill(way: &mut ProcessedWay, height: f32, flat: bool) {
     }
 }
 
-/// (height in metres, flat roof) for one outline, if the laser saw it.
-fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<(f32, bool)> {
+/// What the laser saw of one outline's roof.
+struct Measured {
+    /// The height its walls get, in metres: the top of a flat roof, else the
+    /// eaves.
+    height: f32,
+    flat: bool,
+    /// The top of the roof (its 95th percentile), in metres.
+    top: f32,
+}
+
+/// What the laser saw of one outline's roof, if it saw enough of it.
+fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<Measured> {
     let pts: Vec<(f64, f64)> = way
         .nodes
         .iter()
@@ -151,11 +162,12 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<(f32,
     roof.sort_by(f32::total_cmp);
     let at = |q: f64| roof[((roof.len() - 1) as f64 * q).round() as usize];
     let (eave, top) = (at(0.1), at(0.95));
-    if top - eave < 1.0 {
-        Some((top, true))
-    } else {
-        Some((eave.max(2.0), false))
-    }
+    let flat = top - eave < 1.0;
+    Some(Measured {
+        height: if flat { top } else { eave.max(2.0) },
+        flat,
+        top,
+    })
 }
 
 /// Storeys a home with walls this tall holds: floors of 2.8 m over a raised
@@ -217,11 +229,19 @@ mod tests {
     /// A 20 x 20 block world whose laser saw a roof `byte` fifths of a metre up
     /// over (2, 2) .. (12, 12), and a way around it.
     fn roof(byte: u8) -> (Ground, ProcessedWay, XZBBox) {
+        roof_with_eaves(byte, byte)
+    }
+
+    /// As [`roof`], with the outermost ring of the roof at `eave` fifths of a
+    /// metre.
+    fn roof_with_eaves(byte: u8, eave: u8) -> (Ground, ProcessedWay, XZBBox) {
         let (w, h) = (20usize, 20usize);
         let mut cells = vec![[0u8; 5]; w * h];
         for z in 2..13 {
             for x in 2..13 {
-                cells[z * w + x] = [super::super::classify::BUILDING, byte, 0, 0, 0];
+                let edge = x == 2 || x == 12 || z == 2 || z == 12;
+                let q = if edge { eave } else { byte };
+                cells[z * w + x] = [super::super::classify::BUILDING, q, 0, 0, 0];
             }
         }
         let features = super::super::Features {
@@ -284,6 +304,15 @@ mod tests {
         let (_, deferred) = apply(&mut els, &ground, &xzbbox);
         assert_eq!(apply_deferred(&mut els, deferred), 1);
         assert_eq!(tagged(&els).as_deref(), Some("51.0"));
+
+        // A tower whose top reached 51 m waits too, though its eaves (here a
+        // lower ring around it) are far below: those would make it 30 m.
+        let (ground, way, xzbbox) = roof_with_eaves(255, 150);
+        let mut els = vec![office(way)];
+        let (filled, deferred) = apply(&mut els, &ground, &xzbbox);
+        assert_eq!((filled, deferred.len()), (0, 1));
+        assert_eq!(apply_deferred(&mut els, deferred), 1);
+        assert_eq!(tagged(&els).as_deref(), Some("30.0"));
     }
 
     #[test]
