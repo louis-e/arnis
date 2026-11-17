@@ -341,7 +341,15 @@ pub fn generate_amenities(
             }
             "parking" => {
                 if let ProcessedElement::Way(way) = element {
-                    parking_lots::generate_parking_lot(editor, way, args, flood_fill_cache, None);
+                    if parking_lots::is_surface_lot(&way.tags) {
+                        parking_lots::generate_parking_lot(
+                            editor,
+                            way,
+                            args,
+                            flood_fill_cache,
+                            None,
+                        );
+                    }
                 }
             }
             _ => {}

@@ -379,7 +379,11 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
         }
     }
     if let Some(v) = way.tags.get("amenity") {
-        if SEALED_AMENITY.contains(&v.as_str()) {
+        // A garage or an underground lot leaves the ground it is mapped over as it is.
+        if SEALED_AMENITY.contains(&v.as_str())
+            && (v != "parking"
+                || crate::element_processing::parking_lots::is_surface_lot(&way.tags))
+        {
             return true;
         }
     }

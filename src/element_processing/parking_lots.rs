@@ -279,10 +279,10 @@ pub fn orient_parking_lots(elements: &mut [ProcessedElement]) -> usize {
         .enumerate()
         .filter_map(|(i, element)| {
             let tag = match element {
-                ProcessedElement::Way(w) if is_lot(&w.tags) && is_closed(&w.nodes) => {
+                ProcessedElement::Way(w) if is_surface_lot(&w.tags) && is_closed(&w.nodes) => {
                     aisle_in(&[&w.nodes[..]])
                 }
-                ProcessedElement::Relation(r) if is_lot(&r.tags) => {
+                ProcessedElement::Relation(r) if is_surface_lot(&r.tags) => {
                     let rings: Vec<&[ProcessedNode]> = r
                         .members
                         .iter()
@@ -306,8 +306,23 @@ pub fn orient_parking_lots(elements: &mut [ProcessedElement]) -> usize {
     turns.len()
 }
 
-fn is_lot(tags: &HashMap<String, String>) -> bool {
-    tags.get("amenity").map(String::as_str) == Some("parking") && !tags.contains_key("building")
+/// A parking lot laid out on the ground, as opposed to a garage, a deck on a roof or one
+/// under the ground, whose `amenity=parking` area must not pave the ground it is mapped over.
+pub(crate) fn is_surface_lot(tags: &HashMap<String, String>) -> bool {
+    let get = |k: &str| tags.get(k).map(String::as_str);
+    let below = ["layer", "level"].iter().any(|k| {
+        get(k)
+            .and_then(|v| v.parse::<i32>().ok())
+            .is_some_and(|l| l < 0)
+    });
+    get("amenity") == Some("parking")
+        && !tags.contains_key("building")
+        && !matches!(
+            get("parking"),
+            Some("underground" | "multi-storey" | "rooftop")
+        )
+        && !matches!(get("location"), Some("underground" | "roof" | "rooftop"))
+        && !below
 }
 
 /// A parking lot: its asphalt, rows of stalls with a lamp every few, and parked cars.
@@ -457,6 +472,26 @@ mod tests {
 
     fn close(a: (f64, f64), b: (f64, f64)) -> bool {
         (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6
+    }
+
+    #[test]
+    fn only_lots_on_the_ground_are_surface_lots() {
+        let lot = |pairs: &[(&str, &str)]| {
+            let mut tags: HashMap<String, String> = pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            tags.insert("amenity".into(), "parking".into());
+            is_surface_lot(&tags)
+        };
+        assert!(lot(&[]));
+        assert!(lot(&[("parking", "surface")]));
+        assert!(!lot(&[("parking", "underground")]));
+        assert!(!lot(&[("parking", "multi-storey")]));
+        assert!(!lot(&[("parking", "rooftop")]));
+        assert!(!lot(&[("layer", "-1")]));
+        assert!(!lot(&[("level", "-2")]));
+        assert!(!lot(&[("building", "parking")]));
     }
 
     #[test]

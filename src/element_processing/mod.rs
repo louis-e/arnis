@@ -124,7 +124,7 @@ impl RelationArea {
             Some(Self::ManMade)
         } else if highways::is_highway_area_relation(tags) {
             Some(Self::Highway)
-        } else if tags.get("amenity").map(String::as_str) == Some("parking") {
+        } else if parking_lots::is_surface_lot(tags) {
             Some(Self::Parking)
         } else {
             None
