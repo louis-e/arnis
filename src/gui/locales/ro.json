@@ -846,7 +846,7 @@
   "settings_search_empty": "Nicio setare nu se potrivește.",
   "lidar": "Date laser",
   "lidar_desc": "Detalii măsurate unde o regiune își publică scanările. Experimental.",
-  "lidar_tip": "Citește scanări laser și fotografii aeriene deschise pentru detalii care lipsesc din OpenStreetMap, unde o regiune le publică. Nu pentru One World sau zone peste 16 km². Acoperă Bavaria, Renania de Nord-Westfalia, Franța, Țările de Jos, Luxemburg, Estonia, o parte din Elveția, cea mai mare parte a SUA și o parte din Canada. Experimental.",
+  "lidar_tip": "Citește scanări laser și fotografii aeriene deschise pentru detalii care lipsesc din OpenStreetMap, unde o regiune le publică. Nu pentru One World sau zone peste 16 km². Acoperă Bavaria, Renania de Nord-Westfalia, Franța, Țările de Jos, Luxemburg, Estonia, Elveția, cea mai mare parte a SUA și o parte din Canada. Experimental.",
   "measured_trees": "Copaci măsurați",
   "measured_trees_desc": "Copaci unde i-a văzut laserul, la înălțimea lor.",
   "measured_trees_tip": "Pune copacii unde i-a văzut laserul, la înălțimea măsurată, în locul hărții globale a coronamentului. Și copacii cartografiați primesc înălțimea măsurată.",

@@ -846,7 +846,7 @@
   "settings_search_empty": "Không có cài đặt nào phù hợp.",
   "lidar": "Dữ liệu laser",
   "lidar_desc": "Chi tiết đo được ở nơi vùng đó công bố dữ liệu quét. Thử nghiệm.",
-  "lidar_tip": "Đọc quét laser và ảnh hàng không mở cho các chi tiết OpenStreetMap còn thiếu, ở nơi vùng đó công bố. Không dùng cho One World hay khu vực trên 16 km². Hiện có Bavaria, Bắc Rhine-Westphalia, Pháp, Hà Lan, Luxembourg, Estonia, một phần Thụy Sĩ, phần lớn Hoa Kỳ và một phần Canada. Thử nghiệm.",
+  "lidar_tip": "Đọc quét laser và ảnh hàng không mở cho các chi tiết OpenStreetMap còn thiếu, ở nơi vùng đó công bố. Không dùng cho One World hay khu vực trên 16 km². Hiện có Bavaria, Bắc Rhine-Westphalia, Pháp, Hà Lan, Luxembourg, Estonia, Thụy Sĩ, phần lớn Hoa Kỳ và một phần Canada. Thử nghiệm.",
   "measured_trees": "Cây đo được",
   "measured_trees_desc": "Cây ở nơi laser thấy, đúng chiều cao.",
   "measured_trees_tip": "Đặt cây ở nơi laser thấy, với chiều cao đo được, thay cho bản đồ tán cây toàn cầu. Cây đã vẽ cũng nhận chiều cao đo được.",

@@ -846,7 +846,7 @@
   "settings_search_empty": "Nenhuma configuração corresponde.",
   "lidar": "Dados a laser",
   "lidar_desc": "Detalhes medidos onde uma região publica suas varreduras. Experimental.",
-  "lidar_tip": "Lê varreduras a laser e fotos aéreas abertas para detalhes que faltam no OpenStreetMap, onde uma região as publica. Não usado no One World nem em áreas acima de 16 km². Cobre a Baviera, a Renânia do Norte-Vestfália, a França, os Países Baixos, Luxemburgo, a Estônia, parte da Suíça, grande parte dos EUA e parte do Canadá. Experimental.",
+  "lidar_tip": "Lê varreduras a laser e fotos aéreas abertas para detalhes que faltam no OpenStreetMap, onde uma região as publica. Não usado no One World nem em áreas acima de 16 km². Cobre a Baviera, a Renânia do Norte-Vestfália, a França, os Países Baixos, Luxemburgo, a Estônia, a Suíça, grande parte dos EUA e parte do Canadá. Experimental.",
   "measured_trees": "Árvores medidas",
   "measured_trees_desc": "Árvores onde o laser as viu, na sua altura.",
   "measured_trees_tip": "Coloca árvores onde o laser as viu, na altura medida, em vez do mapa global de copas. Árvores mapeadas também recebem a altura medida.",

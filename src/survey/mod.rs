@@ -225,9 +225,15 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
         (n1 + MARGIN_M).ceil(),
     );
     let mut tiles = sheet.tiles(rect);
-    // Sources read in part fetch only what the area needs anyway.
-    if let Laser::Whole { .. } = sheet.laser {
-        tiles.retain(|&t| !sliver(t, rect));
+    // Sources read in part fetch only what the area needs anyway, but for a
+    // cloud-optimised source's zipped tiles, read whole: those listed so before
+    // are left out here, the rest once found (see `fetch_survey_data`).
+    match sheet.laser {
+        Laser::Whole { .. } => tiles.retain(|&t| !sliver(t, rect)),
+        Laser::Copc { .. } => {
+            tiles.retain(|&t| !(sliver(t, rect) && laser::noted_whole(root, &sheet, t)))
+        }
+        Laser::Ept { .. } => {}
     }
     // Square kilometres each tile lacks of what the area wants, from the start
     // of its cache file: side by side.
@@ -259,35 +265,60 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
     })
 }
 
-/// Megabytes the plan's missing whole files take, asked of the server (a HEAD
-/// each) where their addresses are fixed: Bavaria's tiles run from 70 MB to
-/// past 1 GB in the Alps, so the source's typical size can be far off. A file
-/// the server does not size counts at that.
-fn sized_download_mb(client: &reqwest::blocking::Client, plan: &Plan) -> u32 {
-    let Laser::Whole {
-        locate: Locate::Urls(urls),
-        tile_mb,
-    } = &plan.sheet.laser
-    else {
-        return plan.download_mb;
-    };
-    if plan.missing.is_empty() || crate::net::offline() {
+/// Megabytes the plan's missing tiles take, the whole files asked of the server
+/// (a HEAD each) where their addresses are fixed: Bavaria's tiles run from 70 MB
+/// to past 1 GB in the Alps, so the source's typical size can be far off. A file
+/// the server does not size counts at that. A cloud-optimised source's zipped
+/// tiles (see [`zip_url`]), which the plan counted by the part the area needs,
+/// are sized the same way once found.
+fn sized_download_mb(client: &reqwest::blocking::Client, plan: &Plan, urls: &Urls) -> u32 {
+    if plan.missing.is_empty() {
+        return 0;
+    }
+    if crate::net::offline() {
         return plan.download_mb;
     }
     use rayon::prelude::*;
-    let typical = u64::from(*tile_mb) * 1_000_000;
-    let bytes: Vec<u64> = plan
-        .missing
-        .par_iter()
-        .map(|&(te, tn)| {
-            urls(te, tn)
-                .first()
-                .and_then(|u| fetch::content_length(client, u))
-                .unwrap_or(typical)
-        })
-        .collect();
-    bytes.iter().sum::<u64>().div_ceil(1_000_000) as u32
+    let bytes: u64 = match plan.sheet.laser {
+        Laser::Whole {
+            locate: Locate::Urls(_),
+            tile_mb,
+        } => {
+            let typical = u64::from(tile_mb) * 1_000_000;
+            plan.missing
+                .par_iter()
+                .map(|t| {
+                    urls.get(t)
+                        .and_then(|u| u.first())
+                        .and_then(|u| fetch::content_length(client, u))
+                        .unwrap_or(typical)
+                })
+                .sum()
+        }
+        // Once any zip is found: the plan counted it by area, or counted one
+        // left out since (see `fetch_survey_data`).
+        Laser::Copc { mb_per_km2, .. } if urls.values().flatten().any(|u| laser::is_zip(u)) => {
+            let root = cache_root();
+            plan.missing
+                .par_iter()
+                .map(|&t| match zip_url(urls, t) {
+                    Some(u) => fetch::content_length(client, u).unwrap_or(ZIP_MB * 1_000_000),
+                    // The rest as the plan counted it.
+                    None => {
+                        let km2 = laser::missing_km2(&root, &plan.sheet, t.0, t.1, &plan.want(t));
+                        (km2 * f64::from(mb_per_km2) * 1e6) as u64
+                    }
+                })
+                .sum()
+        }
+        _ => return plan.download_mb,
+    };
+    bytes.div_ceil(1_000_000) as u32
 }
+
+/// A zipped tile's size where its server does not give it, erring high (the two
+/// measured in Switzerland take 135 and 159 MB).
+const ZIP_MB: u64 = 200;
 
 /// The status message for laser data over the download limit, followed by the
 /// megabytes needed and the limit; the window says it in the user's language.
@@ -331,7 +362,7 @@ pub fn fetch_survey_data(
     if grid_w < 2 || grid_h < 2 {
         return None;
     }
-    let plan = plan(bbox)?;
+    let mut plan = plan(bbox)?;
     let (e0, _, _, n1) = plan.rect;
     if plan.too_large() {
         println!(
@@ -349,7 +380,13 @@ pub fn fetch_survey_data(
         .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()
         .ok()?;
-    let need_mb = sized_download_mb(&client, &plan);
+    let urls = locate(&client, &plan)?;
+    // A tile found zipped is read whole: left out where only the margin reaches
+    // it, as a source read in whole files leaves it out.
+    let grazed = |t: &(i32, i32)| sliver(*t, plan.rect) && zip_url(&urls, *t).is_some();
+    plan.tiles.retain(|t| !grazed(t));
+    plan.missing.retain(|t| !grazed(t));
+    let need_mb = sized_download_mb(&client, &plan, &urls);
     if need_mb > max_mb {
         over_limit(need_mb, max_mb);
         return None;
@@ -379,7 +416,7 @@ pub fn fetch_survey_data(
     // The sizes above are the server's or an estimate; the bytes that come are
     // held to the limit as well, and past it the area goes without.
     fetch::limit_laser_bytes(u64::from(max_mb) * 1_000_000);
-    let inputs = mosaic(&client, &plan, features.garden || features.trees);
+    let inputs = mosaic(&client, &plan, &urls, features.garden || features.trees);
     if fetch::past_laser_limit() {
         // At least this much; the tiles that came are cached for a next run.
         let got_mb = (fetch::laser_bytes() - bytes0).div_ceil(1_000_000) as u32;
@@ -459,25 +496,16 @@ pub fn fetch_survey_data(
     Some(data)
 }
 
-/// The per-metre measurements over the plan's rectangle, from its tiles.
-fn mosaic(
-    client: &reqwest::blocking::Client,
-    plan: &Plan,
-    with_photo: bool,
-) -> Option<classify::Inputs> {
-    let (e0, n0, e1, n1) = plan.rect;
-    let (w, h) = ((e1 - e0) as usize, (n1 - n0) as usize);
-    let root = cache_root();
-    laser::sweep_leftovers(&root.join(plan.sheet.dir()));
-    let mut inp = classify::Inputs::new(w, h);
-    inp.laser_plants = plan.sheet.laser_plants;
-    inp.strict_pools = plan.sheet.strict_pools;
+/// Where to read each tile: its address, or candidates (see [`locate`]).
+type Urls = std::collections::HashMap<(i32, i32), Vec<String>>;
 
-    // Where to read each tile not already cached: a fixed address, candidates,
-    // or one lookup over the whole rectangle. Addresses cost nothing to work
-    // out, so every tile has them (a cached one never uses them); the lookup is
-    // made only when some tile is not cached.
-    let mut urls: std::collections::HashMap<(i32, i32), Vec<String>> = Default::default();
+/// Where to read each tile not already cached: a fixed address, candidates,
+/// or one lookup over the whole rectangle. Addresses cost nothing to work
+/// out, so every tile has them (a cached one never uses them); the lookup is
+/// made only when some tile is not cached. `None` when it cannot be made.
+fn locate(client: &reqwest::blocking::Client, plan: &Plan) -> Option<Urls> {
+    let root = cache_root();
+    let mut urls = Urls::default();
     let (Laser::Whole { locate, .. } | Laser::Copc { locate, .. } | Laser::Ept { locate, .. }) =
         &plan.sheet.laser;
     let uncached = || {
@@ -514,7 +542,10 @@ fn mosaic(
                     for (t, mut p) in parts {
                         p.sort();
                         p.dedup();
-                        urls.insert(t, vec![p.join("\n")]);
+                        let u = p.join("\n");
+                        // For later runs, which may make no lookup (see `plan_in`).
+                        laser::note_whole(&root, &plan.sheet, t, laser::is_zip(&u));
+                        urls.insert(t, vec![u]);
                     }
                 }
                 Err(e) => {
@@ -526,6 +557,32 @@ fn mosaic(
         }
         Locate::Lookup(_) => {}
     }
+    Some(urls)
+}
+
+/// The address of tile `t`'s zipped file, which is read whole: an older campaign
+/// among a cloud-optimised source's.
+fn zip_url(urls: &Urls, t: (i32, i32)) -> Option<&str> {
+    urls.get(&t)?
+        .iter()
+        .find(|u| laser::is_zip(u))
+        .map(String::as_str)
+}
+
+/// The per-metre measurements over the plan's rectangle, from its tiles.
+fn mosaic(
+    client: &reqwest::blocking::Client,
+    plan: &Plan,
+    urls: &Urls,
+    with_photo: bool,
+) -> Option<classify::Inputs> {
+    let (e0, n0, e1, n1) = plan.rect;
+    let (w, h) = ((e1 - e0) as usize, (n1 - n0) as usize);
+    let root = cache_root();
+    laser::sweep_leftovers(&root.join(plan.sheet.dir()));
+    let mut inp = classify::Inputs::new(w, h);
+    inp.laser_plants = plan.sheet.laser_plants;
+    inp.strict_pools = plan.sheet.strict_pools;
 
     // The photo downloads beside the laser tiles: they come from other servers,
     // or from one that paces every request itself. Each tile goes into the
@@ -555,7 +612,7 @@ fn mosaic(
         // and decode (see `laser::tile`), and a decode's own Rayon work must
         // never pick up another tile while it holds a turn.
         let (tx, rx) = std::sync::mpsc::channel();
-        let (next, urls, root) = (&next, &urls, &root);
+        let (next, root) = (&next, &root);
         for _ in 0..laser::TILES_AT_ONCE.min(plan.tiles.len()) {
             let tx = tx.clone();
             s.spawn(move || loop {
@@ -720,6 +777,25 @@ mod tests {
         // Past the margin the world lies on it: kept, however thin.
         let past = (713_955.0, 5_353_059.0, 716_006.0, 5_354_941.0);
         assert!(!sliver((713, 5353), past));
+    }
+
+    #[test]
+    fn a_zipped_tile_only_the_margin_reaches_is_left_out_once_listed() {
+        // Kriens: the margin reaches 15 m into the tile row north of the area.
+        let bbox = LLBBox::new(47.0333, 8.2781, 47.0377, 8.2839).unwrap();
+        let root = std::env::temp_dir().join(format!("arnis-whole-test-{}", std::process::id()));
+        let tiles = || plan_in(&root, &bbox).unwrap().tiles;
+        let sheet = plan_in(&root, &bbox).unwrap().sheet;
+        assert!(tiles().contains(&(2663, 1210)));
+        laser::note_whole(&root, &sheet, (2663, 1210), true);
+        assert!(!tiles().contains(&(2663, 1210)) && tiles().contains(&(2664, 1210)));
+        // Where the world lies on it, kept.
+        laser::note_whole(&root, &sheet, (2663, 1209), true);
+        assert!(tiles().contains(&(2663, 1209)));
+        // Listed again as cloud-optimised: read in part again.
+        laser::note_whole(&root, &sheet, (2663, 1210), false);
+        assert!(tiles().contains(&(2663, 1210)));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

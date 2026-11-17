@@ -1,10 +1,13 @@
 //! Switzerland: swisstopo's swissSURFACE3D laser scans and SWISSIMAGE photos.
 //!
 //! * swissSURFACE3D: tiles of 1 km in LV95 (EPSG:2056), found through the
-//!   federal STAC API. Only the campaign flown from 2024 is published as COPC;
-//!   tiles that only have the older zipped LAS (about 160 MB each, no index) are
-//!   left out. About 20 points per m², classes 2 ground, 3 vegetation,
-//!   6 building, 9 water, 17 bridge.
+//!   federal STAC API. The campaigns flown from 2024 on are published as COPC
+//!   and read in part; where a tile has none yet, the latest earlier campaign
+//!   (2017 to 2023) is read whole from its zip, one LAS file of about 360 MB
+//!   packed to about 160 (135 MB a km² measured in Muri bei Bern), and left out
+//!   where only the area's margin reaches it, like any whole file. About 12 to
+//!   20 points per m², classes 2 ground, 3 vegetation, 6 building, 9 water,
+//!   17 bridge.
 //! * SWISSIMAGE: 10 cm RGB through the federal WMS.
 //!
 //! Free geodata of the Federal Office of Topography swisstopo (Open Government
@@ -318,8 +321,8 @@ pub static SWITZERLAND: Source = Source {
     attribution: "Federal Office of Topography swisstopo – swissSURFACE3D, SWISSIMAGE",
 };
 
-/// The COPC tiles over a rectangle, from the STAC API; the latest campaign of a
-/// tile wins.
+/// The tiles over a rectangle, from the STAC API: the latest COPC campaign of
+/// a tile, else its latest zipped one.
 fn lookup(
     client: &reqwest::blocking::Client,
     _: &Sheet,
@@ -338,7 +341,7 @@ fn lookup(
         "https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swisssurface3d/items\
          ?bbox={w:.6},{s:.6},{e:.6},{n:.6}&limit=100"
     ));
-    let mut best: std::collections::HashMap<(i32, i32), (String, String)> = Default::default();
+    let mut best: std::collections::HashMap<(i32, i32), (u8, String, String)> = Default::default();
     let mut pages = 0;
     while let Some(u) = url.take() {
         pages += 1;
@@ -359,16 +362,24 @@ fn lookup(
             let (Ok(x), Ok(y)) = (x.parse::<i32>(), y.parse::<i32>()) else {
                 continue;
             };
-            let Some(href) = f["assets"].as_object().and_then(|a| {
-                a.values()
+            let hrefs = || {
+                f["assets"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|a| a.values())
                     .filter_map(|v| v["href"].as_str())
-                    .find(|h| h.ends_with(".copc.laz"))
-            }) else {
-                continue;
+            };
+            // COPC ranks above any zip, then the later campaign.
+            let rank = match hrefs().find(|h| h.ends_with(".copc.laz")) {
+                Some(h) => (1, year.to_string(), h.to_string()),
+                None => match hrefs().find(|h| h.ends_with(".las.zip")) {
+                    Some(h) => (0, year.to_string(), h.to_string()),
+                    None => continue,
+                },
             };
             let key = (x, y);
-            if best.get(&key).is_none_or(|(yr, _)| yr.as_str() < year) {
-                best.insert(key, (year.to_string(), href.to_string()));
+            if best.get(&key).is_none_or(|b| *b < rank) {
+                best.insert(key, rank);
             }
         }
         url = json["links"]
@@ -379,5 +390,5 @@ fn lookup(
             .and_then(|l| l["href"].as_str())
             .map(String::from);
     }
-    Ok(best.into_iter().map(|(k, (_, u))| (k, u)).collect())
+    Ok(best.into_iter().map(|(k, (_, _, u))| (k, u)).collect())
 }

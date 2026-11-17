@@ -846,7 +846,7 @@
   "settings_search_empty": "Nincs egyező beállítás.",
   "lidar": "Lézeradatok",
   "lidar_desc": "Mért részletek, ahol egy régió közzéteszi a szkenjeit. Kísérleti.",
-  "lidar_tip": "Nyílt lézerszkennelést és légifotókat olvas az OpenStreetMapből hiányzó részletekhez, ahol a régió közzéteszi őket. One Worldhöz és 16 km² feletti területhez nem. Bajorországban, Észak-Rajna-Vesztfáliában, Franciaországban, Hollandiában, Luxemburgban, Észtországban, Svájc egy részén, az USA nagy részén és Kanada egy részén. Kísérleti.",
+  "lidar_tip": "Nyílt lézerszkennelést és légifotókat olvas az OpenStreetMapből hiányzó részletekhez, ahol a régió közzéteszi őket. One Worldhöz és 16 km² feletti területhez nem. Bajorországban, Észak-Rajna-Vesztfáliában, Franciaországban, Hollandiában, Luxemburgban, Észtországban, Svájcban, az USA nagy részén és Kanada egy részén. Kísérleti.",
   "measured_trees": "Mért fák",
   "measured_trees_desc": "Fák ott, ahol a lézer látta őket, a magasságukkal.",
   "measured_trees_tip": "Oda teszi a fákat, ahol a lézer látta őket, a mért magassággal, a globális lombkorona-térkép helyett. A térképezett fák is a mért magasságot kapják.",

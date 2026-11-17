@@ -236,6 +236,27 @@ fn fixed_addresses(source: &Sheet) -> bool {
     matches!(locate, super::source::Locate::Urls(_))
 }
 
+fn whole_marker(root: &Path, source: &Sheet, te: i32, tn: i32) -> PathBuf {
+    root.join(source.dir())
+        .join(format!("tile_{te}_{tn}.whole"))
+}
+
+/// Notes whether a cloud-optimised source's index listed tile (`te`, `tn`) as
+/// one whole file (zipped, see [`is_zip`]), for runs that need no lookup.
+pub fn note_whole(root: &Path, source: &Sheet, (te, tn): (i32, i32), whole: bool) {
+    let path = whole_marker(root, source, te, tn);
+    if !whole {
+        let _ = std::fs::remove_file(path);
+    } else if std::fs::create_dir_all(root.join(source.dir())).is_ok() {
+        let _ = std::fs::write(path, b"");
+    }
+}
+
+/// Whether the index last listed tile `t` as one whole file ([`note_whole`]).
+pub fn noted_whole(root: &Path, source: &Sheet, (te, tn): (i32, i32)) -> bool {
+    whole_marker(root, source, te, tn).exists()
+}
+
 fn known_absent(root: &Path, source: &Sheet, te: i32, tn: i32) -> bool {
     if !fixed_addresses(source) {
         return false;
@@ -304,6 +325,8 @@ pub fn tile(
     for url in urls {
         let got = match source.laser {
             Laser::Whole { .. } => read_whole(client, root, source, te, tn, url),
+            // A tile only delivered whole (an older campaign, zipped).
+            Laser::Copc { .. } if is_zip(url) => read_whole(client, root, source, te, tn, url),
             Laser::Copc { .. } | Laser::Ept { .. } => {
                 // A COPC or EPT tile decodes as it downloads: a turn at both.
                 let _download = DOWNLOADS.enter(DOWNLOADS_AT_ONCE);
@@ -471,7 +494,12 @@ fn read_copc(
     Ok(())
 }
 
-/// Download a plain LAZ tile and measure all of it.
+/// Whether `url` is a zip archive holding one LAS or LAZ file, read whole.
+pub fn is_zip(url: &str) -> bool {
+    url.ends_with(".zip")
+}
+
+/// Download a plain LAZ tile (or a zip holding one) and measure all of it.
 fn read_whole(
     client: &reqwest::blocking::Client,
     root: &Path,
@@ -520,9 +548,44 @@ fn read_whole(
     }
     let measured = {
         let _turn = DECODES.enter(decodes_at_once());
-        measure_file(&tmp.0, source, te, tn, url)
+        if is_zip(url) {
+            let las = Partial(PathBuf::from(format!("{}.las", tmp.0.display())));
+            unzip(&tmp.0, &las.0).and_then(|()| measure_file(&las.0, source, te, tn, url))
+        } else {
+            measure_file(&tmp.0, source, te, tn, url)
+        }
     };
     measured.map_err(other)
+}
+
+/// Most a zipped tile may unpack to: Switzerland's hold one LAS file of a few
+/// hundred MB (360 in Muri bei Bern).
+const MAX_UNZIPPED: u64 = 4 << 30;
+
+/// Unpack the LAS or LAZ file in the zip at `from` to `to`, at most
+/// [`MAX_UNZIPPED`] of it, whatever the zip says its size is.
+fn unzip(from: &Path, to: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(from).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let i = (0..zip.len())
+        .find(|&i| {
+            zip.name_for_index(i).and_then(Result::ok).is_some_and(|n| {
+                let n = n.to_ascii_lowercase();
+                n.ends_with(".las") || n.ends_with(".laz")
+            })
+        })
+        .ok_or("no LAS file in the zip")?;
+    let entry = zip.by_index(i).map_err(|e| e.to_string())?;
+    if entry.size() > MAX_UNZIPPED {
+        return Err(format!("a zipped file of {} bytes", entry.size()));
+    }
+    let mut out = std::io::BufWriter::new(std::fs::File::create(to).map_err(|e| e.to_string())?);
+    let n =
+        std::io::copy(&mut entry.take(MAX_UNZIPPED + 1), &mut out).map_err(|e| e.to_string())?;
+    if n > MAX_UNZIPPED {
+        return Err("a zipped file larger than it says".into());
+    }
+    out.flush().map_err(|e| e.to_string())
 }
 
 /// A download in progress, removed when dropped.
