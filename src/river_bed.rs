@@ -8,8 +8,7 @@ use crate::block_definitions::{
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::water_areas::PolygonEdges;
 use crate::element_processing::waterways::{
-    capped_waterway_width, channel_cells, channel_reach, is_channel_waterway,
-    is_underground_waterway,
+    channel_cells, channel_reach, is_channel_waterway, is_underground_waterway, ChannelShape,
 };
 use crate::ground::Ground;
 use crate::ground_generation::ground_noise;
@@ -140,7 +139,7 @@ pub fn compute_river_bed_field(
     xzbbox: &XZBBox,
     clip_bbox: &XZBBox,
     scale: f64,
-    channel_width_cap: Option<i32>,
+    channels: ChannelShape,
 ) -> RiverBedField {
     if mode == RiverBed::Off {
         return RiverBedField::default();
@@ -162,7 +161,7 @@ pub fn compute_river_bed_field(
                 clip_bbox.max_z(),
             ),
             scale,
-            channel_width_cap,
+            channels,
         },
     )
 }
@@ -174,8 +173,8 @@ struct FieldInputs<'a> {
     /// (min_x, max_x, min_z, max_z) of the region whose geometry is complete.
     bb: (i32, i32, i32, i32),
     scale: f64,
-    /// Widest line waterway the draw paints (`--water-detail scaled` at small scale).
-    channel_width_cap: Option<i32>,
+    /// How the draw paints line waterways.
+    channels: ChannelShape<'a>,
 }
 
 struct PolyRings {
@@ -248,7 +247,7 @@ fn build_field_tiled(elements: &[ProcessedElement], inp: &FieldInputs, halo: i32
     let mut nonriver_polys = Vec::new();
     classify(
         elements,
-        inp.channel_width_cap,
+        inp.channels,
         &mut lines,
         &mut river_polys,
         &mut nonriver_polys,
@@ -382,7 +381,14 @@ fn build_tile(
     let mut line_mask = vec![false; n];
     let mut hw_line = vec![0u8; n];
     for &i in &work.lines {
-        stamp_line(&geo.lines[i as usize], &lat, &mut line_mask, &mut hw_line);
+        let roads = inp.channels.roads_at_grade;
+        stamp_line(
+            &geo.lines[i as usize],
+            roads,
+            &lat,
+            &mut line_mask,
+            &mut hw_line,
+        );
     }
     let mut poly_mask = vec![false; n];
     for &i in &work.rivers {
@@ -639,7 +645,7 @@ fn relation_rings(rel: &crate::osm_parser::ProcessedRelation) -> Option<PolyRing
 /// Tag scan of every element; the dispatch sends `natural=water` + `water=river` elsewhere.
 fn classify<'a>(
     elements: &'a [ProcessedElement],
-    channel_width_cap: Option<i32>,
+    channels: ChannelShape,
     lines: &mut Vec<LineRiver<'a>>,
     river_polys: &mut Vec<PolyRings>,
     nonriver_polys: &mut Vec<PolyRings>,
@@ -671,7 +677,7 @@ fn classify<'a>(
                 {
                     continue;
                 }
-                let width = capped_waterway_width(wt, &way.tags, channel_width_cap);
+                let width = channels.width(wt, &way.tags);
                 lines.push(LineRiver { way, width });
             }
             ProcessedElement::Relation(rel) => {
@@ -709,7 +715,13 @@ impl Lat {
 }
 
 /// The ribbon the channel draws (`channel_cells`), geometry only.
-fn stamp_line(lr: &LineRiver, lat: &Lat, mask: &mut [bool], hw_line: &mut [u8]) {
+fn stamp_line(
+    lr: &LineRiver,
+    roads_at_grade: Option<&crate::floodfill_cache::CoordinateBitmap>,
+    lat: &Lat,
+    mask: &mut [bool],
+    hw_line: &mut [u8],
+) {
     let (before, after) = channel_reach(lr.width);
     // The ribbon's centre is this far from its bank.
     let hw = (before.max(after) + 1).clamp(1, 255) as u8;
@@ -719,7 +731,7 @@ fn stamp_line(lr: &LineRiver, lat: &Lat, mask: &mut [bool], hw_line: &mut [u8]) 
         lat.min_z,
         lat.min_z + lat.h as i32 - 1,
     );
-    channel_cells(&lr.way.nodes, lr.width, area, |x, z| {
+    channel_cells(&lr.way.nodes, lr.width, roads_at_grade, area, |x, z| {
         if let Some(i) = lat.idx(x, z) {
             mask[i] = true;
             // Max, so overlapping ways give the same field in any order.

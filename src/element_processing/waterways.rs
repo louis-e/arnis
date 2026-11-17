@@ -2,7 +2,8 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::field_texture::PLOT_PLANTS;
-use crate::floodfill_cache::RoadMaskBitmap;
+use crate::floodfill_cache::{CoordinateBitmap, RoadMaskBitmap};
+use crate::mapillary::geometry::parse_length_m;
 use crate::osm_parser::{ProcessedNode, ProcessedWay};
 use crate::water_depth::{at_bore, carve_water_column, BigWaterField};
 use crate::world_editor::WorldEditor;
@@ -15,76 +16,81 @@ pub struct ChannelBed<'a> {
     pub tunnel_footprint: &'a RoadMaskBitmap,
     /// Decks over the channel; under one that clears the water the bed is dug as elsewhere.
     pub decks: &'a BridgeSurfaceMap,
-    /// Set with a water option on: a channel under a road at grade is then left out, so a
-    /// path along a stream leaves no strips of water on its sides.
-    pub piped_under_roads: Option<&'a BridgeSurfaceMap>,
 }
 
-/// `width_cap` narrows every channel (`--water-detail scaled` on small maps).
+/// How line waterways are drawn. Their drawing and every mask of their water take the same
+/// one, so the water a mask marks is the water drawn.
+#[derive(Clone, Copy, Default)]
+pub struct ChannelShape<'a> {
+    /// Narrows every channel (`--water-detail scaled` on small maps).
+    pub width_cap: Option<i32>,
+    /// With a water option on, the road and path surfaces at grade a channel is piped under:
+    /// nothing is drawn around a centreline cell on one, so a path along a stream leaves no
+    /// strip of water on either side (`Ground::pipe_channels_under_roads`).
+    pub roads_at_grade: Option<&'a CoordinateBitmap>,
+}
+
+impl ChannelShape<'_> {
+    /// Width of a channel of this type and tags, in blocks.
+    pub fn width(&self, waterway_type: &str, tags: &HashMap<String, String>) -> i32 {
+        capped_waterway_width(waterway_type, tags, self.width_cap)
+    }
+}
+
 pub fn generate_waterways(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    width_cap: Option<i32>,
+    shape: ChannelShape,
     bed: &ChannelBed,
 ) {
-    if let Some(waterway_type) = element.tags.get("waterway") {
-        // waterway=* structures are not channels; outlining a dam draws canals down it.
-        if !is_channel_waterway(waterway_type) {
-            return;
-        }
-        let waterway_width = capped_waterway_width(waterway_type, &element.tags, width_cap);
-
-        // Culverts and pipes are not open water; they would cut channels through banks.
-        if is_underground_waterway(&element.tags) {
-            return;
-        }
-
-        // Process consecutive node pairs to create waterways
-        // Use windows(2) to avoid connecting last node back to first
-        for nodes_pair in element.nodes.windows(2) {
-            let prev_node = nodes_pair[0].xz();
-            let current_node = nodes_pair[1].xz();
-
-            let y0 = editor.get_water_level(prev_node.x, prev_node.z);
-            let y1 = editor.get_water_level(current_node.x, current_node.z);
-
-            // Draw a line between the current and previous node
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(
-                prev_node.x,
-                0,
-                prev_node.z,
-                current_node.x,
-                0,
-                current_node.z,
-            );
-
-            // A flat Y per segment leaves puddles near the lower node, so ramp between
-            // the endpoints and clamp to the local surface so the sheet never floats.
-            let last = bresenham_points.len().saturating_sub(1) as i64;
-            let dy = i64::from(y1 - y0);
-            let mut prev: Option<(i32, i32)> = None;
-            for (i, (bx, _, bz)) in bresenham_points.into_iter().enumerate() {
-                let ramped = if last > 0 {
-                    let num = dy * i as i64;
-                    y0 + ((2 * num + last * dy.signum()) / (2 * last)) as i32
-                } else {
-                    y0.min(y1)
-                };
-                let seg_water_y = ramped.min(editor.get_water_level(bx, bz));
-                if bed.piped_under_roads.is_some_and(|decks| {
-                    bed.road_mask.contains(bx, bz)
-                        && (!decks.deck_clears(bx, bz, seg_water_y) || decks.over_grade_way(bx, bz))
-                }) {
-                    prev = None;
-                    continue;
-                }
-                for (x, z) in channel_cells_at(bx, bz, prev, waterway_width) {
-                    fill_channel_cell(editor, x, z, seg_water_y, bed);
-                }
-                prev = Some((bx, bz));
-            }
-        }
+    let Some(waterway_type) = element.tags.get("waterway") else {
+        return;
+    };
+    // waterway=* structures are not channels; outlining a dam draws canals down it.
+    // Culverts and pipes are not open water; they would cut channels through banks.
+    if !is_channel_waterway(waterway_type) || is_underground_waterway(&element.tags) {
+        return;
     }
+    let width = shape.width(waterway_type, &element.tags);
+    let nodes = &element.nodes;
+    // The water surface at the segment ends, and at the centre point drawn last.
+    let mut ends: Option<(usize, i32, i32)> = None;
+    let mut surface: Option<(Centre, i32)> = None;
+    let everywhere = (i32::MIN, i32::MAX, i32::MIN, i32::MAX);
+    channel_walk(nodes, width, shape.roads_at_grade, everywhere, |c, x, z| {
+        let water_y = match surface {
+            Some((at, y)) if at == c => y,
+            _ => {
+                let (y0, y1) = match ends {
+                    Some((segment, y0, y1)) if segment == c.segment => (y0, y1),
+                    _ => {
+                        let (a, b) = (nodes[c.segment].xz(), nodes[c.segment + 1].xz());
+                        let y0 = editor.get_water_level(a.x, a.z);
+                        let y1 = editor.get_water_level(b.x, b.z);
+                        ends = Some((c.segment, y0, y1));
+                        (y0, y1)
+                    }
+                };
+                let y = ramped_surface(y0, y1, c).min(editor.get_water_level(c.x, c.z));
+                surface = Some((c, y));
+                y
+            }
+        };
+        fill_channel_cell(editor, x, z, water_y, bed);
+    });
+}
+
+/// The surface of a segment from water level `y0` at its start to `y1` at its end, at
+/// centre point `c`. A flat Y per segment leaves puddles near the lower node, so it ramps
+/// between the ends; the caller clamps it to the local surface so the sheet never floats.
+fn ramped_surface(y0: i32, y1: i32, c: Centre) -> i32 {
+    let last = c.steps as i64;
+    if last == 0 {
+        return y0.min(y1);
+    }
+    let dy = i64::from(y1 - y0);
+    let num = dy * c.step as i64;
+    y0 + ((2 * num + last * dy.signum()) / (2 * last)) as i32
 }
 
 /// False for `waterway=*` values that are structures or points, not a channel.
@@ -146,16 +152,17 @@ pub fn get_waterway_width(waterway_type: &str) -> i32 {
 pub const MAX_WATERWAY_WIDTH: i32 = 128;
 
 /// Channel width in blocks, from `width=*` when it parses and the type default otherwise.
+/// The tag reads as a length (`1,5`, `2 m`, `6 ft`); of a list such as `3;4` the first
+/// value counts. Any positive width draws at least one block.
 pub fn waterway_width(waterway_type: &str, tags: &HashMap<String, String>) -> i32 {
     let tagged = tags
         .get("width")
-        .and_then(|s| s.trim().split(' ').next())
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|w| w.is_finite())
-        .map(|w| w.round() as i64);
+        .and_then(|s| s.split(';').next())
+        .and_then(parse_length_m)
+        .filter(|w| w.is_finite() && *w > 0.0);
     match tagged {
-        Some(w) if w >= 1 => w.min(i64::from(MAX_WATERWAY_WIDTH)) as i32,
-        _ => get_waterway_width(waterway_type),
+        Some(w) => (w.round() as i64).clamp(1, i64::from(MAX_WATERWAY_WIDTH)) as i32,
+        None => get_waterway_width(waterway_type),
     }
 }
 
@@ -207,20 +214,46 @@ pub fn channel_cells_at(
     )
 }
 
-/// Every cell a channel `width` blocks wide draws along `nodes`, as `channel_cells_at`
-/// gives them for each cell of its centreline: the footprint the water masks share with the
-/// drawn channel. Segments that come no nearer than the channel's reach to the inclusive
-/// `area` (min x, max x, min z, max z) are skipped. A cell may come more than once.
+/// Every cell a channel `width` blocks wide draws along `nodes`, as `channel_walk` gives
+/// them: the footprint the water masks share with the drawn channel.
 pub fn channel_cells(
     nodes: &[ProcessedNode],
     width: i32,
+    roads_at_grade: Option<&CoordinateBitmap>,
     area: (i32, i32, i32, i32),
     mut cell: impl FnMut(i32, i32),
+) {
+    channel_walk(nodes, width, roads_at_grade, area, |_, x, z| cell(x, z));
+}
+
+/// A centreline cell of a channel, on the line from node `segment` to the next, `step`
+/// cells along it of `steps`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Centre {
+    pub x: i32,
+    pub z: i32,
+    pub segment: usize,
+    pub step: usize,
+    pub steps: usize,
+}
+
+/// Every cell a channel `width` blocks wide draws along `nodes`, with the centreline cell it
+/// draws it for: `channel_cells_at` for each cell of its centreline, except one on
+/// `roads_at_grade`, where it is piped under the road. The drawing and every mask of its
+/// water walk this, so they cover the same cells. Segments that come no nearer than the
+/// channel's reach to the inclusive `area` (min x, max x, min z, max z) are skipped. A
+/// cell may come more than once.
+pub fn channel_walk(
+    nodes: &[ProcessedNode],
+    width: i32,
+    roads_at_grade: Option<&CoordinateBitmap>,
+    area: (i32, i32, i32, i32),
+    mut cell: impl FnMut(Centre, i32, i32),
 ) {
     let (before, after) = channel_reach(width);
     let reach = before.max(after) + 1;
     let mut prev = None;
-    for pair in nodes.windows(2) {
+    for (segment, pair) in nodes.windows(2).enumerate() {
         let (a, b) = (pair[0].xz(), pair[1].xz());
         if a.x.max(b.x).saturating_add(reach) < area.0
             || a.x.min(b.x).saturating_sub(reach) > area.1
@@ -230,9 +263,23 @@ pub fn channel_cells(
             prev = None;
             continue;
         }
-        for (x, _, z) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
+        let line = bresenham_line(a.x, 0, a.z, b.x, 0, b.z);
+        let steps = line.len().saturating_sub(1);
+        for (step, (x, _, z)) in line.into_iter().enumerate() {
+            if roads_at_grade.is_some_and(|roads| roads.contains(x, z)) {
+                // No corner joins the cells either side of the road.
+                prev = None;
+                continue;
+            }
+            let centre = Centre {
+                x,
+                z,
+                segment,
+                step,
+                steps,
+            };
             for (cx, cz) in channel_cells_at(x, z, prev, width) {
-                cell(cx, cz);
+                cell(centre, cx, cz);
             }
             prev = Some((x, z));
         }
@@ -341,7 +388,6 @@ mod waterway_profile_tests {
             road_mask: &NONE,
             tunnel_footprint: &NONE,
             decks: &DECKS,
-            piped_under_roads: None,
         }
     }
 
@@ -355,7 +401,12 @@ mod waterway_profile_tests {
     fn a_dropping_channel_follows_the_terrain_instead_of_pooling_at_the_lower_node() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 16.0, 0.25);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
+        generate_waterways(
+            &mut editor,
+            &stream(FIRST_Z, LAST_Z),
+            ChannelShape::default(),
+            &no_bed(),
+        );
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);
@@ -392,9 +443,13 @@ mod waterway_profile_tests {
             road_mask: &road_mask,
             tunnel_footprint: &none,
             decks: &decks,
-            piped_under_roads: Some(&decks),
         };
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &bed);
+        // The road is at grade, so the channel is piped under it.
+        let shape = ChannelShape {
+            width_cap: None,
+            roads_at_grade: Some(&road_mask),
+        };
+        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), shape, &bed);
 
         // Two blocks deeper; the lowest may hold seagrass instead of plain water.
         assert!(water_ys(&editor, CENTER_X, 20).ends_with(&[7, 8]));
@@ -436,7 +491,7 @@ mod waterway_profile_tests {
         canal
             .tags
             .insert("waterway".to_string(), "canal".to_string());
-        generate_waterways(&mut editor, &canal, None, &no_bed());
+        generate_waterways(&mut editor, &canal, ChannelShape::default(), &no_bed());
         assert_eq!(water_ys(&editor, CENTER_X, 30), vec![6, 7, 8]);
     }
 
@@ -462,7 +517,7 @@ mod waterway_profile_tests {
             if let Some(w) = width {
                 way.tags.insert("width".to_string(), w.to_string());
             }
-            generate_waterways(&mut editor, &way, None, &no_bed());
+            generate_waterways(&mut editor, &way, ChannelShape::default(), &no_bed());
             assert_eq!(wet_columns_in_row(&editor, 30), want, "{kind} {width:?}");
         }
     }
@@ -476,7 +531,7 @@ mod waterway_profile_tests {
         way.tags.insert("waterway".to_string(), "ditch".to_string());
         way.nodes[0].x = 10;
         way.nodes[1].x = 40;
-        generate_waterways(&mut editor, &way, None, &no_bed());
+        generate_waterways(&mut editor, &way, ChannelShape::default(), &no_bed());
         let wet = |x: i32, z: i32| !water_ys(&editor, x, z).is_empty();
         for i in 10..40 {
             assert!(wet(i, i), "gap at {i}");
@@ -492,6 +547,85 @@ mod waterway_profile_tests {
             .filter(|&(x, z)| wet(x, z))
             .count();
         assert_eq!(total, 31 + 30);
+    }
+
+    /// Width tags read as lengths; of a list the first value counts, and any positive width
+    /// draws at least one block.
+    #[test]
+    fn a_width_tag_reads_as_a_length() {
+        let width = |tag: &str| {
+            let tags = HashMap::from([("width".to_string(), tag.to_string())]);
+            waterway_width("stream", &tags)
+        };
+        for (tag, want) in [
+            ("2", 2),
+            ("2m", 2),
+            ("2 m", 2),
+            ("1,5", 2),
+            ("2.4", 2),
+            ("0.4", 1),
+            ("0.5", 1),
+            ("10 ft", 3),
+            ("3 ft", 1),
+            ("3;4", 3),
+            ("4 m;6 m", 4),
+            ("500", MAX_WATERWAY_WIDTH),
+            // No width: the stream's own.
+            ("0", 3),
+            ("-2", 3),
+            ("wide", 3),
+            ("", 3),
+        ] {
+            assert_eq!(width(tag), want, "width={tag:?}");
+        }
+    }
+
+    /// `--water-detail scaled` on a small map: rivers and canals at most 5 wide, streams
+    /// and ditches at most 3, and the narrow ones as they are.
+    #[test]
+    fn the_small_map_cap_narrows_rivers_to_five_and_streams_to_three() {
+        let cap = crate::water_detail::WaterDetail::Scaled.channel_width_cap(0.5);
+        assert_eq!(cap, Some(5));
+        assert_eq!(
+            crate::water_detail::WaterDetail::Scaled.channel_width_cap(1.0),
+            None
+        );
+        let tags = |width: Option<&str>| -> HashMap<String, String> {
+            width
+                .map(|w| HashMap::from([("width".to_string(), w.to_string())]))
+                .unwrap_or_default()
+        };
+        for (kind, width, want) in [
+            ("river", None, 5),
+            ("river", Some("4"), 4),
+            ("river", Some("30"), 5),
+            ("canal", None, 5),
+            ("stream", None, 3),
+            ("stream", Some("5"), 3),
+            ("stream", Some("2"), 2),
+            ("brook", Some("8"), 3),
+            ("ditch", None, 1),
+            ("ditch", Some("4"), 3),
+        ] {
+            assert_eq!(
+                capped_waterway_width(kind, &tags(width), cap),
+                want,
+                "{kind} {width:?}"
+            );
+        }
+        // The drawing takes the same cap.
+        let bbox = world_bbox();
+        let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
+        let mut river = stream(FIRST_Z, LAST_Z);
+        river
+            .tags
+            .insert("waterway".to_string(), "river".to_string());
+        let shape = ChannelShape {
+            width_cap: cap,
+            roads_at_grade: None,
+        };
+        generate_waterways(&mut editor, &river, shape, &no_bed());
+        assert_eq!(wet_columns_in_row(&editor, 30), vec![30, 31, 32, 33, 34]);
     }
 
     /// The water masks stamp `channel_cells`, so they must be the cells the channel draws.
@@ -514,7 +648,7 @@ mod waterway_profile_tests {
                 x: 40,
                 z: 55,
             });
-            generate_waterways(&mut editor, &way, None, &no_bed());
+            generate_waterways(&mut editor, &way, ChannelShape::default(), &no_bed());
             let drawn: std::collections::BTreeSet<(i32, i32)> = (0..SIDE as i32)
                 .flat_map(|x| (0..SIDE as i32).map(move |z| (x, z)))
                 .filter(|&(x, z)| !water_ys(&editor, x, z).is_empty())
@@ -524,6 +658,7 @@ mod waterway_profile_tests {
             channel_cells(
                 &way.nodes,
                 w,
+                None,
                 (0, SIDE as i32 - 1, 0, SIDE as i32 - 1),
                 |x, z| {
                     stamped.insert((x, z));
@@ -533,11 +668,90 @@ mod waterway_profile_tests {
         }
     }
 
+    /// Piped under the roads at grade, the channel and its masks leave out the same cells:
+    /// a path along the stream gets no strip of water on either side, and the land cover
+    /// marks no water there that the ground would paint.
+    #[test]
+    fn the_masks_leave_out_the_cells_the_channel_is_piped_under() {
+        use crate::land_cover::{InlandWater, LandCoverData};
+        let bbox = world_bbox();
+        // A footway across the stream at z 20-21, and a path down its centreline below z 40.
+        let mut roads = CoordinateBitmap::new(&bbox);
+        for x in 0..SIDE as i32 {
+            roads.set(x, 20);
+            roads.set(x, 21);
+        }
+        for z in 40..=LAST_Z {
+            roads.set(CENTER_X, z);
+        }
+        let shape = ChannelShape {
+            width_cap: None,
+            roads_at_grade: Some(&roads),
+        };
+        let way = stream(FIRST_Z, LAST_Z);
+        let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
+        generate_waterways(&mut editor, &way, shape, &no_bed());
+        let all = (0..SIDE as i32).flat_map(|x| (0..SIDE as i32).map(move |z| (x, z)));
+        let drawn: std::collections::BTreeSet<(i32, i32)> = all
+            .clone()
+            .filter(|&(x, z)| !water_ys(&editor, x, z).is_empty())
+            .collect();
+        assert!(drawn.contains(&(CENTER_X, 30)), "the stream itself");
+        for z in 41..=LAST_Z {
+            for x in CENTER_X - 1..=CENTER_X + 1 {
+                assert!(
+                    !drawn.contains(&(x, z)),
+                    "water beside the path at ({x}, {z})"
+                );
+            }
+        }
+
+        let mut stamped = std::collections::BTreeSet::new();
+        let w = shape.width("stream", &way.tags);
+        let area = (0, SIDE as i32 - 1, 0, SIDE as i32 - 1);
+        channel_cells(&way.nodes, w, Some(&roads), area, |x, z| {
+            stamped.insert((x, z));
+        });
+        assert_eq!(drawn, stamped);
+
+        // The land cover water override, with no ESA water to guard it, marks just these.
+        let mut lc = LandCoverData {
+            grid: vec![vec![30; SIDE]; SIDE],
+            water_distance: vec![vec![0; SIDE]; SIDE],
+            water_blend_cache: Default::default(),
+            beach_tiles: Default::default(),
+            inland_water: InlandWater::new(SIDE, SIDE),
+            width: SIDE,
+            height: SIDE,
+            cells_per_meter: 1.0,
+        };
+        let mut heights = vec![vec![8.0f32; SIDE]; SIDE];
+        let elements = [crate::osm_parser::ProcessedElement::Way(way.clone())];
+        crate::land_cover::osm_water_override::apply_osm_water_override(
+            &mut lc,
+            &mut heights,
+            SIDE,
+            SIDE,
+            &elements,
+            &bbox,
+            shape,
+        );
+        let marked: std::collections::BTreeSet<(i32, i32)> = all
+            .filter(|&(x, z)| lc.grid[z as usize][x as usize] == crate::land_cover::LC_WATER)
+            .collect();
+        assert_eq!(drawn, marked);
+    }
+
     #[test]
     fn a_flat_channel_sits_at_the_single_shared_level() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
+        generate_waterways(
+            &mut editor,
+            &stream(FIRST_Z, LAST_Z),
+            ChannelShape::default(),
+            &no_bed(),
+        );
 
         for z in FIRST_Z..=LAST_Z {
             assert_eq!(
@@ -552,7 +766,12 @@ mod waterway_profile_tests {
     fn a_one_block_drop_moves_the_upper_half_by_at_most_one_block() {
         let bbox = world_bbox();
         let mut editor = editor_over_slope(&bbox, 8.0, 0.02);
-        generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), None, &no_bed());
+        generate_waterways(
+            &mut editor,
+            &stream(FIRST_Z, LAST_Z),
+            ChannelShape::default(),
+            &no_bed(),
+        );
 
         let upper = editor.get_water_level(CENTER_X, FIRST_Z);
         let lower = editor.get_water_level(CENTER_X, LAST_Z);

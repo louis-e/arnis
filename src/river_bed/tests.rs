@@ -54,7 +54,10 @@ fn build_capped(
             legacy_depth: legacy,
             bb: BB,
             scale,
-            channel_width_cap: cap,
+            channels: ChannelShape {
+                width_cap: cap,
+                roads_at_grade: None,
+            },
         },
     )
 }
@@ -166,7 +169,7 @@ fn tiles_give_the_field_of_one_lattice() {
         legacy_depth: &legacy,
         bb: (0, 1299, 0, 699),
         scale: 1.0,
-        channel_width_cap: None,
+        channels: ChannelShape::default(),
     };
     let tiled = build_field(&els, &inp);
     // A halo past the whole area: every tile works on the same single lattice.
@@ -434,7 +437,7 @@ fn the_field_does_not_depend_on_where_the_geometry_region_ends() {
             legacy_depth: &no_legacy,
             bb: (0, 140, 0, 199),
             scale: 1.0,
-            channel_width_cap: None,
+            channels: ChannelShape::default(),
         },
     );
     for x in 60..=110 {

@@ -30,7 +30,7 @@ pub enum WaterDetail {
     /// The water every scale gets today
     #[default]
     Default,
-    /// Rounded bed depths; on small maps also bowls, narrower streams and water over short unbridged crossings
+    /// Rounded bed depths; on small maps also bowls, narrower rivers and wide streams, and water over short unbridged crossings
     Scaled,
 }
 

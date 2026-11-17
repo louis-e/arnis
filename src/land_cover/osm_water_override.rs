@@ -5,7 +5,8 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::coordinate_system::cartesian::XZBBox;
-use crate::floodfill_cache::hole_groups;
+use crate::element_processing::waterways::ChannelShape;
+use crate::floodfill_cache::{hole_groups, CoordinateBitmap};
 use crate::land_cover::{compute_water_distance, InlandWater, LandCoverData, LC_WATER};
 use crate::osm_parser::{
     ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
@@ -23,7 +24,7 @@ struct WaterContext {
     width: usize,
 }
 
-/// `channel_width_cap` narrows line waterways as their drawing does (`capped_waterway_width`).
+/// `channels` draws line waterways as their drawing does.
 pub fn apply_osm_water_override(
     land_cover: &mut LandCoverData,
     heights: &mut [Vec<f32>],
@@ -31,7 +32,7 @@ pub fn apply_osm_water_override(
     world_height: usize,
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
-    channel_width_cap: Option<i32>,
+    channels: ChannelShape,
 ) {
     let width = land_cover.width;
     let height = land_cover.height;
@@ -61,7 +62,7 @@ pub fn apply_osm_water_override(
         true,
         elements,
         xzbbox,
-        channel_width_cap,
+        channels,
     );
     land_cover.inland_water = inland;
 
@@ -111,7 +112,7 @@ pub fn mark_inland_water(
     world_height: usize,
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
-    channel_width_cap: Option<i32>,
+    channels: ChannelShape,
 ) {
     let (width, height) = (land_cover.width, land_cover.height);
     if width < 2 || height < 2 || world_width < 2 || world_height < 2 {
@@ -132,7 +133,7 @@ pub fn mark_inland_water(
         false,
         elements,
         xzbbox,
-        channel_width_cap,
+        channels,
     )
     .1;
 }
@@ -203,7 +204,7 @@ fn rasterize_osm_water(
     write: bool,
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
-    channel_width_cap: Option<i32>,
+    channels: ChannelShape,
 ) -> (usize, InlandWater) {
     let height = grid.len();
     let width = grid.first().map_or(0, |r| r.len());
@@ -255,16 +256,11 @@ fn rasterize_osm_water(
                     {
                         continue;
                     }
-                    let waterway_width =
-                        crate::element_processing::waterways::capped_waterway_width(
-                            waterway_type,
-                            &way.tags,
-                            channel_width_cap,
-                        );
                     changed += rasterize_line(
                         grid,
                         &way.nodes,
-                        waterway_width,
+                        channels.width(waterway_type, &way.tags),
+                        channels.roads_at_grade,
                         heights,
                         context,
                         min_x,
@@ -601,6 +597,7 @@ fn rasterize_line(
     grid: &mut [Vec<u8>],
     nodes: &[ProcessedNode],
     channel_width: i32,
+    roads_at_grade: Option<&CoordinateBitmap>,
     heights: &[Vec<f32>],
     context: Option<&WaterContext>,
     min_x_world: i32,
@@ -622,7 +619,8 @@ fn rasterize_line(
     let mut count = 0;
     // The cells the channel draws, so the water it marks is the water it gets.
     let area = (min_x_world, max_x_world, min_z_world, max_z_world);
-    crate::element_processing::waterways::channel_cells(nodes, channel_width, area, |wx, wz| {
+    let channel_cells = crate::element_processing::waterways::channel_cells;
+    channel_cells(nodes, channel_width, roads_at_grade, area, |wx, wz| {
         let rel_x = wx - min_x_world;
         let rel_z = wz - min_z_world;
         if rel_x < 0 || rel_z < 0 {
@@ -929,7 +927,7 @@ mod tests {
             ),
         ];
         let before = lc.grid.clone();
-        mark_inland_water(&mut lc, 32, 32, &elements, &bbox, None);
+        mark_inland_water(&mut lc, 32, 32, &elements, &bbox, ChannelShape::default());
         assert!(lc.inland_water.get(5, 5));
         // The lake's mark spreads three steps, the harbour's water stays sea.
         assert!(lc.inland_water.get(13, 5));
@@ -971,7 +969,7 @@ mod tests {
             ),
             water_way(3, &[("waterway", "dock")], square(24, 0, 31, 7)),
         ];
-        mark_inland_water(&mut lc, 32, 8, &elements, &bbox, None);
+        mark_inland_water(&mut lc, 32, 8, &elements, &bbox, ChannelShape::default());
         assert!(lc.inland_water.get(12, 4));
         assert!(!lc.inland_water.get(20, 4));
         assert!(!lc.inland_water.get(28, 4));

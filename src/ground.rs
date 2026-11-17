@@ -69,6 +69,9 @@ pub struct Ground {
     origin: (i32, i32),
     /// In a piece of a job, the whole job's bbox: per-run choices are taken there.
     anchor: Option<LLBBox>,
+    /// With a water option on, the road and path surfaces at grade line waterways are piped
+    /// under (`pipe_channels_under_roads`).
+    roads_at_grade: Option<crate::floodfill_cache::CoordinateBitmap>,
 }
 
 pub(crate) type Geo = Box<dyn Fn(f64, f64) -> (f64, f64) + Send + Sync>;
@@ -331,6 +334,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -391,6 +395,7 @@ impl Ground {
             winter: false,
             origin: frame.origin(bbox),
             anchor: frame.anchor,
+            roads_at_grade: None,
         }
     }
 
@@ -418,6 +423,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -451,6 +457,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -506,6 +513,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -658,6 +666,7 @@ impl Ground {
                         winter: false,
                         origin: frame.origin(&requested_bbox),
                         anchor: frame.anchor,
+                        roads_at_grade: None,
                     }
                 }
                 Err(e) => {
@@ -698,6 +707,7 @@ impl Ground {
                         winter: false,
                         origin: frame.origin(&requested_bbox),
                         anchor: frame.anchor,
+                        roads_at_grade: None,
                     }
                 }
             }
@@ -861,6 +871,35 @@ impl Ground {
         (measured > 0).then(|| (f64::from(wooded) / f64::from(measured), top))
     }
 
+    /// With a water option on, finds the road and path surfaces at grade that line waterways
+    /// are piped under, so a path along a stream leaves no strip of water on either side.
+    /// Their drawing and every mask of their water skip these cells alike: the overrides
+    /// here, then the river bed and the drawing, which `take_roads_at_grade` hands them to.
+    /// The ways later passes drop are left out, so no channel stops under a road not drawn.
+    pub fn pipe_channels_under_roads(
+        &mut self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        args: &Args,
+    ) {
+        self.roads_at_grade = args.water.pipes_channels_under_roads().then(|| {
+            crate::element_processing::highways::collect_roads_at_grade(
+                elements,
+                xzbbox,
+                args.scale,
+                |e| {
+                    crate::mode_filter::kept_for_mode(e, args.mode, args.buildings)
+                        && !args.road_detail.drops_element(e)
+                },
+            )
+        });
+    }
+
+    /// The roads at grade `pipe_channels_under_roads` found, for the river bed and the drawing.
+    pub fn take_roads_at_grade(&mut self) -> Option<crate::floodfill_cache::CoordinateBitmap> {
+        self.roads_at_grade.take()
+    }
+
     /// Force LC_WATER inside OSM water and sink it onto that water; flat worlds only mark inland.
     /// `channel_width_cap` narrows line waterways as their drawing does.
     pub fn apply_osm_water_override(
@@ -874,10 +913,15 @@ impl Ground {
         let Ground {
             land_cover,
             elevation_data,
+            roads_at_grade,
             ..
         } = self;
         let Some(lc) = land_cover.as_mut() else {
             return;
+        };
+        let channels = crate::element_processing::waterways::ChannelShape {
+            width_cap: channel_width_cap,
+            roads_at_grade: roads_at_grade.as_ref(),
         };
         match elevation_data.as_mut() {
             Some(data) => {
@@ -889,17 +933,10 @@ impl Ground {
                     world_height,
                     elements,
                     xzbbox,
-                    channel_width_cap,
+                    channels,
                 );
             }
-            None => mark_inland_water(
-                lc,
-                world_width,
-                world_height,
-                elements,
-                xzbbox,
-                channel_width_cap,
-            ),
+            None => mark_inland_water(lc, world_width, world_height, elements, xzbbox, channels),
         }
     }
 
@@ -915,6 +952,10 @@ impl Ground {
         let Some(lc) = self.land_cover.as_mut() else {
             return;
         };
+        let channels = crate::element_processing::waterways::ChannelShape {
+            width_cap: channel_width_cap,
+            roads_at_grade: self.roads_at_grade.as_ref(),
+        };
         crate::land_cover::osm_land_override::apply_osm_land_override(
             lc,
             world_width,
@@ -922,7 +963,7 @@ impl Ground {
             elements,
             xzbbox,
             scale,
-            channel_width_cap,
+            channels,
         );
     }
 
@@ -2041,6 +2082,7 @@ mod tests {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -2583,6 +2625,7 @@ pub(crate) mod test_support {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 }

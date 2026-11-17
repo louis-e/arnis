@@ -1085,6 +1085,8 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     osm_parser::sort_by_priority(&mut parsed_elements);
     bench.mark("sort_priority");
 
+    // Where line waterways are piped under roads; the masks below skip it as the drawing does.
+    ground.pipe_channels_under_roads(&parsed_elements, &xzbbox, &args);
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
     ground.apply_osm_water_override(
         &parsed_elements,

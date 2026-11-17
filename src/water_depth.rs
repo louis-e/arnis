@@ -7,7 +7,7 @@ use crate::block_definitions::{
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
-use crate::floodfill_cache::RoadMaskBitmap;
+use crate::floodfill_cache::{CoordinateBitmap, RoadMaskBitmap};
 use crate::ground::Ground;
 use crate::land_cover::{coord_hash, LC_WATER};
 use crate::water_detail::WaterDetail;
@@ -99,6 +99,9 @@ pub struct BigWaterField {
     /// The water options dig below the crust the ground pass leaves beside water.
     deeper_than_crust: bool,
     has_river: bool,
+    /// The road and path surfaces at grade line waterways are piped under, with a water
+    /// option on (`Ground::pipe_channels_under_roads`).
+    roads_at_grade: Option<CoordinateBitmap>,
 }
 
 impl BigWaterField {
@@ -112,7 +115,18 @@ impl BigWaterField {
             river: Default::default(),
             deeper_than_crust: false,
             has_river: false,
+            roads_at_grade: None,
         }
+    }
+
+    /// Hands over the roads at grade the ground found for line waterways to pass under.
+    pub fn pipe_channels_under(&mut self, roads_at_grade: Option<CoordinateBitmap>) {
+        self.roads_at_grade = roads_at_grade;
+    }
+
+    /// The road and path surfaces at grade line waterways are piped under, if any.
+    pub fn roads_at_grade(&self) -> Option<&CoordinateBitmap> {
+        self.roads_at_grade.as_ref()
     }
 
     pub fn set_river_bed(&mut self, river: crate::river_bed::RiverBedField) {
@@ -335,6 +349,7 @@ pub fn compute_big_water_field(
         river: Default::default(),
         deeper_than_crust: detail != WaterDetail::Default,
         has_river: false,
+        roads_at_grade: None,
     }
 }
 
@@ -1368,6 +1383,7 @@ mod tests {
             river: Default::default(),
             deeper_than_crust: false,
             has_river: false,
+            roads_at_grade: None,
         };
         assert_eq!(
             bwf.body_max_7x7(0, 0),
