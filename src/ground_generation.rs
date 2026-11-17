@@ -1771,6 +1771,27 @@ impl GridSums {
         Self { side, sums }
     }
 
+    /// The grid of `side` from (`x0`, `z0`) up as `mask` marks it, read a row at a time;
+    /// nothing is marked without a mask.
+    fn of_mask(
+        side: usize,
+        x0: i32,
+        z0: i32,
+        mask: Option<&crate::floodfill_cache::CoordinateBitmap>,
+    ) -> Self {
+        let words = side.div_ceil(32);
+        let mut rows = vec![0u32; side * words];
+        if let Some(mask) = mask {
+            for (dz, row) in rows.chunks_mut(words).enumerate() {
+                for (k, word) in row.iter_mut().enumerate() {
+                    let n = (side - 32 * k).min(32) as u32;
+                    *word = mask.row_bits(x0 + 32 * k as i32, z0 + dz as i32, n);
+                }
+            }
+        }
+        Self::new(side, |x, z| (rows[z * words + x / 32] >> (x % 32)) & 1 != 0)
+    }
+
     /// Whether any cell of the inclusive square of `r` around (x, z) is set.
     fn any_around(&self, x: usize, z: usize, r: usize) -> bool {
         let w = self.side + 1;
@@ -1797,52 +1818,51 @@ fn garden_columns(
     let margin = reach.street.max(reach.path).max(reach.wall);
     let side = (16 + 2 * margin) as usize;
     let (x0, z0) = (chunk_x << 4, chunk_z << 4);
-    let at = |dx: usize, dz: usize| (x0 - margin + dx as i32, z0 - margin + dz as i32);
-    // Without the shared street mask (a test editor) all paving keeps the street's margin.
-    let streets = GridSums::new(side, |dx, dz| {
-        let (x, z) = at(dx, dz);
-        match land {
-            Some(land) => land.streets.contains(x, z),
-            None => editor.surface_is_sealed(x, z),
-        }
-    });
-    let sealed = GridSums::new(side, |dx, dz| {
-        let (x, z) = at(dx, dz);
-        editor.surface_is_sealed(x, z)
-    });
-    let built = GridSums::new(side, |dx, dz| {
-        let (x, z) = at(dx, dz);
-        footprints.contains(x, z)
-    });
-    let mut out = Box::new([false; 256]);
-    let mut any = false;
-    for cz in (0..16).step_by(4) {
-        for cx in (0..16).step_by(4) {
+    // The chunk's 4 x 4 cells near a low dwelling and off tall buildings and paved grounds,
+    // found before the masks round the chunk are read: most chunks have none.
+    let open: Vec<(i32, i32)> = (0..16)
+        .step_by(4)
+        .flat_map(|cz| (0..16).step_by(4).map(move |cx| (cx, cz)))
+        .filter(|&(cx, cz)| {
             let (x, z) = (x0 + cx, z0 + cz);
             let wx = seam_window(CoarseMask::cell_index(x), reach.cells);
             let wz = seam_window(CoarseMask::cell_index(z), reach.cells);
             // School and hospital grounds stay paved but round a house mapped there.
-            if !dwellings.any_in(wx, wz)
-                || tall.is_some_and(|m| m.any_in(wx, wz))
-                || (land.is_some_and(|l| l.grounds.contains(x, z))
+            dwellings.any_in(wx, wz)
+                && !tall.is_some_and(|m| m.any_in(wx, wz))
+                && !(land.is_some_and(|l| l.grounds.contains(x, z))
                     && !houses.is_some_and(|m| m.any_in(wx, wz)))
-            {
-                continue;
-            }
-            for lz in cz..cz + 4 {
-                for lx in cx..cx + 4 {
-                    let (gx, gz) = ((lx + margin) as usize, (lz + margin) as usize);
-                    if built.any_around(gx, gz, 0) {
-                        continue;
-                    }
-                    let paved_near = streets.any_around(gx, gz, reach.street as usize)
-                        || sealed.any_around(gx, gz, reach.path as usize);
-                    let patio = built.any_around(gx, gz, reach.wall as usize)
-                        && ground_noise(x0 + lx, z0 + lz, 9, SALT_PATIO) < 0.5;
-                    if !paved_near && !patio {
-                        out[(lz * 16 + lx) as usize] = true;
-                        any = true;
-                    }
+        })
+        .collect();
+    if open.is_empty() {
+        return None;
+    }
+    let (gx0, gz0) = (x0 - margin, z0 - margin);
+    // Without the shared street mask (a test editor) all paving keeps the street's margin.
+    let streets = GridSums::of_mask(
+        side,
+        gx0,
+        gz0,
+        land.map_or(editor.sealed_surface(), |land| Some(&land.streets)),
+    );
+    let sealed = GridSums::of_mask(side, gx0, gz0, editor.sealed_surface());
+    let built = GridSums::of_mask(side, gx0, gz0, Some(footprints));
+    let mut out = Box::new([false; 256]);
+    let mut any = false;
+    for (cx, cz) in open {
+        for lz in cz..cz + 4 {
+            for lx in cx..cx + 4 {
+                let (gx, gz) = ((lx + margin) as usize, (lz + margin) as usize);
+                if built.any_around(gx, gz, 0) {
+                    continue;
+                }
+                let paved_near = streets.any_around(gx, gz, reach.street as usize)
+                    || sealed.any_around(gx, gz, reach.path as usize);
+                let patio = built.any_around(gx, gz, reach.wall as usize)
+                    && ground_noise(x0 + lx, z0 + lz, 9, SALT_PATIO) < 0.5;
+                if !paved_near && !patio {
+                    out[(lz * 16 + lx) as usize] = true;
+                    any = true;
                 }
             }
         }

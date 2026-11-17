@@ -724,6 +724,11 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface = Some(mask);
     }
 
+    /// The sealed-surface mask, while vegetation is placed.
+    pub fn sealed_surface(&self) -> Option<&crate::floodfill_cache::SealedSurfaceBitmap> {
+        self.sealed_surface.as_deref()
+    }
+
     /// Sets the carriageway mask (shared across the main and tile editors).
     pub fn set_carriageway(&mut self, mask: Arc<crate::floodfill_cache::CoordinateBitmap>) {
         self.carriageway = Some(mask);
