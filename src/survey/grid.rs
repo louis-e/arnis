@@ -88,74 +88,81 @@ pub fn shapes(lab: &[u32], n: u32, w: usize) -> Vec<Shape> {
 
 /// Square dilation with a `(2r+1)` window.
 pub fn dilate(mask: &[bool], w: usize, h: usize, r: usize) -> Vec<bool> {
-    // Separable: rows, then columns.
+    use rayon::prelude::*;
+    if w == 0 {
+        return Vec::new();
+    }
+    // Separable: along each row, then each row is the union of the rows
+    // within reach above and below it. Rows side by side.
     let mut rows = vec![false; w * h];
-    for z in 0..h {
-        let row = &mask[z * w..(z + 1) * w];
-        let mut last: isize = -(r as isize) - 1;
-        // Forward pass remembers the last set cell, backward the next one.
-        let mut fwd = vec![false; w];
-        for x in 0..w {
-            if row[x] {
-                last = x as isize;
+    rows.par_chunks_mut(w)
+        .zip(mask.par_chunks(w))
+        .for_each(|(out, row)| {
+            // Forward pass remembers the last set cell, backward the next one.
+            let mut last: isize = -(r as isize) - 1;
+            for x in 0..w {
+                if row[x] {
+                    last = x as isize;
+                }
+                out[x] = x as isize - last <= r as isize;
             }
-            fwd[x] = x as isize - last <= r as isize;
-        }
-        let mut next: isize = (w + r + 1) as isize;
-        for x in (0..w).rev() {
-            if row[x] {
-                next = x as isize;
+            let mut next: isize = (w + r + 1) as isize;
+            for x in (0..w).rev() {
+                if row[x] {
+                    next = x as isize;
+                }
+                out[x] |= next - x as isize <= r as isize;
             }
-            rows[z * w + x] = fwd[x] || next - x as isize <= r as isize;
-        }
-    }
+        });
     let mut out = vec![false; w * h];
-    for x in 0..w {
-        let mut last: isize = -(r as isize) - 1;
-        let mut fwd = vec![false; h];
-        for z in 0..h {
-            if rows[z * w + x] {
-                last = z as isize;
+    out.par_chunks_mut(w).enumerate().for_each(|(z, o)| {
+        for near in z.saturating_sub(r)..(z + r + 1).min(h) {
+            for (a, &b) in o.iter_mut().zip(&rows[near * w..(near + 1) * w]) {
+                *a |= b;
             }
-            fwd[z] = z as isize - last <= r as isize;
         }
-        let mut next: isize = (h + r + 1) as isize;
-        for z in (0..h).rev() {
-            if rows[z * w + x] {
-                next = z as isize;
-            }
-            out[z * w + x] = fwd[z] || next - z as isize <= r as isize;
-        }
-    }
+    });
     out
 }
 
-/// Mean of `v` over a `(2r+1)` square, the window clipped at the grid edge.
-pub fn box_mean(v: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
-    let mut sat = vec![0.0f64; (w + 1) * (h + 1)];
-    for z in 0..h {
-        let mut run = 0.0f64;
-        for x in 0..w {
-            run += f64::from(v[z * w + x]);
-            sat[(z + 1) * (w + 1) + x + 1] = sat[z * (w + 1) + x + 1] + run;
-        }
-    }
-    let mut out = vec![0.0f32; w * h];
+/// Share of the cells set in `mask` over a `(2r+1)` square, the window clipped
+/// at the grid edge, handed to `f(cell, share)` row by row. The counts are
+/// slid along: only a row's worth of them is kept.
+pub fn box_share(mask: &[bool], w: usize, h: usize, r: usize, mut f: impl FnMut(usize, f32)) {
+    // Set cells per column over the window's rows `lo..hi`, and their running
+    // sum along the row.
+    let mut col = vec![0u32; w];
+    let mut run = vec![0u32; w + 1];
+    let (mut lo, mut hi) = (0, 0);
     for z in 0..h {
         let (z0, z1) = (z.saturating_sub(r), (z + r + 1).min(h));
+        while hi < z1 {
+            for (k, &m) in col.iter_mut().zip(&mask[hi * w..(hi + 1) * w]) {
+                *k += u32::from(m);
+            }
+            hi += 1;
+        }
+        while lo < z0 {
+            for (k, &m) in col.iter_mut().zip(&mask[lo * w..(lo + 1) * w]) {
+                *k -= u32::from(m);
+            }
+            lo += 1;
+        }
+        for x in 0..w {
+            run[x + 1] = run[x] + col[x];
+        }
         for x in 0..w {
             let (x0, x1) = (x.saturating_sub(r), (x + r + 1).min(w));
-            let s = sat[z1 * (w + 1) + x1] - sat[z0 * (w + 1) + x1] - sat[z1 * (w + 1) + x0]
-                + sat[z0 * (w + 1) + x0];
-            out[z * w + x] = (s / ((z1 - z0) * (x1 - x0)) as f64) as f32;
+            let s = f64::from(run[x1] - run[x0]);
+            f(z * w + x, (s / ((z1 - z0) * (x1 - x0)) as f64) as f32);
         }
     }
-    out
 }
 
-/// Median of `v` over the 3x3 window, counting only cells where `keep` holds.
+/// Median of `v` over the 3x3 window, counting only cells where `keep` holds,
+/// for each cell where it holds, in order.
 pub fn median3_within(v: &[f32], keep: &[bool], w: usize, h: usize) -> Vec<f32> {
-    let mut out = v.to_vec();
+    let mut out = Vec::new();
     let mut buf = Vec::with_capacity(9);
     for z in 0..h {
         for x in 0..w {
@@ -176,7 +183,7 @@ pub fn median3_within(v: &[f32], keep: &[bool], w: usize, h: usize) -> Vec<f32> 
                 }
             }
             buf.sort_by(f32::total_cmp);
-            out[z * w + x] = buf[buf.len() / 2];
+            out.push(buf[buf.len() / 2]);
         }
     }
     out
@@ -242,10 +249,49 @@ mod tests {
     }
 
     #[test]
-    fn box_mean_clips_at_the_edge() {
-        let v = vec![1.0f32; 16];
-        assert!(box_mean(&v, 4, 4, 2)
+    fn dilation_is_any_set_cell_within_reach() {
+        let (w, h) = (37, 23);
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let m: Vec<bool> = (0..w * h)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed.is_multiple_of(11)
+            })
+            .collect();
+        for r in 0..4 {
+            let d = dilate(&m, w, h, r);
+            for z in 0..h {
+                for x in 0..w {
+                    let any = (z.saturating_sub(r)..(z + r + 1).min(h)).any(|zz| {
+                        (x.saturating_sub(r)..(x + r + 1).min(w)).any(|xx| m[zz * w + xx])
+                    });
+                    assert_eq!(d[z * w + x], any, "r {r} at {x},{z}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn box_share_clips_at_the_edge() {
+        let mut all = Vec::new();
+        box_share(&[true; 16], 4, 4, 2, |c, s| all.push((c, s)));
+        assert_eq!(all.len(), 16);
+        assert!(all
             .iter()
-            .all(|&m| (m - 1.0).abs() < 1e-6));
+            .enumerate()
+            .all(|(i, &(c, s))| c == i && s == 1.0));
+        // One set cell in a corner of a 7x7: the corner's clipped 3x3 window
+        // holds it, the centre's full 5x5 does not.
+        let (w, h) = (7, 7);
+        let mut m = vec![false; w * h];
+        m[0] = true;
+        let mut share = vec![0.0f32; w * h];
+        box_share(&m, w, h, 2, |c, s| share[c] = s);
+        assert_eq!(share[0], 1.0 / 9.0);
+        assert_eq!(share[2 * w + 2], 1.0 / 25.0);
+        assert_eq!(share[3 * w + 3], 0.0);
+        assert_eq!(share[w * h - 1], 0.0);
     }
 }

@@ -264,10 +264,11 @@ pub fn fetch_survey_data(
     if let Some(path) = std::env::var_os("ARNIS_LASER_DUMP") {
         dump(&inputs, &classes, thresholds, std::path::Path::new(&path));
     }
+    let (w, h) = (inputs.w, inputs.h);
+    drop(inputs);
 
     // Sample onto the world grid: cell (gx, gz) sits at the bbox's west edge plus
     // gx steps, north edge minus gz steps, as the canopy and land cover do.
-    let (w, h) = (inputs.w, inputs.h);
     let lat_step = (bbox.min().lat() - bbox.max().lat()) / (grid_h - 1) as f64;
     let lon_step = (bbox.max().lng() - bbox.min().lng()) / (grid_w - 1) as f64;
     let mut cells = vec![[0u8; 5]; grid_w * grid_h];
@@ -308,28 +309,10 @@ fn mosaic(
     use rayon::prelude::*;
     let (e0, n0, e1, n1) = plan.rect;
     let (w, h) = ((e1 - e0) as usize, (n1 - n0) as usize);
-    let n = w * h;
     let root = cache_root();
-    let mut inp = classify::Inputs {
-        w,
-        h,
-        n_all: vec![0; n],
-        n_gnd: vec![0; n],
-        n_obj: vec![0; n],
-        n_bld: vec![0; n],
-        n_veg: vec![0; n],
-        laser_plants: plan.sheet.laser_plants,
-        strict_pools: plan.sheet.strict_pools,
-        h_obj: vec![0.0; n],
-        h_bld: vec![0.0; n],
-        i_gnd: vec![0.0; n],
-        photo: vec![false; n],
-        exg: vec![0.0; n],
-        green_f: vec![0.0; n],
-        lum: vec![0.0; n],
-        blue: vec![0.0; n],
-        rgb: vec![[0; 3]; n],
-    };
+    let mut inp = classify::Inputs::new(w, h);
+    inp.laser_plants = plan.sheet.laser_plants;
+    inp.strict_pools = plan.sheet.strict_pools;
 
     // Where to read each tile not already cached: a fixed address, candidates,
     // or one lookup over the whole rectangle.
@@ -419,9 +402,9 @@ fn mosaic(
             inp.n_obj[mc] = t.n_obj[tc];
             inp.n_bld[mc] = t.n_bld[tc];
             inp.n_veg[mc] = t.n_veg[tc];
-            inp.h_obj[mc] = f32::from(t.h_obj[tc]) / 5.0;
-            inp.h_bld[mc] = f32::from(t.h_bld[tc]) / 5.0;
-            inp.i_gnd[mc] = f32::from(t.i_gnd[tc]);
+            inp.h_obj_q[mc] = t.h_obj[tc];
+            inp.h_bld_q[mc] = t.h_bld[tc];
+            inp.i_gnd_q[mc] = t.i_gnd[tc];
         });
     }
     if !any {
@@ -453,12 +436,7 @@ fn mosaic(
         for_overlap(plan.rect, te0, tn1, |mc, tc| {
             let c = p.cells[tc];
             if c.present {
-                inp.photo[mc] = true;
-                inp.exg[mc] = f32::from(c.exg) / 200.0;
-                inp.green_f[mc] = f32::from(c.green) / 25.0;
-                inp.lum[mc] = f32::from(c.lum);
-                inp.blue[mc] = f32::from(c.blue) / 200.0;
-                inp.rgb[mc] = c.rgb;
+                inp.photo[mc] = c;
             }
         });
     }
@@ -491,7 +469,7 @@ fn dump(
             _ => [0, 0, 0],
         };
         img.put_pixel(x, y, image::Rgb(class));
-        let i = inp.i_gnd[c];
+        let i = inp.i_gnd(c);
         let band = if inp.n_gnd[c] == 0 {
             [0, 0, 0]
         } else if i >= hi {
@@ -502,7 +480,7 @@ fn dump(
             [220, 200, 120]
         };
         img.put_pixel(w + x, y, image::Rgb(band));
-        img.put_pixel(2 * w + x, y, image::Rgb(inp.rgb[c]));
+        img.put_pixel(2 * w + x, y, image::Rgb(inp.rgb(c)));
     }
     if let Err(e) = img.save(path) {
         eprintln!("Warning: laser dump not written: {e}");

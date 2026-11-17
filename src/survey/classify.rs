@@ -9,7 +9,8 @@
 //! scan of 5 or 10 points a square metre asks proportionally fewer hits of a
 //! hedge; at Bavaria's density nothing changes.
 
-use super::grid::{box_mean, component_median, dilate, label, median3_within, shapes};
+use super::grid::{box_share, component_median, dilate, label, median3_within, shapes};
+use super::photo::PhotoCell;
 
 pub const NONE: u8 = 0;
 pub const LAWN: u8 = 1;
@@ -23,7 +24,9 @@ pub const BUILDING: u8 = 8;
 pub const BED: u8 = 9;
 pub const FENCE: u8 = 10;
 
-/// Measurements over a rectangle of cells, row-major, row 0 north.
+/// Measurements over a rectangle of cells, row-major, row 0 north, kept as the
+/// tile caches quantise them (17 bytes a cell). The accessors give the values
+/// the rules compare: metres, and the photo's measures on their own scales.
 pub struct Inputs {
     pub w: usize,
     pub h: usize,
@@ -41,17 +44,82 @@ pub struct Inputs {
     pub laser_plants: bool,
     /// Whether a pool needs cells the laser returned nothing from.
     pub strict_pools: bool,
+    /// Heights above the ground, in fifths of a metre.
+    pub h_obj_q: Vec<u8>,
+    pub h_bld_q: Vec<u8>,
+    /// Median intensity of the ground returns.
+    pub i_gnd_q: Vec<u16>,
+    /// The photo's measures; `present` is false where there is no photo.
+    pub photo: Vec<PhotoCell>,
+}
+
+impl Inputs {
+    /// Nothing measured yet, for a source with neither flag set.
+    pub fn new(w: usize, h: usize) -> Self {
+        let n = w * h;
+        Inputs {
+            w,
+            h,
+            n_all: vec![0; n],
+            n_gnd: vec![0; n],
+            n_obj: vec![0; n],
+            n_bld: vec![0; n],
+            n_veg: vec![0; n],
+            laser_plants: false,
+            strict_pools: false,
+            h_obj_q: vec![0; n],
+            h_bld_q: vec![0; n],
+            i_gnd_q: vec![0; n],
+            photo: vec![PhotoCell::default(); n],
+        }
+    }
+
     /// Metres above the ground.
-    pub h_obj: Vec<f32>,
-    pub h_bld: Vec<f32>,
-    pub i_gnd: Vec<f32>,
-    pub photo: Vec<bool>,
-    pub exg: Vec<f32>,
+    #[inline]
+    pub fn h_obj(&self, c: usize) -> f32 {
+        f32::from(self.h_obj_q[c]) / 5.0
+    }
+
+    #[inline]
+    pub fn h_bld(&self, c: usize) -> f32 {
+        f32::from(self.h_bld_q[c]) / 5.0
+    }
+
+    #[inline]
+    pub fn i_gnd(&self, c: usize) -> f32 {
+        f32::from(self.i_gnd_q[c])
+    }
+
+    #[inline]
+    pub fn has_photo(&self, c: usize) -> bool {
+        self.photo[c].present
+    }
+
+    #[inline]
+    pub fn exg(&self, c: usize) -> f32 {
+        f32::from(self.photo[c].exg) / 200.0
+    }
+
     /// Share of the cell's pixels that read as plants, 0..1.
-    pub green_f: Vec<f32>,
-    pub lum: Vec<f32>,
-    pub blue: Vec<f32>,
-    pub rgb: Vec<[u8; 3]>,
+    #[inline]
+    pub fn green_f(&self, c: usize) -> f32 {
+        f32::from(self.photo[c].green) / 25.0
+    }
+
+    #[inline]
+    pub fn lum(&self, c: usize) -> f32 {
+        f32::from(self.photo[c].lum)
+    }
+
+    #[inline]
+    pub fn blue(&self, c: usize) -> f32 {
+        f32::from(self.photo[c].blue) / 200.0
+    }
+
+    #[inline]
+    pub fn rgb(&self, c: usize) -> [u8; 3] {
+        self.photo[c].rgb
+    }
 }
 
 /// One classified cell: class, height of what stands on it in fifths of a metre
@@ -97,12 +165,24 @@ impl Counts {
 
 /// The median of the returns a square metre over cells the laser reached.
 pub fn median_density(inp: &Inputs) -> f32 {
-    let mut counts: Vec<u8> = inp.n_all.iter().copied().filter(|&v| v > 0).collect();
-    if counts.is_empty() {
+    let mut hist = [0usize; 256];
+    for &v in &inp.n_all {
+        hist[usize::from(v)] += 1;
+    }
+    let reached: usize = hist[1..].iter().sum();
+    if reached == 0 {
         return 0.0;
     }
-    let mid = counts.len() / 2;
-    f32::from(*counts.select_nth_unstable(mid).1)
+    // The value at index `reached / 2` of the sorted counts.
+    let mid = reached / 2;
+    let mut below = 0;
+    for (v, &k) in hist.iter().enumerate().skip(1) {
+        below += k;
+        if below > mid {
+            return v as f32;
+        }
+    }
+    255.0
 }
 
 /// How the intensity thresholds were found, for the log.
@@ -126,14 +206,14 @@ pub fn calibrate(inp: &Inputs, defaults: (f32, f32)) -> ((f32, f32), Calibration
         if !flat {
             continue;
         }
-        all.push(inp.i_gnd[c]);
-        if !inp.photo[c] {
+        all.push(inp.i_gnd(c));
+        if !inp.has_photo(c) {
             continue;
         }
-        if inp.exg[c] > 0.08 && inp.lum[c] > 70.0 {
-            grass.push(inp.i_gnd[c]);
-        } else if inp.exg[c] < -0.02 && inp.lum[c] > 90.0 && inp.blue[c] < 0.02 {
-            pave.push(inp.i_gnd[c]);
+        if inp.exg(c) > 0.08 && inp.lum(c) > 70.0 {
+            grass.push(inp.i_gnd(c));
+        } else if inp.exg(c) < -0.02 && inp.lum(c) > 90.0 && inp.blue(c) < 0.02 {
+            pave.push(inp.i_gnd(c));
         }
     }
     if grass.len() >= 200 && pave.len() >= 200 {
@@ -221,12 +301,13 @@ pub fn split_intensity(vals: &mut [f32]) -> Option<f32> {
 /// building points as objects again.
 pub fn crowns_not_roofs(inp: &mut Inputs) {
     for c in 0..inp.w * inp.h {
-        let green = inp.photo[c] && (inp.green_f[c] >= 0.35 || inp.exg[c] > 0.04);
+        let green = inp.has_photo(c) && (inp.green_f(c) >= 0.35 || inp.exg(c) > 0.04);
         if green && inp.n_bld[c] > 0 {
             inp.n_obj[c] = inp.n_obj[c].saturating_add(inp.n_bld[c]);
-            inp.h_obj[c] = inp.h_obj[c].max(inp.h_bld[c]);
+            // The higher of two heights is the higher in fifths of a metre.
+            inp.h_obj_q[c] = inp.h_obj_q[c].max(inp.h_bld_q[c]);
             inp.n_bld[c] = 0;
-            inp.h_bld[c] = 0.0;
+            inp.h_bld_q[c] = 0;
         }
     }
 }
@@ -238,6 +319,8 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     let mut hdm = vec![0.0f32; n];
     let median_all = median_density(inp);
     let need = Counts::at_density(median_all);
+    // Each mask below is dropped after its last use: on a town's few square
+    // kilometres they are megabytes apiece.
 
     // Plants: green in the photo, or where there is none, objects most of whose
     // hits look like plants to the laser, which counts beside the photo too
@@ -245,8 +328,8 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     let veg = |c: usize| inp.n_obj[c] > 0 && 2 * u32::from(inp.n_veg[c]) >= u32::from(inp.n_obj[c]);
     let green: Vec<bool> = (0..n)
         .map(|c| {
-            if inp.photo[c] {
-                inp.green_f[c] >= 0.35 || inp.exg[c] > 0.04 || (inp.laser_plants && veg(c))
+            if inp.has_photo(c) {
+                inp.green_f(c) >= 0.35 || inp.exg(c) > 0.04 || (inp.laser_plants && veg(c))
             } else {
                 veg(c)
             }
@@ -257,31 +340,29 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     let green_near = dilate(&green, w, h, 1);
     let building: Vec<bool> = inp.n_bld.iter().map(|&v| v >= need.bld).collect();
     let obj: Vec<bool> = (0..n)
-        .map(|c| inp.n_obj[c] >= need.obj && inp.h_obj[c] >= 0.4 && !building[c])
+        .map(|c| inp.n_obj[c] >= need.obj && inp.h_obj(c) >= 0.4 && !building[c])
         .collect();
-    let hh = &inp.h_obj;
 
     // Ground cover everywhere the laser reached, smoothed by a 5x5 majority so a
     // terrace is one terrace and not a dither of flagstones and lawn.
-    let planted: Vec<f32> = (0..n)
+    let planted: Vec<bool> = (0..n)
         .map(|c| {
             let has_i = inp.n_gnd[c] >= need.few;
-            let p = if has_i && inp.i_gnd[c] >= i_hi {
+            if has_i && inp.i_gnd(c) >= i_hi {
                 true
-            } else if has_i && inp.i_gnd[c] < i_lo {
+            } else if has_i && inp.i_gnd(c) < i_lo {
                 false
             } else {
                 green[c]
-            };
-            p as u8 as f32
+            }
         })
         .collect();
-    let share = box_mean(&planted, w, h, 2);
-    for c in 0..n {
+    drop(green);
+    box_share(&planted, w, h, 2, |c, share| {
         if inp.n_all[c] > 0 {
-            cls[c] = if share[c] >= 0.5 { LAWN } else { PAVED };
+            cls[c] = if share >= 0.5 { LAWN } else { PAVED };
         }
-    }
+    });
 
     // Pools: clearly blue in the photo, and water swallows the laser, so a pool
     // also has far fewer returns than the ground around it. A blue car has neither.
@@ -289,27 +370,36 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     // with no return at all counts as water.
     //
     // [`Source::strict_pools`]: super::source::Source::strict_pools
-    let blue: Vec<bool> = (0..n)
-        .map(|c| inp.photo[c] && inp.blue[c] > 0.03 && inp.lum[c] > 80.0 && !obj[c] && !building[c])
-        .collect();
-    let dry_from = if inp.strict_pools {
-        0.0
-    } else {
-        0.6 * median_all
-    };
-    let (lab, k) = label(&blue, w, h, true);
-    if k > 0 {
-        let sh = shapes(&lab, k, w);
-        let mut wet = vec![0.0f64; k as usize + 1];
-        for c in 0..n {
-            if lab[c] != 0 && f32::from(inp.n_all[c]) <= dry_from {
-                wet[lab[c] as usize] += 1.0;
+    {
+        let blue: Vec<bool> = (0..n)
+            .map(|c| {
+                inp.has_photo(c)
+                    && inp.blue(c) > 0.03
+                    && inp.lum(c) > 80.0
+                    && !obj[c]
+                    && !building[c]
+            })
+            .collect();
+        let dry_from = if inp.strict_pools {
+            0.0
+        } else {
+            0.6 * median_all
+        };
+        let (lab, k) = label(&blue, w, h, true);
+        drop(blue);
+        if k > 0 {
+            let sh = shapes(&lab, k, w);
+            let mut wet = vec![0.0f64; k as usize + 1];
+            for c in 0..n {
+                if lab[c] != 0 && f32::from(inp.n_all[c]) <= dry_from {
+                    wet[lab[c] as usize] += 1.0;
+                }
             }
-        }
-        for c in 0..n {
-            let l = lab[c] as usize;
-            if l != 0 && (6.0..=120.0).contains(&sh[l].area) && wet[l] >= 0.4 * sh[l].area {
-                cls[c] = POOL;
+            for c in 0..n {
+                let l = lab[c] as usize;
+                if l != 0 && (6.0..=120.0).contains(&sh[l].area) && wet[l] >= 0.4 * sh[l].area {
+                    cls[c] = POOL;
+                }
             }
         }
     }
@@ -318,117 +408,150 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     // points a square metre, so two will do above 3 m, and gaps inside a crown are
     // closed. Each cell keeps its own height, so a crown slopes down to its edge
     // and trees lean short rather than tall.
-    let tree_raw: Vec<bool> = (0..n)
-        .map(|c| inp.n_obj[c] >= need.few && hh[c] >= 3.0 && green_near[c] && !building[c])
-        .collect();
-    let grown = dilate(&tree_raw, w, h, 1);
-    let not_grown: Vec<bool> = grown.iter().map(|&b| !b).collect();
-    let tree: Vec<bool> = dilate(&not_grown, w, h, 1)
-        .into_iter()
-        .enumerate()
-        .map(|(c, outside)| !outside && !building[c])
-        .collect();
+    let tree: Vec<bool> = {
+        let tree_raw: Vec<bool> = (0..n)
+            .map(|c| {
+                inp.n_obj[c] >= need.few && inp.h_obj(c) >= 3.0 && green_near[c] && !building[c]
+            })
+            .collect();
+        let mut not_grown = dilate(&tree_raw, w, h, 1);
+        drop(tree_raw);
+        not_grown.iter_mut().for_each(|b| *b = !*b);
+        dilate(&not_grown, w, h, 1)
+            .into_iter()
+            .enumerate()
+            .map(|(c, outside)| !outside && !building[c])
+            .collect()
+    };
 
     // Sheds and garages: building points, or solid objects that are not green.
     // A house's eaves and porch roofs are low building points too, so nothing
     // within two cells of a tall building counts.
-    let tall: Vec<bool> = (0..n).map(|c| building[c] && inp.h_bld[c] > 5.0).collect();
-    let near_house = dilate(&tall, w, h, 2);
-    let shed_cand: Vec<bool> = (0..n)
-        .map(|c| {
-            ((building[c] && (1.8..=5.0).contains(&inp.h_bld[c]))
-                || (obj[c] && !green_near[c] && (1.9..=4.5).contains(&hh[c])))
-                && !near_house[c]
-        })
-        .collect();
-    let (lab, k) = label(&shed_cand, w, h, false);
-    let mut shed = vec![false; n];
-    if k > 0 {
-        let sh = shapes(&lab, k, w);
-        for c in 0..n {
-            let l = lab[c] as usize;
-            if l != 0 && (5.0..=70.0).contains(&sh[l].area) && sh[l].width >= 1.8 {
-                shed[c] = true;
-                cls[c] = SHED;
-                hdm[c] = if building[c] { inp.h_bld[c] } else { hh[c] } * 5.0;
+    let shed: Vec<bool> = {
+        let tall: Vec<bool> = (0..n).map(|c| building[c] && inp.h_bld(c) > 5.0).collect();
+        let near_house = dilate(&tall, w, h, 2);
+        drop(tall);
+        let shed_cand: Vec<bool> = (0..n)
+            .map(|c| {
+                ((building[c] && (1.8..=5.0).contains(&inp.h_bld(c)))
+                    || (obj[c] && !green_near[c] && (1.9..=4.5).contains(&inp.h_obj(c))))
+                    && !near_house[c]
+            })
+            .collect();
+        drop(near_house);
+        let (lab, k) = label(&shed_cand, w, h, false);
+        drop(shed_cand);
+        let mut shed = vec![false; n];
+        if k > 0 {
+            let sh = shapes(&lab, k, w);
+            for c in 0..n {
+                let l = lab[c] as usize;
+                if l != 0 && (5.0..=70.0).contains(&sh[l].area) && sh[l].width >= 1.8 {
+                    shed[c] = true;
+                    cls[c] = SHED;
+                    hdm[c] = if building[c] {
+                        inp.h_bld(c)
+                    } else {
+                        inp.h_obj(c)
+                    } * 5.0;
+                }
             }
         }
-    }
+        shed
+    };
 
     // Low vegetation: long thin components are hedges, the rest bushes, and the
     // knee-high ones beds of flowers and perennials.
-    let lowveg: Vec<bool> = (0..n)
-        .map(|c| obj[c] && green_near[c] && hh[c] < 3.5 && !shed[c] && !tree[c])
-        .collect();
-    let (lab, k) = label(&lowveg, w, h, true);
-    if k > 0 {
-        let sh = shapes(&lab, k, w);
-        for c in 0..n {
-            let l = lab[c] as usize;
-            if l == 0 || sh[l].area < 2.0 {
-                continue;
+    {
+        let lowveg: Vec<bool> = (0..n)
+            .map(|c| obj[c] && green_near[c] && inp.h_obj(c) < 3.5 && !shed[c] && !tree[c])
+            .collect();
+        let (lab, k) = label(&lowveg, w, h, true);
+        drop(lowveg);
+        if k > 0 {
+            let sh = shapes(&lab, k, w);
+            for c in 0..n {
+                let l = lab[c] as usize;
+                if l == 0 || sh[l].area < 2.0 {
+                    continue;
+                }
+                let hedge = sh[l].length >= 5.0 && sh[l].width <= 2.2;
+                let hh = inp.h_obj(c);
+                cls[c] = if hedge {
+                    HEDGE
+                } else if hh < 0.8 {
+                    BED
+                } else {
+                    BUSH
+                };
+                hdm[c] = hh * 5.0;
             }
-            let hedge = sh[l].length >= 5.0 && sh[l].width <= 2.2;
-            cls[c] = if hedge {
-                HEDGE
-            } else if hh[c] < 0.8 {
-                BED
-            } else {
-                BUSH
-            };
-            hdm[c] = hh[c] * 5.0;
         }
     }
+    drop(obj);
 
     // Fences and garden walls: thin, straight, not green, knee to head high, with
     // planted ground beside them. Parked cars make short non-green rows too, but
     // they stand on paving and are wider.
-    let fence_cand: Vec<bool> = (0..n)
-        .map(|c| {
-            inp.n_obj[c] >= need.few
-                && (0.7..=2.3).contains(&hh[c])
-                && !green_near[c]
-                && !building[c]
-                && !matches!(cls[c], SHED | HEDGE | BUSH | BED)
-        })
-        .collect();
-    let (lab, k) = label(&fence_cand, w, h, true);
-    if k > 0 {
-        let sh = shapes(&lab, k, w);
-        let ring = ring_planted_share(&lab, k, w, h, &planted);
-        for c in 0..n {
-            let l = lab[c] as usize;
-            if l != 0 && sh[l].length >= 5.0 && sh[l].width <= 1.4 && ring[l] >= 0.35 {
-                cls[c] = FENCE;
-                hdm[c] = hh[c] * 5.0;
+    {
+        let fence_cand: Vec<bool> = (0..n)
+            .map(|c| {
+                inp.n_obj[c] >= need.few
+                    && (0.7..=2.3).contains(&inp.h_obj(c))
+                    && !green_near[c]
+                    && !building[c]
+                    && !matches!(cls[c], SHED | HEDGE | BUSH | BED)
+            })
+            .collect();
+        let (lab, k) = label(&fence_cand, w, h, true);
+        drop(fence_cand);
+        if k > 0 {
+            let sh = shapes(&lab, k, w);
+            let ring = ring_planted_share(&lab, k, w, h, &planted);
+            for c in 0..n {
+                let l = lab[c] as usize;
+                if l != 0 && sh[l].length >= 5.0 && sh[l].width <= 1.4 && ring[l] >= 0.35 {
+                    cls[c] = FENCE;
+                    hdm[c] = inp.h_obj(c) * 5.0;
+                }
             }
         }
     }
+    drop(planted);
+    drop(green_near);
     for c in 0..n {
         if tree[c] {
             cls[c] = TREE;
-            hdm[c] = hh[c].max(3.0) * 5.0;
+            hdm[c] = inp.h_obj(c).max(3.0) * 5.0;
         }
         if building[c] && !shed[c] {
             cls[c] = BUILDING;
-            hdm[c] = inp.h_bld[c] * 5.0;
+            hdm[c] = inp.h_bld(c) * 5.0;
         }
     }
+    drop(tree);
+    drop(shed);
+    drop(building);
 
     close_hedge_gaps(&mut cls, &mut hdm, w, h);
     smooth_heights(&cls, &mut hdm, w, h);
-    let color = paving_colors(&cls, inp);
-    (0..n)
-        .map(|c| Out {
-            class: cls[c],
-            height_q: hdm[c].round().clamp(0.0, 255.0) as u8,
-            color: color[c],
+    let mut out: Vec<Out> = cls
+        .iter()
+        .zip(&hdm)
+        .map(|(&class, &v)| Out {
+            class,
+            height_q: v.round().clamp(0.0, 255.0) as u8,
+            color: [0; 3],
         })
-        .collect()
+        .collect();
+    drop(cls);
+    drop(hdm);
+    paving_colors(&mut out, inp);
+    out
 }
 
 /// For each component, the share of planted cells in the two-cell ring around it.
-fn ring_planted_share(lab: &[u32], k: u32, w: usize, h: usize, planted: &[f32]) -> Vec<f64> {
+fn ring_planted_share(lab: &[u32], k: u32, w: usize, h: usize, planted: &[bool]) -> Vec<f64> {
     let mut hit = vec![0.0f64; k as usize + 1];
     let mut all = vec![0.0f64; k as usize + 1];
     let mut seen: Vec<u32> = vec![0; w * h];
@@ -448,7 +571,7 @@ fn ring_planted_share(lab: &[u32], k: u32, w: usize, h: usize, planted: &[f32]) 
                     if lab[j] == 0 && seen[j] != l {
                         seen[j] = l;
                         all[l as usize] += 1.0;
-                        hit[l as usize] += f64::from(planted[j]);
+                        hit[l as usize] += f64::from(u8::from(planted[j]));
                     }
                 }
             }
@@ -511,11 +634,10 @@ fn smooth_heights(cls: &[u8], hdm: &mut [f32], w: usize, h: usize) {
         }
     }
     let bush: Vec<bool> = cls.iter().map(|&c| c == BUSH).collect();
+    // Medians of the heights as they stand, written back once all are taken.
     let smoothed = median3_within(hdm, &bush, w, h);
-    for c in 0..cls.len() {
-        if bush[c] {
-            hdm[c] = smoothed[c].max(2.0);
-        }
+    for (c, v) in (0..cls.len()).filter(|&c| bush[c]).zip(smoothed) {
+        hdm[c] = v.max(2.0);
     }
 }
 
@@ -523,21 +645,24 @@ fn smooth_heights(cls: &[u8], hdm: &mut [f32], w: usize, h: usize) {
 /// one material and a parked car or a shadow does not paint a patch of its own.
 /// The photo runs warm: only a clearly red or brown patch keeps its tint (brick
 /// pavers, red gravel), everything else is a grey of its own brightness.
-fn paving_colors(cls: &[u8], inp: &Inputs) -> Vec<[u8; 3]> {
+fn paving_colors(out: &mut [Out], inp: &Inputs) {
     let (w, h) = (inp.w, inp.h);
-    let mut out = vec![[0u8; 3]; w * h];
-    let mask: Vec<bool> = cls.iter().map(|&c| c == PAVED || c == SHED).collect();
+    let mask: Vec<bool> = out
+        .iter()
+        .map(|o| o.class == PAVED || o.class == SHED)
+        .collect();
     let (lab, k) = label(&mask, w, h, false);
+    drop(mask);
     let mut lit: Vec<Vec<[u8; 3]>> = vec![Vec::new(); k as usize + 1];
     let mut any: Vec<Vec<[u8; 3]>> = vec![Vec::new(); k as usize + 1];
     for (c, &l) in lab.iter().enumerate() {
         let l = l as usize;
-        if l == 0 || !inp.photo[c] {
+        if l == 0 || !inp.has_photo(c) {
             continue;
         }
-        any[l].push(inp.rgb[c]);
-        if inp.lum[c] > 70.0 {
-            lit[l].push(inp.rgb[c]);
+        any[l].push(inp.rgb(c));
+        if inp.lum(c) > 70.0 {
+            lit[l].push(inp.rgb(c));
         }
     }
     let color: Vec<[u8; 3]> = (0..=k as usize)
@@ -561,41 +686,62 @@ fn paving_colors(cls: &[u8], inp: &Inputs) -> Vec<[u8; 3]> {
             }
         })
         .collect();
-    for c in 0..w * h {
-        let l = lab[c] as usize;
+    for (o, &l) in out.iter_mut().zip(&lab) {
         if l != 0 {
-            out[c] = color[l];
+            o.color = color[l as usize];
         }
     }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A photo cell on the caches' scales: excess green and blueness times 200,
+    /// green pixels out of 25.
+    fn photo(exg: i8, green: u8, lum: u8, blue: i8, rgb: [u8; 3]) -> PhotoCell {
+        PhotoCell {
+            exg,
+            green,
+            lum,
+            blue,
+            rgb,
+            present: true,
+        }
+    }
+
+    /// A lawn: excess green 0.12, nine in ten pixels green, lit, not blue.
     fn blank(w: usize, h: usize) -> Inputs {
         let n = w * h;
-        Inputs {
-            w,
-            h,
-            n_all: vec![18; n],
-            n_gnd: vec![12; n],
-            n_obj: vec![0; n],
-            n_bld: vec![0; n],
-            n_veg: vec![0; n],
-            laser_plants: false,
-            strict_pools: false,
-            h_obj: vec![0.0; n],
-            h_bld: vec![0.0; n],
-            i_gnd: vec![1780.0; n],
-            photo: vec![true; n],
-            exg: vec![0.12; n],
-            green_f: vec![0.9; n],
-            lum: vec![110.0; n],
-            blue: vec![-0.05; n],
-            rgb: vec![[90, 130, 70]; n],
-        }
+        let mut inp = Inputs::new(w, h);
+        inp.n_all = vec![18; n];
+        inp.n_gnd = vec![12; n];
+        inp.i_gnd_q = vec![1780; n];
+        inp.photo = vec![photo(24, 23, 110, -10, [90, 130, 70]); n];
+        inp
+    }
+
+    #[test]
+    fn density_is_the_middle_count_of_the_cells_reached() {
+        let mut inp = blank(8, 1);
+        inp.n_all = vec![0, 3, 3, 7, 1, 9, 0, 2];
+        // Reached: 1 2 3 3 7 9; index 3 of them.
+        assert_eq!(median_density(&inp), 3.0);
+        inp.n_all = vec![0; 8];
+        assert_eq!(median_density(&inp), 0.0);
+        inp.n_all = vec![255; 8];
+        assert_eq!(median_density(&inp), 255.0);
+    }
+
+    #[test]
+    fn accessors_read_the_cached_scales() {
+        let mut inp = blank(1, 1);
+        inp.h_obj_q[0] = 7;
+        assert_eq!(inp.h_obj(0), 1.4);
+        assert_eq!(inp.exg(0), 0.12);
+        assert_eq!(inp.blue(0), -0.05);
+        assert_eq!(inp.green_f(0), 0.92);
+        assert_eq!(inp.i_gnd(0), 1780.0);
     }
 
     #[test]
@@ -606,18 +752,15 @@ mod tests {
         for x in 2..28 {
             let c = 5 * w + x;
             inp.n_obj[c] = 10;
-            inp.h_obj[c] = 1.4;
+            inp.h_obj_q[c] = 7;
         }
         for z in 0..h {
             for x in 12..15 {
                 let c = z * w + x;
-                inp.i_gnd[c] = 1400.0;
-                inp.exg[c] = -0.05;
-                inp.green_f[c] = 0.0;
-                inp.lum[c] = 150.0;
-                inp.rgb[c] = [150, 150, 150];
+                inp.i_gnd_q[c] = 1400;
+                inp.photo[c] = photo(-10, 0, 150, -10, [150, 150, 150]);
                 inp.n_obj[c] = 0;
-                inp.h_obj[c] = 0.0;
+                inp.h_obj_q[c] = 0;
             }
         }
         let out = classify(&inp, (1450.0, 1600.0));
@@ -636,9 +779,9 @@ mod tests {
         for z in 8..11 {
             for x in 8..12 {
                 let c = z * w + x;
-                inp.blue[c] = 0.06;
-                inp.exg[c] = -0.05;
-                inp.green_f[c] = 0.0;
+                inp.photo[c].blue = 12;
+                inp.photo[c].exg = -10;
+                inp.photo[c].green = 0;
             }
         }
         let out = classify(&inp, (1450.0, 1600.0));
@@ -662,9 +805,9 @@ mod tests {
         for z in 8..11 {
             for x in 8..12 {
                 let c = z * w + x;
-                inp.blue[c] = 0.06;
-                inp.exg[c] = -0.05;
-                inp.green_f[c] = 0.0;
+                inp.photo[c].blue = 12;
+                inp.photo[c].exg = -10;
+                inp.photo[c].green = 0;
                 // Two returns of four: chance at this density, not water.
                 inp.n_all[c] = 2;
             }
@@ -684,19 +827,20 @@ mod tests {
     fn green_roofs_of_a_guess_are_crowns() {
         let (w, h) = (10, 10);
         let mut inp = blank(w, h);
-        // A green cell and a grey one, both with building points.
+        // A green cell and a grey one, both with building points 9 m high
+        // and an object 4 m high.
         for (c, green) in [(11, true), (55, false)] {
             inp.n_bld[c] = 5;
-            inp.h_bld[c] = 9.0;
+            inp.h_bld_q[c] = 45;
             inp.n_obj[c] = 1;
-            inp.h_obj[c] = 4.0;
+            inp.h_obj_q[c] = 20;
             if !green {
-                inp.exg[c] = -0.02;
-                inp.green_f[c] = 0.0;
+                inp.photo[c].exg = -4;
+                inp.photo[c].green = 0;
             }
         }
         crowns_not_roofs(&mut inp);
-        assert_eq!((inp.n_bld[11], inp.n_obj[11], inp.h_obj[11]), (0, 6, 9.0));
+        assert_eq!((inp.n_bld[11], inp.n_obj[11], inp.h_obj(11)), (0, 6, 9.0));
         assert_eq!((inp.n_bld[55], inp.n_obj[55]), (5, 1));
     }
 
@@ -704,18 +848,19 @@ mod tests {
     fn eaves_are_not_sheds_but_a_garden_house_is() {
         let (w, h) = (40, 30);
         let mut inp = blank(w, h);
-        let mut put = |x0: usize, x1: usize, z0: usize, z1: usize, hb: f32| {
+        // Building points `hb` fifths of a metre high.
+        let mut put = |x0: usize, x1: usize, z0: usize, z1: usize, hb: u8| {
             for z in z0..z1 {
                 for x in x0..x1 {
                     let c = z * w + x;
                     inp.n_bld[c] = 10;
-                    inp.h_bld[c] = hb;
+                    inp.h_bld_q[c] = hb;
                 }
             }
         };
-        put(5, 15, 5, 15, 8.0); // a house
-        put(15, 17, 5, 15, 3.0); // its eaves, low building points along a wall
-        put(28, 31, 20, 23, 2.4); // a garden house on its own
+        put(5, 15, 5, 15, 40); // a house, 8 m
+        put(15, 17, 5, 15, 15); // its eaves, low building points along a wall
+        put(28, 31, 20, 23, 12); // a garden house on its own, 2.4 m
         let out = classify(&inp, (1450.0, 1600.0));
         assert_ne!(out[10 * w + 16].class, SHED);
         assert_eq!(out[21 * w + 29].class, SHED);
@@ -727,9 +872,9 @@ mod tests {
         let (w, h) = (40, 40);
         let mut inp = blank(w, h);
         for c in 0..w * h / 2 {
-            inp.i_gnd[c] = 1400.0;
-            inp.exg[c] = -0.05;
-            inp.lum[c] = 150.0;
+            inp.i_gnd_q[c] = 1400;
+            inp.photo[c].exg = -10;
+            inp.photo[c].lum = 150;
         }
         let ((lo, hi), how) = calibrate(&inp, (0.0, 0.0));
         assert_eq!(how, Calibration::Photo);
@@ -774,7 +919,7 @@ mod tests {
         for x in 2..28 {
             let c = 5 * w + x;
             inp.n_obj[c] = 2;
-            inp.h_obj[c] = 1.4;
+            inp.h_obj_q[c] = 7;
         }
         let out = classify(&inp, (1450.0, 1600.0));
         assert_eq!(out[5 * w + 5].class, HEDGE);
@@ -807,18 +952,18 @@ mod tests {
     fn without_a_photo_the_returns_tell_a_hedge_from_a_fence() {
         let (w, h) = (30, 20);
         let mut inp = blank(w, h);
-        inp.photo = vec![false; w * h];
+        inp.photo = vec![PhotoCell::default(); w * h];
         // A hedge along row 5 (most hits not the last of their pulse) and a
         // fence along row 14 (solid).
         for x in 2..28 {
             let c = 5 * w + x;
             inp.n_obj[c] = 10;
             inp.n_veg[c] = 7;
-            inp.h_obj[c] = 1.4;
+            inp.h_obj_q[c] = 7;
             let c = 14 * w + x;
             inp.n_obj[c] = 6;
             inp.n_veg[c] = 0;
-            inp.h_obj[c] = 1.6;
+            inp.h_obj_q[c] = 8;
         }
         let out = classify(&inp, (1450.0, 1600.0));
         assert_eq!(out[5 * w + 5].class, HEDGE);
