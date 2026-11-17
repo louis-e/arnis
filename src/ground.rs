@@ -877,12 +877,32 @@ impl Ground {
     /// trees included.
     pub fn laser_cell(&self, coord: XZPoint) -> Option<crate::survey::Cell> {
         let s = self.survey.as_ref()?;
+        let (x, z) = self.survey_index(s, coord);
+        s.at_any(x, z)
+    }
+
+    /// The survey grid's cell under `coord`, sampled like the canopy map.
+    fn survey_index(&self, s: &crate::survey::SurveyData, coord: XZPoint) -> (usize, usize) {
         let (world_w, world_h) = self.world_dims();
         let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
         let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
         let x = ((x_ratio * (s.width - 1) as f64).round() as usize).min(s.width - 1);
         let z = ((z_ratio * (s.height - 1) as f64).round() as usize).min(s.height - 1);
-        s.at_any(x, z)
+        (x, z)
+    }
+
+    /// The survey's raw cell under `coord`, for a rotation to carry over.
+    pub(crate) fn survey_raw(&self, coord: XZPoint) -> Option<[u8; 5]> {
+        let s = self.survey.as_ref()?;
+        let (x, z) = self.survey_index(s, coord);
+        Some(s.raw_at(x, z))
+    }
+
+    /// The survey turned with the world: its cells on the rotated grid.
+    pub(crate) fn rotate_survey(&mut self, cells: Vec<[u8; 5]>, width: usize, height: usize) {
+        if let Some(s) = self.survey.as_mut() {
+            s.regrid(cells, width, height);
+        }
     }
 
     /// Canopy top in metres, or `None` where the map has no measurement.

@@ -103,6 +103,19 @@ impl SurveyData {
         self.height = height;
     }
 
+    /// The raw cell at (`gx`, `gz`), for carrying the grid through a rotation.
+    pub fn raw_at(&self, gx: usize, gz: usize) -> [u8; 5] {
+        self.cells[gz.min(self.height - 1) * self.width + gx.min(self.width - 1)]
+    }
+
+    /// Puts the cells on a new `width` x `height` grid, as a rotation leaves them.
+    pub fn regrid(&mut self, cells: Vec<[u8; 5]>, width: usize, height: usize) {
+        debug_assert_eq!(cells.len(), width * height);
+        self.cells = cells;
+        self.width = width;
+        self.height = height;
+    }
+
     pub fn at_any(&self, gx: usize, gz: usize) -> Option<Cell> {
         if gx >= self.width || gz >= self.height {
             return None;
