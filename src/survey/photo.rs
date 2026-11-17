@@ -13,8 +13,10 @@
 //! `(b - max(r, g)) / 255` and the mean colour. Cached per tile with a record of
 //! which 256-pixel blocks are in, so a later area fetches only what is missing.
 
+use super::fetch::unreachable;
 use super::source::{Photo, Sheet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const TILE: usize = 1000;
 const CELLS: usize = TILE * TILE;
@@ -132,14 +134,16 @@ impl PhotoTile {
 
 /// The tile's photo cells covering `[c0, c1) x [r0, r1)` (metres from the tile's
 /// north-west corner), fetching any block not yet cached. `None` when the photo
-/// cannot be had; the classifier then goes on the laser alone.
+/// cannot be had; the classifier then goes on the laser alone. Once a request
+/// finds the host unreachable, `down` is set and no more are made: the rest of
+/// the photo would only wait out the same timeout.
 pub fn tile(
     client: &reqwest::blocking::Client,
     root: &Path,
     source: &Sheet,
-    te: i32,
-    tn: i32,
+    (te, tn): (i32, i32),
     (c0, r0, c1, r1): (usize, usize, usize, usize),
+    down: &AtomicBool,
 ) -> Option<PhotoTile> {
     if matches!(source.photo, Photo::None) {
         return None;
@@ -167,7 +171,7 @@ pub fn tile(
             return cached;
         }
     }
-    if crate::net::ensure_online("aerial photos").is_err() {
+    if down.load(Ordering::Relaxed) || crate::net::ensure_online("aerial photos").is_err() {
         return cached;
     }
     let url = match source.photo {
@@ -179,13 +183,16 @@ pub fn tile(
                 _ => PhotoTile::new(WMS_ACROSS),
             };
             let todo = needed(&t);
-            let failed = fetch_wms(client, source, (url, layer), (te, tn), &todo, &mut t);
+            let failed = fetch_wms(client, source, (url, layer), (te, tn), &todo, &mut t, down);
             return finish(root, source, (te, tn), t, failed);
         }
     };
     let layout = match read_layout(client, &url) {
         Ok(l) => l,
         Err(e) => {
+            if unreachable(&e) {
+                down.store(true, Ordering::Relaxed);
+            }
             eprintln!("Warning: aerial photo {te}_{tn} unavailable: {e}");
             return cached;
         }
@@ -203,7 +210,16 @@ pub fn tile(
     let fetched: Vec<(usize, Result<Vec<u8>, String>)> = {
         use rayon::prelude::*;
         todo.par_iter()
-            .map(|&i| (i, fetch_block(client, &url, &layout, i)))
+            .map(|&i| {
+                if down.load(Ordering::Relaxed) {
+                    return (i, Err("host unreachable".to_string()));
+                }
+                let got = fetch_block(client, &url, &layout, i);
+                if got.as_ref().is_err_and(|e| unreachable(e)) {
+                    down.store(true, Ordering::Relaxed);
+                }
+                (i, got)
+            })
             .collect()
     };
     let mut failed = 0;
@@ -262,6 +278,7 @@ fn fetch_wms(
     (te, tn): (i32, i32),
     todo: &[usize],
     t: &mut PhotoTile,
+    down: &AtomicBool,
 ) -> usize {
     use rayon::prelude::*;
     use std::collections::BTreeMap;
@@ -313,17 +330,35 @@ fn fetch_wms(
                 py1 - py0
             );
             // A busy WMS sometimes answers with an XML exception instead of the
-            // image; ask again before giving the blocks up.
-            let img = (0..3).find_map(|attempt| {
+            // image; ask twice more before giving the blocks up. A request that
+            // got no answer at all is not repeated (the fetch has retried it).
+            let mut img = None;
+            for attempt in 0..3u64 {
+                if down.load(Ordering::Relaxed) {
+                    break;
+                }
                 if attempt > 0 {
                     std::thread::sleep(std::time::Duration::from_millis(800 * attempt));
                 }
-                super::fetch::get_bytes(client, &req)
+                let body = match super::fetch::get_bytes(client, &req) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        if unreachable(&e.to_string()) {
+                            down.store(true, Ordering::Relaxed);
+                        }
+                        break;
+                    }
+                };
+                img = image::load_from_memory(&body)
                     .ok()
-                    .and_then(|b| image::load_from_memory(&b).ok())
                     .map(|i| i.to_rgb8())
-                    .filter(|i| i.width() as usize == px1 - px0 && i.height() as usize == py1 - py0)
-            });
+                    .filter(|i| {
+                        i.width() as usize == px1 - px0 && i.height() as usize == py1 - py0
+                    });
+                if img.is_some() {
+                    break;
+                }
+            }
             (blocks, img, (px0, py0))
         })
         .collect();

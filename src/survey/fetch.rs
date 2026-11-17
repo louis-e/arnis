@@ -1,6 +1,7 @@
 //! HTTP for the survey: range reads with polite retries, JSON lookups, and a
 //! count of what the laser reads downloaded.
 
+use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -45,6 +46,12 @@ impl std::fmt::Display for Failure {
     }
 }
 
+/// Whether a failure says the host cannot be reached at all (no answer, no
+/// connection, no name), so asking it for more now only waits.
+pub fn unreachable(kind: &str) -> bool {
+    matches!(kind, "timeout" | "connect" | "dns" | "tls")
+}
+
 /// Hosts that limit requests a second, and the most the survey starts there
 /// over all its threads: IGN's Géoplateforme answers 429 past ten a second.
 const PACED: &[(&str, u32)] = &[("data.geopf.fr", 8)];
@@ -82,13 +89,34 @@ fn back_off(d: Duration) {
     }
 }
 
+/// Most a response without a range may hold: the largest asked for whole is a
+/// WMS image of 2048 pixels square or an EPT node, both far smaller.
+const MAX_BODY: u64 = 256 << 20;
+
+/// How a body read failed, as [`crate::net::failure_kind`] words a request's.
+pub fn read_failure(e: &std::io::Error) -> String {
+    match e.get_ref().and_then(|i| i.downcast_ref::<reqwest::Error>()) {
+        Some(inner) => crate::net::failure_kind(inner),
+        None if e.kind() == std::io::ErrorKind::TimedOut => "timeout".into(),
+        None => "body".into(),
+    }
+}
+
 /// A GET, paced, and retried with a growing pause while the server says it is
-/// busy (429, 502, 503, 504).
+/// busy (429, 502, 503, 504). The body is read a piece at a time, so the
+/// client's timeout is how long the host may go silent, not how long the
+/// whole answer may take. A host that does not answer at all is not asked
+/// again.
 fn get(
     client: &reqwest::blocking::Client,
     url: &str,
     range: Option<Span>,
 ) -> Result<Vec<u8>, Failure> {
+    let cap = match range {
+        Some(Span::From(_, 0)) => return Ok(Vec::new()),
+        Some(Span::From(_, len) | Span::Tail(len)) => len,
+        None => MAX_BODY,
+    };
     let mut wait_ms = 1000;
     let limit = paced(url);
     for attempt in 0..8 {
@@ -100,12 +128,14 @@ fn get(
             let mut req = client.get(url);
             match range {
                 Some(Span::From(start, len)) => {
-                    req = req.header("Range", format!("bytes={}-{}", start, start + len - 1));
+                    let last = start.saturating_add(len - 1);
+                    req = req.header("Range", format!("bytes={start}-{last}"));
                 }
                 Some(Span::Tail(len)) => req = req.header("Range", format!("bytes=-{len}")),
                 None => {}
             }
             req.send()
+                .map_err(|e| crate::net::failure_kind(&e))
                 .and_then(|r| {
                     let status = r.status();
                     let retry_after = r
@@ -113,9 +143,12 @@ fn get(
                         .get("retry-after")
                         .and_then(|v| v.to_str().ok())
                         .and_then(|v| v.parse::<u64>().ok());
-                    r.bytes().map(|b| (status, retry_after, b))
+                    let mut body = Vec::new();
+                    r.take(cap.saturating_add(1))
+                        .read_to_end(&mut body)
+                        .map_err(|e| read_failure(&e))?;
+                    Ok((status, retry_after, body))
                 })
-                .map_err(|e| crate::net::failure_kind(&e))
         };
         match resp {
             Ok((status, retry_after, body)) => {
@@ -139,9 +172,12 @@ fn get(
                 if !status.is_success() {
                     return Err(Failure::Other(format!("HTTP {status}")));
                 }
-                return Ok(body.to_vec());
+                if body.len() as u64 > cap {
+                    return Err(Failure::Other("answer larger than asked for".into()));
+                }
+                return Ok(body);
             }
-            Err(kind) if attempt < 2 && kind != "dns" => {
+            Err(kind) if attempt < 2 && !matches!(kind.as_str(), "dns" | "timeout") => {
                 std::thread::sleep(Duration::from_millis(wait_ms));
                 wait_ms *= 2;
             }

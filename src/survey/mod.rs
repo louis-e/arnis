@@ -314,8 +314,12 @@ pub fn fetch_survey_data(
         );
         return None;
     }
+    // A blocking client's timeout holds for the headers and for each read of a
+    // body, not the whole answer: a host gone silent fails in a minute, while a
+    // tile of a gigabyte may take as long as it downloads.
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(60))
         .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()
         .ok()?;
@@ -587,6 +591,8 @@ fn fill_photos(
     use rayon::prelude::*;
     let (e0, n0, e1, n1) = plan.rect;
     let cells = std::sync::Mutex::new(cells);
+    // Set by the first request that finds the photo's host unreachable.
+    let down = std::sync::atomic::AtomicBool::new(false);
     plan.tiles.par_iter().for_each(|&(te, tn)| {
         if stop.load(std::sync::atomic::Ordering::Relaxed) {
             return;
@@ -596,7 +602,8 @@ fn fill_photos(
         let c1 = ((e1 - te0).min(1000.0)) as usize;
         let r0 = (tn1 - n1).max(0.0) as usize;
         let r1 = ((tn1 - n0).min(1000.0)) as usize;
-        let Some(p) = photo::tile(client, root, &plan.sheet, te, tn, (c0, r0, c1, r1)) else {
+        let Some(p) = photo::tile(client, root, &plan.sheet, (te, tn), (c0, r0, c1, r1), &down)
+        else {
             return;
         };
         let mut cells = cells.lock().unwrap_or_else(|e| e.into_inner());
