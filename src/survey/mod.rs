@@ -3,8 +3,8 @@
 //!
 //! Where a source covers the area (see [`source::SOURCES`]: Bavaria, North
 //! Rhine-Westphalia, France, the Netherlands, Switzerland, Estonia, Luxembourg,
-//! the United States, Canada), the parts of its laser tiles and photos the area
-//! needs are read ([`copc`] and [`ept`] read octrees in part), boiled down to
+//! Latvia, the United States, Canada), the parts of its laser tiles and photos
+//! the area needs are read ([`copc`] and [`ept`] read octrees in part), boiled down to
 //! a few numbers per square metre ([`laser`], [`photo`]), classified per metre
 //! on the source's own grid ([`classify`], [`crs`]) and sampled onto the world's
 //! block grid the same way the canopy map is. The ground pass reads it for columns no mapped feature
@@ -33,6 +33,7 @@ pub mod grid;
 pub mod heights;
 pub mod index;
 pub mod laser;
+pub mod latvia;
 pub mod luxembourg;
 pub mod netherlands;
 pub mod nrw;
@@ -447,10 +448,14 @@ pub fn fetch_survey_data(
         classify::median_density(&inputs),
         match how {
             classify::Calibration::Photo => "photo",
+            classify::Calibration::PhotoTurned => "photo, paving the brighter",
             classify::Calibration::Laser => "laser alone",
             classify::Calibration::Defaults => "source's defaults",
         }
     );
+    if how == classify::Calibration::PhotoTurned {
+        classify::turn_over(&mut inputs);
+    }
     let classes = classify::classify(&inputs, thresholds);
     lap("classes");
     let (w, h) = (inputs.w, inputs.h);
@@ -796,6 +801,16 @@ mod tests {
         laser::note_whole(&root, &sheet, (2663, 1210), false);
         assert!(tiles().contains(&(2663, 1210)));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_latvian_sheet_only_the_margin_reaches_is_left_out() {
+        // Riga: the margin reaches 24 m into the sheet column west of the area.
+        let bbox = LLBBox::new(56.9180, 24.0167, 56.9225, 24.0233).unwrap();
+        let root = std::env::temp_dir().join(format!("arnis-sheet-test-{}", std::process::id()));
+        let plan = plan_in(&root, &bbox).unwrap();
+        assert_eq!(plan.sheet.name, latvia::LATVIA.name);
+        assert_eq!(plan.tiles, vec![(501, 308)]);
     }
 
     #[test]

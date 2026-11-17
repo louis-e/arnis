@@ -44,6 +44,8 @@ pub struct Inputs {
     pub laser_plants: bool,
     /// Whether a pool needs cells the laser returned nothing from.
     pub strict_pools: bool,
+    /// Whether the intensity is turned over (see [`turn_over`]).
+    pub turned: bool,
     /// Heights above the ground, in fifths of a metre.
     pub h_obj_q: Vec<u8>,
     pub h_bld_q: Vec<u8>,
@@ -67,6 +69,7 @@ impl Inputs {
             n_veg: vec![0; n],
             laser_plants: false,
             strict_pools: false,
+            turned: false,
             h_obj_q: vec![0; n],
             h_bld_q: vec![0; n],
             i_gnd_q: vec![0; n],
@@ -189,6 +192,8 @@ pub fn median_density(inp: &Inputs) -> f32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Calibration {
     Photo,
+    /// From the photo, on the intensity turned over: paving reads the brighter.
+    PhotoTurned,
     Laser,
     Defaults,
 }
@@ -219,24 +224,59 @@ pub fn calibrate(inp: &Inputs, defaults: (f32, f32)) -> ((f32, f32), Calibration
     if grass.len() >= 200 && pave.len() >= 200 {
         grass.sort_by(f32::total_cmp);
         pave.sort_by(f32::total_cmp);
-        let at = |v: &[f32], q: f32| v[((v.len() - 1) as f32 * q) as usize];
-        let (g, p) = (at(&grass, 0.5), at(&pave, 0.5));
-        let gap = g - p;
-        // Bavaria's 2022 scans: lawn about 1770, a usable gap 80 or more.
-        if gap >= 0.045 * g {
-            // Where the two overlap (scans whose strips differ in brightness),
-            // the intensity alone only decides past where nearly all lawn, or
-            // nearly all paving, lies; in between the photo does. Cleanly
-            // separated scans keep the band at a fifth and three fifths.
-            let lo = (p + 0.2 * gap).min(at(&grass, 0.1));
-            let hi = (p + 0.6 * gap).max(at(&pave, 0.9));
-            return ((lo, hi), Calibration::Photo);
+        let mid = |v: &[f32]| v[(v.len() - 1) / 2];
+        if let Some(t) = bands(&grass, &pave, mid(&grass)) {
+            return (t, Calibration::Photo);
+        }
+        // Some scans return paving brighter than lawn (Latvia's, where most
+        // lawn returns are classed as low plants): the same bands on the
+        // intensity turned over (see [`turn_over`]).
+        let turned = |v: &[f32]| -> Vec<f32> { v.iter().rev().map(|&i| TURN - i).collect() };
+        if let Some(t) = bands(&turned(&grass), &turned(&pave), mid(&pave)) {
+            return (t, Calibration::PhotoTurned);
         }
     }
     match split_intensity(&mut all) {
         Some(t) => ((t, t), Calibration::Laser),
         None => (defaults, Calibration::Defaults),
     }
+}
+
+/// What a turned-over intensity is subtracted from.
+const TURN: f32 = 65_535.0;
+
+/// Turn the ground intensities over, for thresholds calibrated as
+/// [`Calibration::PhotoTurned`].
+pub fn turn_over(inp: &mut Inputs) {
+    for v in &mut inp.i_gnd_q {
+        *v = u16::MAX - *v;
+    }
+    inp.turned = true;
+}
+
+/// How far from a building, in cells, paving is kept on a turned-over
+/// intensity.
+const PAVING_REACH: usize = 30;
+
+/// The intensity bands under which a cell is paving and over which it is
+/// planted, from the sorted intensities of flat cells the photo shows as
+/// lawn and as paving; `None` unless lawn reads the brighter by a clear part
+/// of `scale`, the brighter one's median intensity.
+fn bands(grass: &[f32], pave: &[f32], scale: f32) -> Option<(f32, f32)> {
+    let at = |v: &[f32], q: f32| v[((v.len() - 1) as f32 * q) as usize];
+    let (g, p) = (at(grass, 0.5), at(pave, 0.5));
+    let gap = g - p;
+    // Bavaria's 2022 scans: lawn about 1770, a usable gap 80 or more.
+    if gap < 0.045 * scale {
+        return None;
+    }
+    // Where the two overlap (scans whose strips differ in brightness), the
+    // intensity alone only decides past where nearly all lawn, or nearly all
+    // paving, lies; in between the photo does. Cleanly separated scans keep
+    // the band at a fifth and three fifths.
+    let lo = (p + 0.2 * gap).min(at(grass, 0.1));
+    let hi = (p + 0.6 * gap).max(at(pave, 0.9));
+    Some((lo, hi))
 }
 
 /// Where flat ground's intensities split in two (Otsu's threshold over their
@@ -363,6 +403,17 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
             cls[c] = if share >= 0.5 { LAWN } else { PAVED };
         }
     });
+    // Where paving reads brighter than lawn, bare ground and trodden meadow
+    // read as bright: paving is kept only within reach of a building, where
+    // yards and drives are, and open ground farther out stays lawn. Streets
+    // and car parks are mapped and win anyway.
+    if inp.turned {
+        box_share(&building, w, h, PAVING_REACH, |c, share| {
+            if share <= 0.0 && cls[c] == PAVED {
+                cls[c] = LAWN;
+            }
+        });
+    }
 
     // Pools: clearly blue in the photo, and water swallows the laser, so a pool
     // also has far fewer returns than the ground around it. A blue car has neither.
@@ -865,6 +916,58 @@ mod tests {
         assert_ne!(out[10 * w + 16].class, SHED);
         assert_eq!(out[21 * w + 29].class, SHED);
         assert_eq!(out[21 * w + 29].height_q, 12);
+    }
+
+    #[test]
+    fn paving_brighter_than_lawn_is_turned_over() {
+        let (w, h) = (40, 40);
+        let mut inp = blank(w, h);
+        // Lawn darker than paving, as Latvia's scans read.
+        inp.i_gnd_q = vec![50; w * h];
+        for c in 0..w * h / 2 {
+            inp.i_gnd_q[c] = 90;
+            inp.photo[c].exg = -10;
+            inp.photo[c].lum = 150;
+        }
+        let ((lo, hi), how) = calibrate(&inp, (0.0, 0.0));
+        assert_eq!(how, Calibration::PhotoTurned);
+        turn_over(&mut inp);
+        // The paving's turned-over 65445 lies under the band, the lawn's
+        // 65485 over it.
+        assert!(lo > 65_445.0 && hi < 65_485.0, "{lo} {hi}");
+        // A house by the paving, which keeps it (see the next test).
+        for c in 0..3 * w {
+            if c % w < 6 {
+                inp.n_bld[c] = 10;
+                inp.h_bld_q[c] = 40;
+            }
+        }
+        let out = classify(&inp, (lo, hi));
+        assert_eq!(out[5 * w + 5].class, PAVED);
+        assert_eq!(out[35 * w + 5].class, LAWN);
+    }
+
+    #[test]
+    fn turned_over_paving_stays_near_the_buildings() {
+        let (w, h) = (80, 10);
+        let mut inp = blank(w, h);
+        // Bare ground all along, read as paving, and a house at the west end.
+        inp.i_gnd_q = vec![1400; w * h];
+        for p in &mut inp.photo {
+            p.exg = -10;
+        }
+        for z in 2..8 {
+            for x in 0..6 {
+                inp.n_bld[z * w + x] = 10;
+                inp.h_bld_q[z * w + x] = 40;
+            }
+        }
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert_eq!(out[5 * w + 60].class, PAVED, "unturned, paving stays");
+        inp.turned = true;
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert_eq!(out[5 * w + 20].class, PAVED, "the yard");
+        assert_eq!(out[5 * w + 60].class, LAWN, "open ground");
     }
 
     #[test]

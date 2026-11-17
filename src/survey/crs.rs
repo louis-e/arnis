@@ -18,7 +18,9 @@
 //! * NAD83 UTM (EPSG:26901-26923) by the same series as UTM. NAD83 and WGS84
 //!   differ by a metre or two, as PROJ's own default (a null transformation)
 //!   has it; OpenStreetMap in North America is traced on NAD83 photos anyway;
-//! * Web Mercator (EPSG:3857), the spherical formulas on the WGS84 radius.
+//! * Web Mercator (EPSG:3857), the spherical formulas on the WGS84 radius;
+//! * Latvia's LKS-92 / Latvia TM (EPSG:3059), Transverse Mercator on GRS80 by
+//!   the same series as UTM.
 //!
 //! A source's points can come in another grid than the one the area is
 //! measured on (USGS's point clouds are in Web Mercator); over a tile, an
@@ -41,6 +43,8 @@ pub enum Crs {
     /// Northern UTM zone on NAD83.
     Nad83Utm(u8),
     WebMercator,
+    /// Latvia's LKS-92 / Latvia TM.
+    Lks92,
 }
 
 /// The UTM zone of a longitude.
@@ -59,6 +63,7 @@ impl Crs {
             Crs::Lest97 => lambert::lest97().forward(lat, lon),
             Crs::Luref => datum::luref().forward(lat, lon),
             Crs::WebMercator => mercator::forward(lat, lon),
+            Crs::Lks92 => tm::LKS92.forward(tm::grs80(), lat, lon),
         }
     }
 
@@ -72,6 +77,7 @@ impl Crs {
             Crs::Lest97 => lambert::lest97().inverse(x, y),
             Crs::Luref => datum::luref().inverse(x, y),
             Crs::WebMercator => mercator::inverse(x, y),
+            Crs::Lks92 => tm::LKS92.inverse(tm::grs80(), x, y),
         }
     }
 
@@ -94,13 +100,14 @@ impl Crs {
             Crs::Nad83Utm(60) => 3373,
             Crs::Nad83Utm(zone) => 32600 + u32::from(zone),
             Crs::WebMercator => 3857,
+            Crs::Lks92 => 3059,
         }
     }
 
     /// Whether the grid's EPSG definition puts northing first, as WMS 1.3.0
     /// then wants its bounding boxes.
     pub fn north_first(self) -> bool {
-        matches!(self, Crs::Lest97 | Crs::Luref)
+        matches!(self, Crs::Lest97 | Crs::Luref | Crs::Lks92)
     }
 }
 
@@ -201,6 +208,27 @@ impl Affine {
 }
 
 /// Spherical Web Mercator on the WGS84 semi-major axis.
+/// Transverse Mercator grids on GRS80, whose ETRS89 realisations WGS84 meets
+/// to well under a metre.
+mod tm {
+    use super::utm::{Series, Tm};
+
+    /// LKS-92 / Latvia TM (EPSG:3059).
+    pub const LKS92: Tm = Tm {
+        lon0: 24.0,
+        lat0: 0.0,
+        k0: 0.9996,
+        fe: 500_000.0,
+        fn_: -6_000_000.0,
+    };
+
+    pub fn grs80() -> &'static Series {
+        use std::sync::OnceLock;
+        static S: OnceLock<Series> = OnceLock::new();
+        S.get_or_init(|| Series::new(6_378_137.0, 1.0 / 298.257_222_101))
+    }
+}
+
 mod mercator {
     const R: f64 = 6_378_137.0;
 
@@ -762,6 +790,22 @@ mod tests {
         let (x16, y16) = Crs::Nad83Utm(16).forward(lat, lon);
         let (gx, gy) = f.apply(x16, y16);
         assert!((gx - 250_400.0).abs() < 0.1 && (gy - 4_500_300.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn lks92_matches_proj() {
+        check(
+            Crs::Lks92,
+            &[
+                (56.95, 24.11, 506_691.224, 311_825.560),
+                (56.928, 24.035, 502_130.280, 309_371.808),
+                (55.87, 26.53, 658_300.786, 194_504.931),
+                (57.39, 21.56, 353_347.736, 363_431.295),
+                (56.51, 27.33, 704_896.473, 267_811.546),
+            ],
+            0.01,
+        );
+        assert!(Crs::Lks92.north_first());
     }
 
     #[test]

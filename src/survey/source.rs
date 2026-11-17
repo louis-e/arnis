@@ -12,7 +12,11 @@ pub struct LaserClasses {
     /// Everything above the ground that is not a building, vegetation included.
     pub object: &'static [u8],
     /// The object classes that are vegetation. Empty where the source does not
-    /// tell vegetation apart; the pulse's returns then stand in for it.
+    /// tell vegetation apart; the pulse's returns then stand in for it. A
+    /// ground class listed here too is low plants on the ground (Latvia's
+    /// lawns and meadows): its returns count as ground of the darkest
+    /// intensity, the side lawn reads on there, so a cell mostly of them reads
+    /// as planted (see [`super::classify::calibrate`]).
     pub vegetation: &'static [u8],
     /// Synthetic points that mark a building's outline on the ground rather
     /// than a return: where a source has no building class (the German states'
@@ -147,7 +151,16 @@ pub enum Photo {
     },
     /// No open photo: the classes come from the laser alone.
     None,
+    /// GeoTIFF sheets on a grid of their own, tiled, at a whole number of
+    /// pixels a metre on the metre grid, read block by block: `sheet` gives
+    /// the sheet holding a point of the grid, its address and its north-west
+    /// corner.
+    Sheets { sheet: SheetAt, px_per_m: usize },
 }
+
+/// The photo sheet holding a point of the grid (easting, northing): its
+/// address and its north-west corner.
+pub type SheetAt = fn(f64, f64) -> Option<(String, f64, f64)>;
 
 pub struct Source {
     /// Cache folder and log name.
@@ -186,6 +199,7 @@ pub static SOURCES: &[&Source] = &[
     &super::luxembourg::LUXEMBOURG,
     &super::usa::USA,
     &super::canada::CANADA,
+    &super::latvia::LATVIA,
 ];
 
 impl Source {
@@ -290,7 +304,9 @@ mod tests {
         assert_eq!(which(59.44, 24.75), Some("estonia")); // Tallinn
         assert_eq!(which(58.38, 26.72), Some("estonia")); // Tartu
         assert_eq!(which(49.61, 6.13), Some("luxembourg")); // Luxembourg City
-        assert_eq!(which(56.95, 24.11), None); // Riga
+        assert_eq!(which(56.95, 24.11), Some("latvia")); // Riga
+        assert_eq!(which(55.87, 26.53), Some("latvia")); // Daugavpils
+        assert_eq!(which(54.69, 25.28), None); // Vilnius
         assert_eq!(which(51.34, 12.37), None); // Leipzig
         assert_eq!(which(48.78, 9.18), None); // Stuttgart
         assert_eq!(which(48.21, 16.37), None); // Vienna
@@ -335,6 +351,9 @@ mod tests {
         assert_eq!(picked(49.002, -122.760), Some("canada"));
         assert_eq!(picked(43.095, -79.040), Some("usa"));
         assert_eq!(picked(43.090, -79.070), Some("canada"));
+        // Valga and Valka.
+        assert_eq!(picked(57.777, 26.045), Some("estonia"));
+        assert_eq!(picked(57.772, 26.015), Some("latvia"));
         // Deep inside, nothing changes.
         assert_eq!(picked(48.14, 11.57), Some("bavaria"));
         assert_eq!(picked(50.94, 6.96), Some("nrw")); // Cologne

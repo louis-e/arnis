@@ -953,7 +953,13 @@ impl<'a> Measure<'a> {
         let block = &mut self.blocks[(row / BLOCK) * BLOCKS + col / BLOCK];
         let at = (row % BLOCK) * BLOCK + col % BLOCK;
         let flags = if classes.ground.contains(&class) {
-            let intensity = u16::from_le_bytes([rec[12], rec[13]]);
+            // Low plants on the ground read as the darkest return (see
+            // `LaserClasses::vegetation`).
+            let intensity = if classes.vegetation.contains(&class) {
+                0
+            } else {
+                u16::from_le_bytes([rec[12], rec[13]])
+            };
             block.ground.push((at as u32) << 16 | u32::from(intensity));
             self.gz_sum[cell] += z;
             return;
@@ -1427,6 +1433,42 @@ mod tests {
         assert_eq!((t.n_bld[c(502)], t.n_obj[c(502)]), (0, 1));
         // The mark is not a return.
         assert_eq!(t.n_all[c(500)], 3);
+    }
+
+    #[test]
+    fn low_plants_on_the_ground_read_as_the_darkest_ground() {
+        let src = &Sheet::at(&super::super::latvia::LATVIA, 24.0);
+        let layout = PointLayout {
+            format: 1,
+            record_len: 28,
+            scale: [0.01, 0.01, 0.01],
+            offset: [0.0, 0.0, 0.0],
+        };
+        // A point in tile 501_308 at cell (col, row), class, intensity.
+        let rec = |col: usize, row: usize, class: u8, intensity: u16| {
+            let mut r = vec![0u8; 28];
+            let x = ((501_000.0 + col as f64 + 0.5) / 0.01) as i32;
+            let y = ((309_000.0 - row as f64 - 0.5) / 0.01) as i32;
+            r[0..4].copy_from_slice(&x.to_le_bytes());
+            r[4..8].copy_from_slice(&y.to_le_bytes());
+            r[8..12].copy_from_slice(&((10.0 / 0.01) as i32).to_le_bytes());
+            r[12..14].copy_from_slice(&intensity.to_le_bytes());
+            r[14] = 1 | (1 << 3);
+            r[15] = class;
+            r
+        };
+        let mut m = Measure::new(src, 501, 308, (0, 0, TILE, TILE));
+        // Paving: ground returns only. Meadow: mostly low vegetation.
+        for _ in 0..3 {
+            m.add(&layout, &rec(10, 10, 2, 90));
+            m.add(&layout, &rec(20, 10, 3, 40));
+        }
+        m.add(&layout, &rec(20, 10, 2, 90));
+        let t = m.finish("test");
+        let c = |col: usize| 10 * TILE + col;
+        assert_eq!((t.n_gnd[c(10)], t.i_gnd[c(10)]), (3, 90));
+        assert_eq!((t.n_gnd[c(20)], t.i_gnd[c(20)]), (4, 0));
+        assert_eq!(t.n_obj[c(20)], 0);
     }
 
     #[test]

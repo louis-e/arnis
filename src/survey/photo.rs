@@ -14,7 +14,7 @@
 //! which 256-pixel blocks are in, so a later area fetches only what is missing.
 
 use super::fetch::unreachable;
-use super::source::{Photo, Sheet};
+use super::source::{Photo, Sheet, SheetAt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -45,6 +45,7 @@ pub struct PhotoTile {
 
 struct Layout {
     width: usize,
+    height: usize,
     tile_w: usize,
     tile_h: usize,
     offsets: Vec<u64>,
@@ -186,6 +187,17 @@ pub fn tile(
             let failed = fetch_wms(client, source, (url, layer), (te, tn), &todo, &mut t, down);
             return finish(root, source, (te, tn), t, failed);
         }
+        Photo::Sheets { sheet, px_per_m } => {
+            let mut t = match cached {
+                Some(t) if t.blocks_across == WMS_ACROSS => t,
+                _ => PhotoTile::new(WMS_ACROSS),
+            };
+            let todo = needed(&t);
+            let failed = fetch_rendered((te, tn), &todo, &mut t, &|rect, size| {
+                render_sheets(client, (sheet, px_per_m), rect, size, down)
+            });
+            return finish(root, source, (te, tn), t, failed);
+        }
     };
     let layout = match read_layout(client, &url) {
         Ok(l) => l,
@@ -287,6 +299,61 @@ fn fetch_wms(
     t: &mut PhotoTile,
     down: &AtomicBool,
 ) -> usize {
+    fetch_rendered((te, tn), todo, t, &|(w, s, e, n), (width, height)| {
+        let bbox = if source.crs.north_first() {
+            format!("{s},{w},{n},{e}")
+        } else {
+            format!("{w},{s},{e},{n}")
+        };
+        let req = format!(
+            "{url}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={layer}&STYLES=\
+             &CRS=EPSG:{}&BBOX={bbox}&WIDTH={width}&HEIGHT={height}&FORMAT=image/jpeg",
+            source.crs.epsg(),
+        );
+        // A busy WMS sometimes answers with an XML exception instead of the
+        // image, or with an error; ask twice more before giving the blocks
+        // up. A host that cannot be reached is not asked again.
+        for attempt in 0..3u64 {
+            if down.load(Ordering::Relaxed) {
+                return None;
+            }
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(800 * attempt));
+            }
+            let body = match super::fetch::get_bytes(client, &req) {
+                Ok(b) => b,
+                Err(e) if unreachable(&e.to_string()) => {
+                    down.store(true, Ordering::Relaxed);
+                    return None;
+                }
+                Err(_) => continue,
+            };
+            let img = image::load_from_memory(&body)
+                .ok()
+                .map(|i| i.to_rgb8())
+                .filter(|i| i.width() as usize == width && i.height() as usize == height);
+            if img.is_some() {
+                return img;
+            }
+        }
+        None
+    })
+}
+
+/// Draws a rectangle of the grid (west, south, east, north) at a size in
+/// pixels.
+type Render<'a> =
+    dyn Fn((f64, f64, f64, f64), (usize, usize)) -> Option<image::RgbImage> + Sync + 'a;
+
+/// Fetch the blocks `todo` as images of a few neighbours at a time, `render`
+/// drawing each rectangle of the grid (west, south, east, north) at the size
+/// asked, and fold them into `t`. Returns how many failed.
+fn fetch_rendered(
+    (te, tn): (i32, i32),
+    todo: &[usize],
+    t: &mut PhotoTile,
+    render: &Render<'_>,
+) -> usize {
     use rayon::prelude::*;
     use std::collections::BTreeMap;
     let mut chunks: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
@@ -301,6 +368,7 @@ fn fetch_wms(
     let full = TILE * PX_PER_M;
     let layout = Layout {
         width: full,
+        height: full,
         tile_w: 256,
         tile_h: 256,
         offsets: Vec::new(),
@@ -323,48 +391,9 @@ fn fetch_wms(
             let (px0, px1) = (bx0 * 256, ((bx1 + 1) * 256).min(full));
             let (py0, py1) = (by0 * 256, ((by1 + 1) * 256).min(full));
             let m = |px: usize| px as f64 / PX_PER_M as f64;
-            let (w, s, e, n) = (te0 + m(px0), tn1 - m(py1), te0 + m(px1), tn1 - m(py0));
-            let bbox = if source.crs.north_first() {
-                format!("{s},{w},{n},{e}")
-            } else {
-                format!("{w},{s},{e},{n}")
-            };
-            let req = format!(
-                "{url}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS={layer}&STYLES=\
-                 &CRS=EPSG:{}&BBOX={bbox}&WIDTH={}&HEIGHT={}&FORMAT=image/jpeg",
-                source.crs.epsg(),
-                px1 - px0,
-                py1 - py0
-            );
-            // A busy WMS sometimes answers with an XML exception instead of the
-            // image, or with an error; ask twice more before giving the blocks
-            // up. A host that cannot be reached is not asked again.
-            let mut img = None;
-            for attempt in 0..3u64 {
-                if down.load(Ordering::Relaxed) {
-                    break;
-                }
-                if attempt > 0 {
-                    std::thread::sleep(std::time::Duration::from_millis(800 * attempt));
-                }
-                let body = match super::fetch::get_bytes(client, &req) {
-                    Ok(b) => b,
-                    Err(e) if unreachable(&e.to_string()) => {
-                        down.store(true, Ordering::Relaxed);
-                        break;
-                    }
-                    Err(_) => continue,
-                };
-                img = image::load_from_memory(&body)
-                    .ok()
-                    .map(|i| i.to_rgb8())
-                    .filter(|i| {
-                        i.width() as usize == px1 - px0 && i.height() as usize == py1 - py0
-                    });
-                if img.is_some() {
-                    break;
-                }
-            }
+            let rect = (te0 + m(px0), tn1 - m(py1), te0 + m(px1), tn1 - m(py0));
+            let img = render(rect, (px1 - px0, py1 - py0))
+                .filter(|i| i.width() as usize == px1 - px0 && i.height() as usize == py1 - py0);
             (blocks, img, (px0, py0))
         })
         .collect();
@@ -401,6 +430,117 @@ fn fetch_wms(
 }
 
 /// Read the first IFD of a classic TIFF and the tile table it points to.
+/// A rectangle of the grid (west, south, east, north) drawn at `size` pixels
+/// from sheets of GeoTIFF on the metre grid at `px_per_m` (see
+/// [`Photo::Sheets`]), nearest pixel; `None` when a sheet it needs cannot be
+/// read. Once a request finds the host unreachable, `down` is set and no more
+/// are made.
+fn render_sheets(
+    client: &reqwest::blocking::Client,
+    (sheet, px_per_m): (SheetAt, usize),
+    (w, s, e, n): (f64, f64, f64, f64),
+    (width, height): (usize, usize),
+    down: &AtomicBool,
+) -> Option<image::RgbImage> {
+    use rayon::prelude::*;
+    let failed = |e: &String| {
+        if unreachable(e) {
+            down.store(true, Ordering::Relaxed);
+        }
+    };
+    let k = px_per_m as f64;
+    let (sx, sy) = ((e - w) / width as f64, (n - s) / height as f64);
+    // Each output pixel's sheet, by the sheets' extents: a rectangle meets at
+    // most a few, each looked up and its layout read once.
+    let mut owner = vec![0u8; width * height];
+    let mut sheets: Vec<(String, f64, f64, Layout)> = Vec::new();
+    for y in 0..height {
+        for x in 0..width {
+            let (pe, pn) = (w + (x as f64 + 0.5) * sx, n - (y as f64 + 0.5) * sy);
+            let inside = |&(_, sw, sn, ref l): &(String, f64, f64, Layout)| {
+                pe >= sw
+                    && pe < sw + l.width as f64 / k
+                    && pn <= sn
+                    && pn > sn - l.height as f64 / k
+            };
+            let i = match sheets.iter().position(inside) {
+                Some(i) => i,
+                None => {
+                    if down.load(Ordering::Relaxed) {
+                        return None;
+                    }
+                    let (url, sw, sn) = sheet(pe, pn)?;
+                    let l = read_layout(client, &url).inspect_err(failed).ok()?;
+                    let here = (url, sw, sn, l);
+                    if !sheet_layout(&here.3) || !inside(&here) || sheets.len() == 255 {
+                        return None;
+                    }
+                    sheets.push(here);
+                    sheets.len() - 1
+                }
+            };
+            owner[y * width + x] = i as u8;
+        }
+    }
+    let mut img = image::RgbImage::new(width as u32, height as u32);
+    for (i, (url, sw, sn, l)) in sheets.iter().enumerate() {
+        let across = l.width.div_ceil(l.tile_w);
+        // The sheet's pixel under each output pixel it owns.
+        let at = |x: usize, y: usize| {
+            let (pe, pn) = (w + (x as f64 + 0.5) * sx, n - (y as f64 + 0.5) * sy);
+            let px = (((pe - sw) * k) as usize).min(l.width - 1);
+            let py = (((sn - pn) * k) as usize).min(l.height - 1);
+            (px, py)
+        };
+        let mut blocks: Vec<usize> = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .filter(|&(x, y)| owner[y * width + x] as usize == i)
+            .map(|(x, y)| {
+                let (px, py) = at(x, y);
+                (py / l.tile_h) * across + px / l.tile_w
+            })
+            .collect();
+        blocks.sort_unstable();
+        blocks.dedup();
+        let got: Vec<(usize, Vec<u8>)> = blocks
+            .par_iter()
+            .map(|&b| {
+                if down.load(Ordering::Relaxed) {
+                    return Err("host unreachable".to_string());
+                }
+                let px = fetch_block(client, url, l, b).inspect_err(failed)?;
+                Ok((b, px))
+            })
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let got: std::collections::HashMap<usize, Vec<u8>> = got.into_iter().collect();
+        for y in 0..height {
+            for x in 0..width {
+                if owner[y * width + x] as usize != i {
+                    continue;
+                }
+                let (px, py) = at(x, y);
+                let b = &got[&((py / l.tile_h) * across + px / l.tile_w)];
+                let o = ((py % l.tile_h) * l.tile_w + px % l.tile_w) * l.samples;
+                img.put_pixel(x as u32, y as u32, image::Rgb([b[o], b[o + 1], b[o + 2]]));
+            }
+        }
+    }
+    Some(img)
+}
+
+/// Whether a sheet's layout is one [`render_sheets`] reads: 3 or 4 samples a
+/// pixel in square blocks of 16 to 1024 pixels, an offset for each, and no
+/// more than 65536 pixels a side.
+fn sheet_layout(l: &Layout) -> bool {
+    let sides = (1..=1 << 16).contains(&l.width) && (1..=1 << 16).contains(&l.height);
+    sides
+        && (16..=1024).contains(&l.tile_w)
+        && l.tile_h == l.tile_w
+        && (3..=4).contains(&l.samples)
+        && l.offsets.len() >= l.width.div_ceil(l.tile_w) * l.height.div_ceil(l.tile_h)
+}
+
 fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, String> {
     let head = get_range(client, url, 0, 65_536)?;
     if head.len() < 8 {
@@ -431,12 +571,21 @@ fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, 
         return Err("BigTIFF is not supported here".into());
     }
     let ifd = u32_at(&head, 4) as usize;
+    // Most files keep their directory up front; some write it after the
+    // pixels, and it is read from there.
+    let (head, base) = if ifd + 2 > head.len() {
+        (get_range(client, url, ifd as u64, 65_536)?, ifd)
+    } else {
+        (head, 0)
+    };
+    let ifd = ifd - base;
     if ifd + 2 > head.len() {
-        return Err("IFD past the first 64 KiB".into());
+        return Err("short TIFF directory".into());
     }
     let entries = u16_at(&head, ifd) as usize;
     let mut l = Layout {
         width: 0,
+        height: 0,
         tile_w: 0,
         tile_h: 0,
         offsets: Vec::new(),
@@ -464,6 +613,7 @@ fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, 
         };
         match tag {
             256 => l.width = value(),
+            257 => l.height = value(),
             259 => l.compression = short() as u16,
             277 => l.samples = short(),
             317 => l.predictor = short() as u16,
@@ -482,8 +632,11 @@ fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, 
         }
         let bytes = if count * size <= 4 {
             return Err("single-tile TIFF".into());
-        } else if at as usize + count * size <= head.len() {
-            head[at as usize..at as usize + count * size].to_vec()
+        } else if let Some(rel) = (at as usize)
+            .checked_sub(base)
+            .filter(|&r| r + count * size <= head.len())
+        {
+            head[rel..rel + count * size].to_vec()
         } else {
             get_range(client, url, u64::from(at), (count * size) as u64)?
         };
