@@ -1397,13 +1397,26 @@ pub fn generate_world_with_options(
         railways::collect_rail_passages(&elements, &clip_bbox, args.scale, &building_footprints);
     building_passages.union_with(&rail_passages.cells);
 
+    // Mapped trees first: a road's verge keeps its ground only for a canopy tree that will
+    // stand, and none stands under a mapped tree's crown.
+    let mut mapped_trunks = crate::trees::mapped::MappedTrunks::collect(&elements, args.scale);
+    let crown_r = crate::element_processing::tree::crown_probe_blocks(args.scale);
+    mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
+    let mapped_trunks = Arc::new(mapped_trunks);
+    editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups. The carriageways
     // among them come in the same pass: trees keep their trunks out of them, mapped
     // street trees included, and leave more headroom over them than over a footway.
-    let (road_mask, carriageway, mapped_paths) = highways::collect_road_and_carriageway_coords(
+    let highways::RoadCoords {
+        roads: road_mask,
+        carriageways: carriageway,
+        paths: mapped_paths,
+        cut: road_cut,
+    } = highways::collect_road_and_carriageway_coords(
         &elements,
         &editor,
         &clip_bbox,
@@ -1434,12 +1447,6 @@ pub fn generate_world_with_options(
     editor.set_carriageway(Arc::clone(&carriageway));
     let mapped_paths = Arc::new(mapped_paths);
     editor.set_mapped_paths(Arc::clone(&mapped_paths));
-
-    let mut mapped_trunks = crate::trees::mapped::MappedTrunks::collect(&elements, args.scale);
-    let crown_r = crate::element_processing::tree::crown_probe_blocks(args.scale);
-    mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
-    let mapped_trunks = Arc::new(mapped_trunks);
-    editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
     // Indexed up front, so a construction site skips its own crane whichever renders first.
     let mapped_cranes = Arc::new(man_made::mapped_crane_points(&elements));
     editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
@@ -1604,7 +1611,9 @@ pub fn generate_world_with_options(
             crossings.as_deref(),
             &xzbbox,
             |way, x, z| surfaces.y_at(way, x, z),
-            |x, z| building_footprints.contains(x, z),
+            // Where the road stops short of a building, a mapped sidewalk or a verge, the
+            // lanes beside it move in.
+            |x, z| building_footprints.contains(x, z) || road_cut.contains(x, z),
         );
         println!(
             "  Moving cars: {} cars on the road network",
@@ -1612,6 +1621,7 @@ pub fn generate_world_with_options(
         );
         Arc::new(net)
     });
+    drop(road_cut);
     let mut walk_network = extras
         .pedestrians
         .then(|| {

@@ -937,14 +937,24 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Whether what a road gains past its lanes leaves (x, z) to the ground: land cover keeps
-    /// it green, or the canopy map grows a tree with its trunk within a block of it. Parking
-    /// rows and the second lane of a street pave over neither, so verges keep their grass
-    /// and street trees, as the plain road beside them did.
-    pub fn keeps_its_ground(&self, x: i32, z: i32) -> bool {
+    /// it green, or a mapped tree or one the canopy map grows has its trunk within a block of
+    /// it. Parking rows and the second lane of a street pave over neither, so verges keep
+    /// their grass and street trees their pits, as the plain road beside them did. A trunk
+    /// counts only where it will stand: not on what `paved` says is paved whatever the verge
+    /// does, as the road's own lanes, and a canopy one not under a mapped tree's crown,
+    /// which the canopy leaves to that tree.
+    pub fn keeps_its_ground(&self, x: i32, z: i32, paved: impl Fn(i32, i32) -> bool) -> bool {
         use crate::land_cover::{
             LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_TREE_COVER,
             LC_WETLAND,
         };
+        if self
+            .mapped_trunks
+            .as_ref()
+            .is_some_and(|t| t.trunk_within(x, z, 1, |tx, tz| !paved(tx, tz)))
+        {
+            return true;
+        }
         let Some(ground) = self.ground.as_ref() else {
             return false;
         };
@@ -975,6 +985,9 @@ impl<'a> WorldEditor<'a> {
                 continue;
             }
             seen[k] = slot;
+            if paved(slot.0, slot.1) || self.under_mapped_crown(slot.0, slot.1) {
+                continue;
+            }
             let (_, tree) = crate::ground_generation::canopy_verdict(
                 ground,
                 slot.0,

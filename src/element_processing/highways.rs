@@ -1940,6 +1940,20 @@ fn generate_highways_internal(
             let square_stamp = stamps_square(way);
             // How far the road paves into a building standing against it, or a verge.
             let kept_by_walls = wall_core(way, highway_type, scale_factor);
+            // Whether the stamp of the centreline cell (dx, dz) back leaves (x, z) unpaved.
+            let cut_here = |editor: &WorldEditor, dx: i32, dz: i32, x: i32, z: i32| {
+                kept_by_walls.is_some_and(|core| {
+                    !in_road_stamp(dx, dz, core)
+                        && cut_beside(
+                            |sx, sz| near_centreline(way, core, sx, sz),
+                            building_footprints,
+                            Some(editor),
+                            |px, pz| editor.on_mapped_path(px, pz),
+                            x,
+                            z,
+                        )
+                })
+            };
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
 
@@ -2067,10 +2081,23 @@ fn generate_highways_internal(
             let crossing_clips = crossing_paint.and(markings.crossing_clips(way.id));
             // Surface of the carriageway under a crossing cell; None off the road, and
             // everywhere for a crossing that shares no node with a road.
-            let carriageway_at = |cx: i32, cz: i32| -> Option<&'static [Block]> {
+            let carriageway_at = |editor: &WorldEditor, cx: i32, cz: i32| {
                 crossing_clips?
                     .iter()
-                    .find(|c| c.contains(cx, cz))
+                    .find(|c| {
+                        c.contains(cx, cz)
+                            && !(c.past_core(cx, cz)
+                                && c.core().is_some_and(|core| {
+                                    cut_beside(
+                                        |sx, sz| c.in_core(core, sx, sz),
+                                        building_footprints,
+                                        Some(editor),
+                                        |px, pz| editor.on_mapped_path(px, pz),
+                                        cx,
+                                        cz,
+                                    )
+                                }))
+                    })
                     .map(|c| c.palette())
             };
 
@@ -2278,11 +2305,7 @@ fn generate_highways_internal(
                                 }
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
-                                if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
-                                    && (building_footprints.contains(set_x, set_z)
-                                        || editor.keeps_its_ground(set_x, set_z)
-                                        || editor.on_mapped_path(set_x, set_z))
-                                {
+                                if cut_here(editor, dx, dz, set_x, set_z) {
                                     continue;
                                 }
                                 if drown_over_water
@@ -2352,7 +2375,7 @@ fn generate_highways_internal(
                                 // A crossing on the road is painted on the road's own
                                 // surface, not the footway's grey.
                                 let crossing_here =
-                                    crossing_paint.zip(carriageway_at(set_x, set_z));
+                                    crossing_paint.zip(carriageway_at(editor, set_x, set_z));
                                 if let Some((paint, road)) = crossing_here {
                                     let along = if dir_horizontal { set_x } else { set_z };
                                     let on_stripe = paint == CrossingPaint::Zebra
@@ -2673,7 +2696,7 @@ fn generate_highways_internal(
                                     } else {
                                         (*x + off, *z)
                                     };
-                                    if let Some(road) = carriageway_at(sx, sz) {
+                                    if let Some(road) = carriageway_at(editor, sx, sz) {
                                         paint(editor, WHITE_CONCRETE, sx, sz, road);
                                     }
                                 }
@@ -3666,7 +3689,7 @@ pub fn collect_road_surface_coords(
         water_detail,
         &CoordinateBitmap::new_empty(),
     )
-    .0
+    .roads
 }
 
 /// True for highway types that carry vehicles rather than people on foot, bike or horse.
@@ -3754,25 +3777,42 @@ pub fn collect_road_and_carriageway_coords(
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
     building_footprints: &CoordinateBitmap,
-) -> (CoordinateBitmap, CoordinateBitmap, CoordinateBitmap) {
+) -> RoadCoords {
     let mut roads = CoordinateBitmap::new(xzbbox);
     let mut carriageways = CoordinateBitmap::new(xzbbox);
-    let mut paths = CoordinateBitmap::new(xzbbox);
     let editor = Some(editor);
-    // The sidewalks and paths first, which the roads beside them then stop at.
-    stamp_highway_surfaces(
-        elements,
-        editor,
-        scale,
-        water_detail,
-        building_footprints,
-        None,
-        |carriageway, x, z| {
-            if !carriageway {
-                paths.set(x, z);
-            }
-        },
-    );
+    // The sidewalks first, which the roads beside them then stop at; read only where a road
+    // has a strip past its core to stop.
+    let widens = elements.iter().any(|e| match e {
+        ProcessedElement::Way(w) => {
+            surface_highway_type(w).is_some_and(|t| wall_core(w, t, scale).is_some())
+        }
+        _ => false,
+    });
+    let mut paths = CoordinateBitmap::new_empty();
+    if widens {
+        let mut found = CoordinateBitmap::new(xzbbox);
+        let mut any = false;
+        stamp_highway_surfaces(
+            elements,
+            editor,
+            scale,
+            water_detail,
+            building_footprints,
+            None,
+            |carriageway, x, z| {
+                if !carriageway {
+                    found.set(x, z);
+                    any = true;
+                }
+            },
+            |_, _| {},
+        );
+        if any {
+            paths = found;
+        }
+    }
+    let mut cut: Vec<u64> = Vec::new();
     stamp_highway_surfaces(
         elements,
         editor,
@@ -3786,23 +3826,111 @@ pub fn collect_road_and_carriageway_coords(
                 carriageways.set(x, z);
             }
         },
+        |x, z| cut.push(pack_xz(x, z)),
     );
-    (roads, carriageways, paths)
+    cut.sort_unstable();
+    cut.dedup();
+    cut.retain(|&c| !roads.contains((c >> 32) as u32 as i32, c as u32 as i32));
+    cut.shrink_to_fit();
+    RoadCoords {
+        roads,
+        carriageways,
+        paths,
+        cut: CutCells(cut),
+    }
 }
 
-/// A sidewalk, footpath or cycle path mapped as its own way, which a road's parking rows
-/// and second lane stop at: not a crossing, which runs across the road.
+/// What `collect_road_and_carriageway_coords` finds.
+pub struct RoadCoords {
+    /// Every road and path surface cell.
+    pub roads: CoordinateBitmap,
+    /// The lanes among them, without the parking rows along the kerbs.
+    pub carriageways: CoordinateBitmap,
+    /// The sidewalks mapped as their own ways, which a road's parking rows and second lane
+    /// stop at; empty where no road widens past its core or no such sidewalk is mapped.
+    pub paths: CoordinateBitmap,
+    /// The cells a road's stamp covers but leaves unpaved beside it, which no other way
+    /// paves.
+    pub cut: CutCells,
+}
+
+/// Cells a road's stamp covers but `cut_beside` leaves unpaved, packed and sorted.
+#[derive(Default)]
+pub struct CutCells(Vec<u64>);
+
+impl CutCells {
+    pub fn contains(&self, x: i32, z: i32) -> bool {
+        self.0.binary_search(&pack_xz(x, z)).is_ok()
+    }
+}
+
+/// Whether a road leaves (x, z), past the core it keeps against what stands beside it,
+/// unpaved: a building stands there, a sidewalk is mapped there as its own way (`on_path`),
+/// or the verge keeps its ground. `in_core` says whether a cell lies in the road's own core,
+/// where no tree will stand.
+pub(crate) fn cut_beside(
+    in_core: impl Fn(i32, i32) -> bool,
+    footprints: &CoordinateBitmap,
+    editor: Option<&WorldEditor>,
+    on_path: impl Fn(i32, i32) -> bool,
+    x: i32,
+    z: i32,
+) -> bool {
+    footprints.contains(x, z)
+        || on_path(x, z)
+        || editor.is_some_and(|e| {
+            e.keeps_its_ground(x, z, |sx, sz| {
+                footprints.contains(sx, sz) || in_core(sx, sz)
+            })
+        })
+}
+
+/// How far from a centreline cell the disc stamp of half-width `half` reaches.
+pub(crate) fn stamp_radius(half: i32) -> f32 {
+    ((half * half + half) as f32).sqrt()
+}
+
+/// Whether (x, z) lies within the disc stamp of half-width `half` along the way's
+/// centreline, as near as the segments between its nodes tell.
+fn near_centreline(way: &ProcessedWay, half: i32, x: i32, z: i32) -> bool {
+    let reach = stamp_radius(half);
+    let (px, pz) = (x as f32, z as f32);
+    way.nodes.windows(2).any(|w| {
+        let (ax, az) = (w[0].x as f32, w[0].z as f32);
+        let (dx, dz) = (w[1].x as f32 - ax, w[1].z as f32 - az);
+        let len_sq = dx * dx + dz * dz;
+        let t = if len_sq > 0.0 {
+            (((px - ax) * dx + (pz - az) * dz) / len_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        (px - ax - t * dx).hypot(pz - az - t * dz) <= reach
+    })
+}
+
+/// A sidewalk mapped as its own way at grade, which a road's parking rows and second lane
+/// stop at: a footway, cycle path or path tagged as a sidewalk or a side path, so running
+/// alongside the road. A path that only joins or crosses the street, and a footbridge or a
+/// walkway on another level, do not cut it.
 pub(crate) fn is_mapped_path(way: &ProcessedWay, highway_type: &str) -> bool {
-    !is_carriageway(highway_type)
-        && !way.tags.contains_key("crossing")
-        && !["footway", "cycleway", "path"]
+    let tag = |k: &str| way.tags.get(k).map(String::as_str);
+    let alongside = ["footway", "cycleway", "path"]
+        .iter()
+        .any(|k| tag(k) == Some("sidewalk"))
+        || tag("is_sidepath") == Some("yes");
+    let at_grade = !is_bridge_way(way)
+        && tag("tunnel").is_none_or(|t| t == "no")
+        && ["layer", "level"]
             .iter()
-            .any(|k| way.tags.get(*k).is_some_and(|v| v == "crossing"))
+            .all(|k| tag(k).is_none_or(|v| v.trim().parse::<f64>().is_ok_and(|l| l == 0.0)));
+    !is_carriageway(highway_type) && alongside && at_grade
 }
 
-/// Hands `stamp` every road and path surface cell, with whether its way carries vehicles.
-/// Without `paths`, only the sidewalks and paths mapped as their own ways; with them,
-/// every way, a road's parking rows and second lane stopping at those paths.
+/// Hands `stamp` every road and path surface cell, with whether its way carries vehicles,
+/// and `skipped` every cell a road's stamp covers but `cut_beside` leaves unpaved. Without
+/// `paths`, only the sidewalks mapped as their own ways; with them, every way, a road's
+/// parking rows and second lane stopping at those sidewalks.
+#[allow(clippy::too_many_arguments)]
 fn stamp_highway_surfaces(
     elements: &[ProcessedElement],
     editor: Option<&WorldEditor>,
@@ -3811,6 +3939,7 @@ fn stamp_highway_surfaces(
     building_footprints: &CoordinateBitmap,
     paths: Option<&CoordinateBitmap>,
     mut stamp: impl FnMut(bool, i32, i32),
+    mut skipped: impl FnMut(i32, i32),
 ) {
     // A way that meets a bridge is its ramp or its approach, and keeps its surface.
     let drowning = editor.filter(|_| water_detail.drowns_crossing(scale, &HashMap::new()));
@@ -3885,11 +4014,18 @@ fn stamp_highway_surfaces(
                     if skip_water && drowned.is_some_and(|e| fills(e, bx + dx, bz + dz)) {
                         continue;
                     }
-                    if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
-                        && (building_footprints.contains(bx + dx, bz + dz)
-                            || editor.is_some_and(|e| e.keeps_its_ground(bx + dx, bz + dz))
-                            || paths.is_some_and(|p| p.contains(bx + dx, bz + dz)))
-                    {
+                    if kept_by_walls.is_some_and(|core| {
+                        !in_road_stamp(dx, dz, core)
+                            && cut_beside(
+                                |sx, sz| near_centreline(way, core, sx, sz),
+                                building_footprints,
+                                editor,
+                                |px, pz| paths.is_some_and(|p| p.contains(px, pz)),
+                                bx + dx,
+                                bz + dz,
+                            )
+                    }) {
+                        skipped(bx + dx, bz + dz);
                         continue;
                     }
                     let in_lanes = if square {
@@ -6099,6 +6235,143 @@ mod tests {
         carve_highway_tunnel_interior(editor, &cells);
     }
 
+    /// A verge keeps its ground where land cover keeps it green, and next to the trunk of a
+    /// canopy tree that will stand: not one on the road's own lanes, nor one under a mapped
+    /// tree's crown.
+    #[test]
+    fn a_verge_keeps_its_ground_for_grass_and_for_trees_that_will_stand() {
+        use crate::canopy::CanopyData;
+        use crate::land_cover::{LandCoverData, LC_BUILT_UP, LC_GRASSLAND};
+        let cover = |class: u8| LandCoverData {
+            grid: vec![vec![class]],
+            water_distance: vec![vec![0]],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
+            width: 1,
+            height: 1,
+            cells_per_meter: 1.0,
+        };
+        let xzbbox = XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let open = |_: i32, _: i32| false;
+        // A lawn keeps all of it.
+        let mut editor = test_editor(&xzbbox);
+        editor.set_ground(std::sync::Arc::new(
+            crate::ground::Ground::new_flat_land_cover_test(cover(LC_GRASSLAND), 64, 64),
+        ));
+        assert!(editor.keeps_its_ground(20, 20, open));
+        // Built-up ground under a closed canopy: only round the trunk slots.
+        let canopy = CanopyData::from_grid(vec![20; 64 * 64], 64, 64);
+        let ground = std::sync::Arc::new(
+            crate::ground::Ground::new_flat_canopy_test(canopy, 64, 64)
+                .with_land_cover_test(cover(LC_BUILT_UP)),
+        );
+        editor.set_ground(std::sync::Arc::clone(&ground));
+        let spacing = editor.tree_slot_spacing();
+        let slot = crate::trees::schematic::trunk_slot_s(30, 30, spacing);
+        let (_, tree) = crate::ground_generation::canopy_verdict(
+            &ground, slot.0, slot.1, 0, 0, spacing, None, 1.0,
+        );
+        assert!(tree, "a closed canopy plants its slot");
+        assert!(editor.keeps_its_ground(slot.0 + 1, slot.1, open));
+        // A trunk on the road's own lanes never stands, so it keeps nothing.
+        assert!(!editor.keeps_its_ground(slot.0 + 1, slot.1, |x, z| (x, z) == slot));
+        // Nor one under a mapped tree's crown; the mapped tree keeps its own pit instead,
+        // unless it stands on the lanes.
+        let trunk = (slot.0 + 3, slot.1);
+        let mapped = vec![ProcessedElement::Node(ProcessedNode {
+            id: 9,
+            tags: [("natural".to_string(), "tree".to_string())].into(),
+            x: trunk.0,
+            z: trunk.1,
+        })];
+        editor.set_mapped_trunks(std::sync::Arc::new(
+            crate::trees::mapped::MappedTrunks::collect(&mapped, 1.0),
+        ));
+        assert!(editor.under_mapped_crown(slot.0, slot.1));
+        assert!(!editor.keeps_its_ground(slot.0 - 1, slot.1, open));
+        assert!(editor.keeps_its_ground(trunk.0 + 1, trunk.1 + 1, open));
+        assert!(!editor.keeps_its_ground(trunk.0 + 2, trunk.1, open));
+        assert!(!editor.keeps_its_ground(trunk.0 + 1, trunk.1, |x, z| (x, z) == trunk));
+    }
+
+    /// The renderer leaves unpaved what the masks leave out: the second lane of a street
+    /// stops at a house front and at a sidewalk mapped as its own way, its core runs on.
+    #[test]
+    fn the_renderer_cuts_the_strip_the_masks_cut() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let mut editor = tunnel_editor(&xzbbox, flat_ground());
+        let street = way_between(
+            1,
+            (10, 50),
+            (110, 50),
+            &[("highway", "residential"), ("sidewalk", "both")],
+        );
+        let sidewalk = way_between(
+            2,
+            (70, 47),
+            (90, 47),
+            &[("highway", "footway"), ("footway", "sidewalk")],
+        );
+        let mut houses = CoordinateBitmap::new(&xzbbox);
+        for x in 40..=60 {
+            for z in 53..=60 {
+                houses.set(x, z);
+            }
+        }
+        let elems = vec![
+            ProcessedElement::Way(street.clone()),
+            ProcessedElement::Way(sidewalk),
+        ];
+        let coords = collect_road_and_carriageway_coords(
+            &elems,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+            &houses,
+        );
+        editor.set_mapped_paths(std::sync::Arc::new(coords.paths));
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let endpoints = collect_tunnel_internal_endpoints(&elems, &xzbbox);
+        let portals = test_portals(&editor, &elems, &endpoints);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        generate_highways(
+            &mut editor,
+            &ProcessedElement::Way(street),
+            &args,
+            &HighwayConnectivityMap::new(),
+            &FloodFillCache::new(),
+            &coords.roads,
+            &structures,
+            &surface,
+            &endpoints,
+            &portals,
+            &empty,
+            &mut Vec::new(),
+            &RoadMarkingIndex::default(),
+            &houses,
+        );
+        let paved = |x: i32, z: i32| editor.highest_block_between(x, z, -12, 8).is_some();
+        // Before the house its seven blocks, in front of it the core's five.
+        assert!(paved(20, 53) && paved(20, 47));
+        assert!(paved(50, 52) && !paved(50, 53));
+        // Its strip stops at the sidewalk, which draws itself.
+        assert!(paved(80, 48) && !paved(80, 47) && paved(80, 53));
+        // Where the masks cut, the renderer did.
+        for x in 10..=110 {
+            for z in 46..=54 {
+                if coords.cut.contains(x, z) {
+                    assert!(!paved(x, z), "({x}, {z})");
+                }
+            }
+        }
+    }
+
     fn flat_ground() -> crate::ground::Ground {
         crate::ground::Ground::new_elevation_test(vec![vec![0.0f32; 200]; 200], 200, 200)
     }
@@ -6299,8 +6572,21 @@ mod tests {
                 &[(30, 40), (30, 60)],
                 &[("highway", "footway"), ("footway", "crossing")],
             ),
+            // A path joining it from the south, and a footbridge and a first-floor walkway
+            // over it.
+            line_way(4, &[(80, 30), (80, 50)], &[("highway", "footway")]),
+            line_way(
+                5,
+                &[(90, 40), (90, 60)],
+                &[("highway", "footway"), ("bridge", "yes"), ("layer", "1")],
+            ),
+            line_way(
+                6,
+                &[(100, 40), (100, 60)],
+                &[("highway", "footway"), ("level", "1")],
+            ),
         ];
-        let (roads, lanes, paths) = collect_road_and_carriageway_coords(
+        let coords = collect_road_and_carriageway_coords(
             &elems,
             &editor,
             &xzbbox,
@@ -6308,11 +6594,49 @@ mod tests {
             Default::default(),
             &CoordinateBitmap::new_empty(),
         );
+        let (roads, lanes, paths) = (&coords.roads, &coords.carriageways, &coords.paths);
         // Two lanes, seven blocks, where nothing is mapped beside it; the second lane stops
-        // at the sidewalk, which stays one.
+        // at the sidewalk, which stays one, and cars there keep off the cells it left.
         assert!(lanes.contains(60, 47) && lanes.contains(60, 52));
         assert!(!lanes.contains(60, 53) && paths.contains(60, 53) && roads.contains(60, 53));
-        assert!(!paths.contains(30, 47) && lanes.contains(30, 47));
+        assert!(!coords.cut.contains(60, 53), "the sidewalk paves it");
+        // Nothing that only crosses, joins or bridges it cuts its strip.
+        for x in [30, 80, 90, 100] {
+            assert!(!paths.contains(x, 47) && lanes.contains(x, 47), "{x}");
+        }
+    }
+
+    #[test]
+    fn a_street_beside_a_house_leaves_its_cut_strip_to_the_cars() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let elems = vec![line_way(
+            1,
+            &[(10, 50), (110, 50)],
+            &[("highway", "residential"), ("sidewalk", "both")],
+        )];
+        // A house front on the street's north edge, between x = 40 and 60.
+        let mut houses = CoordinateBitmap::new(&xzbbox);
+        for x in 40..=60 {
+            for z in 53..=60 {
+                houses.set(x, z);
+            }
+        }
+        let coords = collect_road_and_carriageway_coords(
+            &elems,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+            &houses,
+        );
+        // The second lane stops at the wall; the cells it left are the cut the cars see,
+        // the core in front of it is paved.
+        assert!(!coords.roads.contains(50, 53) && coords.cut.contains(50, 53));
+        assert!(coords.roads.contains(50, 52) && !coords.cut.contains(50, 52));
+        assert!(coords.roads.contains(20, 53) && !coords.cut.contains(20, 53));
+        // No road stops at a sidewalk here, so no sidewalk mask is kept.
+        assert!(coords.paths.is_empty());
     }
 
     fn line_way(id: u64, points: &[(i32, i32)], tags: &[(&str, &str)]) -> ProcessedElement {

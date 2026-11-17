@@ -8,7 +8,7 @@ use crate::clipping::is_invented_node_id;
 use crate::decals::region::SignRegion;
 use crate::element_processing::highways::{
     highway_block_range, in_road_stamp, lane_marking_count, stamp_reach, stamps_square,
-    surface_palette,
+    surface_palette, wall_core,
 };
 use crate::element_processing::raceways::RacewayPaint;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -114,10 +114,31 @@ pub struct CarriagewayClip {
     half: i32,
     /// The road's stamp is the deck's square rather than the disc.
     square: bool,
+    /// The half the road keeps against what stands beside it, where past it the road may
+    /// leave the ground unpaved; None where it paves its whole stamp.
+    core: Option<i32>,
     palette: &'static [Block],
 }
 
 impl CarriagewayClip {
+    /// Whether (x, z) is past the core the road keeps against what stands beside it, where
+    /// the road paves only what that leaves it.
+    pub fn past_core(&self, x: i32, z: i32) -> bool {
+        self.core.is_some_and(|core| !self.in_core(core, x, z))
+    }
+
+    /// Whether (x, z) lies in the road's stamp of half-width `core`.
+    pub fn in_core(&self, core: i32, x: i32, z: i32) -> bool {
+        self.centre
+            .iter()
+            .any(|&(cx, cz)| in_road_stamp(x - cx, z - cz, core))
+    }
+
+    /// The core the road keeps, if it may leave ground past it unpaved.
+    pub fn core(&self) -> Option<i32> {
+        self.core
+    }
+
     /// Surface blocks of the crossed road, which crossing paint may replace.
     pub fn palette(&self) -> &'static [Block] {
         self.palette
@@ -716,6 +737,7 @@ impl RoadMarkingIndex {
                         centre,
                         half: road.half,
                         square: road.square,
+                        core: wall_core(road.way, &road.way.tags["highway"], scale),
                         palette: road.palette,
                     };
                     // Cells the crossing paints: its width, on this carriageway only.
