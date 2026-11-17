@@ -3585,6 +3585,13 @@ impl BuildingConfig {
         self.is_photo_column(bx, bz) || self.preset_shell.contains(&(bx, bz))
     }
 
+    /// The wall height with the full ground-floor bonus, which thresholds
+    /// tuned before low buildings gave a row of it up read.
+    #[inline]
+    fn full_floor_height(&self) -> i32 {
+        self.building_height + GROUND_FLOOR_BONUS - self.ground_bonus
+    }
+
     /// Grammar anchor: the ground-floor bonus at ground level; elevated parts
     /// already carry it in their min_level offset, keeping stacked bands in phase.
     #[inline]
@@ -6684,14 +6691,17 @@ fn is_hall(tags: &HashMap<String, String>, footprint_m2: Option<f64>) -> bool {
 }
 
 /// Whether a building with `levels` storeys keeps the full ground-floor
-/// bonus: a hall, or a one-storey shop big enough for a fascia band
-/// (`top_band_for`), whose shop windows need the room under it.
+/// bonus: a hall, a car park (whose decks are counted from its height), or a
+/// one-storey shop big enough for a fascia band (`top_band_for`), whose shop
+/// windows need the room under it.
 fn keeps_full_ground_floor(
     tags: &HashMap<String, String>,
     footprint_m2: Option<f64>,
     levels: f64,
 ) -> bool {
     is_hall(tags, footprint_m2)
+        || tags.get("building").map(String::as_str) == Some("parking")
+        || tags.get("parking").map(String::as_str) == Some("multi-storey")
         || (levels < 2.0
             && matches!(
                 tags.get("building").map(String::as_str),
@@ -6733,9 +6743,9 @@ fn mapped_ground_bonus(
     }
 }
 
-/// Untagged building way id -> median wall height, in metres, of the tagged
+/// Untagged building way id -> wall heights, in metres, of the tagged
 /// buildings it shares a wall with (two or more nodes).
-pub type NeighbourHeights = FnvHashMap<u64, f64>;
+pub type NeighbourHeights = FnvHashMap<u64, Vec<f64>>;
 
 /// An empty `NeighbourHeights`, for contexts without one.
 #[cfg(test)]
@@ -6753,49 +6763,175 @@ fn has_mapped_height(tags: &HashMap<String, String>) -> bool {
             .is_some_and(|l| l >= 1.0)
 }
 
-/// For every untagged building way, the median wall height of the tagged
-/// buildings it shares a wall with. An untagged house in a dense core gets a
-/// village height from its type and footprint alone (Munich's old town came
-/// out 5.8 m low against laser heights); halfway towards its neighbours cut
-/// the error in all five measured areas, while taking their height outright
-/// made Regensburg worse. It only rises towards them (`rise_to_neighbours`).
-/// `scale` is in blocks per metre, for the footprints that make a hall.
+/// Whether a building stands out of the row it shares a wall with: a church,
+/// a tower, a chimney or another structure. An annex built against one is not
+/// a storey short of it.
+fn landmark_neighbour(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("building").map(String::as_str),
+        Some(
+            "church"
+                | "cathedral"
+                | "chapel"
+                | "basilica"
+                | "mosque"
+                | "synagogue"
+                | "temple"
+                | "shrine"
+                | "tower"
+                | "bell_tower"
+                | "campanile"
+                | "minaret"
+                | "water_tower"
+        )
+    ) || tags.get("amenity").map(String::as_str) == Some("place_of_worship")
+        || tags.contains_key("man_made")
+        || tags.contains_key("tower:type")
+}
+
+/// Cells a flood fill of a closed ring gives, the ring itself left out:
+/// the lattice points strictly inside it (Pick's theorem), so a footprint
+/// counts the same here as `cached_footprint_size` does in generation.
+fn ring_interior_cells(nodes: &[ProcessedNode]) -> usize {
+    let boundary: i64 = nodes
+        .windows(2)
+        .map(|w| {
+            let (mut a, mut b) = (
+                i64::from(w[0].x - w[1].x).abs(),
+                i64::from(w[0].z - w[1].z).abs(),
+            );
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            a
+        })
+        .sum();
+    (ring_area_blocks(nodes) - boundary as f64 / 2.0 + 1.0).max(0.0) as usize
+}
+
+/// Height in metres of a tagged neighbour's walls, the eave an untagged
+/// building beside it rises towards: storeys without the roof over them, a
+/// mapped `height` less the roof under it (a mapped `roof:height`, else the
+/// pitch `mapped_height_roof_rise` gives a roof of no mapped shape or a
+/// pitched one). None for a building raised off the ground.
+fn neighbour_walls_m(
+    nodes: &[ProcessedNode],
+    tags: &HashMap<String, String>,
+    scale: f64,
+) -> Option<f64> {
+    let metres = |k: &str| {
+        tags.get(k)
+            .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+            .filter(|m| m.is_finite())
+    };
+    if metres("min_height").is_some_and(|m| m > 0.0)
+        || metres("building:min_level").is_some_and(|m| m > 0.0)
+    {
+        return None;
+    }
+    let hint = HeightHint {
+        footprint_m2: Some(footprint_m2(ring_interior_cells(nodes), scale)),
+        ..HeightHint::default()
+    };
+    let (walls, _) = mapped_parts(tags, hint)?;
+    let Some(height) = parse_building_height_tag(tags) else {
+        return Some(walls);
+    };
+    if tags
+        .get("roof:shape")
+        .is_some_and(|s| parse_roof_type(s) == RoofType::Flat)
+    {
+        return Some(height);
+    }
+    if let Some(rise) = metres("roof:height").filter(|m| *m > 0.0) {
+        return Some((height - rise).max(height.min(3.0)));
+    }
+    // A low pitch over the shorter half-span, as the generator draws it.
+    let mut diameter: f64 = 1.0;
+    for (i, a) in nodes.iter().enumerate() {
+        for b in &nodes[i + 1..] {
+            diameter = diameter.max(f64::from(a.x - b.x).hypot(f64::from(a.z - b.z)));
+        }
+    }
+    let short_half_m = ring_area_blocks(nodes) / diameter / 2.0 / scale;
+    let rise = (short_half_m * 0.85).min(9.0).min(height * 0.375);
+    Some(height - rise)
+}
+
+/// For every untagged building way, the wall heights of the tagged buildings
+/// and building multipolygons it shares a wall with, churches, towers and
+/// structures left out. An untagged house in a dense core gets a village
+/// height from its type and footprint alone (Munich's old town came out
+/// 5.8 m low against laser heights); halfway towards its neighbours cut the
+/// error in all five measured areas, while taking their height outright made
+/// Regensburg worse. It only rises towards them (`rise_to_neighbours`).
+/// `scale` is in blocks per metre.
 pub fn tagged_neighbour_heights(
     elements: &[crate::osm_parser::ProcessedElement],
     scale: f64,
 ) -> NeighbourHeights {
-    use crate::osm_parser::ProcessedElement;
-    let ways = elements.iter().filter_map(|e| match e {
-        ProcessedElement::Way(w)
-            if w.tags.contains_key("building")
-                && !w.tags.contains_key("building:part")
-                && !is_underground_building(&w.tags) =>
-        {
-            Some(w)
+    use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
+    let is_building = |tags: &HashMap<String, String>| {
+        tags.contains_key("building")
+            && !tags.contains_key("building:part")
+            && !is_underground_building(tags)
+    };
+    let mut tagged: Vec<(&[ProcessedNode], &HashMap<String, String>)> = Vec::new();
+    let mut untagged: Vec<&ProcessedWay> = Vec::new();
+    for element in elements {
+        match element {
+            ProcessedElement::Way(w) if is_building(&w.tags) => {
+                if has_mapped_height(&w.tags) {
+                    tagged.push((&w.nodes, &w.tags));
+                } else {
+                    untagged.push(w);
+                }
+            }
+            ProcessedElement::Relation(r) if is_building(&r.tags) && has_mapped_height(&r.tags) => {
+                tagged.extend(
+                    r.members
+                        .iter()
+                        .filter(|m| m.role == ProcessedMemberRole::Outer)
+                        .map(|m| (m.way.nodes.as_slice(), &r.tags)),
+                );
+            }
+            _ => {}
         }
-        _ => None,
-    });
-    let (tagged, untagged): (Vec<&ProcessedWay>, Vec<&ProcessedWay>) =
-        ways.partition(|w| has_mapped_height(&w.tags));
-    let distinct_nodes = |w: &ProcessedWay| {
-        let mut ids: Vec<u64> = w.nodes.iter().map(|n| n.id).collect();
+    }
+    let walls: Vec<Option<f64>> = tagged
+        .iter()
+        .map(|&(nodes, tags)| {
+            if landmark_neighbour(tags) {
+                None
+            } else {
+                neighbour_walls_m(nodes, tags, scale)
+            }
+        })
+        .collect();
+    let distinct_nodes = |nodes: &[ProcessedNode]| {
+        let mut ids: Vec<u64> = nodes.iter().map(|n| n.id).collect();
         ids.sort_unstable();
         ids.dedup();
         ids
     };
-    // Only the tagged ways' nodes are indexed, sorted for a binary search: a
+    // Only the tagged rings' nodes are indexed, sorted for a binary search: a
     // map over every node of every building took a gigabyte on a big area.
     let mut index: Vec<(u64, u32)> = tagged
         .iter()
         .enumerate()
-        .flat_map(|(i, w)| distinct_nodes(w).into_iter().map(move |id| (id, i as u32)))
+        .filter(|&(i, _)| walls[i].is_some())
+        .flat_map(|(i, &(nodes, _))| {
+            distinct_nodes(nodes)
+                .into_iter()
+                .map(move |id| (id, i as u32))
+        })
         .collect();
     index.sort_unstable();
     let mut out = NeighbourHeights::default();
     let mut shared: Vec<u32> = Vec::new();
     for w in untagged {
         shared.clear();
-        for id in distinct_nodes(w) {
+        for id in distinct_nodes(&w.nodes) {
             let from = index.partition_point(|&(n, _)| n < id);
             shared.extend(
                 index[from..]
@@ -6809,54 +6945,63 @@ pub fn tagged_neighbour_heights(
         }
         shared.sort_unstable();
         // Tagged neighbours sharing two nodes or more: a wall, not a corner.
-        let mut heights: Vec<f64> = shared
+        let heights: Vec<f64> = shared
             .chunk_by(|a, b| a == b)
             .filter(|run| run.len() >= 2)
-            .filter_map(|run| {
-                let way = tagged[run[0] as usize];
-                let hint = HeightHint {
-                    footprint_m2: Some(footprint_m2(
-                        ring_area_blocks(&way.nodes).round() as usize,
-                        scale,
-                    )),
-                    ..HeightHint::default()
-                };
-                mapped_walls_m(&way.tags, hint)
-            })
-            .map(|(m, _)| m)
+            .filter_map(|run| walls[run[0] as usize])
             .collect();
-        if heights.is_empty() {
-            continue;
+        if !heights.is_empty() {
+            out.insert(w.id, heights);
         }
-        heights.sort_by(f64::total_cmp);
-        let n = heights.len();
-        let median = if n % 2 == 1 {
-            heights[n / 2]
-        } else {
-            (heights[n / 2 - 1] + heights[n / 2]) / 2.0
-        };
-        out.insert(w.id, median);
     }
     out
 }
 
+/// Most storeys an untagged building rises to beside its neighbours: more
+/// is what `calculate_building_height` calls tall.
+const MAX_RISEN_STOREYS: f64 = 7.0;
+
+/// Most storeys an untagged building gains beside its neighbours.
+const MAX_STOREYS_RISEN: f64 = 2.0;
+
 /// The height an untagged building of storeys, `own` blocks tall at
 /// `floor_cycle`, takes beside tagged neighbours whose walls are
-/// `neighbours_m` tall: halfway up to them, in whole storeys, where that is
-/// taller than its own. It never comes down to lower neighbours: met halfway,
-/// the garages and sheds Overture gives three or four metres took a storey
-/// off the village houses they stand against, and left the upper windows
-/// half under the eave.
+/// `neighbours_m` tall: halfway up to their median, in whole storeys, two
+/// at most and never past seven, where that is taller than its own.
+/// Neighbours over twice its height stand out of its row and do not count.
+/// It never comes down to lower neighbours: met halfway, the garages and
+/// sheds Overture gives three or four metres took a storey off the village
+/// houses they stand against, and left the upper windows half under the eave.
 fn rise_to_neighbours(
     own: i32,
-    neighbours_m: f64,
+    neighbours_m: &[f64],
     floor_cycle: i32,
     scale_factor: f64,
 ) -> Option<i32> {
     let cycle = f64::from(floor_cycle);
     let bonus = f64::from(GROUND_FLOOR_BONUS);
-    let halfway = (f64::from(own) / scale_factor + neighbours_m) / 2.0;
-    let storeys = ((halfway - bonus) / cycle).round().max(1.0);
+    let own_m = f64::from(own) / scale_factor;
+    let mut near: Vec<f64> = neighbours_m
+        .iter()
+        .copied()
+        .filter(|&m| m <= 2.0 * own_m)
+        .collect();
+    if near.is_empty() {
+        return None;
+    }
+    near.sort_by(f64::total_cmp);
+    let n = near.len();
+    let median = if n % 2 == 1 {
+        near[n / 2]
+    } else {
+        (near[n / 2 - 1] + near[n / 2]) / 2.0
+    };
+    let own_storeys = ((own_m - bonus) / cycle).round().max(1.0);
+    let halfway = (own_m + median) / 2.0;
+    let storeys = ((halfway - bonus) / cycle)
+        .round()
+        .min(own_storeys + MAX_STOREYS_RISEN)
+        .min(MAX_RISEN_STOREYS);
     let height = ((storeys * cycle + bonus) * scale_factor) as i32;
     (height > own).then_some(height)
 }
@@ -10855,6 +11000,23 @@ fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
     (polygon_area / bbox_area).min(1.0)
 }
 
+/// Whether a building's outline came from a cadastre, which surveys the walls
+/// rather than the roof seen from the air: the German ALKIS and Kataster, the
+/// French cadastre, the Dutch BAG and Kadaster, the Austrian DKM and their
+/// kind. Its walls are on the outline already, and the eave hangs past it.
+fn outline_traces_walls(tags: &HashMap<String, String>) -> bool {
+    const SURVEYS: [&str; 6] = ["cadastr", "kadast", "katast", "catast", "alkis", "lantm"];
+    const REGISTERS: [&str; 2] = ["bag", "dkm"];
+    tags.iter()
+        .filter(|(k, _)| k.as_str() == "source" || k.starts_with("source:"))
+        .any(|(_, v)| {
+            let v = v.to_lowercase();
+            SURVEYS.iter().any(|s| v.contains(s))
+                || v.split(|c: char| !c.is_alphanumeric())
+                    .any(|word| REGISTERS.contains(&word))
+        })
+}
+
 /// Whether a roof of this type hangs an eave out past its walls: the gabled and
 /// hipped families do, unless the outline is turned off the grid (such a roof
 /// sits flush on its walls), and a mansard always does.
@@ -13254,7 +13416,7 @@ fn generate_corner_downpipes(
     facade: &FacadePlan,
     stepped: Option<&SteppedOutline>,
 ) {
-    if config.building_height < 10
+    if config.full_floor_height() < 10
         || config.condition != BuildingCondition::Normal
         || !config.has_windows
     {
@@ -13338,15 +13500,18 @@ fn generate_corner_downpipes(
         } = corners[(start_idx + k * corners.len() / 2) % corners.len()];
         // A pipe off a photographed corner stands in front of the photograph;
         // one off a party-wall corner stands in front of the neighbour.
+        // The corner of the walls, a block or two in where they stepped.
+        let (wx, wz) = (ox - dx, oz - dz);
         if building_passages.contains(px, pz)
             || config.is_flat_column(px, pz)
+            || config.is_flat_column(wx, wz)
             || facade.is_party(px, pz)
         {
             continue;
         }
         // Follow the wall foundation down where the ground drops away.
         let descent = if config.is_ground_level {
-            feature_descent(editor, config, ox - dx, oz - dz, ox, oz)
+            feature_descent(editor, config, wx, wz, ox, oz)
         } else {
             0
         };
@@ -14253,7 +14418,7 @@ pub fn generate_buildings(
 
     // An untagged building of storeys rises towards taller tagged neighbours.
     let blended_height = match ctx.neighbour_heights.get(&element.id) {
-        Some(&neighbours_m)
+        Some(neighbours_m)
             if relation_levels.is_none()
                 && min_level == 0
                 && !has_mapped_height(&element.tags)
@@ -14272,13 +14437,18 @@ pub fn generate_buildings(
         }
         _ => None,
     };
-    // Met halfway, more than seven storeys is tall, as mapped storeys are.
-    let is_tall_building = is_tall_building
-        || blended_height.is_some_and(|h| {
-            (f64::from(h) / scale_factor - f64::from(GROUND_FLOOR_BONUS)) / f64::from(floor_cycle)
-                > 7.0
-        });
     let building_height = blended_height.unwrap_or(building_height);
+    // The rows of taller ground floor the walls were laid with. Thresholds
+    // tuned before low buildings gave one up read the height with all of it,
+    // so such a building keeps the detail it had.
+    let ground_bonus = mapped_ground_bonus(
+        &element.tags,
+        min_level,
+        relation_levels,
+        floor_cycle,
+        Some(footprint_m2(cached_footprint_size, scale_factor)),
+    );
+    let full_floor_rows = GROUND_FLOOR_BONUS - ground_bonus;
 
     // A building going up is a frame of slabs and columns, not a finished shell.
     if BuildingCondition::from_tags(&element.tags) == BuildingCondition::Construction
@@ -14359,7 +14529,7 @@ pub fn generate_buildings(
         element,
         category,
         cached_footprint_size,
-        building_height,
+        building_height + full_floor_rows,
         facade.has_any_street,
     );
 
@@ -14540,6 +14710,7 @@ pub fn generate_buildings(
         && min_level_offset == 0
         && args.scale >= building_inset::MIN_INSET_SCALE
         && !element.tags.contains_key("building:part")
+        && !outline_traces_walls(&element.tags)
         // A photographed facade is fitted to the mapped wall line.
         && !crate::mapillary::facades::has_building(element.id))
     .then(|| {
@@ -14559,6 +14730,18 @@ pub fn generate_buildings(
             i.strip,
         ),
         None => (None, None, FnvHashSet::default()),
+    };
+    // Walls of a stepped building that stayed on the outline, beside a
+    // neighbour: their eave hangs out past them as an unstepped one does.
+    let kept_walls: FnvHashSet<(i32, i32)> = match &inset_way {
+        Some(way) => {
+            let outline_ring: FnvHashSet<(i32, i32)> =
+                building_inset::ring_cells(&element.nodes).collect();
+            building_inset::ring_cells(&way.nodes)
+                .filter(|c| outline_ring.contains(c))
+                .collect()
+        }
+        None => FnvHashSet::default(),
     };
     // The strip is this building's own: its free sides have no neighbour
     // within two blocks.
@@ -14789,13 +14972,7 @@ pub fn generate_buildings(
         is_ground_level: min_level_offset == 0,
         building_height: effective_building_height,
         floor_cycle,
-        ground_bonus: mapped_ground_bonus(
-            &element.tags,
-            min_level,
-            relation_levels,
-            floor_cycle,
-            Some(footprint_m2(cached_footprint_size, scale_factor)),
-        ),
+        ground_bonus,
         is_tall_building,
         start_y_offset,
         abs_terrain_offset,
@@ -14828,7 +15005,7 @@ pub fn generate_buildings(
             || flat_parapet_for(
                 group_seed,
                 style.roof_type,
-                effective_building_height,
+                effective_building_height + full_floor_rows,
                 category,
                 condition,
                 roof_ctx.region,
@@ -15248,7 +15425,8 @@ pub fn generate_buildings(
     }
     // A mapped entrance node sets a door of its own where it was mapped,
     // which the stepped wall no longer overwrites: the building's door
-    // stands a block in, on the wall.
+    // stands a block in, on the wall. An entrance came before the building
+    // and its door is taken away; a door node comes after and sets none.
     for node in &outline.nodes {
         if eave_strip.contains(&(node.x, node.z))
             && (node.tags.contains_key("door") || node.tags.contains_key("entrance"))
@@ -15256,6 +15434,7 @@ pub fn generate_buildings(
             for (y, door) in [(1, DARK_OAK_DOOR_LOWER), (2, DARK_OAK_DOOR_UPPER)] {
                 editor.set_block(AIR, node.x, y, node.z, Some(&[door]), None);
             }
+            editor.step_door_in(node.x, node.z);
         }
     }
     for (x, z) in generate_loading_doors(editor, element, &config, effective_passages, &facade) {
@@ -15536,11 +15715,17 @@ pub fn generate_buildings(
                             continue;
                         }
                         // Stepped walls keep their eave on the outline: in its
-                        // own strip, never past it.
+                        // own strip, never past it. A wall that stayed on the
+                        // line hangs its eave out a block, over a gap to a
+                        // neighbour a cell away as well, which closes it.
                         let foreign = if inset_way.is_none() || hole_points.contains(&c) {
                             ctx.building_footprints.contains(c.0, c.1)
                         } else {
+                            let beside_kept = (-1..=1).any(|ox| {
+                                (-1..=1).any(|oz| kept_walls.contains(&(c.0 + ox, c.1 + oz)))
+                            });
                             !eave_strip.contains(&c)
+                                && !(beside_kept && !ctx.building_footprints.contains(c.0, c.1))
                         };
                         if foreign || group_other_cells.contains(&c) {
                             blocked.insert(c);
@@ -20823,21 +21008,157 @@ mod height_tests {
             way(4, &[10, 11, 12, 10], &[("building", "yes")]),
         ];
         let heights = tagged_neighbour_heights(&elements, 1.0);
-        assert_eq!(heights.get(&1), Some(&17.0));
+        assert_eq!(heights.get(&1).map(Vec::as_slice), Some(&[17.0][..]));
         assert_eq!(heights.len(), 1);
     }
 
+    /// Building ways `id` around the square from (`x`, 0) to (`x` + 10, 10),
+    /// whose nodes are numbered by corner so squares side by side share a wall.
+    fn square_way(id: u64, x: i32, tags: &[(&str, &str)]) -> crate::osm_parser::ProcessedElement {
+        use crate::osm_parser::{ProcessedElement, ProcessedNode};
+        let corner = |cx: i32, z: i32| ProcessedNode {
+            id: (cx as u64) * 100 + z as u64,
+            tags: HashMap::new(),
+            x: cx,
+            z,
+        };
+        let mut w = way_with_tags(tags);
+        w.id = id;
+        w.nodes = vec![
+            corner(x, 0),
+            corner(x + 10, 0),
+            corner(x + 10, 10),
+            corner(x, 10),
+            corner(x, 0),
+        ];
+        ProcessedElement::Way(w)
+    }
+
+    // A church, a tower or a structure stands out of the row, and an annex
+    // against it gains nothing from it.
+    #[test]
+    fn an_annex_does_not_rise_to_its_church() {
+        let annex = square_way(1, 0, &[("building", "yes")]);
+        let church = square_way(2, 10, &[("building", "church"), ("height", "60")]);
+        let heights = tagged_neighbour_heights(&[annex.clone(), church], 1.0);
+        assert!(heights.is_empty());
+        let chimney = square_way(
+            2,
+            10,
+            &[
+                ("building", "yes"),
+                ("man_made", "chimney"),
+                ("height", "40"),
+            ],
+        );
+        assert!(tagged_neighbour_heights(&[annex, chimney], 1.0).is_empty());
+    }
+
+    // Walls are matched to walls: a gabled neighbour's `height` is its ridge,
+    // so the pitch under it comes off, and one raised off the ground is no
+    // wall to rise to.
+    #[test]
+    fn neighbours_count_their_walls_not_their_roofs() {
+        let infill = square_way(1, 10, &[("building", "yes")]);
+        let gabled = |id, x| {
+            square_way(
+                id,
+                x,
+                &[
+                    ("building", "house"),
+                    ("height", "14"),
+                    ("roof:shape", "gabled"),
+                ],
+            )
+        };
+        let heights = tagged_neighbour_heights(&[gabled(2, 0), infill.clone(), gabled(3, 20)], 1.0);
+        let walls = heights.get(&1).expect("two neighbours");
+        assert_eq!(walls.len(), 2);
+        // A 10 m span: a pitch of 0.85 of its 3.5 m half-span comes off.
+        assert!(
+            walls.iter().all(|&m| (10.5..11.5).contains(&m)),
+            "{walls:?}"
+        );
+        let flat = square_way(
+            2,
+            0,
+            &[
+                ("building", "yes"),
+                ("height", "14"),
+                ("roof:shape", "flat"),
+            ],
+        );
+        let heights = tagged_neighbour_heights(&[flat, infill.clone()], 1.0);
+        assert_eq!(heights.get(&1).map(Vec::as_slice), Some(&[14.0][..]));
+        let mapped_roof = square_way(
+            2,
+            0,
+            &[
+                ("building", "yes"),
+                ("building:levels", "3"),
+                ("roof:height", "4"),
+            ],
+        );
+        let heights = tagged_neighbour_heights(&[mapped_roof, infill.clone()], 1.0);
+        assert_eq!(heights.get(&1).map(Vec::as_slice), Some(&[11.0][..]));
+        let raised = square_way(
+            2,
+            0,
+            &[("building", "yes"), ("height", "14"), ("min_height", "8")],
+        );
+        assert!(tagged_neighbour_heights(&[raised, infill], 1.0).is_empty());
+    }
+
+    // A building multipolygon's outer ring is a neighbour like a way.
+    #[test]
+    fn building_multipolygons_count_as_neighbours() {
+        use crate::osm_parser::{
+            ProcessedElement, ProcessedMember, ProcessedMemberRole, ProcessedRelation,
+        };
+        let ProcessedElement::Way(ring) = square_way(9, 0, &[]) else {
+            unreachable!()
+        };
+        let relation = ProcessedElement::Relation(ProcessedRelation {
+            id: 2,
+            tags: [("building", "yes"), ("building:levels", "4")]
+                .iter()
+                .map(|&(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            members: vec![ProcessedMember {
+                role: ProcessedMemberRole::Outer,
+                way: std::sync::Arc::new(ring),
+            }],
+        });
+        let infill = square_way(1, 10, &[("building", "yes")]);
+        let heights = tagged_neighbour_heights(&[relation, infill], 1.0);
+        assert_eq!(heights.get(&1).map(Vec::as_slice), Some(&[14.0][..]));
+    }
+
     // Beside lower neighbours an untagged house keeps its storeys; beside
-    // taller ones it rises halfway to them, in whole storeys.
+    // taller ones it rises halfway to them, in whole storeys, two at most and
+    // never to a tall building.
     #[test]
     fn untagged_buildings_only_rise_towards_their_neighbours() {
         // Two guessed storeys against a garage of 4.3 m.
-        assert_eq!(rise_to_neighbours(10, 4.3, 4, 1.0), None);
+        assert_eq!(rise_to_neighbours(10, &[4.3], 4, 1.0), None);
         // Against five storeys of 17 m: halfway is 13.5, three storeys.
-        assert_eq!(rise_to_neighbours(10, 17.0, 4, 1.0), Some(14));
+        assert_eq!(rise_to_neighbours(10, &[17.0], 4, 1.0), Some(14));
         // Halfway to a slightly taller neighbour is not a storey more.
-        assert_eq!(rise_to_neighbours(10, 12.0, 4, 1.0), None);
-        assert_eq!(rise_to_neighbours(20, 17.0, 4, 2.0), Some(28));
+        assert_eq!(rise_to_neighbours(10, &[12.0], 4, 1.0), None);
+        assert_eq!(rise_to_neighbours(20, &[17.0], 4, 2.0), Some(28));
+        // A single neighbour over twice as tall stands out of the row.
+        assert_eq!(rise_to_neighbours(10, &[60.0], 4, 1.0), None);
+        assert_eq!(rise_to_neighbours(10, &[21.0], 4, 1.0), None);
+        // Its median counts, the tower beside the row left out.
+        assert_eq!(rise_to_neighbours(10, &[17.0, 60.0], 4, 1.0), Some(14));
+        // Two storeys more at most: halfway to 28 m from three storeys is five.
+        assert_eq!(rise_to_neighbours(14, &[28.0], 4, 1.0), Some(22));
+        assert_eq!(rise_to_neighbours(10, &[20.0], 3, 1.0), Some(14));
+        // Never past seven storeys, which would make it tall.
+        let risen = rise_to_neighbours(26, &[50.0], 4, 1.0).unwrap();
+        assert_eq!(risen, 30);
+        assert!((f64::from(risen) - 2.0) / 4.0 <= 7.0);
+        assert_eq!(rise_to_neighbours(30, &[56.0], 4, 1.0), None);
     }
 
     // The laser writes a home's storeys as building:levels, so a two-storey
@@ -20898,6 +21219,15 @@ mod height_tests {
         let boxed =
             calculate_building_height(&way_with_tags(&shop_box), "retail", 0, 1.0, None, 4, 600, 1);
         assert_eq!(boxed.0, 6);
+        // A car park's decks are counted from its height, so it keeps them all.
+        let car_park = [("building", "parking"), ("building:levels", "2")];
+        assert_eq!(height(&car_park, 4), 10);
+        let shop_deck = [
+            ("building", "retail"),
+            ("parking", "multi-storey"),
+            ("building:levels", "2"),
+        ];
+        assert_eq!(height(&shop_deck, 4), 10);
         // A part keeps the bonus its stacked siblings are laid out by.
         let part = [("building:part", "yes"), ("building:levels", "1")];
         assert_eq!(height(&part, 4), 6);
@@ -22159,6 +22489,41 @@ mod style_tests {
         let corner = columns.iter().find(|c| (c.x, c.z) == (20, 0)).unwrap();
         assert_eq!(corner.slot(), BaySlot::End);
         assert!(corner.corner());
+    }
+
+    // A cadastre surveys the walls, so its outlines keep them; one traced
+    // from the air steps them in under the eave.
+    #[test]
+    fn cadastre_outlines_keep_their_walls() {
+        use crate::element_processing::building_test_support::tag_map;
+        let src = |pairs: &[(&str, &str)]| outline_traces_walls(&tag_map(pairs));
+        assert!(src(&[(
+            "source",
+            "cadastre-dgi-fr source : Cadastre. Mise à jour : 2015"
+        )]));
+        assert!(src(&[("source", "ALKIS Bayern")]));
+        assert!(src(&[(
+            "source:geometry",
+            "Bayerische Vermessungsverwaltung, Kataster"
+        )]));
+        assert!(src(&[("source", "BAG")]));
+        assert!(src(&[("source", "3dshapes;BAG")]));
+        assert!(src(&[("source:outline", "basemap.at;DKM")]));
+        assert!(!src(&[("source", "Bing")]));
+        assert!(!src(&[("source", "survey")]));
+        assert!(!src(&[("source", "esri/World_Imagery; bagnoli survey")]));
+        assert!(!src(&[("building", "house")]));
+    }
+
+    // Thresholds tuned on the full ground floor read the height with all of
+    // it, so a low building keeps its downpipes, detail and parapet.
+    #[test]
+    fn low_buildings_read_thresholds_with_the_full_ground_floor() {
+        let mut config = test_config(9, false, false);
+        config.ground_bonus = LOW_RISE_GROUND_BONUS;
+        assert_eq!(config.full_floor_height(), 10);
+        config.ground_bonus = GROUND_FLOOR_BONUS;
+        assert_eq!(config.full_floor_height(), 9);
     }
 
     #[test]
@@ -25819,6 +26184,76 @@ mod facade_integration_tests {
             !street_doors,
             "no synthetic door once an entrance is mapped"
         );
+    }
+
+    // A wall a cell from its neighbour stays on the line and hangs its eave
+    // over the gap, as on main, so no slot opens to the sky; a free wall
+    // steps in and its eave stops on the outline.
+    #[test]
+    fn a_wall_kept_beside_a_neighbour_hangs_its_eave_over_the_gap() {
+        let xz = XZBBox::rect_from_xz_lengths(70.0, 60.0).unwrap();
+        let road = CoordinateBitmap::new(&xz);
+        // The neighbour's inside, as the flood fills mark it: its wall line
+        // runs at x = 42, a cell east of this house's.
+        let footprints = bitmap_with_rect(&xz, 43, 21, 53, 31);
+        let way = rect_way(
+            46,
+            20,
+            20,
+            40,
+            32,
+            &[
+                ("building", "house"),
+                ("building:levels", "2"),
+                ("roof:shape", "hipped"),
+            ],
+        );
+        let mut editor = test_editor(&xz);
+        run_building(&mut editor, &way, &road, &footprints);
+        let roofed = |x: i32| editor.highest_block_between(x, 26, 1, 60).is_some();
+        assert!(roofed(40), "the east wall stays on the line");
+        assert!(roofed(41), "its eave closes the gap");
+        assert!(!roofed(42), "and stops short of the neighbour");
+        assert!(roofed(20), "the free west side's eave reaches the outline");
+        assert!(!roofed(19), "and no further");
+    }
+
+    // A door node without `entrance` is drawn after the buildings. Its door
+    // goes on the stepped wall, and none stands alone under the eave.
+    #[test]
+    fn a_door_node_on_a_stepped_wall_leaves_the_strip_clear() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        let road = bitmap_with_rect(&xz, 0, 12, 59, 14);
+        let footprints = CoordinateBitmap::new(&xz);
+        let mut way = rect_way(
+            45,
+            20,
+            20,
+            40,
+            32,
+            &[("building", "house"), ("building:levels", "2")],
+        );
+        let door = ProcessedNode {
+            id: 4445,
+            tags: [("door".to_string(), "hinged".to_string())]
+                .into_iter()
+                .collect(),
+            x: 30,
+            z: 32,
+        };
+        way.nodes.insert(3, door.clone());
+        let mut editor = test_editor(&xz);
+        run_building(&mut editor, &way, &road, &footprints);
+        crate::element_processing::doors::generate_doors(&mut editor, &door);
+        assert!(
+            editor.check_for_block(30, 1, 31, Some(DOOR_BLOCKS)),
+            "the door stands on the stepped wall"
+        );
+        assert!(
+            !editor.check_for_block(30, 1, 32, Some(DOOR_BLOCKS)),
+            "no door left in the strip"
+        );
+        assert!(!editor.check_for_block(30, 0, 32, Some(&[GRAY_CONCRETE])));
     }
 
     #[test]

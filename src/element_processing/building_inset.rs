@@ -56,7 +56,7 @@ pub(crate) struct OutlineInset {
 }
 
 /// The cells of a ring's edges.
-fn ring_cells(nodes: &[ProcessedNode]) -> impl Iterator<Item = (i32, i32)> + '_ {
+pub(crate) fn ring_cells(nodes: &[ProcessedNode]) -> impl Iterator<Item = (i32, i32)> + '_ {
     nodes.windows(2).flat_map(|w| {
         bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z)
             .into_iter()
@@ -68,13 +68,32 @@ fn ring_cells(nodes: &[ProcessedNode]) -> impl Iterator<Item = (i32, i32)> + '_ 
 /// cells outward anywhere along them: those step in under the eave. The
 /// others are party walls, or run past a neighbour for part of their length,
 /// and stay on the outline, so no gap opens beside the neighbour. `own` is
-/// the building's own fill.
+/// the building's own cells, its outline included.
+///
+/// `footprints` holds what the flood fills give, the inside of each outline
+/// without its wall line, so a neighbour's wall two cells out is found by the
+/// inside of it beside that cell. Two houses a cell apart both stepped in,
+/// three cells between their walls, and their eaves left a slot open to the
+/// sky.
 pub(crate) fn free_edges(
     nodes: &[ProcessedNode],
     own: &FnvHashSet<(i32, i32)>,
     footprints: &CoordinateBitmap,
 ) -> Vec<bool> {
+    free_edges_by(nodes, own, footprints, true)
+}
+
+/// `free_edges`, finding a neighbour's wall line two cells out by the inside
+/// beside it where `walls` is set, by its inside alone where it is not.
+fn free_edges_by(
+    nodes: &[ProcessedNode],
+    own: &FnvHashSet<(i32, i32)>,
+    footprints: &CoordinateBitmap,
+    walls: bool,
+) -> Vec<bool> {
+    const SIDES: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
     let outward = outward_side(nodes);
+    let taken = |c: (i32, i32)| footprints.contains(c.0, c.1) && !own.contains(&c);
     nodes
         .windows(2)
         .map(|w| {
@@ -88,7 +107,10 @@ pub(crate) fn free_edges(
                 .any(|&(x, _, z)| {
                     (1..=2).any(|d| {
                         let c = (x + nx * d, z + nz * d);
-                        footprints.contains(c.0, c.1) && !own.contains(&c)
+                        taken(c)
+                            || (walls
+                                && d == 2
+                                && SIDES.iter().any(|&(sx, sz)| taken((c.0 + sx, c.1 + sz))))
                     })
                 })
         })
@@ -278,11 +300,30 @@ pub(crate) fn inset_outline(
     // need not cover where it runs off the grid.
     let mut outline = own.clone();
     outline.extend(ring_cells(nodes));
+    // A building steps in only where it does with its neighbours read from
+    // their insides alone, so keeping a wall a cell from a neighbour on the
+    // line never lets one that kept all its walls step some of them in.
+    let near = free_edges_by(nodes, &outline, footprints, false);
+    let first = inset_with(nodes, &own, &outline, &near)?;
     let step = free_edges(nodes, &outline, footprints);
+    if step == near {
+        return Some(first);
+    }
+    inset_with(nodes, &own, &outline, &step)
+}
+
+/// The walls stepped in along the edges flagged in `step`, or None where the
+/// rules of `inset_outline` keep them on the outline.
+fn inset_with(
+    nodes: &[ProcessedNode],
+    own: &FnvHashSet<(i32, i32)>,
+    outline: &FnvHashSet<(i32, i32)>,
+    step: &[bool],
+) -> Option<OutlineInset> {
     if !step.iter().any(|&s| s) {
         return None;
     }
-    let ring = inset_ring(nodes, &step)?;
+    let ring = inset_ring(nodes, step)?;
     // Every wall stays inside the outline.
     if ring_cells(&ring).any(|c| !outline.contains(&c)) {
         return None;
@@ -312,7 +353,7 @@ pub(crate) fn inset_outline(
     let (sx, sz) = spans(&stepped);
     // Made narrower than a house the step suits.
     let stepped_rings = rings(&stepped);
-    let cramped = stepped_rings < MIN_SHRUNK_RINGS && stepped_rings < rings(&outline);
+    let cramped = stepped_rings < MIN_SHRUNK_RINGS && stepped_rings < rings(outline);
     if inner.is_empty()
         || fin
         || cramped
@@ -379,6 +420,48 @@ mod tests {
             corners(&inset.nodes),
             vec![(11, 11), (22, 11), (22, 21), (11, 21), (11, 11)]
         );
+    }
+
+    // As in generation, the footprints hold only the inside of each outline.
+    // A row house a cell from its neighbour keeps that side on the line, so
+    // the eaves close the gap; two cells off, it steps in.
+    #[test]
+    fn a_wall_a_cell_from_a_neighbour_stays_on_the_line() {
+        let way = rect_way(1, 10, 10, 22, 22, &[("building", "house")]);
+        let fill = fill_of(&way.nodes);
+        let with_neighbour_at = |x0: i32| {
+            let neighbour = rect_way(2, x0, 10, x0 + 12, 22, &[("building", "house")]);
+            let mut footprints = CoordinateBitmap::new(&bbox());
+            for (x, z) in fill.iter().copied().chain(fill_of(&neighbour.nodes)) {
+                footprints.set(x, z);
+            }
+            footprints
+        };
+        let inset = inset_outline(&way.nodes, &fill, &with_neighbour_at(24)).unwrap();
+        assert_eq!(
+            corners(&inset.nodes),
+            vec![(11, 11), (22, 11), (22, 21), (11, 21), (11, 11)]
+        );
+        let inset = inset_outline(&way.nodes, &fill, &with_neighbour_at(25)).unwrap();
+        assert_eq!(
+            corners(&inset.nodes),
+            vec![(11, 11), (21, 11), (21, 21), (11, 21), (11, 11)]
+        );
+    }
+
+    // A house too narrow to step in on both sides keeps all its walls:
+    // keeping the side a cell from a neighbour on the line never lets the
+    // other step in alone.
+    #[test]
+    fn keeping_a_wall_on_the_line_steps_no_other_in() {
+        let way = rect_way(1, 10, 10, 19, 23, &[("building", "house")]);
+        let fill = fill_of(&way.nodes);
+        let neighbour = rect_way(2, 21, 10, 31, 23, &[("building", "house")]);
+        let mut footprints = CoordinateBitmap::new(&bbox());
+        for (x, z) in fill.iter().copied().chain(fill_of(&neighbour.nodes)) {
+            footprints.set(x, z);
+        }
+        assert!(inset_outline(&way.nodes, &fill, &footprints).is_none());
     }
 
     #[test]

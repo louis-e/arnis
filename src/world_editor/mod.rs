@@ -350,6 +350,9 @@ pub struct WorldEditor<'a> {
     frame_cells: FnvHashSet<(i32, i32, i32)>,
     /// Trunk slots a schematic tree already stands in.
     tree_slots: FnvHashSet<(i32, i32)>,
+    /// Door nodes on an outline whose walls stepped in under the eave: the
+    /// building set their door on the stepped wall, so none stands in the strip.
+    stepped_doors: FnvHashSet<(i32, i32)>,
     /// Set for a One World run: merge into the world's existing regions.
     merge_into_existing: Option<crate::world_utils::WorldLayout>,
     /// A piece of a job builds past its own area and writes only inside these block bounds.
@@ -422,6 +425,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -498,6 +502,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -574,6 +579,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -1032,6 +1038,16 @@ impl<'a> WorldEditor<'a> {
     /// Claims the trunk slot (x, z); false when a tree already stands in it.
     pub fn claim_tree_slot(&mut self, x: i32, z: i32) -> bool {
         self.tree_slots.insert((x, z))
+    }
+
+    /// Marks the door node at (x, z) as moved onto a stepped wall.
+    pub fn step_door_in(&mut self, x: i32, z: i32) {
+        self.stepped_doors.insert((x, z));
+    }
+
+    /// Whether the door node at (x, z) has its door on a stepped wall.
+    pub fn door_stepped_in(&self, x: i32, z: i32) -> bool {
+        self.stepped_doors.contains(&(x, z))
     }
 
     /// Strict bounds of a tile editor (inclusive), used by placements that must run in
