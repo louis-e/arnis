@@ -45,8 +45,8 @@ pub mod usa;
 pub mod utm;
 
 use crate::coordinate_system::geographic::LLBBox;
-use source::{Laser, Locate, Sheet};
-use std::path::PathBuf;
+use source::{Laser, Locate, Photo, Sheet};
+use std::path::{Path, PathBuf};
 
 pub use place::{Cell, Kind};
 
@@ -159,7 +159,8 @@ pub struct Plan {
     pub tiles: Vec<(i32, i32)>,
     /// West, south, east, north in the source's grid metres, whole metres.
     pub rect: (f64, f64, f64, f64),
-    /// Megabytes of laser data not yet cached, estimated.
+    /// Megabytes of laser scans not yet cached, estimated from the cache alone
+    /// (see [`estimate`]).
     pub download_mb: u32,
     /// The tiles that lack some of what the area wants.
     pub missing: Vec<(i32, i32)>,
@@ -183,40 +184,107 @@ impl Plan {
     }
 
     /// Counts again what the tiles lack, against the cache in `root`: after a
-    /// lookup noted some absent (see [`locate`]).
-    fn recount(&mut self, root: &std::path::Path) {
+    /// lookup noted some absent or let an older campaign go (see [`locate`]).
+    fn recount(&mut self, root: &Path) {
         (self.missing, self.download_mb) = lacking(root, &self.sheet, &self.tiles, self.rect);
+    }
+
+    /// Megabytes a run of these features is expected to download, from the
+    /// cache alone: the laser scans and, for the lawns and trees, the aerial
+    /// photos. What the data plan shows, and what the limit is held to.
+    pub fn need_mb(&self, root: &Path, features: Features) -> u32 {
+        let photos = if features.garden || features.trees {
+            photo_bytes(root, self)
+        } else {
+            0
+        };
+        self.download_mb
+            .saturating_add(photos.div_ceil(1_000_000) as u32)
     }
 }
 
 /// The tiles of `tiles` that lack some of what `rect` wants, and the megabytes
-/// estimated for them, side by side from the start of each cache file.
+/// estimated for them ([`estimate`]), side by side from the start of each
+/// cache file.
 fn lacking(
-    root: &std::path::Path,
+    root: &Path,
     sheet: &Sheet,
     tiles: &[(i32, i32)],
     rect: source::Rect,
 ) -> (Vec<(i32, i32)>, u32) {
     use rayon::prelude::*;
-    let km2: Vec<f64> = tiles
+    let bytes: Vec<Option<u64>> = tiles
         .par_iter()
-        .map(|&(te, tn)| laser::missing_km2(root, sheet, te, tn, &laser::blocks_for(te, tn, rect)))
+        .map(|&t| estimate(root, sheet, t, rect, None))
         .collect();
     let missing: Vec<(i32, i32)> = tiles
         .iter()
-        .zip(&km2)
-        .filter(|(_, &km2)| km2 > 0.0)
+        .zip(&bytes)
+        .filter(|(_, b)| b.is_some())
         .map(|(&t, _)| t)
         .collect();
-    let download_mb = match sheet.laser {
-        // Read whole: a tile missing any block costs its whole file.
-        Laser::Whole { tile_mb, .. } => missing.len() as u32 * tile_mb,
-        Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
-            let km2: f64 = km2.iter().sum();
-            (km2 * f64::from(mb_per_km2)).ceil() as u32
+    let total: u64 = bytes.iter().flatten().sum();
+    (missing, total.div_ceil(1_000_000) as u32)
+}
+
+/// Bytes tile `t` is expected to download for the part of `rect` it lacks,
+/// from the cache alone; `None` when it lacks nothing. Read whole (a source of
+/// whole files, or a zip, `zipped` saying whether the tile was found zipped
+/// this run, else whether it was last time): the size the server last gave
+/// (see [`laser::note_size`]), else the source's typical size. Read in part:
+/// the blocks it lacks at the source's download per square kilometre.
+fn estimate(
+    root: &Path,
+    sheet: &Sheet,
+    t: (i32, i32),
+    rect: source::Rect,
+    zipped: Option<bool>,
+) -> Option<u64> {
+    let km2 = laser::missing_km2(root, sheet, t.0, t.1, &laser::blocks_for(t.0, t.1, rect));
+    if km2 <= 0.0 {
+        return None;
+    }
+    let whole =
+        |typical_mb: u64| laser::noted_size(root, sheet, t).unwrap_or(typical_mb * 1_000_000);
+    Some(match sheet.laser {
+        Laser::Whole { tile_mb, .. } => whole(u64::from(tile_mb)),
+        Laser::Copc { .. } if zipped.unwrap_or_else(|| laser::noted_whole(root, sheet, t)) => {
+            whole(ZIP_MB)
         }
-    };
-    (missing, download_mb)
+        Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
+            (km2 * f64::from(mb_per_km2) * 1e6).ceil() as u64
+        }
+    })
+}
+
+/// Megabytes of aerial photo a square kilometre of an area takes to download.
+/// Measured: Bavaria's tiled GeoTIFFs hold their 20 cm pixels LZW-packed and
+/// without overviews, 75 MB a km² (Erding); Latvia's sheets 85 (Riga); the
+/// WMS photos, JPEG, 5 to 9.5 (Ann Arbor, Amersfoort, Nantes, Kriens).
+fn photo_mb_per_km2(photo: &Photo) -> f64 {
+    match photo {
+        Photo::TiledTiff(_) => 80.0,
+        Photo::Sheets { .. } => 90.0,
+        Photo::Wms { .. } => 10.0,
+        Photo::None => 0.0,
+    }
+}
+
+/// Bytes of aerial photos a run is expected to download for the plan: the
+/// rectangle's part of each tile whose photo is not cached yet.
+fn photo_bytes(root: &Path, plan: &Plan) -> u64 {
+    let mb_per_km2 = photo_mb_per_km2(&plan.sheet.photo);
+    let (e0, n0, e1, n1) = plan.rect;
+    plan.tiles
+        .iter()
+        .filter(|&&(te, tn)| !photo::cache_path(root, &plan.sheet, te, tn).exists())
+        .map(|&(te, tn)| {
+            let (te0, tn0) = (f64::from(te) * 1000.0, f64::from(tn) * 1000.0);
+            let w = (e1.min(te0 + 1000.0) - e0.max(te0)).max(0.0);
+            let h = (n1.min(tn0 + 1000.0) - n0.max(tn0)).max(0.0);
+            (w * h * mb_per_km2).ceil() as u64
+        })
+        .sum()
 }
 
 pub fn plan(bbox: &LLBBox) -> Option<Plan> {
@@ -282,58 +350,60 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
     })
 }
 
-/// Megabytes the plan's missing tiles take, the whole files asked of the server
-/// (a HEAD each) where their addresses are fixed: Bavaria's tiles run from 70 MB
-/// to past 1 GB in the Alps, so the source's typical size can be far off. A file
-/// the server does not size counts at that. A cloud-optimised source's zipped
-/// tiles (see [`zip_url`]), which the plan counted by the part the area needs,
-/// are sized the same way once found.
-fn sized_download_mb(client: &reqwest::blocking::Client, plan: &Plan, urls: &Urls) -> u32 {
+/// Bytes each of the plan's missing tiles is expected to download: a whole
+/// file's as its server gives it (a HEAD each, noted for estimates made from
+/// the cache alone), else as [`estimate`] has it. Bavaria's tiles run from 70
+/// MB to past 1 GB in the Alps, so the source's typical size can be far off.
+/// A cloud-optimised source's zipped tiles (see [`zip_url`]) are sized the
+/// same way once found.
+fn planned_bytes(
+    client: &reqwest::blocking::Client,
+    plan: &Plan,
+    urls: &Urls,
+) -> Vec<((i32, i32), u64)> {
     if plan.missing.is_empty() {
-        return 0;
+        return Vec::new();
     }
-    if crate::net::offline() {
-        return plan.download_mb;
-    }
-    use rayon::prelude::*;
-    let bytes: u64 = match plan.sheet.laser {
-        Laser::Whole {
-            locate: Locate::Urls(_),
-            tile_mb,
-        } => {
-            let typical = u64::from(tile_mb) * 1_000_000;
-            plan.missing
-                .par_iter()
-                .map(|t| {
-                    urls.get(t)
-                        .and_then(|u| u.first())
-                        .and_then(|u| fetch::content_length(client, u))
-                        .unwrap_or(typical)
-                })
-                .sum()
+    let root = cache_root();
+    let size = |&t: &(i32, i32)| {
+        let zip = zip_url(urls, t);
+        let whole = match plan.sheet.laser {
+            Laser::Whole {
+                locate: Locate::Urls(_),
+                ..
+            } => urls.get(&t).and_then(|u| u.first()).map(String::as_str),
+            Laser::Copc { .. } => zip,
+            _ => None,
+        };
+        let head = whole
+            .filter(|_| !crate::net::offline())
+            .and_then(|u| fetch::content_length(client, u));
+        if let Some(n) = head {
+            laser::note_size(&root, &plan.sheet, t, n);
+            return (t, n);
         }
-        // Once any zip is found: the plan counted it by area, or counted one
-        // left out since (see `fetch_survey_data`).
-        Laser::Copc { mb_per_km2, .. } if urls.values().flatten().any(|u| laser::is_zip(u)) => {
-            let root = cache_root();
-            plan.missing
-                .par_iter()
-                .map(|&t| match zip_url(urls, t) {
-                    Some(u) => fetch::content_length(client, u).unwrap_or(ZIP_MB * 1_000_000),
-                    // The rest as the plan counted it.
-                    None => {
-                        let km2 = laser::missing_km2(&root, &plan.sheet, t.0, t.1, &plan.want(t));
-                        (km2 * f64::from(mb_per_km2) * 1e6) as u64
-                    }
-                })
-                .sum()
-        }
-        _ => return plan.download_mb,
+        let zipped = matches!(plan.sheet.laser, Laser::Copc { .. }).then_some(zip.is_some());
+        (
+            t,
+            estimate(&root, &plan.sheet, t, plan.rect, zipped).unwrap_or(0),
+        )
     };
-    bytes.div_ceil(1_000_000) as u32
+    // On threads of their own: a HEAD waits on the network, which on the shared
+    // pool would hold up the ground generation beside it.
+    use rayon::prelude::*;
+    match rayon::ThreadPoolBuilder::new()
+        .num_threads(HEAD_THREADS)
+        .build()
+    {
+        Ok(pool) => pool.install(|| plan.missing.par_iter().map(size).collect()),
+        Err(_) => plan.missing.iter().map(size).collect(),
+    }
 }
 
-/// A zipped tile's size where its server does not give it, erring high (the two
+/// HEAD requests sizing an area's tiles at once.
+const HEAD_THREADS: usize = 8;
+
+/// A zipped tile's size where its server has not given it, erring high (the two
 /// measured in Switzerland take 135 and 159 MB).
 const ZIP_MB: u64 = 200;
 
@@ -346,7 +416,7 @@ pub const OVER_LIMIT: &str = "laser_over_limit:";
 /// window.
 fn over_limit(need_mb: u32, max_mb: u32) {
     println!(
-        "Laser data skipped: the area needs about {need_mb} MB of laser scans, more than the {max_mb} MB allowed. Allow it with --lidar-max-mb {}.",
+        "Laser data skipped: the area needs about {need_mb} MB of laser scans and photos, more than the {max_mb} MB allowed. Allow it with --lidar-max-mb {}.",
         limit_for(need_mb)
     );
     crate::progress::emit_gui_progress_update(
@@ -397,14 +467,24 @@ pub fn fetch_survey_data(
         .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()
         .ok()?;
+    let root = cache_root();
     let urls = locate(&client, &plan)?;
-    plan.recount(&cache_root());
+    plan.recount(&root);
     // A tile found zipped is read whole: left out where only the margin reaches
     // it, as a source read in whole files leaves it out.
     let grazed = |t: &(i32, i32)| sliver(*t, plan.rect) && zip_url(&urls, *t).is_some();
     plan.tiles.retain(|t| !grazed(t));
     plan.missing.retain(|t| !grazed(t));
-    let need_mb = sized_download_mb(&client, &plan, &urls);
+    // Heights read only the laser's roofs; lawns and trees need the photo too.
+    let with_photo = features.garden || features.trees;
+    let planned = planned_bytes(&client, &plan, &urls);
+    let photos_planned = if with_photo {
+        photo_bytes(&root, &plan)
+    } else {
+        0
+    };
+    let need = planned.iter().map(|&(_, b)| b).sum::<u64>() + photos_planned;
+    let need_mb = need.div_ceil(1_000_000) as u32;
     if need_mb > max_mb {
         over_limit(need_mb, max_mb);
         return None;
@@ -415,7 +495,11 @@ pub fn fetch_survey_data(
         plan.tiles.len(),
         if plan.tiles.len() == 1 { "" } else { "s" }
     );
-    let (bytes0, area0) = (fetch::laser_bytes(), fetch::laser_area_m2());
+    let (bytes0, photos0, area0) = (
+        fetch::laser_bytes(),
+        fetch::photo_bytes(),
+        fetch::laser_area_m2(),
+    );
     let debug = std::env::var_os("ARNIS_LASER_DEBUG").is_some();
     let clock = std::time::Instant::now();
     let lap = |what: &str| {
@@ -430,15 +514,24 @@ pub fn fetch_survey_data(
             );
         }
     };
-    // Heights read only the laser's roofs; lawns and trees need the photo too.
-    // The sizes above are the server's or an estimate; the bytes that come are
-    // held to the limit as well, and past it the area goes without.
+    // The sizes above are the server's or an estimate; the bytes that come,
+    // scans and photos, are held to the limit as well, and past it the area
+    // goes without.
     fetch::limit_laser_bytes(u64::from(max_mb) * 1_000_000);
-    let inputs = mosaic(&client, &plan, &urls, features.garden || features.trees);
+    let inputs = mosaic(&client, &plan, &urls, with_photo);
     if fetch::past_laser_limit() {
-        // At least this much; the tiles that came are cached for a next run.
-        let got_mb = (fetch::laser_bytes() - bytes0).div_ceil(1_000_000) as u32;
-        over_limit(got_mb, max_mb);
+        // What the area needs, not what came before the stop: that, and what
+        // did not come yet as planned. The tiles that came are cached for a
+        // next run, which needs only the rest.
+        let photos = fetch::photo_bytes() - photos0;
+        let came = fetch::laser_bytes() - bytes0 + photos;
+        let rest: u64 = planned
+            .iter()
+            .filter(|&&(t, _)| !laser::is_cached(&root, &plan.sheet, t.0, t.1, &plan.want(t)))
+            .map(|&(_, b)| b)
+            .sum();
+        let need = came + rest + photos_planned.saturating_sub(photos);
+        over_limit(need.div_ceil(1_000_000) as u32, max_mb);
         return None;
     }
     let mut inputs = inputs?;
@@ -456,6 +549,13 @@ pub fn fetch_survey_data(
             bytes as f64 / 1e6,
             area as f64 / 1e6,
             bytes as f64 / area as f64
+        );
+    }
+    let photos = fetch::photo_bytes() - photos0;
+    if photos > 0 {
+        println!(
+            "Laser data: downloaded {:.1} MB of aerial photos",
+            photos as f64 / 1e6
         );
     }
     let (thresholds, how) = classify::calibrate(&inputs, plan.sheet.intensity_defaults);
@@ -622,6 +722,13 @@ fn mosaic(
     let (w, h) = ((e1 - e0) as usize, (n1 - n0) as usize);
     let root = cache_root();
     laser::sweep_leftovers(&root.join(plan.sheet.dir()));
+    // Where the source is known to have nothing for any tile, the photo would
+    // be of no use either (and, offline, not in the cache).
+    let with_photo = with_photo
+        && !plan
+            .tiles
+            .iter()
+            .all(|&t| laser::known_absent(&root, &plan.sheet, t, &plan.want(t)));
     let mut inp = classify::Inputs::new(w, h);
     inp.laser_plants = plan.sheet.laser_plants;
     inp.strict_pools = plan.sheet.strict_pools;
@@ -645,10 +752,12 @@ fn mosaic(
     let next = std::sync::atomic::AtomicUsize::new(0);
     let mut failed: Vec<((i32, i32), String)> = Vec::new();
     let mut any = false;
+    // Set once the photo is of no more use: past the limit, or no laser.
+    let photos_off = std::sync::atomic::AtomicBool::new(false);
     std::thread::scope(|s| {
         let photos = s.spawn(|| {
             if with_photo {
-                fill_photos(client, plan, &root, photo_cells);
+                fill_photos(client, plan, &root, photo_cells, &photos_off);
             }
         });
         // Plain threads, not a Rayon pool: they wait their turn to download
@@ -674,6 +783,9 @@ fn mosaic(
         }
         drop(tx);
         for ((te, tn), got) in rx {
+            if fetch::past_laser_limit() {
+                photos_off.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             let t = match got {
                 Ok(laser::Fetched::Tile(t)) => t,
                 Ok(laser::Fetched::Absent) => continue,
@@ -694,6 +806,11 @@ fn mosaic(
                 h_bld_q[mc] = t.h_bld[tc];
                 i_gnd_q[mc] = t.i_gnd[tc];
             });
+        }
+        // Without a laser tile the area goes without laser data: the photo
+        // still to come would be downloaded for nothing.
+        if !any {
+            photos_off.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         // The photo only helps the laser along: whatever stopped it, the
         // laser goes on with the cells that came.
@@ -726,25 +843,27 @@ fn mosaic(
 }
 
 /// The photo's cells over the plan's rectangle, tile by tile as they come (only
-/// the part of each tile the rectangle covers).
+/// the part of each tile the rectangle covers). Set, `down` stops the requests
+/// still to come: the laser sets it once the photo is of no more use, the
+/// photo's own requests when its host cannot be reached or the run is past
+/// its download limit.
 fn fill_photos(
     client: &reqwest::blocking::Client,
     plan: &Plan,
     root: &std::path::Path,
     cells: &mut [photo::PhotoCell],
+    down: &std::sync::atomic::AtomicBool,
 ) {
     use rayon::prelude::*;
     let (e0, n0, e1, n1) = plan.rect;
     let cells = std::sync::Mutex::new(cells);
-    // Set by the first request that finds the photo's host unreachable.
-    let down = std::sync::atomic::AtomicBool::new(false);
     let each = |&(te, tn): &(i32, i32)| {
         let (te0, tn1) = (f64::from(te) * 1000.0, f64::from(tn + 1) * 1000.0);
         let c0 = (e0 - te0).max(0.0) as usize;
         let c1 = ((e1 - te0).min(1000.0)) as usize;
         let r0 = (tn1 - n1).max(0.0) as usize;
         let r1 = ((tn1 - n0).min(1000.0)) as usize;
-        let Some(p) = photo::tile(client, root, &plan.sheet, (te, tn), (c0, r0, c1, r1), &down)
+        let Some(p) = photo::tile(client, root, &plan.sheet, (te, tn), (c0, r0, c1, r1), down)
         else {
             return;
         };
@@ -758,13 +877,16 @@ fn fill_photos(
     };
     // On threads of their own: photo requests wait on the network and on a
     // paced host's turns, which on the shared pool would hold up the ground
-    // generation and the laser decoding beside them.
+    // generation and the laser decoding beside them. Marked, so what they
+    // download counts as photos (see `fetch::for_photos`).
+    fetch::for_photos();
     match rayon::ThreadPoolBuilder::new()
         .num_threads(PHOTO_THREADS)
+        .start_handler(|_| fetch::for_photos())
         .build()
     {
         Ok(pool) => pool.install(|| plan.tiles.par_iter().for_each(each)),
-        Err(_) => plan.tiles.par_iter().for_each(each),
+        Err(_) => plan.tiles.iter().for_each(each),
     }
 }
 
@@ -849,6 +971,46 @@ mod tests {
         let plan = plan_in(&root, &bbox).unwrap();
         assert_eq!(plan.sheet.name, latvia::LATVIA.name);
         assert_eq!(plan.tiles, vec![(501, 308)]);
+    }
+
+    #[test]
+    fn an_estimate_from_the_cache_counts_as_a_run_does() {
+        // Erding: Bavaria's whole tiles at their typical size, then one at the
+        // size its server gave a run.
+        let bbox = LLBBox::new(48.294843, 11.886772, 48.310405, 11.911930).unwrap();
+        let root = std::env::temp_dir().join(format!("arnis-estimate-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let plan = plan_in(&root, &bbox).unwrap();
+        let Laser::Whole { tile_mb, .. } = plan.sheet.laser else {
+            panic!("Bavaria reads whole files")
+        };
+        let n = plan.missing.len() as u32;
+        assert_eq!(plan.download_mb, n * tile_mb);
+        laser::note_size(&root, &plan.sheet, plan.missing[0], 70_000_000);
+        let plan = plan_in(&root, &bbox).unwrap();
+        assert_eq!(plan.download_mb, (n - 1) * tile_mb + 70);
+        // Photos count for lawns and trees, not for heights alone.
+        let heights = Features {
+            garden: false,
+            trees: false,
+            heights: true,
+        };
+        let all = Features {
+            garden: true,
+            trees: true,
+            heights: true,
+        };
+        assert_eq!(plan.need_mb(&root, heights), plan.download_mb);
+        assert!(plan.need_mb(&root, all) > plan.download_mb);
+        let _ = std::fs::remove_dir_all(&root);
+
+        // Kriens: a tile last found zipped counts as a whole zip, not by area.
+        let bbox = LLBBox::new(47.0333, 8.2781, 47.0377, 8.2839).unwrap();
+        let before = plan_in(&root, &bbox).unwrap();
+        laser::note_whole(&root, &before.sheet, (2663, 1209), true);
+        let after = plan_in(&root, &bbox).unwrap();
+        assert!(after.download_mb >= before.download_mb + ZIP_MB as u32 / 2);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -264,6 +264,27 @@ pub fn noted_whole(root: &Path, source: &Sheet, (te, tn): (i32, i32)) -> bool {
     whole_marker(root, source, te, tn).exists()
 }
 
+fn size_note(root: &Path, source: &Sheet, te: i32, tn: i32) -> PathBuf {
+    root.join(source.dir()).join(format!("tile_{te}_{tn}.size"))
+}
+
+/// Notes the size the server gave for tile `t`'s whole file, so an estimate
+/// made from the cache alone (the data plan, an offline run) counts it so.
+pub fn note_size(root: &Path, source: &Sheet, (te, tn): (i32, i32), bytes: u64) {
+    if std::fs::create_dir_all(root.join(source.dir())).is_ok() {
+        let _ = std::fs::write(size_note(root, source, te, tn), bytes.to_string());
+    }
+}
+
+/// The size last noted for tile `t`'s whole file ([`note_size`]).
+pub fn noted_size(root: &Path, source: &Sheet, (te, tn): (i32, i32)) -> Option<u64> {
+    std::fs::read_to_string(size_note(root, source, te, tn))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
 /// Whether the file at `path` was last written within `days`.
 fn fresh(path: &Path, days: u64) -> bool {
     std::fs::metadata(path)
@@ -332,6 +353,11 @@ pub fn missing_km2(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool])
         .filter(|&&b| b)
         .count();
     missing as f64 * (BLOCK * BLOCK) as f64 / 1e6
+}
+
+/// Whether the source is known to have none of the blocks wanted.
+pub fn known_absent(root: &Path, source: &Sheet, (te, tn): (i32, i32), want: &[bool]) -> bool {
+    absent_blocks(root, source, te, tn).is_some_and(|gone| covers(&gone, want))
 }
 
 /// Whether the tile costs no download for the blocks wanted: its cache file's

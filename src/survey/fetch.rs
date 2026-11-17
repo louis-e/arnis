@@ -1,6 +1,7 @@
 //! HTTP for the survey: range reads with polite retries, JSON lookups, and a
-//! count of what the laser reads downloaded.
+//! count of what the laser reads and the aerial photos downloaded.
 
+use std::cell::Cell;
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -17,20 +18,49 @@ pub fn count_laser_bytes(n: u64) {
     LASER_BYTES.fetch_add(n, Ordering::Relaxed);
 }
 
-/// The laser bytes downloaded in this process past which a run stops reading.
+/// Bytes of aerial photos downloaded in this process: every request made on a
+/// thread [`for_photos`] marked.
+static PHOTO_BYTES: AtomicU64 = AtomicU64::new(0);
+
+pub fn photo_bytes() -> u64 {
+    PHOTO_BYTES.load(Ordering::Relaxed)
+}
+
+thread_local! {
+    static FOR_PHOTOS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks the calling thread as one the aerial photos are fetched on: what its
+/// requests download counts as photos, toward the limit, and none starts past
+/// the limit.
+pub fn for_photos() {
+    FOR_PHOTOS.with(|f| f.set(true));
+}
+
+fn on_photo_thread() -> bool {
+    FOR_PHOTOS.with(Cell::get)
+}
+
+/// The laser data downloaded in this process past which a run stops reading:
+/// laser scans and aerial photos together.
 static LASER_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
 
 /// What a read stopped by the limit fails with.
 pub const PAST_LIMIT: &str = "past the download limit";
 
-/// Lets the run download `bytes` more of laser data from here.
-pub fn limit_laser_bytes(bytes: u64) {
-    LASER_LIMIT.store(laser_bytes().saturating_add(bytes), Ordering::Relaxed);
+/// Laser scans and photos downloaded in this process.
+fn limited_bytes() -> u64 {
+    laser_bytes() + photo_bytes()
 }
 
-/// Whether the run has downloaded more laser data than it may.
+/// Lets the run download `bytes` more of laser data (scans and photos) from here.
+pub fn limit_laser_bytes(bytes: u64) {
+    LASER_LIMIT.store(limited_bytes().saturating_add(bytes), Ordering::Relaxed);
+}
+
+/// Whether the run has downloaded more laser data (scans and photos) than it may.
 pub fn past_laser_limit() -> bool {
-    laser_bytes() > LASER_LIMIT.load(Ordering::Relaxed)
+    limited_bytes() > LASER_LIMIT.load(Ordering::Relaxed)
 }
 
 /// `Err` once past the limit, for a reader to stop on before its next request.
@@ -86,10 +116,11 @@ impl std::fmt::Display for Failure {
     }
 }
 
-/// Whether a failure says the host cannot be reached at all (no answer, no
-/// connection, no name), so asking it for more now only waits.
+/// Whether a failure says asking for more now is no use: the host cannot be
+/// reached at all (no answer, no connection, no name), so another request
+/// only waits, or the run is past its download limit.
 pub fn unreachable(kind: &str) -> bool {
-    matches!(kind, "timeout" | "connect" | "dns" | "tls")
+    matches!(kind, "timeout" | "connect" | "dns" | "tls" | PAST_LIMIT)
 }
 
 /// Hosts that limit requests a second, and the most the survey starts there
@@ -157,6 +188,11 @@ fn get(
         Some(Span::From(_, len) | Span::Tail(len)) => len,
         None => MAX_BODY,
     };
+    // A photo is not started past the limit; a laser read checks it itself.
+    let photo = on_photo_thread();
+    if photo {
+        within_laser_limit()?;
+    }
     let mut wait_ms = 1000;
     let limit = paced(url);
     for attempt in 0..8 {
@@ -214,6 +250,9 @@ fn get(
                 }
                 if body.len() as u64 > cap {
                     return Err(Failure::Other("answer larger than asked for".into()));
+                }
+                if photo {
+                    PHOTO_BYTES.fetch_add(body.len() as u64, Ordering::Relaxed);
                 }
                 return Ok(body);
             }
