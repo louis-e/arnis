@@ -139,6 +139,20 @@ pub fn plan(bbox: &LLBBox) -> Option<Plan> {
     plan_in(&cache_root(), bbox)
 }
 
+/// Whether only the margin reaches tile (`te`, `tn`): the rectangle meets it in
+/// a strip no wider than [`MARGIN_M`], so none of the world lies on it. A source
+/// read in whole files leaves such a tile out, and its 50 to 200 MB download,
+/// at the cost of some context for what crosses the world's edge (on Erding,
+/// the shade of one paved strip along it). Reaching further in, the world's
+/// edge would go without laser data, and its gardens and roofs would change
+/// there visibly.
+fn sliver((te, tn): (i32, i32), (e0, n0, e1, n1): source::Rect) -> bool {
+    let (te0, tn0) = (f64::from(te) * 1000.0, f64::from(tn) * 1000.0);
+    let w = e1.min(te0 + 1000.0) - e0.max(te0);
+    let h = n1.min(tn0 + 1000.0) - n0.max(tn0);
+    w.min(h) <= MARGIN_M
+}
+
 /// [`plan`] against the laser cache in `root`.
 pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
     let source = source::for_bbox(bbox)?;
@@ -163,7 +177,11 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
         (e1 + MARGIN_M).ceil(),
         (n1 + MARGIN_M).ceil(),
     );
-    let tiles = sheet.tiles(rect);
+    let mut tiles = sheet.tiles(rect);
+    // Sources read in part fetch only what the area needs anyway.
+    if let Laser::Whole { .. } = sheet.laser {
+        tiles.retain(|&t| !sliver(t, rect));
+    }
     // Each tile's cache is read whole to check it: side by side.
     use rayon::prelude::*;
     let download_mb = match sheet.laser {
@@ -597,5 +615,16 @@ mod tests {
         assert!(seen.contains(&(20 * 80, 960)));
         // The last: mosaic row 39, column 39 is tile row 19, column 999.
         assert!(seen.contains(&(39 * 80 + 39, 19 * 1000 + 999)));
+    }
+
+    #[test]
+    fn a_tile_only_the_margin_reaches_is_left_out() {
+        // Erding's rectangle: 6 m into the tile columns either side.
+        let rect = (713_994.0, 5_353_059.0, 716_006.0, 5_354_941.0);
+        assert!(sliver((713, 5353), rect) && sliver((716, 5354), rect));
+        assert!(!sliver((714, 5353), rect) && !sliver((715, 5354), rect));
+        // Past the margin the world lies on it: kept, however thin.
+        let past = (713_955.0, 5_353_059.0, 716_006.0, 5_354_941.0);
+        assert!(!sliver((713, 5353), past));
     }
 }
