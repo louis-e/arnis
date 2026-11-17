@@ -3236,6 +3236,9 @@ struct BuildingConfig {
     window_archetype: WindowArchetype,
     /// Window and pier widths the wall runs are laid out with.
     bays: BayRhythm,
+    /// The outline the walls stepped in from, where they did. A stepped
+    /// wall keeps the windows of the outline wall in front of it.
+    eave_outline: Option<Rc<[ProcessedNode]>>,
     /// Panel between storeys in a shaft whose spandrels recede with the glass.
     spandrel_block: Block,
     /// Stone base and capital of a masonry tower, if it has them.
@@ -3777,7 +3780,12 @@ impl BuildingConfig {
 
     /// Bays of a straight wall run `len` columns long, upper floors and ground.
     fn run_layouts(&self, len: i32) -> (BayLayout, BayLayout) {
-        let upper = BayLayout::plan(len, self.bays);
+        self.with_shopfront(BayLayout::plan(len, self.bays))
+    }
+
+    /// A run's upper bays and the shopfront under them.
+    fn with_shopfront(&self, upper: BayLayout) -> (BayLayout, BayLayout) {
+        let len = upper.len;
         // A masonry tower's piers run down to the pavement as they are.
         if self.masonry_lobby() {
             return (upper, upper);
@@ -8341,13 +8349,22 @@ const RUN_HEADING_COS: f64 = 0.97;
 /// the same ring in turn, so the last ring is kept per thread and handed out
 /// again rather than laid out once per pass.
 fn facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Rc<[WallColumn]> {
-    // Keyed on everything the layout reads: the ring, the bays and whether
-    // the shopfront takes the bays of the floors above.
-    type Memo = Option<(Vec<(i32, i32)>, (BayRhythm, bool), Rc<[WallColumn]>)>;
+    // Keyed on everything the layout reads: the ring, the bays, whether
+    // the shopfront takes the bays of the floors above, and the outline a
+    // stepped ring takes its windows from.
+    type Memo = Option<(
+        Vec<(i32, i32)>,
+        (BayRhythm, bool, Option<u64>),
+        Rc<[WallColumn]>,
+    )>;
     thread_local! {
         static LAST: RefCell<Memo> = const { RefCell::new(None) };
     }
-    let key = (config.bays, config.masonry_lobby());
+    let key = (
+        config.bays,
+        config.masonry_lobby(),
+        config.eave_outline.as_ref().map(|_| config.element_id),
+    );
     LAST.with(|last| {
         let mut last = last.borrow_mut();
         if let Some((ring, last_key, columns)) = last.as_ref() {
@@ -8369,6 +8386,104 @@ fn facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Rc<[WallC
 }
 
 fn lay_out_facade_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Vec<WallColumn> {
+    let mut columns = lay_out_ring_columns(nodes, config);
+    if let Some(outline) = config.eave_outline.as_deref() {
+        let same = outline.len() == nodes.len()
+            && outline
+                .iter()
+                .zip(nodes)
+                .all(|(a, b)| (a.x, a.z) == (b.x, b.z));
+        if !same {
+            keep_outline_bays(&mut columns, &lay_out_ring_columns(outline, config), config);
+        }
+    }
+    columns
+}
+
+/// A stepped ring's runs take the bays of the outline runs they stand behind.
+/// Laid out afresh, a wall two blocks shorter often fits a window fewer, and
+/// the stepped house lost a window on most fronts, with its shutters, sills
+/// and flower pots. A run keeps the outline's windows where they were, on
+/// corner piers as much narrower as it stepped in at either end, while those
+/// piers keep a block. Where they would not, as on a short gable, it keeps
+/// as many windows on narrower piers between them, and only where even
+/// one-block piers leave no room does it keep its own bays.
+fn keep_outline_bays(columns: &mut [WallColumn], outline: &[WallColumn], config: &BuildingConfig) {
+    let facing: FnvHashMap<(i32, i32, (i32, i32)), &WallColumn> = outline
+        .iter()
+        .filter(|c| c.normal != (0, 0))
+        .map(|c| ((c.x, c.z, c.normal), c))
+        .collect();
+    let runs = columns.iter().map(|c| c.run + 1).max().unwrap_or(0);
+    // Per run: the outline column a block out from each of its columns, as
+    // (outline run, offset along it, bays), while they all agree.
+    let mut found: Vec<Option<(usize, i32, BayLayout, BayLayout)>> = vec![None; runs];
+    let mut broken = vec![false; runs];
+    for c in columns.iter() {
+        let r = c.run;
+        if broken[r] {
+            continue;
+        }
+        let Some(o) = facing.get(&(c.x + c.normal.0, c.z + c.normal.1, c.normal)) else {
+            broken[r] = true;
+            continue;
+        };
+        let here = (o.run, o.pos - c.pos, o.upper, o.shop);
+        match found[r] {
+            None => found[r] = Some(here),
+            Some(seen) if (seen.0, seen.1) == (here.0, here.1) => {}
+            Some(_) => broken[r] = true,
+        }
+    }
+    let shifted = |own: &BayLayout, outline: &BayLayout, k: i32| -> Option<BayLayout> {
+        if outline.count == 0 {
+            return Some(BayLayout {
+                lead: own.len,
+                count: 0,
+                ..*own
+            });
+        }
+        let lead = outline.lead - k;
+        (lead >= 1 && outline.len == own.len + 2 * k).then_some(BayLayout {
+            len: own.len,
+            lead,
+            ..*outline
+        })
+    };
+    // The outline's windows over `len` columns, the piers between them as
+    // wide as they can be up to the outline's, the ends a block at least.
+    let squeezed = |len: i32, outline: &BayLayout| -> Option<BayLayout> {
+        let count = outline.count;
+        (1..=outline.pier).rev().find_map(|pier| {
+            let spare = len - count * outline.window - (count - 1) * pier;
+            let odd = spare % 2 == 1;
+            (spare >= 2).then_some(BayLayout {
+                len,
+                lead: spare / 2,
+                window: outline.window,
+                pier,
+                count,
+                wide_window: odd && count % 2 == 1,
+                wide_pier: odd && count % 2 == 0,
+            })
+        })
+    };
+    for c in columns.iter_mut() {
+        let Some((_, k, upper, shop)) = found[c.run].filter(|_| !broken[c.run]) else {
+            continue;
+        };
+        if let Some(u) = shifted(&c.upper, &upper, k) {
+            c.shop = shifted(&c.shop, &shop, k).unwrap_or_else(|| config.with_shopfront(u).1);
+            c.upper = u;
+        } else if upper.count > c.upper.count {
+            if let Some(u) = squeezed(c.upper.len, &upper) {
+                (c.upper, c.shop) = config.with_shopfront(u);
+            }
+        }
+    }
+}
+
+fn lay_out_ring_columns(nodes: &[ProcessedNode], config: &BuildingConfig) -> Vec<WallColumn> {
     let n_seg = nodes.len().saturating_sub(1);
     if n_seg == 0 {
         return Vec::new();
@@ -11099,6 +11214,15 @@ impl BalconySite<'_> {
             })
     }
 
+    /// Takes the cells a balcony before `cols` would stand on, without building it.
+    fn reserve(&mut self, cols: &[(i32, i32)], normal: (i32, i32), h: i32, depth: i32) {
+        for &(x, z) in cols {
+            for d in 1..=depth {
+                self.taken.insert((x + normal.0 * d, h, z + normal.1 * d));
+            }
+        }
+    }
+
     /// Builds a balcony before the wall columns `cols`, in order along the wall,
     /// whose first and last carry its side rails, at floor row `h`. `furnish`
     /// seeds what stands on it.
@@ -11373,7 +11497,7 @@ fn generate_balconies(
     building_passages: &CoordinateBitmap,
     facade: &FacadePlan,
     footprints: Option<&CoordinateBitmap>,
-    eave_strip: Option<&FnvHashSet<(i32, i32)>>,
+    stepped: Option<&SteppedOutline>,
 ) {
     // A tower only takes a band of them up its street front.
     let banded = matches!(
@@ -11394,23 +11518,27 @@ fn generate_balconies(
     // Never on the ground floor; elevated parts keep their base row.
     let first_h = config.start_y_offset + config.grammar_anchor() + config.floor_cycle;
     let columns = facade_columns(&element.nodes, config);
-    let mut wall = WallRuns::default();
-    for wc in columns.iter() {
-        let here = Some((wc.run, wc.normal));
-        wall.entry((wc.x, wc.z))
-            .and_modify(|w| {
-                if *w != here {
-                    *w = None;
-                }
-            })
-            .or_insert(here);
-    }
+    let wall_runs = |columns: &[WallColumn]| {
+        let mut wall = WallRuns::default();
+        for wc in columns {
+            let here = Some((wc.run, wc.normal));
+            wall.entry((wc.x, wc.z))
+                .and_modify(|w| {
+                    if *w != here {
+                        *w = None;
+                    }
+                })
+                .or_insert(here);
+        }
+        wall
+    };
+    let wall = wall_runs(&columns);
     let mut site = BalconySite {
         config,
         facade,
         passages: building_passages,
         footprints,
-        eave_strip,
+        eave_strip: stepped.map(|s| s.strip),
         wall,
         taken: FnvHashSet::default(),
     };
@@ -11476,27 +11604,99 @@ fn generate_balconies(
         }
     }
 
-    for wc in columns.iter() {
-        let BaySlot::Window { k, width, bay } = wc.slot() else {
+    // One balcony per window, hung from its middle column, where the window
+    // asks for one. A stepped building asks the windows its walls had on the
+    // outline, so it keeps the balconies they carried, and hangs each on the
+    // window of the stepped wall that took that one's place.
+    let (plan_columns, plan_facade) = match stepped {
+        Some(s) => (
+            facade_columns(&s.way.nodes, config),
+            s.facade.unwrap_or(facade),
+        ),
+        None => (columns.clone(), facade),
+    };
+    // The balconies the outline's walls had room for, which the stepped ones keep.
+    let mut plan_site = stepped.map(|_| BalconySite {
+        config,
+        facade: plan_facade,
+        passages: building_passages,
+        footprints,
+        eave_strip: None,
+        wall: wall_runs(&plan_columns),
+        taken: FnvHashSet::default(),
+    });
+    let centres: FnvHashMap<(i32, i32), WallColumn> = if stepped.is_some() {
+        columns
+            .iter()
+            .filter(|wc| {
+                matches!(wc.slot(), BaySlot::Window { k, width, .. } if k == (width - 1) / 2)
+                    && !front_blocked(wc, config, building_passages, facade, None)
+            })
+            .map(|wc| ((wc.x, wc.z), *wc))
+            .collect()
+    } else {
+        FnvHashMap::default()
+    };
+    for pc in plan_columns.iter() {
+        let BaySlot::Window { k, width, bay } = pc.slot() else {
             continue;
         };
-        // One balcony per window, hung from its middle column.
         if config.balcony_band == BalconyBand::Filant
             || k != (width - 1) / 2
-            || front_blocked(wc, config, building_passages, facade, None)
+            || front_blocked(pc, config, building_passages, plan_facade, None)
         {
             continue;
         }
-        let (bx, bz) = (wc.x, wc.z);
-        let normal = wc.normal;
+        let normal = pc.normal;
         let (tan_x, tan_z) = (-normal.1, normal.0);
-        // Five columns of this wall run: the window's and its piers.
-        let span: Vec<(i32, i32)> = (-2i32..=2)
-            .map(|t| (bx + tan_x * t, bz + tan_z * t))
-            .collect();
-        let is_rear = facade
+        // The window this one is on the walls as built: itself, or on a
+        // stepped wall the one a block in, or a column or two along it.
+        let Some(wc) = (if stepped.is_none() {
+            Some(*pc)
+        } else {
+            [1, 0]
+                .into_iter()
+                .flat_map(|back| [0, 1, -1, 2, -2].map(|t| (back, t)))
+                .find_map(|(back, t)| {
+                    let cell = (
+                        pc.x - normal.0 * back + tan_x * t,
+                        pc.z - normal.1 * back + tan_z * t,
+                    );
+                    centres.get(&cell).filter(|wc| wc.normal == normal).copied()
+                })
+        }) else {
+            continue;
+        };
+        let (bx, bz) = (wc.x, wc.z);
+        // Five columns of this wall run: the window's and its piers. A
+        // stepped wall is two columns shorter than the outline's, so where
+        // that one would run into a corner or the balcony beside it, it
+        // slides along, narrows to four or three columns, or, by a corner,
+        // runs away from it from the window.
+        let span_at = |from: i32, to: i32| -> Vec<(i32, i32)> {
+            (from..=to)
+                .map(|t| (bx + tan_x * t, bz + tan_z * t))
+                .collect()
+        };
+        let spans: Vec<Vec<(i32, i32)>> = if stepped.is_some() {
+            vec![
+                span_at(-2, 2),
+                span_at(-3, 1),
+                span_at(-1, 3),
+                span_at(-2, 1),
+                span_at(-1, 2),
+                span_at(-1, 1),
+                span_at(-3, 0),
+                span_at(0, 3),
+                span_at(-2, 0),
+                span_at(0, 2),
+            ]
+        } else {
+            vec![span_at(-2, 2)]
+        };
+        let is_rear = plan_facade
             .segments
-            .get(wc.seg)
+            .get(pc.seg)
             .and_then(|s| s.as_ref())
             .is_some_and(|s| s.class == FacadeClass::Rear);
         // Banded balconies skip windows until five columns are clear.
@@ -11507,18 +11707,22 @@ fn generate_balconies(
             BalconyBand::EveryBay => Some(step),
             BalconyBand::Alternating => Some(2 * step),
         };
+        let plan_col = pc.facade(plan_facade);
         let col = wc.facade(facade);
         for h in first_h..top_h {
-            if config.floor_row(h) != 0 || !glazed_at(h + 1, config, col) {
+            if config.floor_row(h) != 0
+                || !glazed_at(h + 1, config, plan_col)
+                || !glazed_at(h + 1, config, col)
+            {
                 continue;
             }
             let wants = match band_step {
-                Some(step) => facade.is_street(bx, bz) && bay % step == 0,
+                Some(step) => plan_facade.is_street(pc.x, pc.z) && bay % step == 0,
                 // One roll per bay, not per storey: the odd balcony comes as
                 // a stack up the wall, where singles read as noise.
                 None => {
                     let roll = coord_rng(
-                        (wc.run as i32).wrapping_mul(4096).wrapping_add(bay),
+                        (pc.run as i32).wrapping_mul(4096).wrapping_add(bay),
                         0,
                         element.id ^ 0xBA1C_0417_0000_0011,
                     )
@@ -11526,8 +11730,20 @@ fn generate_balconies(
                     roll < if is_rear { 5 } else { 14 }
                 }
             };
-            if wants && site.fits(&span, normal, h, depth) {
-                site.build(editor, &span, normal, h, seed(bx, bz, h));
+            if !wants {
+                continue;
+            }
+            if let Some(plan) = plan_site.as_mut() {
+                let outline_span: Vec<(i32, i32)> = (-2i32..=2)
+                    .map(|t| (pc.x + tan_x * t, pc.z + tan_z * t))
+                    .collect();
+                if !plan.fits(&outline_span, normal, h, depth) {
+                    continue;
+                }
+                plan.reserve(&outline_span, normal, h, depth);
+            }
+            if let Some(span) = spans.iter().find(|span| site.fits(span, normal, h, depth)) {
+                site.build(editor, span, normal, h, seed(bx, bz, h));
             }
         }
     }
@@ -12978,6 +13194,36 @@ fn generate_storefront_awnings(
     }
 }
 
+/// A convex corner a downpipe may stand at: the ring's corner, the pipe's
+/// cell, and the diagonal the corner faces out on.
+#[derive(Clone, Copy)]
+struct PipeCorner {
+    corner: (i32, i32),
+    pipe: (i32, i32),
+    diagonal: (i32, i32),
+}
+
+/// The outline of a building whose walls stepped in under the eave, for the
+/// details planned on the walls the outline would have had.
+struct SteppedOutline<'a> {
+    way: &'a ProcessedWay,
+    /// The facade plan laid on the outline, where the building has one.
+    facade: Option<&'a FacadePlan>,
+    /// The outline's cells outside the stepped walls.
+    strip: &'a FnvHashSet<(i32, i32)>,
+}
+
+impl SteppedOutline<'_> {
+    /// Whether the outline's edge leaving the corner `c` towards `towards`
+    /// stepped in: its line, a block or two along from the corner, is strip.
+    fn edge_stepped(&self, c: (i32, i32), towards: (i32, i32)) -> bool {
+        let step = ((towards.0 - c.0).signum(), (towards.1 - c.1).signum());
+        let len = (towards.0 - c.0).abs().max((towards.1 - c.1).abs());
+        let d = len.clamp(1, 2);
+        self.strip.contains(&(c.0 + step.0 * d, c.1 + step.1 * d))
+    }
+}
+
 /// Vertical drainpipe runs hugging two facade corners, a staple of hand-built city blocks.
 fn generate_corner_downpipes(
     editor: &mut WorldEditor,
@@ -12985,6 +13231,7 @@ fn generate_corner_downpipes(
     config: &BuildingConfig,
     building_passages: &CoordinateBitmap,
     facade: &FacadePlan,
+    stepped: Option<&SteppedOutline>,
 ) {
     if config.building_height < 10
         || config.condition != BuildingCondition::Normal
@@ -13006,17 +13253,24 @@ fn generate_corner_downpipes(
     if !rng.random_bool(0.35) {
         return;
     }
-    let outward = outward_side(&element.nodes);
+    // A stepped building takes the corners its walls had on the outline, a
+    // terraced row's pipes between its houses included, each pipe moved in
+    // with the walls that stepped.
+    let (ring, facade) = match stepped {
+        Some(s) => (s.way, s.facade.unwrap_or(facade)),
+        None => (element, facade),
+    };
+    let outward = outward_side(&ring.nodes);
 
     // Convex corners of two perpendicular walls, with the pipe cell on the
     // diagonal both walls' outward normals point to. Re-entrant corners
     // would put it indoors and mid-wall nodes are not corners at all.
-    let vertices = ring_vertices(&element.nodes);
+    let vertices = ring_vertices(&ring.nodes);
     let n = vertices.len();
     if n < 3 {
         return;
     }
-    let corners: Vec<((i32, i32), (i32, i32))> = (0..n)
+    let corners: Vec<PipeCorner> = (0..n)
         .filter_map(|i| {
             let p = vertices[(i + n - 1) % n];
             let c = vertices[i];
@@ -13030,7 +13284,23 @@ fn generate_corner_downpipes(
             let (ax, az) = compute_outward_normal(p.0, p.1, c.0, c.1, outward);
             let (bx, bz) = compute_outward_normal(c.0, c.1, q.0, q.1, outward);
             let (dx, dz) = (ax + bx, az + bz);
-            (dx != 0 && dz != 0).then_some((c, (dx, dz)))
+            if dx == 0 || dz == 0 {
+                return None;
+            }
+            let (mut ox, mut oz) = (c.0 + dx, c.1 + dz);
+            if let Some(s) = stepped {
+                if s.edge_stepped(c, p) {
+                    (ox, oz) = (ox - ax, oz - az);
+                }
+                if s.edge_stepped(c, q) {
+                    (ox, oz) = (ox - bx, oz - bz);
+                }
+            }
+            Some(PipeCorner {
+                corner: c,
+                pipe: (ox, oz),
+                diagonal: (dx, dz),
+            })
         })
         .collect();
     if corners.is_empty() {
@@ -13040,7 +13310,11 @@ fn generate_corner_downpipes(
     let pipe = get_wall_piece_for_material(config.wall_block);
     let start_idx = rng.random_range(0..corners.len());
     for k in 0..2usize {
-        let ((px, pz), (dx, dz)) = corners[(start_idx + k * corners.len() / 2) % corners.len()];
+        let PipeCorner {
+            corner: (px, pz),
+            pipe: (ox, oz),
+            diagonal: (dx, dz),
+        } = corners[(start_idx + k * corners.len() / 2) % corners.len()];
         // A pipe off a photographed corner stands in front of the photograph;
         // one off a party-wall corner stands in front of the neighbour.
         if building_passages.contains(px, pz)
@@ -13049,10 +13323,9 @@ fn generate_corner_downpipes(
         {
             continue;
         }
-        let (ox, oz) = (px + dx, pz + dz);
         // Follow the wall foundation down where the ground drops away.
         let descent = if config.is_ground_level {
-            feature_descent(editor, config, px, pz, ox, oz)
+            feature_descent(editor, config, ox - dx, oz - dz, ox, oz)
         } else {
             0
         };
@@ -14288,13 +14561,22 @@ pub fn generate_buildings(
         .is_some()
         .then(|| cached_floor_area.iter().copied().collect());
     let room_fill = stepped_floor.as_ref().unwrap_or(&own_fill);
+    // Curtains look for the building's own floor round the window; the strip
+    // before a stepped wall is its own too.
+    let window_floor: Option<FnvHashSet<(i32, i32)>> = stepped_floor
+        .as_ref()
+        .map(|f| f.union(&eave_strip).copied().collect());
+    let window_floor = window_floor.as_ref().unwrap_or(&own_fill);
     // The walls, windows and doors are laid out on the stepped ring. The plan
     // laid on the outline above chose the style that asked for the step, so
-    // it is drawn again here, where the first one was drawn at all.
+    // it is drawn again here, where the first one was drawn at all. The
+    // outline's plan stays for the details planned on the outline.
+    let mut outline_facade: Option<FacadePlan> = None;
     if inset_way.is_some() && cached_footprint_size >= MIN_FACADE_FOOTPRINT {
         let mut own_cells = own_fill.clone();
         own_cells.extend(group_other_cells.iter().copied());
-        facade = compute_stepped_facade_plan(element, ctx, args.scale, &own_cells, 1);
+        let stepped = compute_stepped_facade_plan(element, ctx, args.scale, &own_cells, 1);
+        outline_facade = Some(std::mem::replace(&mut facade, stepped));
     }
 
     // Window layout is picked before the config literal so the frame gate
@@ -14552,6 +14834,7 @@ pub fn generate_buildings(
             bays.pier += i32::from(surrounds);
             bays
         },
+        eave_outline: inset_way.is_some().then(|| outline.nodes.as_slice().into()),
         spandrel_block: if window_archetype == WindowArchetype::DecoPiers {
             deco_spandrel_for_wall(wall_block, group_seed)
         } else {
@@ -14978,6 +15261,14 @@ pub fn generate_buildings(
         FnvHashSet::default()
     };
     let part_probe = is_part.then_some((ctx.building_footprints, &part_own_cells));
+    // A stepped building plans its balconies and downpipes on its outline,
+    // where the walls on the outline would have carried them, and hangs them
+    // on the stepped walls.
+    let stepped_outline = inset_way.as_ref().map(|_| SteppedOutline {
+        way: outline,
+        facade: outline_facade.as_ref(),
+        strip: &eave_strip,
+    });
     generate_window_frames(
         editor,
         element,
@@ -15004,7 +15295,7 @@ pub fn generate_buildings(
             effective_passages,
             &facade,
             Some(ctx.building_footprints),
-            Some(&eave_strip),
+            stepped_outline.as_ref(),
         );
     }
     generate_window_life(
@@ -15014,7 +15305,7 @@ pub fn generate_buildings(
         effective_passages,
         &facade,
         part_probe,
-        (!is_part && group_other_cells.is_empty()).then_some(room_fill),
+        (!is_part && group_other_cells.is_empty()).then_some(window_floor),
         Some(ctx.building_footprints),
     );
     generate_window_reveals(
@@ -15064,7 +15355,14 @@ pub fn generate_buildings(
     // Add corner quoins (accent-block columns at building corners)
     if !is_part {
         generate_corner_quoins(editor, element, &config, effective_passages, &facade);
-        generate_corner_downpipes(editor, element, &config, effective_passages, &facade);
+        generate_corner_downpipes(
+            editor,
+            element,
+            &config,
+            effective_passages,
+            &facade,
+            stepped_outline.as_ref(),
+        );
         generate_storefront_awnings(editor, element, &config, effective_passages, &facade);
     }
 
@@ -21821,6 +22119,74 @@ mod style_tests {
     }
 
     #[test]
+    fn a_stepped_wall_keeps_the_windows_of_its_outline() {
+        let ring = |points: &[(i32, i32)]| -> Vec<ProcessedNode> {
+            let mut nodes: Vec<ProcessedNode> = points
+                .iter()
+                .enumerate()
+                .map(|(i, &(x, z))| ProcessedNode {
+                    id: i as u64 + 1,
+                    tags: HashMap::new(),
+                    x,
+                    z,
+                })
+                .collect();
+            nodes.push(nodes[0].clone());
+            nodes
+        };
+        // A house stepped in a block on every side, under its eave.
+        let outline = ring(&[(0, 0), (14, 0), (14, 10), (0, 10)]);
+        let stepped = ring(&[(1, 1), (13, 1), (13, 9), (1, 9)]);
+        let mut config = test_config(10, false, false);
+        let on_line = facade_columns(&outline, &config);
+        let own = facade_columns(&stepped, &config);
+        config.eave_outline = Some(outline.as_slice().into());
+        let columns = facade_columns(&stepped, &config);
+        let glazed = |cols: &[WallColumn], normal: (i32, i32)| -> Vec<i32> {
+            let mut along: Vec<i32> = cols
+                .iter()
+                .filter(|c| c.normal == normal && c.slot().is_window())
+                .map(|c| if normal.0 == 0 { c.x } else { c.z })
+                .collect();
+            along.sort_unstable();
+            along.dedup();
+            along
+        };
+        for normal in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+            let want = glazed(&on_line, normal);
+            assert!(!want.is_empty(), "no window facing {normal:?}");
+            assert_eq!(glazed(&columns, normal), want, "facing {normal:?}");
+        }
+        // Laid out on its own, the shorter front fits a window fewer.
+        assert!(glazed(&own, (0, -1)).len() < glazed(&on_line, (0, -1)).len());
+        // Every stepped run still ends on a pier.
+        assert!(columns
+            .iter()
+            .filter(|c| c.pos == 0 || c.pos == c.upper.len - 1)
+            .all(|c| c.slot() == BaySlot::End));
+
+        // A gable too short to keep its corner piers keeps its two windows
+        // on a narrower pier between them, where alone it fits one.
+        let outline = ring(&[(0, 0), (14, 0), (14, 8), (0, 8)]);
+        let stepped = ring(&[(1, 1), (13, 1), (13, 7), (1, 7)]);
+        config.eave_outline = None;
+        let own = facade_columns(&stepped, &config);
+        config.eave_outline = Some(outline.as_slice().into());
+        let columns = facade_columns(&stepped, &config);
+        let gable = |cols: &[WallColumn]| {
+            cols.iter().find(|c| c.normal == (1, 0)).map(|c| {
+                (
+                    c.upper.count,
+                    c.upper.slot(0),
+                    c.upper.slot(c.upper.len - 1),
+                )
+            })
+        };
+        assert_eq!(gable(&own).map(|g| g.0), Some(1));
+        assert_eq!(gable(&columns), Some((2, BaySlot::End, BaySlot::End)));
+    }
+
+    #[test]
     fn climate_reweights_walls() {
         // Desert houses stay inside the desert-weighted pool and lean sandy
         let mut sandy = 0;
@@ -21980,6 +22346,7 @@ mod style_tests {
             window_phase: 0,
             window_archetype: WindowArchetype::Portrait,
             bays: WindowArchetype::Portrait.rhythm(),
+            eave_outline: None,
             spandrel_block: SMOOTH_STONE,
             zoning: None,
             balcony_band: BalconyBand::Scattered,
