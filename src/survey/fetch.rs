@@ -264,8 +264,8 @@ enum Span {
     Tail(u64),
 }
 
-/// The size of the file at `url` as the server gives it (a HEAD request), or
-/// `None` when it does not say.
+/// The size of the file at `url` as the server gives it (a HEAD request): 0
+/// when it has no such file, `None` when it does not say.
 pub fn content_length(client: &reqwest::blocking::Client, url: &str) -> Option<u64> {
     let _permit = crate::net::request_permit();
     // Offered gzip, Bavaria's server compresses even its LAZ files on the fly
@@ -276,6 +276,11 @@ pub fn content_length(client: &reqwest::blocking::Client, url: &str) -> Option<u
         .timeout(Duration::from_secs(20))
         .send()
         .ok()?;
+    // A file the server does not have costs nothing: the read that follows
+    // finds it missing (and marks it so) without downloading anything.
+    if matches!(resp.status().as_u16(), 403 | 404) {
+        return Some(0);
+    }
     if !resp.status().is_success() {
         return None;
     }
