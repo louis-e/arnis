@@ -58,9 +58,9 @@ fn fixed_half(highway_type: &str, tags: &HashMap<String, String>) -> Option<i32>
     match highway_type {
         // Bicycle paths are 2-4 m across; at the road default they swallowed the verge
         // and the kerb of the road they run beside.
-        "footway" | "path" | "cycleway" | "track" | "escape" | "steps" => Some(1),
-        // A pedestrian street is the whole street, house front to house front.
-        "pedestrian" => Some(3),
+        // A pedestrian street is a path through the town's paving: drawn house front to
+        // house front, it was one plain sheet of stone.
+        "footway" | "pedestrian" | "path" | "cycleway" | "track" | "escape" | "steps" => Some(1),
         "raceway" => Some(raceways::default_half_width(tags)),
         _ => None,
     }
@@ -413,7 +413,7 @@ mod tests {
     fn paths_and_pedestrian_streets_keep_their_own_widths() {
         assert_eq!(halves("footway", &[("lanes", "4")]).kerb, 1);
         assert_eq!(halves("cycleway", &[]).kerb, 1);
-        assert_eq!(halves("pedestrian", &[]).kerb, 3);
+        assert_eq!(halves("pedestrian", &[]).kerb, 1);
         // A tagged width is the width drawn: 3 m three blocks, 4.8 m five.
         assert_eq!(halves("footway", &[("width", "3")]).kerb, 1);
         let sidewalk = halves("footway", &[("footway", "sidewalk"), ("width", "4.8")]);

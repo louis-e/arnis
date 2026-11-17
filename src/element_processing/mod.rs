@@ -90,8 +90,6 @@ pub enum RelationArea {
     Grounds,
     ManMade,
     Pool,
-    /// Pedestrian squares and other highway areas, paved like a closed `area=yes` way.
-    Highway,
     /// Surface parking lots.
     Parking,
 }
@@ -122,8 +120,6 @@ impl RelationArea {
             Some(Self::Leisure)
         } else if tags.contains_key("man_made") {
             Some(Self::ManMade)
-        } else if highways::is_highway_area_relation(tags) {
-            Some(Self::Highway)
         } else if parking_lots::is_surface_lot(tags) {
             Some(Self::Parking)
         } else {
@@ -141,7 +137,6 @@ impl RelationArea {
             | Self::Golf
             | Self::Grounds
             | Self::Pool
-            | Self::Highway
             | Self::Parking => true,
             Self::Landuse => landuse_paints_ground(tags),
             Self::ManMade => matches!(
