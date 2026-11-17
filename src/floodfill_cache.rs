@@ -881,17 +881,18 @@ impl FloodFillCache {
                     }
                 }
                 // Squares and parking lots mapped as multipolygons pave their outers like the
-                // closed ways, yielding to lawns inside; their holes are left out of the fill.
+                // closed ways, yielding to lawns inside; their holes, which the fill leaves out,
+                // open again as a lawn inside would.
                 if matches!(
                     RelationArea::of(&r.tags),
                     Some(RelationArea::Highway | RelationArea::Parking)
                 ) {
-                    for m in r
-                        .members
-                        .iter()
-                        .filter(|m| m.role == ProcessedMemberRole::Outer && self.contains(m.way.id))
-                    {
-                        sealed_ids.push((m.way.id, true));
+                    for m in r.members.iter().filter(|m| self.contains(m.way.id)) {
+                        match m.role {
+                            ProcessedMemberRole::Outer => sealed_ids.push((m.way.id, true)),
+                            ProcessedMemberRole::Inner => planted_ids.push(m.way.id),
+                            ProcessedMemberRole::Part => {}
+                        }
                     }
                 }
                 continue;
@@ -1408,6 +1409,45 @@ mod tests {
             sealed.contains(65, 15),
             "a lawn on the fairway stays sealed"
         );
+    }
+
+    #[test]
+    fn a_square_multipolygon_reopens_its_holes() {
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation};
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let ring = |id, (x0, z0): (i32, i32), side: i32| {
+            let (x1, z1) = (x0 + side, z0 + side);
+            tagged_way(id, &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)], &[])
+        };
+        let member = |role, way| ProcessedMember {
+            role,
+            way: Arc::new(way),
+        };
+        let square = ProcessedRelation {
+            id: 9,
+            tags: [
+                ("type", "multipolygon"),
+                ("highway", "pedestrian"),
+                ("area", "yes"),
+            ]
+            .iter()
+            .map(|&(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+            members: vec![
+                member(ProcessedMemberRole::Outer, ring(1, (0, 0), 80)),
+                // The town hall standing in the square.
+                member(ProcessedMemberRole::Inner, ring(2, (10, 10), 20)),
+            ],
+        };
+        let elements = vec![ProcessedElement::Relation(square)];
+        let cache = FloodFillCache::precompute(&elements, None);
+        let mut roads = RoadMaskBitmap::new(&xzbbox);
+        roads.set(15, 15);
+        let sealed = cache.collect_sealed_surfaces(&elements, &roads).unwrap();
+
+        assert!(sealed.contains(50, 50), "the square is paved");
+        assert!(!sealed.contains(20, 20), "its hole is given back");
+        assert!(sealed.contains(15, 15), "a road through the hole stays");
     }
 
     #[test]
