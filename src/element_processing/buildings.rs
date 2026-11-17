@@ -6758,8 +6758,8 @@ fn has_mapped_height(tags: &HashMap<String, String>) -> bool {
 /// village height from its type and footprint alone (Munich's old town came
 /// out 5.8 m low against laser heights); halfway towards its neighbours cut
 /// the error in all five measured areas, while taking their height outright
-/// made Regensburg worse. `scale` is in blocks per metre, for the footprints
-/// that make a hall.
+/// made Regensburg worse. It only rises towards them (`rise_to_neighbours`).
+/// `scale` is in blocks per metre, for the footprints that make a hall.
 pub fn tagged_neighbour_heights(
     elements: &[crate::osm_parser::ProcessedElement],
     scale: f64,
@@ -6838,6 +6838,27 @@ pub fn tagged_neighbour_heights(
         out.insert(w.id, median);
     }
     out
+}
+
+/// The height an untagged building of storeys, `own` blocks tall at
+/// `floor_cycle`, takes beside tagged neighbours whose walls are
+/// `neighbours_m` tall: halfway up to them, in whole storeys, where that is
+/// taller than its own. It never comes down to lower neighbours: met halfway,
+/// the garages and sheds Overture gives three or four metres took a storey
+/// off the village houses they stand against, and left the upper windows
+/// half under the eave.
+fn rise_to_neighbours(
+    own: i32,
+    neighbours_m: f64,
+    floor_cycle: i32,
+    scale_factor: f64,
+) -> Option<i32> {
+    let cycle = f64::from(floor_cycle);
+    let bonus = f64::from(GROUND_FLOOR_BONUS);
+    let halfway = (f64::from(own) / scale_factor + neighbours_m) / 2.0;
+    let storeys = ((halfway - bonus) / cycle).round().max(1.0);
+    let height = ((storeys * cycle + bonus) * scale_factor) as i32;
+    (height > own).then_some(height)
 }
 
 /// Area of a closed ring of block coordinates, in square blocks.
@@ -14230,7 +14251,7 @@ pub fn generate_buildings(
             )
         };
 
-    // An untagged building of storeys meets its tagged neighbours halfway.
+    // An untagged building of storeys rises towards taller tagged neighbours.
     let blended_height = match ctx.neighbour_heights.get(&element.id) {
         Some(&neighbours_m)
             if relation_levels.is_none()
@@ -14247,12 +14268,7 @@ pub fn generate_buildings(
                     InferredHeight::Levels(_)
                 ) =>
         {
-            let neighbours = neighbours_m * scale_factor;
-            Some(
-                ((f64::from(building_height) + neighbours) / 2.0)
-                    .round()
-                    .max(3.0) as i32,
-            )
+            rise_to_neighbours(building_height, neighbours_m, floor_cycle, scale_factor)
         }
         _ => None,
     };
@@ -20809,6 +20825,33 @@ mod height_tests {
         let heights = tagged_neighbour_heights(&elements, 1.0);
         assert_eq!(heights.get(&1), Some(&17.0));
         assert_eq!(heights.len(), 1);
+    }
+
+    // Beside lower neighbours an untagged house keeps its storeys; beside
+    // taller ones it rises halfway to them, in whole storeys.
+    #[test]
+    fn untagged_buildings_only_rise_towards_their_neighbours() {
+        // Two guessed storeys against a garage of 4.3 m.
+        assert_eq!(rise_to_neighbours(10, 4.3, 4, 1.0), None);
+        // Against five storeys of 17 m: halfway is 13.5, three storeys.
+        assert_eq!(rise_to_neighbours(10, 17.0, 4, 1.0), Some(14));
+        // Halfway to a slightly taller neighbour is not a storey more.
+        assert_eq!(rise_to_neighbours(10, 12.0, 4, 1.0), None);
+        assert_eq!(rise_to_neighbours(20, 17.0, 4, 2.0), Some(28));
+    }
+
+    // The laser writes a home's storeys as building:levels, so a two-storey
+    // home measured so shows its two storeys, as it does on main.
+    #[test]
+    fn a_measured_two_storey_home_shows_two_storeys() {
+        for kind in ["house", "yes", "detached", "terrace", "apartments"] {
+            let way = way_with_tags(&[("building", kind), ("building:levels", "2")]);
+            let cycle = floor_cycle_for(kind, &way.tags, false, true);
+            let (h, _) = calculate_building_height(&way, kind, 0, 1.0, None, cycle, 100, 1);
+            let anchor = mapped_ground_bonus(&way.tags, 0, None, cycle, Some(100.0));
+            assert_eq!((h - anchor) / cycle, 2, "{kind}");
+            assert_eq!(h, 8, "{kind}");
+        }
     }
 
     // One storey keeps one row of the taller ground floor, as do two at the
