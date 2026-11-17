@@ -140,6 +140,9 @@ struct Gate {
     reach: (f64, f64),
     /// From the hinge to the boom's tip, in blocks.
     boom: f64,
+    /// The cell behind the mast, where its boom stands while up, is off the road, or past
+    /// its kerb: in neither its lanes nor the parking rows beside them.
+    boom_clear: bool,
 }
 
 /// A track of a crossing: the service that runs on it, where along its route the road
@@ -489,12 +492,20 @@ impl CrossingPlan {
                     } else {
                         out + f64::from(half) + 0.5
                     };
+                    let facing = (-travel.0, -travel.1);
+                    let (_, (fx, fz)) = cardinal(facing);
                     gates.push(Gate {
                         crossing: c,
                         post,
-                        facing: (-travel.0, -travel.1),
+                        facing,
                         reach: (-side.0, -side.1),
                         boom: boom.clamp(BOOM_REACH.0, BOOM_REACH.1),
+                        boom_clear: {
+                            let (bx, bz) = (post.0 - fx, post.1 - fz);
+                            let out = (f64::from(bx) + 0.5 - origin.0) * side.0
+                                + (f64::from(bz) + 0.5 - origin.1) * side.1;
+                            !road_mask.contains(bx, bz) || out > f64::from(half) + 0.5
+                        },
                     });
                 }
                 // Spots across the road on each track, a couple of blocks apart.
@@ -1319,7 +1330,7 @@ fn place_blocks(editor: &mut WorldEditor, gate: &Gate, booms: bool, size: f64) {
         return;
     }
     let (bx, bz) = (x - fx, z - fz);
-    if editor.on_carriageway(bx, bz) {
+    if !gate.boom_clear || editor.on_carriageway(bx, bz) {
         return;
     }
     let base = editor.get_absolute_y(bx, 0, bz);

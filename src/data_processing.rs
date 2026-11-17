@@ -482,7 +482,7 @@ fn process_element(
                     bridge_surface,
                 );
                 if signage && way.tags.get("amenity").map(String::as_str) == Some("parking") {
-                    signage::generate_parking_signage(editor, way, road_mask);
+                    signage::generate_parking_signage(editor, way, building_footprints, road_mask);
                 }
             } else if way.tags.contains_key("leisure") {
                 leisure::generate_leisure(
@@ -821,7 +821,12 @@ fn process_element(
                         holes.as_ref(),
                     );
                     if signage {
-                        signage::generate_parking_signage(editor, &way, road_mask);
+                        signage::generate_parking_signage(
+                            editor,
+                            &way,
+                            building_footprints,
+                            road_mask,
+                        );
                     }
                 }
             }
