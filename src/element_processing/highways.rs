@@ -3655,9 +3655,10 @@ pub(crate) fn stamps_square(way: &ProcessedWay) -> bool {
 }
 
 /// The half-width a road keeps where a building stands against it, when narrower than the
-/// road: its lanes inside the parking rows, a pedestrian street a path's width. What the road
-/// gains past that, as in a narrow old-town street whose house fronts are mapped wider than
-/// they stand, stops at the walls instead of paving the ground floors. None for a road paved
+/// road: its lanes inside the parking rows, a two-way street with a sidewalk the width it
+/// would have without one, a pedestrian street a path's width. What the road gains past
+/// that, as in a narrow old-town street whose house fronts are mapped wider than they
+/// stand, stops at the walls instead of paving the ground floors. None for a road paved
 /// whole: a bridge deck, or a passage through a building.
 pub(crate) fn wall_core(way: &ProcessedWay, highway_type: &str, scale: f64) -> Option<i32> {
     if stamps_square(way) || way.tags.get("tunnel").map(String::as_str) == Some("building_passage")
@@ -3668,7 +3669,7 @@ pub(crate) fn wall_core(way: &ProcessedWay, highway_type: &str, scale: f64) -> O
     let core = if highway_type == "pedestrian" {
         halves.lanes.min(1)
     } else {
-        halves.lanes
+        road_width::wall_half(highway_type, &way.tags, scale)
     };
     (core < halves.kerb).then_some(core)
 }
@@ -4116,6 +4117,12 @@ mod tests {
             core(&[("highway", "residential"), ("parking:both", "lane")]),
             Some(2)
         );
+        // The second lane a sidewalk gives a street stops at walls; tagged lanes do not.
+        assert_eq!(
+            core(&[("highway", "residential"), ("sidewalk", "both")]),
+            Some(2)
+        );
+        assert_eq!(core(&[("highway", "residential"), ("lanes", "2")]), None);
         assert_eq!(core(&[("highway", "pedestrian")]), Some(1));
         assert_eq!(
             core(&[("highway", "pedestrian"), ("tunnel", "building_passage")]),

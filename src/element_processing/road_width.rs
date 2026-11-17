@@ -19,6 +19,11 @@ const FAST_LANE_M: f64 = 3.5;
 const PARALLEL_PARKING_M: f64 = 2.25;
 const ANGLED_PARKING_M: f64 = 5.0;
 
+/// A cycle lane kept for bicycles on the carriageway, with its line: a two-lane street with
+/// one each side, surveyed in Munich, is 10 m kerb to kerb. An advisory lane is marked
+/// inside the lanes it runs along and takes nothing more.
+const CYCLE_LANE_M: f64 = 1.5;
+
 /// A road's half-widths in blocks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RoadHalves {
@@ -137,19 +142,81 @@ fn parking_m(tags: &HashMap<String, String>) -> (f64, f64) {
     (l.0 + r.0, l.1 + r.1)
 }
 
+/// Metres of cycle lanes kept for bicycles on the carriageway, both sides together:
+/// `cycleway:<side>=lane` with `cycleway:<side>:lane=exclusive`, and its `:width` if given.
+fn cycle_lanes_m(tags: &HashMap<String, String>) -> f64 {
+    let get = |key: String| tags.get(&key).map(String::as_str);
+    ["left", "right"]
+        .into_iter()
+        .map(|side| {
+            let pick = |suffix: &str| {
+                get(format!("cycleway:{side}{suffix}"))
+                    .or_else(|| get(format!("cycleway:both{suffix}")))
+                    .or_else(|| get(format!("cycleway{suffix}")))
+            };
+            if pick("") == Some("lane") && pick(":lane") == Some("exclusive") {
+                pick(":width").and_then(metres).unwrap_or(CYCLE_LANE_M)
+            } else {
+                0.0
+            }
+        })
+        .sum()
+}
+
+/// Whether a street is laid out for two lanes though no lanes are tagged: a residential or
+/// unclassified street carrying traffic both ways with a sidewalk beside it, on the way or
+/// mapped as its own. Without one, as through a village or an estate, such a street is
+/// about 5 m across; with one, 6 to 7 m.
+fn two_way_street(highway_type: &str, tags: &HashMap<String, String>) -> bool {
+    let tag = |key: &str| tags.get(key).map(String::as_str);
+    let one_way = matches!(
+        tag("oneway"),
+        Some("yes" | "true" | "1" | "-1" | "reversible" | "alternating")
+    ) || matches!(tag("junction"), Some("roundabout" | "circular"));
+    let sidewalk = [
+        "sidewalk",
+        "sidewalk:both",
+        "sidewalk:left",
+        "sidewalk:right",
+    ]
+    .into_iter()
+    .any(|key| tag(key).is_some_and(|v| v != "no" && v != "none"));
+    matches!(highway_type, "residential" | "unclassified")
+        && tag("lanes").is_none()
+        && !one_way
+        && sidewalk
+}
+
 /// A road's half-widths, at the scale the world is built at.
 ///
 /// Vehicular roads are their lanes at 3.25 m each (3.5 m on motorways and trunk roads),
-/// never narrower than their class's default, plus the cars parked along the kerbs.
-/// `width` and `width:carriageway` are kerb to kerb where nothing is parked. Bays set into
-/// the sidewalk (`street_side`) come on top of them; parking on the road itself is in some
-/// mappers' `width` and not in others', so there the width is the least the road spans.
-/// Down-scaling never collapses a road to nothing; above 1:1 roads keep their
-/// 1:1 width.
+/// never narrower than their class's default, plus any cycle lanes kept for bicycles, plus
+/// the cars parked along the kerbs. A two-way street with a sidewalk and nothing parked
+/// along it has two lanes. `width` and `width:carriageway` are kerb to kerb where nothing
+/// is parked. Bays set into the sidewalk (`street_side`) come on top of them; parking on
+/// the road itself is in some mappers' `width` and not in others', so there the width is
+/// the least the road spans. Down-scaling never collapses a road to nothing; above 1:1
+/// roads keep their 1:1 width.
 pub(crate) fn road_halves(
     highway_type: &str,
     tags: &HashMap<String, String>,
     scale: f64,
+) -> RoadHalves {
+    halves_at(highway_type, tags, scale, true)
+}
+
+/// The half-width a road keeps where a building stands against it: its lanes, less the
+/// second lane a two-way street gets from its sidewalk, which old-town house fronts are
+/// often mapped too close to leave room for.
+pub(crate) fn wall_half(highway_type: &str, tags: &HashMap<String, String>, scale: f64) -> i32 {
+    halves_at(highway_type, tags, scale, false).lanes
+}
+
+fn halves_at(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    scale: f64,
+    street_lanes: bool,
 ) -> RoadHalves {
     // A road under construction is as wide as the finished road.
     let highway_type = if highway_type == "construction" {
@@ -169,8 +236,15 @@ pub(crate) fn road_halves(
             .and_then(|l| l.parse::<i32>().ok())
             .unwrap_or_else(|| highway_default_lanes(highway_type))
             .clamp(1, 16);
-        let traffic_m = default_m.max(f64::from(lanes) * lane_m);
         let (parked_m, bays_m) = parking_m(tags);
+        // Where cars are parked along it, they take the room of the second lane.
+        let street_m = if street_lanes && parked_m == 0.0 && two_way_street(highway_type, tags) {
+            2.0 * lane_m
+        } else {
+            0.0
+        };
+        let traffic_m =
+            default_m.max(f64::from(lanes) * lane_m).max(street_m) + cycle_lanes_m(tags);
         let tagged = tags
             .get("width:carriageway")
             .and_then(|w| metres(w))
@@ -340,7 +414,73 @@ mod tests {
         assert_eq!(halves("footway", &[("lanes", "4")]).kerb, 1);
         assert_eq!(halves("cycleway", &[]).kerb, 1);
         assert_eq!(halves("pedestrian", &[]).kerb, 3);
+        // A tagged width is the width drawn: 3 m three blocks, 4.8 m five.
         assert_eq!(halves("footway", &[("width", "3")]).kerb, 1);
+        let sidewalk = halves("footway", &[("footway", "sidewalk"), ("width", "4.8")]);
+        assert_eq!(sidewalk, RoadHalves { lanes: 2, kerb: 2 });
+    }
+
+    #[test]
+    fn a_two_way_street_with_a_sidewalk_has_two_lanes() {
+        assert_eq!(halves("residential", &[("sidewalk", "both")]).kerb, 3);
+        assert_eq!(
+            halves("residential", &[("sidewalk:right", "separate")]).kerb,
+            3
+        );
+        assert_eq!(halves("unclassified", &[("sidewalk", "separate")]).kerb, 3);
+        // One way, without a sidewalk, with its lanes tagged, or not a street: as before.
+        let as_before: [(&str, &[(&str, &str)]); 6] = [
+            ("residential", &[("sidewalk", "both"), ("oneway", "yes")]),
+            (
+                "residential",
+                &[("sidewalk", "both"), ("junction", "roundabout")],
+            ),
+            ("residential", &[("sidewalk", "no")]),
+            ("residential", &[("sidewalk", "both"), ("lanes", "1")]),
+            ("service", &[("sidewalk", "both")]),
+            ("living_street", &[("sidewalk", "both")]),
+        ];
+        for (highway, pairs) in as_before {
+            assert_eq!(halves(highway, pairs).kerb, 2, "{highway} {pairs:?}");
+        }
+        // Cars parked along it take the second lane's room.
+        let parked = halves(
+            "residential",
+            &[("sidewalk", "both"), ("parking:both", "lane")],
+        );
+        assert_eq!(parked, RoadHalves { lanes: 2, kerb: 4 });
+    }
+
+    #[test]
+    fn cycle_lanes_kept_for_bicycles_widen_the_carriageway() {
+        let exclusive = [
+            ("lanes", "2"),
+            ("cycleway:both", "lane"),
+            ("cycleway:both:lane", "exclusive"),
+        ];
+        // 6.5 m of lanes and two 1.5 m cycle lanes.
+        assert_eq!(
+            halves("residential", &exclusive),
+            RoadHalves { lanes: 4, kerb: 4 }
+        );
+        // An advisory lane is marked inside the lanes.
+        let advisory = [
+            ("cycleway:both", "lane"),
+            ("cycleway:both:lane", "advisory"),
+        ];
+        assert_eq!(halves("secondary", &advisory).kerb, 3);
+        // One side: 8 m, or at its own 1 m width 7.5 m.
+        let one = [
+            ("lanes", "2"),
+            ("cycleway:right", "lane"),
+            ("cycleway:right:lane", "exclusive"),
+        ];
+        assert_eq!(halves("residential", &one).kerb, 4);
+        let narrow: Vec<(&str, &str)> = one
+            .into_iter()
+            .chain([("cycleway:right:width", "1")])
+            .collect();
+        assert_eq!(halves("residential", &narrow).kerb, 3);
     }
 
     #[test]
