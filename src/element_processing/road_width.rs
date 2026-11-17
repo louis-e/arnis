@@ -66,10 +66,30 @@ fn fixed_half(highway_type: &str, tags: &HashMap<String, String>) -> Option<i32>
     }
 }
 
-/// Parses a length in metres, tolerating a trailing "m".
+/// Parses a length in metres: the first of several values ("7;8"), with a decimal comma
+/// ("3,5") or a trailing "m", or in feet and inches ("10'", "10'6\"", "12 ft").
 pub(crate) fn metres(raw: &str) -> Option<f64> {
-    let s = raw.trim().trim_end_matches('m').trim();
-    s.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+    let s = raw.split(';').next()?.trim().replace(',', ".");
+    let number = |t: &str| t.trim().parse::<f64>().ok();
+    let m = if let Some((feet, inches)) = s.split_once('\'') {
+        let inches = inches.trim().trim_end_matches('"');
+        let inches = if inches.trim().is_empty() {
+            0.0
+        } else {
+            number(inches)?
+        };
+        number(feet)? * 0.3048 + inches * 0.0254
+    } else if let Some(feet) = s.strip_suffix("ft") {
+        number(feet)? * 0.3048
+    } else {
+        number(s.trim_end_matches('m'))?
+    };
+    Some(m).filter(|v| v.is_finite() && *v > 0.0)
+}
+
+/// A count such as `lanes`: the first of several values ("2;3").
+pub(crate) fn count(raw: &str) -> Option<i32> {
+    raw.split(';').next()?.trim().parse::<i32>().ok()
 }
 
 /// How much of a parking row stands on the carriageway, by `parking:<side>=*`.
@@ -205,13 +225,16 @@ pub(crate) fn road_halves(
     halves_at(highway_type, tags, scale, true)
 }
 
-/// The half-width a road keeps where a building stands against it: its lanes, less the
-/// second lane a two-way street gets from its sidewalk, which old-town house fronts are
-/// often mapped too close to leave room for.
+/// The half-width a road keeps where a building stands against it: its lanes and cycle
+/// lanes, less the second lane a two-way street gets from its sidewalk, which old-town house
+/// fronts are often mapped too close to leave room for.
 pub(crate) fn wall_half(highway_type: &str, tags: &HashMap<String, String>, scale: f64) -> i32 {
     halves_at(highway_type, tags, scale, false).lanes
 }
 
+/// The road's halves. With `street_lanes`, its lanes are the ones cars drive in, a two-way
+/// street with a sidewalk given its second; without, as `wall_half` wants them, they keep
+/// the cycle lanes beside them and leave that second lane out.
 fn halves_at(
     highway_type: &str,
     tags: &HashMap<String, String>,
@@ -233,7 +256,7 @@ fn halves_at(
         let (default_m, lane_m) = carriageway_m(highway_type);
         let lanes = tags
             .get("lanes")
-            .and_then(|l| l.parse::<i32>().ok())
+            .and_then(|l| count(l))
             .unwrap_or_else(|| highway_default_lanes(highway_type))
             .clamp(1, 16);
         let (parked_m, bays_m) = parking_m(tags);
@@ -243,8 +266,9 @@ fn halves_at(
         } else {
             0.0
         };
-        let traffic_m =
-            default_m.max(f64::from(lanes) * lane_m).max(street_m) + cycle_lanes_m(tags);
+        let driving_m = default_m.max(f64::from(lanes) * lane_m).max(street_m);
+        let cycle_m = cycle_lanes_m(tags);
+        let traffic_m = driving_m + cycle_m;
         let tagged = tags
             .get("width:carriageway")
             .and_then(|w| metres(w))
@@ -258,6 +282,12 @@ fn halves_at(
             (kerb_m - parked_m).max(traffic_m)
         } else {
             kerb_m
+        };
+        // Cycle lanes run between the lanes cars drive in and the kerb, as parked cars do.
+        let lanes_m = if street_lanes {
+            (lanes_m - cycle_m).max(driving_m.min(lanes_m))
+        } else {
+            lanes_m
         };
         (half_of(lanes_m.min(kerb_m)), half_of(kerb_m))
     };
@@ -458,10 +488,21 @@ mod tests {
             ("cycleway:both", "lane"),
             ("cycleway:both:lane", "exclusive"),
         ];
-        // 6.5 m of lanes and two 1.5 m cycle lanes.
+        // 6.5 m of lanes and two 1.5 m cycle lanes: the cars drive in the 6.5 m, and a
+        // building keeps off the cycle lanes too.
         assert_eq!(
             halves("residential", &exclusive),
-            RoadHalves { lanes: 4, kerb: 4 }
+            RoadHalves { lanes: 3, kerb: 4 }
+        );
+        assert_eq!(wall_half("residential", &tags(&exclusive), 1.0), 4);
+        // Four lanes and their cycle lanes: the outer lane stops at the cycle lane.
+        let four: Vec<(&str, &str)> = exclusive
+            .into_iter()
+            .map(|(k, v)| if k == "lanes" { (k, "4") } else { (k, v) })
+            .collect();
+        assert_eq!(
+            halves("residential", &four),
+            RoadHalves { lanes: 6, kerb: 8 }
         );
         // An advisory lane is marked inside the lanes.
         let advisory = [
@@ -481,6 +522,29 @@ mod tests {
             .chain([("cycleway:right:width", "1")])
             .collect();
         assert_eq!(halves("residential", &narrow).kerb, 3);
+    }
+
+    #[test]
+    fn widths_and_lanes_read_as_mappers_write_them() {
+        // The first of several values, a decimal comma, feet and inches.
+        assert_eq!(metres("7;8"), Some(7.0));
+        assert_eq!(metres("3,5"), Some(3.5));
+        assert!((metres("10'").unwrap() - 3.048).abs() < 1e-9);
+        assert!((metres("10'6\"").unwrap() - 3.2004).abs() < 1e-9);
+        assert!((metres("12 ft").unwrap() - 3.6576).abs() < 1e-9);
+        assert_eq!(metres("6.5 m"), Some(6.5));
+        assert_eq!(metres("wide"), None);
+        assert_eq!(metres("0"), None);
+        assert_eq!(count("2;3"), Some(2));
+        assert_eq!(count("x"), None);
+        // As a road reads them: 7 m and 3.5 m kerb to kerb, two lanes.
+        assert_eq!(halves("residential", &[("width", "7;8")]).kerb, 3);
+        assert_eq!(halves("residential", &[("width", "3,5")]).kerb, 1);
+        assert_eq!(halves("residential", &[("width", "10'")]).kerb, 1);
+        assert_eq!(
+            halves("primary", &[("lanes", "2;3")]),
+            halves("primary", &[("lanes", "2")])
+        );
     }
 
     #[test]
