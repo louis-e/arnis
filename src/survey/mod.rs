@@ -593,7 +593,7 @@ fn fill_photos(
     let cells = std::sync::Mutex::new(cells);
     // Set by the first request that finds the photo's host unreachable.
     let down = std::sync::atomic::AtomicBool::new(false);
-    plan.tiles.par_iter().for_each(|&(te, tn)| {
+    let each = |&(te, tn): &(i32, i32)| {
         if stop.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
@@ -613,8 +613,21 @@ fn fill_photos(
                 cells[mc] = c;
             }
         });
-    });
+    };
+    // On threads of their own: photo requests wait on the network and on a
+    // paced host's turns, which on the shared pool would hold up the ground
+    // generation and the laser decoding beside them.
+    match rayon::ThreadPoolBuilder::new()
+        .num_threads(PHOTO_THREADS)
+        .build()
+    {
+        Ok(pool) => pool.install(|| plan.tiles.par_iter().for_each(each)),
+        Err(_) => plan.tiles.par_iter().for_each(each),
+    }
 }
+
+/// Threads the photo downloads run on, each tile's blocks included.
+const PHOTO_THREADS: usize = 4;
 
 /// Debugging aid (`ARNIS_LASER_DUMP=out.png`): the classes on the metre grid,
 /// beside the ground intensity against the thresholds and the photo.
