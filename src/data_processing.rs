@@ -1464,11 +1464,12 @@ pub fn generate_world_with_options(
     // blocks and standing still; other formats keep their banner heads.
     let traffic_signals = (extras.traffic_lights || java).then(|| {
         Arc::new(
-            crate::element_processing::traffic_lights::SignalIndex::build(
+            crate::element_processing::traffic_lights::SignalIndex::build_beside(
                 &elements,
                 args.scale,
                 sign_region.drives_on_left(),
                 &road_mask,
+                &mapped_paths,
                 extras.traffic_lights,
             ),
         )
