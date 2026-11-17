@@ -6645,6 +6645,33 @@ fn infer_building_height(
 /// floor slab row (the "+2" in the wall grammar).
 const GROUND_FLOOR_BONUS: i32 = 2;
 
+/// Walls, in metres, of a garage, carport or shed: the three blocks an
+/// untyped one is inferred at.
+const ACCESSORY_WALLS_M: i32 = 3;
+
+/// A garage, carport or shed: a single low storey, whatever its storey count
+/// says, and never raised towards the houses it stands against.
+fn is_accessory_building(building_type: &str) -> bool {
+    matches!(building_type, "garage" | "garages" | "carport" | "shed")
+}
+
+/// A garage, carport or shed mapped with one storey (or none): drawn at the
+/// three blocks its untagged kind gets, not a storey and the town's raised
+/// ground floor (a carport against a house came out as high as the house's
+/// eaves).
+fn accessory_storey(building_type: &str, tags: &HashMap<String, String>) -> bool {
+    is_accessory_building(building_type)
+        && parse_building_height_tag(tags).is_none()
+        && tags
+            .get("building:levels")
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .is_none_or(|l| l <= 1.0)
+}
+
+/// Least footprint, in square metres, an untagged building needs to rise
+/// towards its neighbours: smaller ones are sheds, bins and garages.
+const MIN_RISING_M2: f64 = 40.0;
+
 /// Untagged building way id -> wall heights, in metres, of the tagged
 /// buildings it shares a wall with (two or more nodes).
 pub type NeighbourHeights = FnvHashMap<u64, Vec<f64>>;
@@ -6997,7 +7024,11 @@ fn mapped_parts(tags: &HashMap<String, String>, hint: HeightHint) -> Option<(f64
     if takes_commercial_rhythm(levels > 7.0, building_type, cycle, tags) {
         cycle = 4;
     }
-    let walls = levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS);
+    let walls = if own && accessory_storey(building_type, tags) {
+        f64::from(ACCESSORY_WALLS_M)
+    } else {
+        levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS)
+    };
     if walls > MAX_PLAUSIBLE_HEIGHT_M {
         return None;
     }
@@ -7190,6 +7221,9 @@ fn calculate_building_height(
                 };
                 building_height =
                     (((lev * floor_cycle as f64 + bonus) * scale_factor) as i32).max(3);
+                if min_level == 0 && accessory_storey(building_type, &element.tags) {
+                    building_height = multiply_scale(ACCESSORY_WALLS_M, scale_factor).max(3);
+                }
                 has_source = true;
                 if levels > 7.0 {
                     is_tall_building = true;
@@ -10925,18 +10959,18 @@ fn outline_traces_walls(tags: &HashMap<String, String>) -> bool {
 }
 
 /// Whether a roof of this type hangs an eave out past its walls: the gabled and
-/// hipped families do, unless the outline is turned off the grid (such a roof
-/// sits flush on its walls), and a mansard always does.
-fn roof_has_eaves(roof_type: RoofType, outline_turned: bool) -> bool {
-    match roof_type {
-        RoofType::Mansard => true,
-        RoofType::Gabled
-        | RoofType::Gambrel
-        | RoofType::HalfHipped
-        | RoofType::Round
-        | RoofType::Hipped => !outline_turned,
-        _ => false,
-    }
+/// hipped families and a mansard do. Off the grid only a roof in slabs does,
+/// one cell deep, and its walls stay on the outline.
+fn roof_has_eaves(roof_type: RoofType) -> bool {
+    matches!(
+        roof_type,
+        RoofType::Mansard
+            | RoofType::Gabled
+            | RoofType::Gambrel
+            | RoofType::HalfHipped
+            | RoofType::Round
+            | RoofType::Hipped
+    )
 }
 
 /// Whether an outline is turned far enough off the grid that its walls step every few blocks.
@@ -14329,6 +14363,9 @@ pub fn generate_buildings(
             if relation_levels.is_none()
                 && min_level == 0
                 && !has_mapped_height(&element.tags)
+                // Garages, sheds and small boxes beside a house stay low.
+                && !is_accessory_building(building_type)
+                && cached_footprint_size as f64 >= MIN_RISING_M2 * scale_factor * scale_factor
                 && matches!(
                     infer_building_height(
                         building_type,
@@ -14598,10 +14635,10 @@ pub fn generate_buildings(
     // shared. The turn is the outline's, as the roof reads it.
     let outline_turned = outline_is_turned(&element.nodes);
     let inset = (has_sloped_roof
-        && roof_has_eaves(style.roof_type, outline_turned)
-        // A turned outline keeps its walls. Only a mansard has eaves there,
-        // and stepped in off the grid its deck came out as a ragged strip of
-        // membrane down the slates.
+        && roof_has_eaves(style.roof_type)
+        // A turned outline keeps its walls, its eave hanging a block past
+        // them: stepped in off the grid a mansard's deck came out as a ragged
+        // strip of membrane down the slates.
         && !outline_turned
         && min_level_offset == 0
         && args.scale >= building_inset::MIN_INSET_SCALE
@@ -16991,7 +17028,7 @@ struct RoofTrim {
     short_eave: bool,
     /// Cells of neighbouring buildings no eave or trim may reach.
     blocked: FnvHashSet<(i32, i32)>,
-    /// Outline turned off the grid: laid 1:2 in slabs, flush with the walls.
+    /// Outline turned off the grid: laid 1:2 in slabs over a one-cell eave.
     turned: bool,
     /// A low 1:2 pitch in slabs whatever the span.
     low_pitch: bool,
@@ -17852,7 +17889,7 @@ fn place_rake_trim(
     trims
 }
 
-/// Eave overhang two cells deep (one with `short_eave`), stepping down with
+/// Eave overhang two cells deep (one with `short_eave` or off the grid), stepping down with
 /// the slope, off every side of a roof cell that drops to an eave (`seeds`:
 /// the cell and a bit per `ROOF_SIDES` entry), with outer corners where two
 /// such sides meet and inner corners where two eaves meet in a valley. Cells in `covered` (the
@@ -17875,7 +17912,8 @@ fn place_roof_eaves(
     };
     let abs = config.abs_terrain_offset;
     let open = |c: &(i32, i32)| !covered.contains(c) && !config.trim.blocked.contains(c);
-    let short_eave = config.trim.short_eave;
+    // Off the grid a second ring would comb every step of the walls.
+    let short_eave = config.trim.short_eave || config.trim.turned;
 
     // Ring cells keep the sides they hang off: two in a valley.
     let mut inner: FnvHashMap<(i32, i32), u8> = FnvHashMap::default();
@@ -18658,8 +18696,11 @@ fn generate_gabled_roof(
         && !config.trim.steep_cap
         && max_reach - wall_cap >= 4;
 
-    // A turned roof has no overhang to carry and sits straight on the wall.
-    let eave = config.base_height + i32::from(!config.trim.turned);
+    // A turned roof in slabs hangs a one-block eave past its walls; one left
+    // in stairs (no slab for its cover, or a steep or round profile) has none
+    // to carry and sits straight on the wall.
+    let overhang = !config.trim.turned || mode == PitchMode::Slabs;
+    let eave = config.base_height + i32::from(overhang);
     let level_of = |s: &SlopeSample| -> i32 {
         let e = s.dist_to_edge.min(s.scan_perp_min);
         if profile == GableProfile::Round {
@@ -18871,7 +18912,7 @@ fn generate_gabled_roof(
         )
         .filter(|&(_, sides)| sides != 0)
         .collect();
-    if !config.trim.turned {
+    if overhang {
         place_roof_eaves(editor, &seeds, &covered, config, mode);
     }
     heights
@@ -19065,8 +19106,10 @@ fn generate_hipped_roof_inner(
         && !config.trim.steep_cap
         && max_dist - wall_cap >= 4;
 
-    // With no overhang to carry, the roof sits straight on the wall.
-    let lift = if with_overhang && !turned { 1 } else { 0 };
+    // A turned roof hangs its eave out only in slabs; with no overhang to
+    // carry, the roof sits straight on the wall.
+    let overhang = with_overhang && (!turned || mode == PitchMode::Slabs);
+    let lift = i32::from(overhang);
     let eave = config.base_height + lift;
     let mut levels: RoofLevels =
         FnvHashMap::with_capacity_and_hasher(floor_area.len(), Default::default());
@@ -19116,7 +19159,7 @@ fn generate_hipped_roof_inner(
         true,
     );
 
-    if with_overhang && !turned {
+    if overhang {
         let seeds = all_side_eave_seeds(floor_area, &footprint);
         place_roof_eaves(editor, &seeds, &footprint, config, mode);
     }
@@ -20864,6 +20907,37 @@ mod height_tests {
         let way = way_with_tags(&[]);
         let (h, _) = calculate_building_height(&way, "yes", 0, 1.0, Some(5), 3, 100, 1);
         assert_eq!(h, 17); // 5 levels * 3 + 2
+    }
+
+    // A garage, carport or shed of one storey stands three blocks high, as an
+    // untagged one does, not a storey and a raised ground floor that put a
+    // carport level with the eaves of the house beside it (Erding). Two
+    // storeys, a mapped height and other buildings keep the storey rule.
+    #[test]
+    fn one_storey_garages_and_carports_stay_low() {
+        let height = |kind: &str, tags: &[(&str, &str)]| {
+            calculate_building_height(&way_with_tags(tags), kind, 0, 1.0, None, 4, 100, 1).0
+        };
+        for kind in ["garage", "garages", "carport", "shed"] {
+            let one = [("building", kind), ("building:levels", "1")];
+            assert_eq!(height(kind, &one), 3, "{kind}");
+            let untagged = [("building", kind)];
+            assert_eq!(height(kind, &untagged), 3, "{kind}");
+        }
+        let two = [("building", "garages"), ("building:levels", "2")];
+        assert_eq!(height("garages", &two), 10);
+        let measured = [("building", "carport"), ("height", "4.5")];
+        assert_eq!(height("carport", &measured), 4);
+        let shop = [("building", "retail"), ("building:levels", "1")];
+        assert_eq!(height("retail", &shop), 6);
+        // Elsewhere their walls are estimated the same way.
+        let walls = |tags: &[(&str, &str)]| {
+            mapped_walls_m(&way_with_tags(tags).tags, HeightHint::default()).map(|(m, _)| m)
+        };
+        assert_eq!(
+            walls(&[("building", "carport"), ("building:levels", "1")]),
+            Some(3.0)
+        );
     }
 
     // An untagged building takes note of the tagged ones it shares a wall
@@ -27402,7 +27476,7 @@ mod facade_integration_tests {
     }
 
     #[test]
-    fn turned_roofs_end_flush_and_carry_no_stairs() {
+    fn turned_roofs_hang_one_block_and_carry_no_stairs() {
         // A 12 x 24 house turned 30 degrees off the grid.
         let (c, sn) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
         let corners: Vec<(i32, i32)> = [
@@ -27445,16 +27519,25 @@ mod facade_integration_tests {
             };
             let world = built_world(bbox, &way);
             assert_eq!(roof_stairs(&world), 0, "{shape}: stairs in a turned roof");
-            // Nothing of the roof hangs past the walls: every column with
-            // roof in it stands on the building's floor or wall.
-            let floating = world
+            // The roof hangs a one-block eave past the walls, as a roof on
+            // the grid does, and no further: a second ring would comb every
+            // step of the walls.
+            let stands = |x: i32, z: i32| (0..=2).any(|g| world.contains_key(&(x, g, z)));
+            let hanging: FnvHashSet<(i32, i32)> = world
                 .keys()
-                .filter(|&&(x, y, z)| y > 5 && !(0..=2).any(|g| world.contains_key(&(x, g, z))))
-                .count();
-            assert_eq!(
-                floating, 0,
-                "{shape}: {floating} roof blocks hang past the walls"
+                .filter(|&&(x, y, z)| y > 5 && !stands(x, z))
+                .map(|&(x, _, z)| (x, z))
+                .collect();
+            assert!(
+                hanging.len() > 30,
+                "{shape}: only {} eave columns past the walls",
+                hanging.len()
             );
+            let far = hanging
+                .iter()
+                .filter(|&&(x, z)| !(-1..=1).any(|dx| (-1..=1).any(|dz| stands(x + dx, z + dz))))
+                .count();
+            assert_eq!(far, 0, "{shape}: {far} roof columns hang two blocks out");
         }
     }
 }
