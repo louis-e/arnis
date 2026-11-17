@@ -577,7 +577,71 @@ const UNSORTED: u8 = 4;
 /// Height over which unsorted returns can be a roof.
 const ROOF_MIN_M: f32 = 2.5;
 
-/// Points gathered over a window of a tile, before they are boiled down.
+/// Values in chunks of a fixed size: a long list grows without copying and
+/// without the unused half a doubled `Vec` can carry.
+struct Chunked<T> {
+    full: Vec<Vec<T>>,
+    last: Vec<T>,
+}
+
+impl<T> Chunked<T> {
+    /// Values a chunk holds; only the first chunk grows to it.
+    const CHUNK: usize = 1 << 13;
+
+    fn new() -> Self {
+        Chunked {
+            full: Vec::new(),
+            last: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, v: T) {
+        if self.last.len() == Self::CHUNK {
+            let next = Vec::with_capacity(Self::CHUNK);
+            self.full.push(std::mem::replace(&mut self.last, next));
+        }
+        self.last.push(v);
+    }
+
+    fn len(&self) -> usize {
+        self.full.len() * Self::CHUNK + self.last.len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &T> {
+        self.full.iter().flatten().chain(&self.last)
+    }
+}
+
+/// The returns of one 100 m block, kept until the tile is read: a few bytes
+/// each. A cell within the block (0..10 000) fits in 14 bits.
+struct BlockPoints {
+    /// Ground returns: the cell times 65 536 plus the intensity.
+    ground: Chunked<u32>,
+    /// Building and object returns: the cell, flags and height of each.
+    above_at: Chunked<u16>,
+    above_flags: Chunked<u8>,
+    above_z: Chunked<f32>,
+}
+
+impl BlockPoints {
+    fn new() -> Self {
+        BlockPoints {
+            ground: Chunked::new(),
+            above_at: Chunked::new(),
+            above_flags: Chunked::new(),
+            above_z: Chunked::new(),
+        }
+    }
+}
+
+/// The tile cell of cell `l` of block `b`.
+fn tile_cell(b: usize, l: usize) -> usize {
+    let (bx, by) = (b % BLOCKS, b / BLOCKS);
+    (by * BLOCK + l / BLOCK) * TILE + bx * BLOCK + l % BLOCK
+}
+
+/// Points gathered over a window of a tile, before they are boiled down. They
+/// are kept by block and boiled down a block at a time.
 struct Measure<'a> {
     source: &'a Sheet,
     /// The tile's west and north edges in grid metres.
@@ -589,10 +653,7 @@ struct Measure<'a> {
     /// Cells under a building outline, where the source marks them.
     footprint: Vec<bool>,
     gz_sum: Vec<f64>,
-    /// Ground returns: (cell, intensity).
-    ground: Vec<(u32, u16)>,
-    /// Building and object returns: (cell, z, flags).
-    above: Vec<(u32, f32, u8)>,
+    blocks: Vec<BlockPoints>,
     /// Where the points come in another grid, the map onto the tile's.
     to_grid: Option<Affine>,
 }
@@ -611,8 +672,7 @@ impl<'a> Measure<'a> {
                 vec![false; CELLS]
             },
             gz_sum: vec![0.0; CELLS],
-            ground: Vec::new(),
-            above: Vec::new(),
+            blocks: (0..BLOCKS * BLOCKS).map(|_| BlockPoints::new()).collect(),
             to_grid: None,
         }
     }
@@ -631,7 +691,8 @@ impl<'a> Measure<'a> {
         if !(c0 as f64..c1 as f64).contains(&col) || !(r0 as f64..r1 as f64).contains(&row) {
             return;
         }
-        let cell = row as u32 * TILE as u32 + col as u32;
+        let (row, col) = (row as usize, col as usize);
+        let cell = row * TILE + col;
         // Point formats 0-5 keep the class in byte 15 and returns in byte 14
         // (3+3 bits); 6-10 keep returns in byte 14 (4+4 bits) and the class in 16.
         let (class, ret, nret) = if l.format >= 6 {
@@ -642,18 +703,21 @@ impl<'a> Measure<'a> {
         let classes = &self.source.classes;
         if classes.footprint.contains(&class) {
             // Not a return: only a mark on the ground.
-            self.footprint[cell as usize] = true;
+            self.footprint[cell] = true;
             return;
         }
-        self.n_all[cell as usize] += 1;
+        self.n_all[cell] += 1;
         let zi = i32::from_le_bytes(rec[8..12].try_into().unwrap());
         let z = f64::from(zi) * l.scale[2] + l.offset[2];
-        if classes.ground.contains(&class) {
-            self.ground
-                .push((cell, u16::from_le_bytes([rec[12], rec[13]])));
-            self.gz_sum[cell as usize] += z;
+        let block = &mut self.blocks[(row / BLOCK) * BLOCKS + col / BLOCK];
+        let at = (row % BLOCK) * BLOCK + col % BLOCK;
+        let flags = if classes.ground.contains(&class) {
+            let intensity = u16::from_le_bytes([rec[12], rec[13]]);
+            block.ground.push((at as u32) << 16 | u32::from(intensity));
+            self.gz_sum[cell] += z;
+            return;
         } else if classes.building.contains(&class) {
-            self.above.push((cell, z as f32, BUILDING));
+            BUILDING
         } else if classes.object.contains(&class) {
             let passes = nret > 1 && ret < nret;
             let plant = if classes.vegetation.is_empty() {
@@ -666,91 +730,194 @@ impl<'a> Measure<'a> {
             } else {
                 0
             };
-            self.above
-                .push((cell, z as f32, unsorted | if plant { PLANT } else { 0 }));
-        }
+            unsorted | if plant { PLANT } else { 0 }
+        } else {
+            return;
+        };
+        block.above_at.push(at as u16);
+        block.above_flags.push(flags);
+        block.above_z.push(z as f32);
     }
 
     fn finish(self, origin: &str) -> LaserTile {
+        let Measure {
+            source,
+            n_all,
+            footprint,
+            gz_sum,
+            mut blocks,
+            ..
+        } = self;
         let mut t = LaserTile::empty(origin);
-        let mut n_gnd = vec![0u32; CELLS];
-        for &(c, _) in &self.ground {
-            n_gnd[c as usize] += 1;
+        for (slot, &n) in t.n_all.iter_mut().zip(&n_all) {
+            *slot = n.min(255) as u8;
         }
-        let ground_z = fill_ground(&self.gz_sum, &n_gnd);
+        drop(n_all);
+        const AT: usize = BLOCK * BLOCK;
+        // Per cell of the block in hand: where its values start, and where the
+        // next one goes.
+        let mut start = vec![0u32; AT + 1];
+        let mut fill = vec![0u32; AT];
 
-        // Ground intensity medians.
-        let i_by_cell = group_by_cell(&self.ground, &n_gnd, |&(_, i)| f32::from(i));
-        for (c, slot) in t.i_gnd.iter_mut().enumerate() {
-            let vals = i_by_cell.cell(c);
-            if !vals.is_empty() {
-                *slot = quantile(vals, 0.5).round() as u16;
+        // Ground: the count and median intensity of each cell, a block at a time.
+        let mut n_gnd = vec![0u32; CELLS];
+        let mut vals: Vec<u16> = Vec::new();
+        for (b, block) in blocks.iter_mut().enumerate() {
+            let ground = std::mem::replace(&mut block.ground, Chunked::new());
+            if ground.len() == 0 {
+                continue;
+            }
+            start.fill(0);
+            for &g in ground.iter() {
+                start[(g >> 16) as usize + 1] += 1;
+            }
+            for l in 0..AT {
+                start[l + 1] += start[l];
+            }
+            fill.copy_from_slice(&start[..AT]);
+            vals.clear();
+            vals.resize(ground.len(), 0);
+            for &g in ground.iter() {
+                let l = (g >> 16) as usize;
+                vals[fill[l] as usize] = g as u16;
+                fill[l] += 1;
+            }
+            drop(ground);
+            for l in 0..AT {
+                let v = &mut vals[start[l] as usize..start[l + 1] as usize];
+                if v.is_empty() {
+                    continue;
+                }
+                v.sort_unstable();
+                let c = tile_cell(b, l);
+                n_gnd[c] = v.len() as u32;
+                t.n_gnd[c] = v.len().min(255) as u8;
+                t.i_gnd[c] = quantile(v, 0.5);
             }
         }
+        drop(vals);
+        let ground_z = fill_ground(&gz_sum, &n_gnd);
+        drop((gz_sum, n_gnd));
 
         // Where the source marks outlines instead of classing roofs, what stands
         // over an outline or within a metre of it (the eaves) and is not a plant
-        // is the roof.
-        let mut above = self.above;
-        if !self.footprint.is_empty() {
-            let roof = grow_by_one(&self.footprint);
-            for p in &mut above {
-                if p.2 & PLANT == 0 && roof[p.0 as usize] {
-                    p.2 = BUILDING;
-                }
-            }
-        }
-
-        // Heights above the ground for building and object returns.
-        let mut n_obj = vec![0u32; CELLS];
-        let mut n_bld = vec![0u32; CELLS];
-        let mut n_veg = vec![0u32; CELLS];
-        let mut heights: Vec<(u32, f32, u8)> = above
-            .iter()
-            .map(|&(c, z, f)| (c, z - ground_z[c as usize], f))
-            .filter(|&(_, h, f)| f & BUILDING != 0 || h > 0.25)
-            .collect();
-        find_roofs(&mut heights);
-        for &(c, _, f) in &heights {
-            if f & BUILDING != 0 {
-                n_bld[c as usize] += 1;
+        // is the roof. Of the rest, building returns and objects over 0.25 m
+        // count, at their height above the ground.
+        let roof = (!footprint.is_empty()).then(|| grow_by_one(&footprint));
+        drop(footprint);
+        let (roof, ground_z) = (roof.as_deref(), &ground_z[..]);
+        let settle = |c: usize, f: u8, z: f32| -> Option<(u8, f32)> {
+            let f = if f & PLANT == 0 && roof.is_some_and(|r| r[c]) {
+                BUILDING
             } else {
-                n_obj[c as usize] += 1;
-                if f & PLANT != 0 {
-                    n_veg[c as usize] += 1;
+                f
+            };
+            let h = z - ground_z[c];
+            (f & BUILDING != 0 || h > 0.25).then_some((f, h))
+        };
+        // Whether this scan left its roofs among the unsorted returns: asked of
+        // the whole window at once.
+        let guess_roofs = !source.classes.unsorted.is_empty()
+            && roofs_unsorted(
+                blocks
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(b, block)| counted(b, block, settle).map(|p| p.2)),
+            );
+
+        // Each cell's object heights, then its building heights, a block at a
+        // time.
+        let q = |h: f32| (h * 5.0).round().clamp(0.0, 255.0) as u8;
+        let mut n_obj = vec![0u32; AT];
+        let mut n_bld = vec![0u32; AT];
+        let mut n_veg = vec![0u32; AT];
+        let mut fill_bld = vec![0u32; AT];
+        let mut kept: Vec<(u32, f32, u8)> = Vec::new();
+        let mut heights: Vec<f32> = Vec::new();
+        for (b, block) in blocks.iter_mut().enumerate() {
+            if block.above_at.len() == 0 {
+                continue;
+            }
+            kept.clear();
+            kept.extend(counted(b, block, settle));
+            *block = BlockPoints::new();
+            if guess_roofs {
+                find_roofs(&mut kept);
+            }
+            n_obj.fill(0);
+            n_bld.fill(0);
+            n_veg.fill(0);
+            for &(l, _, f) in &kept {
+                let l = l as usize;
+                if f & BUILDING != 0 {
+                    n_bld[l] += 1;
+                } else {
+                    n_obj[l] += 1;
+                    if f & PLANT != 0 {
+                        n_veg[l] += 1;
+                    }
                 }
             }
-        }
-        let obj: Vec<(u32, f32)> = heights
-            .iter()
-            .filter(|p| p.2 & BUILDING == 0)
-            .map(|p| (p.0, p.1))
-            .collect();
-        let bld: Vec<(u32, f32)> = heights
-            .iter()
-            .filter(|p| p.2 & BUILDING != 0)
-            .map(|p| (p.0, p.1))
-            .collect();
-        let obj_by = group_by_cell(&obj, &n_obj, |p| p.1);
-        let bld_by = group_by_cell(&bld, &n_bld, |p| p.1);
-        let q = |h: f32| (h * 5.0).round().clamp(0.0, 255.0) as u8;
-        for c in 0..CELLS {
-            t.n_all[c] = self.n_all[c].min(255) as u8;
-            t.n_gnd[c] = n_gnd[c].min(255) as u8;
-            t.n_obj[c] = n_obj[c].min(255) as u8;
-            t.n_bld[c] = n_bld[c].min(255) as u8;
-            t.n_veg[c] = n_veg[c].min(255) as u8;
-            let o = obj_by.cell(c);
-            if !o.is_empty() {
-                t.h_obj[c] = q(quantile(o, 0.95));
+            start[0] = 0;
+            for l in 0..AT {
+                start[l + 1] = start[l] + n_obj[l] + n_bld[l];
+                fill[l] = start[l];
+                fill_bld[l] = start[l] + n_obj[l];
             }
-            let b = bld_by.cell(c);
-            if !b.is_empty() {
-                t.h_bld[c] = q(quantile(b, 0.95));
+            heights.clear();
+            heights.resize(start[AT] as usize, 0.0);
+            for &(l, h, f) in &kept {
+                let next = if f & BUILDING != 0 {
+                    &mut fill_bld[l as usize]
+                } else {
+                    &mut fill[l as usize]
+                };
+                heights[*next as usize] = h;
+                *next += 1;
+            }
+            for l in 0..AT {
+                let c = tile_cell(b, l);
+                t.n_obj[c] = n_obj[l].min(255) as u8;
+                t.n_bld[c] = n_bld[l].min(255) as u8;
+                t.n_veg[c] = n_veg[l].min(255) as u8;
+                let (s, m, e) = (
+                    start[l] as usize,
+                    (start[l] + n_obj[l]) as usize,
+                    start[l + 1] as usize,
+                );
+                let o = &mut heights[s..m];
+                if !o.is_empty() {
+                    o.sort_by(f32::total_cmp);
+                    t.h_obj[c] = q(quantile(o, 0.95));
+                }
+                let bl = &mut heights[m..e];
+                if !bl.is_empty() {
+                    bl.sort_by(f32::total_cmp);
+                    t.h_bld[c] = q(quantile(bl, 0.95));
+                }
             }
         }
         t
     }
+}
+
+/// The returns of block `b` that count, as (cell within the block, height,
+/// flags): `settle` gives a return's flags and height from its tile cell,
+/// flags and z, or `None` when it does not count.
+fn counted<'a>(
+    b: usize,
+    block: &'a BlockPoints,
+    settle: impl Fn(usize, u8, f32) -> Option<(u8, f32)> + 'a,
+) -> impl Iterator<Item = (u32, f32, u8)> + 'a {
+    block
+        .above_at
+        .iter()
+        .zip(block.above_flags.iter())
+        .zip(block.above_z.iter())
+        .filter_map(move |((&l, &f), &z)| {
+            let l = usize::from(l);
+            settle(tile_cell(b, l), f, z).map(|(f, h)| (l as u32, h, f))
+        })
 }
 
 /// The cells set in `m` and their eight neighbours, over a whole tile.
@@ -771,17 +938,26 @@ fn grow_by_one(m: &[bool]) -> Vec<bool> {
     out
 }
 
-/// Scans that leave buildings among the unsorted returns (no building point in
-/// the whole window, while there are unsorted ones) have their roofs found
-/// here: a cell whose unsorted returns over 2.5 m are nearly all the last of
-/// their pulse is hard and solid, a roof; a crown lets part of the pulse
-/// through. Those returns then count as building points.
-fn find_roofs(heights: &mut [(u32, f32, u8)]) {
-    if heights.iter().any(|&(_, _, f)| f & BUILDING != 0)
-        || !heights.iter().any(|&(_, _, f)| f & UNSORTED != 0)
-    {
-        return;
+/// Whether a scan left its buildings among the unsorted returns, from the
+/// flags of all its returns that count: no building point, while there are
+/// unsorted ones.
+fn roofs_unsorted(flags: impl Iterator<Item = u8>) -> bool {
+    let mut unsorted = false;
+    for f in flags {
+        if f & BUILDING != 0 {
+            return false;
+        }
+        unsorted |= f & UNSORTED != 0;
     }
+    unsorted
+}
+
+/// The roofs of a scan that left them unsorted (see [`roofs_unsorted`]): a
+/// cell whose unsorted returns over 2.5 m are nearly all the last of their
+/// pulse is hard and solid, a roof; a crown lets part of the pulse through.
+/// Those returns then count as building points. Returns are (cell, height,
+/// flags).
+fn find_roofs(heights: &mut [(u32, f32, u8)]) {
     let mut tall = std::collections::HashMap::<u32, (u32, u32)>::new();
     for &(c, h, f) in heights.iter() {
         if f & UNSORTED != 0 && h >= ROOF_MIN_M {
@@ -804,56 +980,9 @@ fn find_roofs(heights: &mut [(u32, f32, u8)]) {
     }
 }
 
-/// Values grouped by cell with a counting sort, sorted within each cell.
-struct ByCell {
-    start: Vec<u32>,
-    vals: Vec<f32>,
-}
-
-impl ByCell {
-    fn cell(&self, c: usize) -> &[f32] {
-        &self.vals[self.start[c] as usize..self.start[c + 1] as usize]
-    }
-}
-
-fn group_by_cell<T>(items: &[T], counts: &[u32], val: impl Fn(&T) -> f32) -> ByCell
-where
-    T: CellOf,
-{
-    let mut start = vec![0u32; CELLS + 1];
-    for c in 0..CELLS {
-        start[c + 1] = start[c] + counts[c];
-    }
-    let mut fill = start.clone();
-    let mut vals = vec![0.0f32; items.len()];
-    for it in items {
-        let c = it.cell() as usize;
-        vals[fill[c] as usize] = val(it);
-        fill[c] += 1;
-    }
-    for c in 0..CELLS {
-        vals[start[c] as usize..start[c + 1] as usize].sort_by(f32::total_cmp);
-    }
-    ByCell { start, vals }
-}
-
-trait CellOf {
-    fn cell(&self) -> u32;
-}
-impl CellOf for (u32, u16) {
-    fn cell(&self) -> u32 {
-        self.0
-    }
-}
-impl CellOf for (u32, f32) {
-    fn cell(&self) -> u32 {
-        self.0
-    }
-}
-
 /// The value at quantile `q` of sorted `v`, picked the way the lab did:
 /// index `floor((n - 1) * q)`.
-fn quantile(v: &[f32], q: f64) -> f32 {
+fn quantile<T: Copy>(v: &[T], q: f64) -> T {
     v[((v.len() - 1) as f64 * q).floor() as usize]
 }
 
@@ -874,35 +1003,38 @@ fn fill_ground(sum: &[f64], count: &[u32]) -> Vec<f32> {
         return vec![0.0; CELLS];
     }
     // Grow inwards a ring at a time; 60 rings cover any house and most halls.
+    // Each ring reads the heights as the last one left them: its own are
+    // written once all are found.
+    let mut holes: Vec<u32> = (0..CELLS as u32)
+        .filter(|&c| z[c as usize].is_nan())
+        .collect();
+    let mut found: Vec<(u32, f32)> = Vec::new();
     for _ in 0..60 {
-        let mut changed = false;
-        let prev = z.clone();
-        for row in 0..TILE {
-            for col in 0..TILE {
-                let c = row * TILE + col;
-                if !prev[c].is_nan() {
+        found.clear();
+        holes.retain(|&c| {
+            let (row, col) = (c as usize / TILE, c as usize % TILE);
+            let (mut s, mut n) = (0.0f32, 0u32);
+            for (dr, dc) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let (r, k) = (row as i32 + dr, col as i32 + dc);
+                if r < 0 || k < 0 || r >= TILE as i32 || k >= TILE as i32 {
                     continue;
                 }
-                let (mut s, mut n) = (0.0f32, 0u32);
-                for (dr, dc) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                    let (r, k) = (row as i32 + dr, col as i32 + dc);
-                    if r < 0 || k < 0 || r >= TILE as i32 || k >= TILE as i32 {
-                        continue;
-                    }
-                    let v = prev[r as usize * TILE + k as usize];
-                    if !v.is_nan() {
-                        s += v;
-                        n += 1;
-                    }
-                }
-                if n > 0 {
-                    z[c] = s / n as f32;
-                    changed = true;
+                let v = z[r as usize * TILE + k as usize];
+                if !v.is_nan() {
+                    s += v;
+                    n += 1;
                 }
             }
-        }
-        if !changed {
+            if n > 0 {
+                found.push((c, s / n as f32));
+            }
+            n == 0
+        });
+        if found.is_empty() {
             break;
+        }
+        for &(c, v) in &found {
+            z[c as usize] = v;
         }
     }
     let mut sorted = known;
@@ -932,6 +1064,7 @@ mod tests {
             (3, 1.5, u),
             (3, 1.6, u),
         ];
+        assert!(roofs_unsorted(pts.iter().map(|p| p.2)));
         let mut h = pts.clone();
         find_roofs(&mut h);
         assert!(h[..3].iter().all(|p| p.2 == BUILDING));
@@ -939,13 +1072,9 @@ mod tests {
         // A scan that sorts its buildings out is left alone.
         let mut h = pts.clone();
         h.push((9, 7.0, BUILDING));
-        find_roofs(&mut h);
-        assert_eq!(&h[..8], &pts[..]);
+        assert!(!roofs_unsorted(h.iter().map(|p| p.2)));
         // So is a source without unsorted classes.
-        let mut h: Vec<(u32, f32, u8)> = pts.iter().map(|&(c, z, f)| (c, z, f & !u)).collect();
-        let before = h.clone();
-        find_roofs(&mut h);
-        assert_eq!(h, before);
+        assert!(!roofs_unsorted(pts.iter().map(|p| p.2 & !u)));
     }
 
     #[test]
@@ -1064,5 +1193,116 @@ mod tests {
         let v = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         assert_eq!(quantile(&v, 0.95), 9.0);
         assert_eq!(quantile(&v, 0.5), 5.0);
+    }
+
+    #[test]
+    fn block_by_block_measures_as_cell_by_cell() {
+        // Random returns over cells either side of block seams, measured by
+        // `Measure` and by a plain list per cell.
+        let src = &Sheet::at(&super::super::nrw::NRW, 7.0);
+        let layout = PointLayout {
+            format: 1,
+            record_len: 28,
+            scale: [0.01, 0.01, 0.01],
+            offset: [0.0, 0.0, 0.0],
+        };
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut rnd = |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let mut m = Measure::new(src, 367, 5646, (0, 0, TILE, TILE));
+        // Per cell: ground (intensity, z), above (z, class, ret, nret), marks.
+        type Cell = (Vec<(u16, f64)>, Vec<(f64, u8, u8, u8)>, bool);
+        let mut cells: std::collections::BTreeMap<usize, Cell> = Default::default();
+        let mut put =
+            |row: usize, col: usize, class: u8, z: f64, ret: u8, nret: u8, intensity: u16| {
+                let mut r = vec![0u8; 28];
+                let x = ((367_000.0 + col as f64 + 0.5) / 0.01) as i32;
+                let y = ((5_647_000.0 - row as f64 - 0.5) / 0.01) as i32;
+                r[0..4].copy_from_slice(&x.to_le_bytes());
+                r[4..8].copy_from_slice(&y.to_le_bytes());
+                r[8..12].copy_from_slice(&((z / 0.01).round() as i32).to_le_bytes());
+                r[12..14].copy_from_slice(&intensity.to_le_bytes());
+                r[14] = ret | (nret << 3);
+                r[15] = class;
+                m.add(&layout, &r);
+                let z = f64::from(i32::from_le_bytes(r[8..12].try_into().unwrap())) * 0.01;
+                let e = cells.entry(row * TILE + col).or_default();
+                match class {
+                    2 => e.0.push((intensity, z)),
+                    20 => e.1.push((z, class, ret, nret)),
+                    26 => e.2 = true,
+                    _ => {}
+                }
+            };
+        for _ in 0..40_000 {
+            let (row, col) = (95 + rnd(12) as usize, 195 + rnd(12) as usize);
+            let class = [2, 2, 2, 20, 20, 26, 7][rnd(7) as usize];
+            let z = 100.0 + rnd(900) as f64 / 100.0;
+            let (ret, nret) = (1 + rnd(2) as u8, 1 + rnd(2) as u8);
+            put(row, col, class, z, ret, nret, 1000 + rnd(900) as u16);
+        }
+        // Sparse ground over the rest of the tile, so the ground under it fills
+        // in a few rings.
+        for row in (3..TILE).step_by(10) {
+            for col in (3..TILE).step_by(10) {
+                put(row, col, 2, 99.0, 1, 1, 1200);
+            }
+        }
+        let t = m.finish("test");
+
+        let mut sum = vec![0.0f64; CELLS];
+        let mut count = vec![0u32; CELLS];
+        let mut marks = vec![false; CELLS];
+        for (&c, (g, _, mark)) in &cells {
+            for &(_, z) in g {
+                sum[c] += z;
+            }
+            count[c] = g.len() as u32;
+            marks[c] = *mark;
+        }
+        let ground_z = fill_ground(&sum, &count);
+        let roof = grow_by_one(&marks);
+        for (&c, (g, above, _)) in &cells {
+            let mut i: Vec<u16> = g.iter().map(|p| p.0).collect();
+            i.sort_unstable();
+            assert_eq!(t.n_gnd[c], i.len() as u8);
+            assert_eq!(t.i_gnd[c], if i.is_empty() { 0 } else { quantile(&i, 0.5) });
+            let (mut obj, mut bld, mut veg) = (Vec::new(), Vec::new(), 0u8);
+            for &(z, _, ret, nret) in above {
+                let plant = nret > 1 && ret < nret;
+                let h = z as f32 - ground_z[c];
+                if !plant && roof[c] {
+                    bld.push(h);
+                } else if h > 0.25 {
+                    obj.push(h);
+                    veg += u8::from(plant);
+                }
+            }
+            obj.sort_by(f32::total_cmp);
+            bld.sort_by(f32::total_cmp);
+            let q = |v: &[f32]| {
+                if v.is_empty() {
+                    0
+                } else {
+                    (quantile(v, 0.95) * 5.0).round().clamp(0.0, 255.0) as u8
+                }
+            };
+            assert_eq!(
+                (t.n_obj[c], t.n_bld[c], t.n_veg[c], t.h_obj[c], t.h_bld[c]),
+                (obj.len() as u8, bld.len() as u8, veg, q(&obj), q(&bld)),
+                "cell {c}"
+            );
+        }
+        // Cells without returns stay empty, including under a grown roof.
+        assert_eq!(t.n_all.iter().filter(|&&n| n > 0).count(), {
+            cells
+                .values()
+                .filter(|(g, a, _)| !g.is_empty() || !a.is_empty())
+                .count()
+        });
     }
 }
