@@ -12,8 +12,12 @@
 //! ([`elements`]). OSM always wins: nothing here overrides a mapped feature.
 //!
 //! Downloads are bounded: only tiles inside the source's outline, only the photo
-//! blocks the area touches, results cached per tile, and a budget on what one run
-//! may fetch (`--garden-detail-max-mb`).
+//! blocks the area touches, results cached per tile, and a limit on what one run
+//! may fetch of the laser scans (`--lidar-max-mb`).
+//!
+//! `ARNIS_LASER_DEBUG=1` prints, to stderr, each COPC or EPT tile's read (level,
+//! nodes, requests, megabytes, points a square metre) and the time and resident
+//! memory at each stage.
 
 pub mod bavaria;
 pub mod canada;
@@ -412,9 +416,6 @@ pub fn fetch_survey_data(
     );
     let classes = classify::classify(&inputs, thresholds);
     lap("classes");
-    if let Some(path) = std::env::var_os("ARNIS_LASER_DUMP") {
-        dump(&inputs, &classes, thresholds, std::path::Path::new(&path));
-    }
     let (w, h) = (inputs.w, inputs.h);
     drop(inputs);
 
@@ -529,7 +530,6 @@ fn mosaic(
     // The photo downloads beside the laser tiles: they come from other servers,
     // or from one that paces every request itself. Each tile goes into the
     // mosaic as it comes and is let go.
-    let photo_on = with_photo && std::env::var_os("ARNIS_LASER_NO_PHOTO").is_none();
     let classify::Inputs {
         n_all,
         n_gnd,
@@ -547,7 +547,7 @@ fn mosaic(
     let mut any = false;
     std::thread::scope(|s| {
         let photos = s.spawn(|| {
-            if photo_on {
+            if with_photo {
                 fill_photos(client, plan, &root, photo_cells);
             }
         });
@@ -667,51 +667,6 @@ fn fill_photos(
 
 /// Threads the photo downloads run on, each tile's blocks included.
 const PHOTO_THREADS: usize = 4;
-
-/// Debugging aid (`ARNIS_LASER_DUMP=out.png`): the classes on the metre grid,
-/// beside the ground intensity against the thresholds and the photo.
-fn dump(
-    inp: &classify::Inputs,
-    out: &[classify::Out],
-    (lo, hi): (f32, f32),
-    path: &std::path::Path,
-) {
-    let (w, h) = (inp.w as u32, inp.h as u32);
-    let mut img = image::RgbImage::new(w * 3, h);
-    for (c, o) in out.iter().enumerate() {
-        let (x, y) = ((c % inp.w) as u32, (c / inp.w) as u32);
-        let class = match o.class {
-            classify::LAWN => [110, 190, 80],
-            classify::PAVED => [170, 170, 170],
-            classify::HEDGE => [20, 110, 20],
-            classify::BUSH => [60, 150, 60],
-            classify::TREE => [0, 70, 0],
-            classify::SHED => [230, 60, 200],
-            classify::POOL => [40, 120, 250],
-            classify::BUILDING => [120, 40, 30],
-            classify::BED => [200, 160, 60],
-            classify::FENCE => [250, 250, 0],
-            _ => [0, 0, 0],
-        };
-        img.put_pixel(x, y, image::Rgb(class));
-        let i = inp.i_gnd(c);
-        let band = if inp.n_gnd[c] == 0 {
-            [0, 0, 0]
-        } else if i >= hi {
-            [90, 200, 90]
-        } else if i < lo {
-            [110, 110, 110]
-        } else {
-            [220, 200, 120]
-        };
-        img.put_pixel(w + x, y, image::Rgb(band));
-        img.put_pixel(2 * w + x, y, image::Rgb(inp.rgb(c)));
-    }
-    if let Err(e) = img.save(path) {
-        eprintln!("Warning: laser dump not written: {e}");
-    }
-    eprintln!("laser thresholds: {lo:.0} {hi:.0}");
-}
 
 /// Calls `f(mosaic_cell, tile_cell)` for every metre the rectangle and the tile
 /// with north-west corner (`te0`, `tn1`) share.

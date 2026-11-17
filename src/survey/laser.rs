@@ -52,13 +52,6 @@ const MAGIC: &[u8; 8] = b"ARNSLAS4";
 /// about 5).
 pub const TARGET_DENSITY: f64 = 7.0;
 
-/// [`TARGET_DENSITY`], or `ARNIS_LASER_DENSITY` for comparing densities.
-fn target_density() -> f64 {
-    std::env::var("ARNIS_LASER_DENSITY")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(TARGET_DENSITY)
-}
 /// A tile the source does not have is asked for again after this long.
 const ABSENT_DAYS: u64 = 30;
 
@@ -114,7 +107,7 @@ impl LaserTile {
     fn write(&self, path: &Path) -> std::io::Result<()> {
         let mut raw = Vec::with_capacity(CELLS * 9 + 256);
         raw.extend_from_slice(MAGIC);
-        raw.push((target_density() * 10.0) as u8);
+        raw.push((TARGET_DENSITY * 10.0) as u8);
         raw.extend(self.blocks.iter().map(|&b| b as u8));
         let origin = self.origin.as_bytes();
         raw.extend_from_slice(&(origin.len() as u16).to_le_bytes());
@@ -152,7 +145,7 @@ impl LaserTile {
         let nb = BLOCKS * BLOCKS;
         let mut head = vec![0u8; 9 + nb + 2];
         d.read_exact(&mut head).ok()?;
-        if &head[..8] != MAGIC || head[8] != (target_density() * 10.0) as u8 {
+        if &head[..8] != MAGIC || head[8] != (TARGET_DENSITY * 10.0) as u8 {
             return None;
         }
         let blocks = head[9..9 + nb].iter().map(|&b| b != 0).collect();
@@ -412,7 +405,7 @@ fn read_copc(
                     client,
                     file,
                     f.inverse().rect(window),
-                    target_density(),
+                    TARGET_DENSITY,
                     8,
                     &visit,
                 )
@@ -429,13 +422,13 @@ fn read_copc(
                     m.lock().unwrap_or_else(|e| e.into_inner()).to_grid = f;
                     Ok(f)
                 };
-                copc::read(client, file, window, target_density(), 4, &place, &visit)
+                copc::read(client, file, window, TARGET_DENSITY, 4, &place, &visit)
             }
             _ => copc::read(
                 client,
                 file,
                 window,
-                target_density(),
+                TARGET_DENSITY,
                 4,
                 &|_| Ok(None),
                 &visit,
