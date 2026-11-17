@@ -2173,14 +2173,16 @@ fn with_steps(
                 let here = y_at(at);
                 if here != prev.1 {
                     let top = here.max(prev.1);
+                    // A point put in on the way to the next station keeps to its cap, as the
+                    // cars bound for it do.
                     match out.last_mut() {
                         Some(last) if prev.0 - last.0 < 0.05 => last.3 = last.3.max(top),
-                        _ => out.push((prev.0, None, None, top)),
+                        _ => out.push((prev.0, None, cap, top)),
                     }
                     if s - at < 0.05 {
                         y = y.max(top);
                     } else {
-                        out.push((at, None, None, top));
+                        out.push((at, None, cap, top));
                     }
                 }
                 if at >= s {
@@ -2985,6 +2987,19 @@ mod tests {
             assert_eq!(points.first().map(|p| p.3), Some(lo));
             assert_eq!(points.last().map(|p| p.3), Some(hi));
         }
+        // The points put in at a step keep to the cap of the station they lead to.
+        let y_at = |s: f64| if s < 6.3 { 65.0 } else { 66.0 };
+        let stations = vec![
+            (0.0, None, None),
+            (4.0, None, None),
+            (10.0, None, Some(300)),
+        ];
+        let points = with_steps(stations, &y_at);
+        assert!(points.len() > 3, "{points:?}");
+        for p in &points[2..] {
+            assert_eq!(p.2, Some(300), "{points:?}");
+        }
+        assert_eq!(points[1].2, None);
     }
 
     fn node(id: u64, x: i32, z: i32, tags: &[(&str, &str)]) -> ProcessedNode {
