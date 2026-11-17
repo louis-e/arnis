@@ -209,6 +209,22 @@ impl CoordinateBitmap {
             .is_some_and(|i| (self.bits[i / 8] >> (i % 8)) & 1 == 0)
     }
 
+    /// Whether any coordinate in the rectangle from (`min_x`, `min_z`) to
+    /// (`max_x`, `max_z`) is set; the part outside the bitmap counts as unset.
+    pub fn any_in(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> bool {
+        if self.count == 0 {
+            return false;
+        }
+        let last_x = i64::from(self.min_x) + self.width as i64 - 1;
+        let last_z = i64::from(self.min_z) + self.height as i64 - 1;
+        let (x0, z0) = (min_x.max(self.min_x), min_z.max(self.min_z));
+        let (x1, z1) = (i64::from(max_x).min(last_x), i64::from(max_z).min(last_z));
+        if i64::from(x0) > x1 || i64::from(z0) > z1 {
+            return false;
+        }
+        self.count_in_range(x0, z0, x1 as i32, z1 as i32).0 > 0
+    }
+
     /// Returns true if no coordinates are marked.
     #[must_use]
     #[allow(dead_code)]
@@ -1159,6 +1175,154 @@ fn points_bounds(mut points: impl Iterator<Item = (i32, i32)>) -> Option<XZBBox>
     XZBBox::rect_from_min_max(x0, z0, x1, z1).ok()
 }
 
+/// What of a mapped feature measured trees keep clear of.
+enum KeptWater {
+    /// Water filling the area: a swimming pool, a pond, lake or river mapped as an
+    /// area, a reservoir, covered or not.
+    Area,
+    /// A fountain, as far as its model reaches.
+    Fountain,
+    /// A stream, river or ditch drawn along its line, this many blocks either side.
+    Channel(i32),
+}
+
+fn kept_water(
+    tags: &std::collections::HashMap<String, String>,
+    channel_width_cap: Option<i32>,
+) -> Option<KeptWater> {
+    use crate::element_processing::waterways;
+    let is = |k: &str, v: &str| tags.get(k).is_some_and(|t| t == v);
+    if is("amenity", "fountain") {
+        return Some(KeptWater::Fountain);
+    }
+    if is("leisure", "swimming_pool")
+        || is("natural", "water")
+        || tags.contains_key("water")
+        || is("landuse", "reservoir")
+        || is("man_made", "reservoir_covered")
+        || is("waterway", "riverbank")
+        || is("waterway", "dock")
+    {
+        return Some(KeptWater::Area);
+    }
+    let kind = tags.get("waterway")?;
+    (waterways::is_channel_waterway(kind) && !waterways::is_underground_waterway(tags)).then(|| {
+        // As `create_water_channel` draws it around each point of the line.
+        let width = waterways::capped_waterway_width(kind, tags, channel_width_cap);
+        KeptWater::Channel(width / 2 + 1)
+    })
+}
+
+/// The columns of mapped water that measured trees keep clear of, and `margin`
+/// blocks around them: pools (the survey's own among them), ponds, lakes and
+/// rivers mapped as areas, reservoirs, covered ones too, streams and ditches as
+/// wide as they are drawn, and fountains, as far as the model stamped for each
+/// reaches. A lake's islands are not water. `None` when the area has none.
+pub fn collect_tree_keep_clear(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    channel_width_cap: Option<i32>,
+    margin: i32,
+) -> Option<CoordinateBitmap> {
+    let mut keep = CoordinateBitmap::new(xzbbox);
+    let mut mark = |x: i32, z: i32, r: i32| {
+        for dx in -r..=r {
+            for dz in -r..=r {
+                keep.set(x + dx, z + dz);
+            }
+        }
+    };
+    let point_fountain = crate::structures::fountain::reach(0) + margin;
+    for element in elements {
+        let Some(kind) = kept_water(element.tags(), channel_width_cap) else {
+            continue;
+        };
+        let fountain = matches!(kind, KeptWater::Fountain);
+        match (element, kind) {
+            (ProcessedElement::Node(n), KeptWater::Fountain) => mark(n.x, n.z, point_fountain),
+            (ProcessedElement::Node(_), _) => {}
+            (ProcessedElement::Way(w), KeptWater::Channel(half)) => {
+                let r = half + margin;
+                for pair in w.nodes.windows(2) {
+                    let (a, b) = (pair[0].xz(), pair[1].xz());
+                    // A long river runs far past the area; only what can reach it counts.
+                    if a.x.max(b.x) + r < xzbbox.min_x()
+                        || a.x.min(b.x) - r > xzbbox.max_x()
+                        || a.z.max(b.z) + r < xzbbox.min_z()
+                        || a.z.min(b.z) - r > xzbbox.max_z()
+                    {
+                        continue;
+                    }
+                    for (x, _, z) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
+                        mark(x, z, r);
+                    }
+                }
+            }
+            // As `generate_fountain` stamps it: at its first node, as a point.
+            (ProcessedElement::Way(w), KeptWater::Fountain) if w.nodes.len() < 3 => {
+                if let Some(n) = w.nodes.first() {
+                    mark(n.x, n.z, point_fountain);
+                }
+            }
+            (ProcessedElement::Way(w), _) => {
+                let ring = crate::clipping::clip_way_to_bbox(&w.nodes, xzbbox);
+                let coords: Vec<(i32, i32)> = ring.iter().map(|n| (n.x, n.z)).collect();
+                let cells = flood_fill_area(&coords, None);
+                if fountain {
+                    fountain_reach(&mut mark, &cells, margin);
+                }
+                for (x, z) in cells {
+                    mark(x, z, margin);
+                }
+            }
+            // A waterway relation's channels are drawn from its member ways.
+            (ProcessedElement::Relation(_), KeptWater::Channel(_)) => {}
+            (ProcessedElement::Relation(rel), _) => {
+                let outers = relation_rings(rel, ProcessedMemberRole::Outer, xzbbox);
+                let inners = relation_rings(rel, ProcessedMemberRole::Inner, xzbbox);
+                for (members, cutting) in hole_groups(&outers, &inners, |&p| p) {
+                    let holes: Vec<(i32, i32)> = cutting
+                        .iter()
+                        .flat_map(|&i| flood_fill_area(&inners[i], None))
+                        .collect();
+                    let mut island = CoordinateBitmap::new_empty();
+                    if let Some(bounds) = points_bounds(holes.iter().copied()) {
+                        island = CoordinateBitmap::new(&bounds);
+                        for &(x, z) in &holes {
+                            island.set(x, z);
+                        }
+                    }
+                    for &o in &members {
+                        let cells: Vec<(i32, i32)> = flood_fill_area(&outers[o], None)
+                            .into_iter()
+                            .filter(|&(x, z)| !island.contains(x, z))
+                            .collect();
+                        if fountain {
+                            fountain_reach(&mut mark, &cells, margin);
+                        }
+                        for (x, z) in cells {
+                            mark(x, z, margin);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (!keep.is_empty()).then_some(keep)
+}
+
+/// Marks as far as the model stamped for a fountain mapped as these cells reaches
+/// past them, from where it is stamped.
+fn fountain_reach(mark: &mut impl FnMut(i32, i32, i32), cells: &[(i32, i32)], margin: i32) {
+    if let Some((x, z)) = crate::structures::fountain::anchor(cells) {
+        mark(
+            x,
+            z,
+            crate::structures::fountain::reach(cells.len()) + margin,
+        );
+    }
+}
+
 /// A relation's merged, clipped, closed rings of one role.
 fn relation_rings(
     rel: &crate::osm_parser::ProcessedRelation,
@@ -1569,6 +1733,63 @@ mod tests {
             cache.holes_in(&island, &inners, None).is_none(),
             "an island in the lake is wood again"
         );
+    }
+
+    #[test]
+    fn trees_keep_clear_of_mapped_water_as_it_is_drawn() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 199, 199).unwrap();
+        let square = |x0, z0, x1, z1| [(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)];
+        let pool = tagged_way(1, &square(10, 10, 20, 20), &[("leisure", "swimming_pool")]);
+        let stream = tagged_way(2, &[(50, 0), (50, 100)], &[("waterway", "stream")]);
+        let culvert = tagged_way(
+            3,
+            &[(70, 0), (70, 100)],
+            &[("waterway", "stream"), ("tunnel", "culvert")],
+        );
+        let park = tagged_way(4, &square(100, 10, 120, 30), &[("leisure", "park")]);
+        let (lake, island) = (ring(5, 130, 130, 190, 190), ring(6, 150, 150, 170, 170));
+        let fountain = crate::osm_parser::ProcessedNode {
+            id: 7,
+            tags: [("amenity".to_string(), "fountain".to_string())].into(),
+            x: 100,
+            z: 160,
+        };
+        let elements = vec![
+            ProcessedElement::Way(pool),
+            ProcessedElement::Way(stream),
+            ProcessedElement::Way(culvert),
+            ProcessedElement::Way(park),
+            ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+                id: 8,
+                tags: [("natural".to_string(), "water".to_string())].into(),
+                members: [
+                    (ProcessedMemberRole::Outer, &lake),
+                    (ProcessedMemberRole::Inner, &island),
+                ]
+                .into_iter()
+                .map(|(role, way)| crate::osm_parser::ProcessedMember {
+                    role,
+                    way: Arc::new(way.clone()),
+                })
+                .collect(),
+            }),
+            ProcessedElement::Node(fountain),
+        ];
+        let keep = collect_tree_keep_clear(&elements, &xzbbox, None, 1).unwrap();
+        assert!(keep.contains(15, 15) && !keep.contains(7, 15), "the pool");
+        // A stream is drawn 3 wide and a block either side; one more is the margin.
+        assert!(keep.contains(53, 50) && keep.contains(47, 50));
+        assert!(!keep.contains(54, 50) && !keep.contains(46, 50));
+        assert!(!keep.contains(70, 50), "a culvert is not open water");
+        assert!(!keep.contains(110, 20), "a park is not water");
+        assert!(
+            keep.contains(140, 140) && !keep.contains(160, 160),
+            "an island is land"
+        );
+        let r = crate::structures::fountain::reach(0);
+        assert!(r > 0);
+        assert!(keep.contains(100 + r + 1, 160) && !keep.contains(100 + r + 2, 160));
+        assert!(collect_tree_keep_clear(&elements[3..4], &xzbbox, None, 1).is_none());
     }
 
     #[test]

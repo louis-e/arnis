@@ -250,6 +250,8 @@ pub struct WorldEditor<'a> {
     mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
     /// Lift lines and terminals, kept free of trees.
     clear_corridors: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// Mapped water the measured trees keep clear of (see `tree_keep_clear`).
+    tree_keep_clear: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Stations laid out for the whole area, shared with the tile editors.
     stations: Option<Arc<crate::element_processing::stations::StationIndex>>,
     /// Every rail block laid here, halo included, for the clearing of the track's gauge.
@@ -375,6 +377,7 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -451,6 +454,7 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -527,6 +531,7 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -770,6 +775,18 @@ impl<'a> WorldEditor<'a> {
     /// Sets the lift corridors (shared across the main and tile editors).
     pub fn set_clear_corridors(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
         self.clear_corridors = Some(map);
+    }
+
+    /// Sets the mapped water measured trees keep clear of (shared across the main
+    /// and tile editors); only a run with measured trees sets it.
+    pub fn set_tree_keep_clear(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.tree_keep_clear = Some(map);
+    }
+
+    /// Mapped water and the block around it, where a measured tree may neither
+    /// stand nor reach with its crown; `None` in a run without measured trees.
+    pub fn tree_keep_clear(&self) -> Option<&crate::floodfill_cache::CoordinateBitmap> {
+        self.tree_keep_clear.as_deref()
     }
 
     /// True where a lift line or terminal, a track or a platform keeps trees off.

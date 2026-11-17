@@ -829,6 +829,11 @@ impl Ground {
         self.survey.as_ref().is_some_and(|s| s.features.heights)
     }
 
+    /// Whether the laser's trees replace the canopy map (see [`Self::apply_measured_canopy`]).
+    pub fn laser_trees_wanted(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.trees)
+    }
+
     /// With measured trees on: the laser's trees replace the canopy map wherever
     /// the laser measured, at their measured height; bare ground it measured is
     /// bare. Outside its reach the canopy map stays. Mapped trees read their height
