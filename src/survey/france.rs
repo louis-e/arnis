@@ -675,6 +675,7 @@ pub static FRANCE: Source = Source {
     },
     laser_plants: true,
     strict_pools: false,
+    paving_brighter: false,
     attribution: "IGN – LiDAR HD, BD ORTHO (Licence Ouverte Etalab 2.0)",
 };
 

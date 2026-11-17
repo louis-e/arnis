@@ -53,6 +53,7 @@ pub static CANADA: Source = Source {
     },
     laser_plants: true,
     strict_pools: true,
+    paving_brighter: false,
     attribution: "Contains information licensed under the Open Government Licence – Canada (NRCan CanElevation)",
 };
 

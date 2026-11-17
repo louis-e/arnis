@@ -44,8 +44,12 @@ pub struct Inputs {
     pub laser_plants: bool,
     /// Whether a pool needs cells the laser returned nothing from.
     pub strict_pools: bool,
-    /// Whether the intensity is turned over (see [`turn_over`]).
-    pub turned: bool,
+    /// Whether paving returns a brighter ground intensity than lawn (see
+    /// [`Source::paving_brighter`]): [`Inputs::i_gnd`] then reads it turned
+    /// over, and paving is kept near buildings only.
+    ///
+    /// [`Source::paving_brighter`]: super::source::Source::paving_brighter
+    pub paving_brighter: bool,
     /// Heights above the ground, in fifths of a metre.
     pub h_obj_q: Vec<u8>,
     pub h_bld_q: Vec<u8>,
@@ -69,7 +73,7 @@ impl Inputs {
             n_veg: vec![0; n],
             laser_plants: false,
             strict_pools: false,
-            turned: false,
+            paving_brighter: false,
             h_obj_q: vec![0; n],
             h_bld_q: vec![0; n],
             i_gnd_q: vec![0; n],
@@ -88,9 +92,16 @@ impl Inputs {
         f32::from(self.h_bld_q[c]) / 5.0
     }
 
+    /// The ground returns' median intensity, turned over where paving reads
+    /// the brighter: planted ground reads the brighter either way.
     #[inline]
     pub fn i_gnd(&self, c: usize) -> f32 {
-        f32::from(self.i_gnd_q[c])
+        let i = f32::from(self.i_gnd_q[c]);
+        if self.paving_brighter {
+            TURN - i
+        } else {
+            i
+        }
     }
 
     #[inline]
@@ -192,26 +203,25 @@ pub fn median_density(inp: &Inputs) -> f32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Calibration {
     Photo,
-    /// From the photo, on the intensity turned over: paving reads the brighter.
-    PhotoTurned,
     Laser,
     Defaults,
 }
 
-/// Thresholds on the ground-return intensity: from the photo where it can tell
-/// lawn from paving, else from the split in the ground intensities themselves,
-/// else the source's defaults.
+/// Thresholds on the ground-return intensity as [`Inputs::i_gnd`] reads it:
+/// from the photo where it can tell lawn from paving, else from the split in the
+/// ground intensities themselves, else the source's defaults.
 pub fn calibrate(inp: &Inputs, defaults: (f32, f32)) -> ((f32, f32), Calibration) {
     let k = Counts::at_density(median_density(inp));
     let mut grass = Vec::new();
     let mut pave = Vec::new();
+    // As measured, not turned over: see the split below.
     let mut all = Vec::new();
     for c in 0..inp.w * inp.h {
         let flat = inp.n_obj[c] == 0 && inp.n_bld[c] == 0 && inp.n_gnd[c] >= k.flat;
         if !flat {
             continue;
         }
-        all.push(inp.i_gnd(c));
+        all.push(f32::from(inp.i_gnd_q[c]));
         if !inp.has_photo(c) {
             continue;
         }
@@ -224,20 +234,27 @@ pub fn calibrate(inp: &Inputs, defaults: (f32, f32)) -> ((f32, f32), Calibration
     if grass.len() >= 200 && pave.len() >= 200 {
         grass.sort_by(f32::total_cmp);
         pave.sort_by(f32::total_cmp);
-        let mid = |v: &[f32]| v[(v.len() - 1) / 2];
-        if let Some(t) = bands(&grass, &pave, mid(&grass)) {
+        // The gap is held to the brighter one's median as measured: lawn's,
+        // or where paving reads the brighter, paving's, which sits at the
+        // same place counted from the top of the intensities turned over.
+        let scale = if inp.paving_brighter {
+            TURN - pave[pave.len() / 2]
+        } else {
+            grass[(grass.len() - 1) / 2]
+        };
+        if let Some(t) = bands(&grass, &pave, scale) {
             return (t, Calibration::Photo);
         }
-        // Some scans return paving brighter than lawn (Latvia's, where most
-        // lawn returns are classed as low plants): the same bands on the
-        // intensity turned over (see [`turn_over`]).
-        let turned = |v: &[f32]| -> Vec<f32> { v.iter().rev().map(|&i| TURN - i).collect() };
-        if let Some(t) = bands(&turned(&grass), &turned(&pave), mid(&pave)) {
-            return (t, Calibration::PhotoTurned);
-        }
     }
+    // The split is found on the intensities as measured, whose median it
+    // asks the two sides to lie well apart against, and its threshold turned
+    // over after; so are the defaults (see `Source::intensity_defaults`).
+    let turn = |t: f32| if inp.paving_brighter { TURN - t } else { t };
     match split_intensity(&mut all) {
-        Some(t) => ((t, t), Calibration::Laser),
+        Some(t) => ((turn(t), turn(t)), Calibration::Laser),
+        None if inp.paving_brighter => {
+            ((turn(defaults.1), turn(defaults.0)), Calibration::Defaults)
+        }
         None => (defaults, Calibration::Defaults),
     }
 }
@@ -245,17 +262,8 @@ pub fn calibrate(inp: &Inputs, defaults: (f32, f32)) -> ((f32, f32), Calibration
 /// What a turned-over intensity is subtracted from.
 const TURN: f32 = 65_535.0;
 
-/// Turn the ground intensities over, for thresholds calibrated as
-/// [`Calibration::PhotoTurned`].
-pub fn turn_over(inp: &mut Inputs) {
-    for v in &mut inp.i_gnd_q {
-        *v = u16::MAX - *v;
-    }
-    inp.turned = true;
-}
-
-/// How far from a building, in cells, paving is kept on a turned-over
-/// intensity.
+/// How far from a building, in cells, paving is kept where it reads the
+/// brighter.
 const PAVING_REACH: usize = 30;
 
 /// The intensity bands under which a cell is paving and over which it is
@@ -281,9 +289,9 @@ fn bands(grass: &[f32], pave: &[f32], scale: f32) -> Option<(f32, f32)> {
 
 /// Where flat ground's intensities split in two (Otsu's threshold over their
 /// histogram): planted ground returns a near-infrared pulse brighter than
-/// asphalt and most paving. `None` unless the split is clear: enough cells, each
-/// side at least a tenth of them, the two sides well apart and most of the
-/// spread between them rather than within.
+/// asphalt and most paving, or in a few scans darker. `None` unless the split
+/// is clear: enough cells, each side at least a tenth of them, the two sides
+/// well apart and most of the spread between them rather than within.
 pub fn split_intensity(vals: &mut [f32]) -> Option<f32> {
     if vals.len() < 500 {
         return None;
@@ -407,7 +415,7 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     // read as bright: paving is kept only within reach of a building, where
     // yards and drives are, and open ground farther out stays lawn. Streets
     // and car parks are mapped and win anyway.
-    if inp.turned {
+    if inp.paving_brighter {
         box_share(&building, w, h, PAVING_REACH, |c, share| {
             if share <= 0.0 && cls[c] == PAVED {
                 cls[c] = LAWN;
@@ -929,9 +937,11 @@ mod tests {
             inp.photo[c].exg = -10;
             inp.photo[c].lum = 150;
         }
+        // Read as measured, lawn would have to be the brighter.
+        assert_eq!(calibrate(&inp, (0.0, 0.0)).1, Calibration::Laser);
+        inp.paving_brighter = true;
         let ((lo, hi), how) = calibrate(&inp, (0.0, 0.0));
-        assert_eq!(how, Calibration::PhotoTurned);
-        turn_over(&mut inp);
+        assert_eq!(how, Calibration::Photo);
         // The paving's turned-over 65445 lies under the band, the lawn's
         // 65485 over it.
         assert!(lo > 65_445.0 && hi < 65_485.0, "{lo} {hi}");
@@ -964,10 +974,49 @@ mod tests {
         }
         let out = classify(&inp, (1450.0, 1600.0));
         assert_eq!(out[5 * w + 60].class, PAVED, "unturned, paving stays");
-        inp.turned = true;
+        // The same intensity where paving reads the brighter.
+        inp.paving_brighter = true;
+        inp.i_gnd_q.fill(u16::MAX - 1400);
         let out = classify(&inp, (1450.0, 1600.0));
         assert_eq!(out[5 * w + 20].class, PAVED, "the yard");
         assert_eq!(out[5 * w + 60].class, LAWN, "open ground");
+    }
+
+    #[test]
+    fn without_a_photo_paving_brighter_is_split_as_measured_and_turned_over() {
+        let (w, h) = (40, 40);
+        let mut inp = blank(w, h);
+        inp.paving_brighter = true;
+        inp.photo = vec![PhotoCell::default(); w * h];
+        // Riga's ground: paving 80 to 88, lawn 0 to 2, mostly 0.
+        for (c, v) in inp.i_gnd_q.iter_mut().enumerate() {
+            *v = if c < w * h / 2 {
+                80 + (c % 9) as u16
+            } else {
+                (c % 3) as u16
+            };
+        }
+        let ((lo, hi), how) = calibrate(&inp, (40.0, 60.0));
+        assert_eq!(how, Calibration::Laser);
+        // Turned over: the lawn's 65533 and up over it, the paving's 65455
+        // and down under it.
+        assert!(lo == hi && lo > 65_455.0 && lo <= 65_533.0, "{lo}");
+        for c in 0..3 * w {
+            if c % w < 6 {
+                inp.n_bld[c] = 10;
+                inp.h_bld_q[c] = 40;
+            }
+        }
+        let out = classify(&inp, (lo, hi));
+        assert_eq!(out[5 * w + 5].class, PAVED);
+        assert_eq!(out[35 * w + 5].class, LAWN);
+        // Ground of one intensity does not split: the defaults, lawn up to 40
+        // and paving past 60, turned over.
+        inp.i_gnd_q.fill(50);
+        assert_eq!(
+            calibrate(&inp, (40.0, 60.0)),
+            ((65_475.0, 65_495.0), Calibration::Defaults)
+        );
     }
 
     #[test]

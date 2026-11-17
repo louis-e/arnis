@@ -54,6 +54,7 @@ pub static USA: Source = Source {
     },
     laser_plants: true,
     strict_pools: true,
+    paving_brighter: false,
     attribution: "U.S. Geological Survey 3D Elevation Program, USDA NAIP (public domain)",
 };
 

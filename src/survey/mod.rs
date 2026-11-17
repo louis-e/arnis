@@ -448,14 +448,10 @@ pub fn fetch_survey_data(
         classify::median_density(&inputs),
         match how {
             classify::Calibration::Photo => "photo",
-            classify::Calibration::PhotoTurned => "photo, paving the brighter",
             classify::Calibration::Laser => "laser alone",
             classify::Calibration::Defaults => "source's defaults",
         }
     );
-    if how == classify::Calibration::PhotoTurned {
-        classify::turn_over(&mut inputs);
-    }
     let classes = classify::classify(&inputs, thresholds);
     lap("classes");
     let (w, h) = (inputs.w, inputs.h);
@@ -588,6 +584,7 @@ fn mosaic(
     let mut inp = classify::Inputs::new(w, h);
     inp.laser_plants = plan.sheet.laser_plants;
     inp.strict_pools = plan.sheet.strict_pools;
+    inp.paving_brighter = plan.sheet.paving_brighter;
 
     // The photo downloads beside the laser tiles: they come from other servers,
     // or from one that paces every request itself. Each tile goes into the

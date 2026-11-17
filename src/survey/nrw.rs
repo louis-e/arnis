@@ -451,6 +451,7 @@ pub static NRW: Source = Source {
     },
     laser_plants: true,
     strict_pools: false,
+    paving_brighter: false,
     attribution: "Geobasis NRW (dl-de/zero-2.0)",
 };
 

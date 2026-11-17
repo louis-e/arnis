@@ -361,6 +361,7 @@ pub static BAVARIA: Source = Source {
     },
     laser_plants: false,
     strict_pools: false,
+    paving_brighter: false,
     attribution: "Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0)",
 };
 

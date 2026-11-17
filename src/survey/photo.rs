@@ -13,10 +13,12 @@
 //! `(b - max(r, g)) / 255` and the mean colour. Cached per tile with a record of
 //! which 256-pixel blocks are in, so a later area fetches only what is missing.
 
-use super::fetch::unreachable;
+use super::fetch::{unreachable, Failure};
 use super::source::{Photo, Sheet, SheetAt};
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 pub const TILE: usize = 1000;
 const CELLS: usize = TILE * TILE;
@@ -193,8 +195,16 @@ pub fn tile(
                 _ => PhotoTile::new(WMS_ACROSS),
             };
             let todo = needed(&t);
-            let failed = fetch_rendered((te, tn), &todo, &mut t, &|rect, size| {
-                render_sheets(client, (sheet, px_per_m), rect, size, down)
+            let kept = SheetCache::default();
+            let failed = fetch_rendered((te, tn), &todo, &mut t, true, &|rect, size| {
+                Some(render_sheets(
+                    client,
+                    (sheet, px_per_m),
+                    &kept,
+                    rect,
+                    size,
+                    down,
+                ))
             });
             return finish(root, source, (te, tn), t, failed);
         }
@@ -202,6 +212,7 @@ pub fn tile(
     let layout = match read_layout(client, &url) {
         Ok(l) => l,
         Err(e) => {
+            let e = e.to_string();
             if unreachable(&e) {
                 down.store(true, Ordering::Relaxed);
             }
@@ -245,7 +256,7 @@ pub fn tile(
     for (i, block) in fetched {
         match block {
             Ok(px) => {
-                fill_cells(&mut t, &layout, i, &px);
+                fill_cells(&mut t, &layout, i, &px, None);
                 t.blocks_in[i] = true;
             }
             Err(_) => failed += 1,
@@ -299,7 +310,7 @@ fn fetch_wms(
     t: &mut PhotoTile,
     down: &AtomicBool,
 ) -> usize {
-    fetch_rendered((te, tn), todo, t, &|(w, s, e, n), (width, height)| {
+    let get = |(w, s, e, n): (f64, f64, f64, f64), (width, height): (usize, usize)| {
         let bbox = if source.crs.north_first() {
             format!("{s},{w},{n},{e}")
         } else {
@@ -337,30 +348,56 @@ fn fetch_wms(
             }
         }
         None
+    };
+    fetch_rendered((te, tn), todo, t, false, &|rect, size| {
+        get(rect, size).map(|img| Drawn { img, state: None })
     })
 }
 
+/// How a pixel of a drawn rectangle came out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Px {
+    Came,
+    /// No photo here: no sheet holds the point, or the survey has none of
+    /// it. So it would be every time.
+    Absent,
+    /// Not had this time.
+    Failed,
+}
+
+/// A rectangle drawn, and how each of its pixels came out, row-major; `None`
+/// when all came.
+struct Drawn {
+    img: image::RgbImage,
+    state: Option<Vec<Px>>,
+}
+
 /// Draws a rectangle of the grid (west, south, east, north) at a size in
-/// pixels.
-type Render<'a> =
-    dyn Fn((f64, f64, f64, f64), (usize, usize)) -> Option<image::RgbImage> + Sync + 'a;
+/// pixels; `None` when none of it came.
+type Render<'a> = dyn Fn((f64, f64, f64, f64), (usize, usize)) -> Option<Drawn> + Sync + 'a;
 
 /// Fetch the blocks `todo` as images of a few neighbours at a time, `render`
 /// drawing each rectangle of the grid (west, south, east, north) at the size
-/// asked, and fold them into `t`. Returns how many failed.
+/// asked, and fold them into `t`: side by side, or `in_order`, one after
+/// another a row at a time (as sheets are read, whose blocks neighbours
+/// share). A block any pixel of which failed is left for a later run; one
+/// with pixels that have no photo is done with, the cells they touch without
+/// photo. Returns how many failed.
 fn fetch_rendered(
     (te, tn): (i32, i32),
     todo: &[usize],
     t: &mut PhotoTile,
+    in_order: bool,
     render: &Render<'_>,
 ) -> usize {
     use rayon::prelude::*;
     use std::collections::BTreeMap;
+    // By row, then column.
     let mut chunks: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
     for &i in todo {
         let (bx, by) = (i % WMS_ACROSS, i / WMS_ACROSS);
         chunks
-            .entry((bx / WMS_CHUNK, by / WMS_CHUNK))
+            .entry((by / WMS_CHUNK, bx / WMS_CHUNK))
             .or_default()
             .push(i);
     }
@@ -377,156 +414,382 @@ fn fetch_rendered(
         predictor: 1,
         samples: 3,
     };
-    // Per request: its blocks, the image if it came, and its north-west pixel.
-    type Answer = (Vec<usize>, Option<image::RgbImage>, (usize, usize));
-    let results: Vec<Answer> = chunks
-        .into_values()
-        .collect::<Vec<_>>()
-        .into_par_iter()
-        .map(|blocks| {
-            let bx0 = blocks.iter().map(|i| i % WMS_ACROSS).min().unwrap_or(0);
-            let bx1 = blocks.iter().map(|i| i % WMS_ACROSS).max().unwrap_or(0);
-            let by0 = blocks.iter().map(|i| i / WMS_ACROSS).min().unwrap_or(0);
-            let by1 = blocks.iter().map(|i| i / WMS_ACROSS).max().unwrap_or(0);
-            let (px0, px1) = (bx0 * 256, ((bx1 + 1) * 256).min(full));
-            let (py0, py1) = (by0 * 256, ((by1 + 1) * 256).min(full));
-            let m = |px: usize| px as f64 / PX_PER_M as f64;
-            let rect = (te0 + m(px0), tn1 - m(py1), te0 + m(px1), tn1 - m(py0));
-            let img = render(rect, (px1 - px0, py1 - py0))
-                .filter(|i| i.width() as usize == px1 - px0 && i.height() as usize == py1 - py0);
-            (blocks, img, (px0, py0))
-        })
-        .collect();
-    let mut failed = 0;
-    for (blocks, img, (px0, py0)) in results {
-        let Some(img) = img else {
-            failed += blocks.len();
-            continue;
+    // Per request: its blocks, what was drawn, and its north-west pixel.
+    type Answer = (Vec<usize>, Option<Drawn>, (usize, usize));
+    let draw = |blocks: Vec<usize>| -> Answer {
+        let bx0 = blocks.iter().map(|i| i % WMS_ACROSS).min().unwrap_or(0);
+        let bx1 = blocks.iter().map(|i| i % WMS_ACROSS).max().unwrap_or(0);
+        let by0 = blocks.iter().map(|i| i / WMS_ACROSS).min().unwrap_or(0);
+        let by1 = blocks.iter().map(|i| i / WMS_ACROSS).max().unwrap_or(0);
+        let (px0, px1) = (bx0 * 256, ((bx1 + 1) * 256).min(full));
+        let (py0, py1) = (by0 * 256, ((by1 + 1) * 256).min(full));
+        let m = |px: usize| px as f64 / PX_PER_M as f64;
+        let rect = (te0 + m(px0), tn1 - m(py1), te0 + m(px1), tn1 - m(py0));
+        let (w, h) = (px1 - px0, py1 - py0);
+        let drawn = render(rect, (w, h)).filter(|d| {
+            d.img.width() as usize == w
+                && d.img.height() as usize == h
+                && d.state.as_ref().is_none_or(|s| s.len() == w * h)
+        });
+        (blocks, drawn, (px0, py0))
+    };
+    let fold = |t: &mut PhotoTile, (blocks, drawn, (px0, py0)): Answer| -> usize {
+        let Some(Drawn { img, state }) = drawn else {
+            return blocks.len();
         };
+        let (iw, ih) = (img.width() as usize, img.height() as usize);
+        let mut failed = 0;
         for i in blocks {
             let (bx, by) = (i % WMS_ACROSS, i / WMS_ACROSS);
             // The block's pixels, padded to 256 x 256 past the tile's edge like
-            // a TIFF's edge tiles.
+            // a TIFF's edge tiles, and which of them have no photo.
             let mut px = vec![0u8; 256 * 256 * 3];
+            let mut absent: Option<Vec<bool>> = None;
+            let mut lost = false;
             for y in 0..256 {
                 let iy = by * 256 + y - py0;
-                if iy >= img.height() as usize {
+                if iy >= ih {
                     break;
                 }
                 for x in 0..256 {
                     let ix = bx * 256 + x - px0;
-                    if ix >= img.width() as usize {
+                    if ix >= iw {
                         break;
                     }
                     let p = img.get_pixel(ix as u32, iy as u32).0;
                     px[(y * 256 + x) * 3..(y * 256 + x) * 3 + 3].copy_from_slice(&p);
+                    match state.as_ref().map_or(Px::Came, |s| s[iy * iw + ix]) {
+                        Px::Came => {}
+                        Px::Absent => {
+                            let a = absent.get_or_insert_with(|| vec![false; 256 * 256]);
+                            a[y * 256 + x] = true;
+                        }
+                        Px::Failed => lost = true,
+                    }
                 }
             }
-            fill_cells(t, &layout, i, &px);
+            if lost {
+                failed += 1;
+                continue;
+            }
+            fill_cells(t, &layout, i, &px, absent.as_deref());
             t.blocks_in[i] = true;
         }
+        failed
+    };
+    if in_order {
+        chunks
+            .into_values()
+            .map(|blocks| fold(t, draw(blocks)))
+            .sum()
+    } else {
+        let drawn: Vec<Answer> = chunks
+            .into_values()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(draw)
+            .collect();
+        drawn.into_iter().map(|a| fold(t, a)).sum()
     }
-    failed
 }
 
-/// Read the first IFD of a classic TIFF and the tile table it points to.
+/// Most bytes of decoded sheet blocks a tile keeps for its next rectangles:
+/// about 60 of Latvia's blocks of 512 pixels, more than a row of a tile's
+/// rectangles meets, so those it shares with the next row are still kept.
+const SHEET_BLOCK_BYTES: usize = 48 << 20;
+
+/// What drawing a tile from sheets keeps from one rectangle to the next: each
+/// sheet's layout once asked for, or why there is none, and the blocks lately
+/// read, so that a block two rectangles share is read once.
+#[derive(Default)]
+struct SheetCache {
+    layouts: Mutex<HashMap<String, Result<Arc<Layout>, Px>>>,
+    recent: Mutex<Recent>,
+}
+
+/// Decoded sheet blocks by address and number, the latest last, up to
+/// [`SHEET_BLOCK_BYTES`].
+#[derive(Default)]
+struct Recent {
+    blocks: VecDeque<Kept>,
+    bytes: usize,
+}
+
+struct Kept {
+    url: String,
+    block: usize,
+    px: Arc<Vec<u8>>,
+}
+
+impl Recent {
+    fn get(&mut self, url: &str, block: usize) -> Option<Arc<Vec<u8>>> {
+        let at = self
+            .blocks
+            .iter()
+            .position(|k| k.block == block && k.url == url)?;
+        let hit = self.blocks.remove(at)?;
+        let px = Arc::clone(&hit.px);
+        self.blocks.push_back(hit);
+        Some(px)
+    }
+
+    fn put(&mut self, url: &str, block: usize, px: Arc<Vec<u8>>) {
+        self.bytes += px.len();
+        self.blocks.push_back(Kept {
+            url: url.to_string(),
+            block,
+            px,
+        });
+        while self.bytes > SHEET_BLOCK_BYTES {
+            let Some(old) = self.blocks.pop_front() else {
+                break;
+            };
+            self.bytes -= old.px.len();
+        }
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl SheetCache {
+    /// The sheet's layout, read the first time it is asked for: absent where
+    /// the survey has no such sheet, failed where it could not be had or is
+    /// not one [`render_sheets`] reads.
+    fn layout(
+        &self,
+        client: &reqwest::blocking::Client,
+        url: &str,
+        down: &AtomicBool,
+    ) -> Result<Arc<Layout>, Px> {
+        if let Some(l) = lock(&self.layouts).get(url) {
+            return l.clone();
+        }
+        let l = if down.load(Ordering::Relaxed) {
+            Err(Px::Failed)
+        } else {
+            match read_layout(client, url) {
+                Ok(l) if sheet_layout(&l) => Ok(Arc::new(l)),
+                Ok(_) => Err(Px::Failed),
+                Err(Failure::Missing) => Err(Px::Absent),
+                Err(e) => {
+                    if unreachable(&e.to_string()) {
+                        down.store(true, Ordering::Relaxed);
+                    }
+                    Err(Px::Failed)
+                }
+            }
+        };
+        lock(&self.layouts).insert(url.to_string(), l.clone());
+        l
+    }
+
+    /// The sheet's blocks `want`, those not kept read side by side; `None`
+    /// for one that could not be had.
+    fn blocks(
+        &self,
+        client: &reqwest::blocking::Client,
+        url: &str,
+        l: &Layout,
+        want: &[usize],
+        down: &AtomicBool,
+    ) -> HashMap<usize, Option<Arc<Vec<u8>>>> {
+        use rayon::prelude::*;
+        let mut got = HashMap::with_capacity(want.len());
+        let mut missing = Vec::new();
+        {
+            let mut recent = lock(&self.recent);
+            for &b in want {
+                match recent.get(url, b) {
+                    Some(px) => {
+                        got.insert(b, Some(px));
+                    }
+                    None => missing.push(b),
+                }
+            }
+        }
+        let read: Vec<(usize, Option<Vec<u8>>)> = missing
+            .par_iter()
+            .map(|&b| {
+                if down.load(Ordering::Relaxed) {
+                    return (b, None);
+                }
+                let px = fetch_block(client, url, l, b);
+                if px.as_ref().is_err_and(|e| unreachable(e)) {
+                    down.store(true, Ordering::Relaxed);
+                }
+                (b, px.ok())
+            })
+            .collect();
+        let mut recent = lock(&self.recent);
+        for (b, px) in read {
+            let px = px.map(Arc::new);
+            if let Some(px) = &px {
+                recent.put(url, b, Arc::clone(px));
+            }
+            got.insert(b, px);
+        }
+        got
+    }
+}
+
+/// One part of a drawn rectangle: a sheet read, or pixels `x.0..=x.1` of rows
+/// `y.0..=y.1` that no sheet can be had for.
+enum Part {
+    Sheet {
+        url: String,
+        sw: f64,
+        sn: f64,
+        layout: Arc<Layout>,
+    },
+    Gap {
+        x: (usize, usize),
+        y: (usize, usize),
+        px: Px,
+    },
+}
+
+/// The owner of a pixel past the most parts a rectangle is drawn from.
+const LOST: u8 = u8::MAX;
+
+/// Whether the sheet with north-west corner (`sw`, `sn`) covers the point.
+fn covers((sw, sn): (f64, f64), l: &Layout, k: f64, (pe, pn): (f64, f64)) -> bool {
+    pe >= sw && pe < sw + l.width as f64 / k && pn <= sn && pn > sn - l.height as f64 / k
+}
+
 /// A rectangle of the grid (west, south, east, north) drawn at `size` pixels
 /// from sheets of GeoTIFF on the metre grid at `px_per_m` (see
-/// [`Photo::Sheets`]), nearest pixel; `None` when a sheet it needs cannot be
-/// read. Once a request finds the host unreachable, `down` is set and no more
-/// are made.
+/// [`Photo::Sheets`]), nearest pixel, with what `kept` holds of the tile's
+/// sheets. Pixels that no sheet holds, or whose sheet the survey lacks, are
+/// absent; those whose sheet or block could not be read failed. Once a
+/// request finds the host unreachable, `down` is set and no more are made.
 fn render_sheets(
     client: &reqwest::blocking::Client,
     (sheet, px_per_m): (SheetAt, usize),
+    kept: &SheetCache,
     (w, s, e, n): (f64, f64, f64, f64),
     (width, height): (usize, usize),
     down: &AtomicBool,
-) -> Option<image::RgbImage> {
-    use rayon::prelude::*;
-    let failed = |e: &String| {
-        if unreachable(e) {
-            down.store(true, Ordering::Relaxed);
-        }
-    };
+) -> Drawn {
     let k = px_per_m as f64;
     let (sx, sy) = ((e - w) / width as f64, (n - s) / height as f64);
-    // Each output pixel's sheet, by the sheets' extents: a rectangle meets at
-    // most a few, each looked up and its layout read once.
+    let at = |x: usize, y: usize| (w + (x as f64 + 0.5) * sx, n - (y as f64 + 0.5) * sy);
+    let named = |x: usize, y: usize| {
+        let (pe, pn) = at(x, y);
+        sheet(pe, pn).map(|s| s.0)
+    };
+    // The last of `from..to` still `same`, by halving.
+    let last = |from: usize, to: usize, same: &dyn Fn(usize) -> bool| {
+        let (mut lo, mut hi) = (from, to);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if same(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    };
+    // Each output pixel's part, by the sheets' extents: a rectangle meets at
+    // most a few, each looked up once and its layout read once a tile. Where
+    // none is named, or the one named cannot be had, the pixels named the
+    // same are found east and south of this one by halving: sheets are
+    // rectangles, and this is the first pixel of its sheet to come.
     let mut owner = vec![0u8; width * height];
-    let mut sheets: Vec<(String, f64, f64, Layout)> = Vec::new();
+    let mut parts: Vec<Part> = Vec::new();
     for y in 0..height {
         for x in 0..width {
-            let (pe, pn) = (w + (x as f64 + 0.5) * sx, n - (y as f64 + 0.5) * sy);
-            let inside = |&(_, sw, sn, ref l): &(String, f64, f64, Layout)| {
-                pe >= sw
-                    && pe < sw + l.width as f64 / k
-                    && pn <= sn
-                    && pn > sn - l.height as f64 / k
-            };
-            let i = match sheets.iter().position(inside) {
-                Some(i) => i,
-                None => {
-                    if down.load(Ordering::Relaxed) {
-                        return None;
-                    }
-                    let (url, sw, sn) = sheet(pe, pn)?;
-                    let l = read_layout(client, &url).inspect_err(failed).ok()?;
-                    let here = (url, sw, sn, l);
-                    if !sheet_layout(&here.3) || !inside(&here) || sheets.len() == 255 {
-                        return None;
-                    }
-                    sheets.push(here);
-                    sheets.len() - 1
+            let p = at(x, y);
+            let holds = |part: &Part| match part {
+                Part::Sheet { sw, sn, layout, .. } => covers((*sw, *sn), layout, k, p),
+                Part::Gap { x: xs, y: ys, .. } => {
+                    (xs.0..=xs.1).contains(&x) && (ys.0..=ys.1).contains(&y)
                 }
             };
-            owner[y * width + x] = i as u8;
+            let i = match parts.iter().position(holds) {
+                Some(i) => i as u8,
+                None if parts.len() == usize::from(LOST) => LOST,
+                None => {
+                    let gap = |name: Option<String>, px: Px| Part::Gap {
+                        x: (x, last(x, width, &|x1| named(x1, y) == name)),
+                        y: (y, last(y, height, &|y1| named(x, y1) == name)),
+                        px,
+                    };
+                    let part = match sheet(p.0, p.1) {
+                        None => gap(None, Px::Absent),
+                        Some((url, sw, sn)) => match kept.layout(client, &url, down) {
+                            Ok(layout) if covers((sw, sn), &layout, k, p) => Part::Sheet {
+                                url,
+                                sw,
+                                sn,
+                                layout,
+                            },
+                            Ok(_) => gap(Some(url), Px::Failed),
+                            Err(px) => gap(Some(url), px),
+                        },
+                    };
+                    parts.push(part);
+                    (parts.len() - 1) as u8
+                }
+            };
+            owner[y * width + x] = i;
         }
     }
+    let mut state: Vec<Px> = owner
+        .iter()
+        .map(|&o| match parts.get(usize::from(o)) {
+            Some(Part::Sheet { .. }) => Px::Came,
+            Some(Part::Gap { px, .. }) => *px,
+            None => Px::Failed,
+        })
+        .collect();
     let mut img = image::RgbImage::new(width as u32, height as u32);
-    for (i, (url, sw, sn, l)) in sheets.iter().enumerate() {
+    for (i, part) in parts.iter().enumerate() {
+        let Part::Sheet {
+            url,
+            sw,
+            sn,
+            layout: l,
+        } = part
+        else {
+            continue;
+        };
         let across = l.width.div_ceil(l.tile_w);
         // The sheet's pixel under each output pixel it owns.
-        let at = |x: usize, y: usize| {
-            let (pe, pn) = (w + (x as f64 + 0.5) * sx, n - (y as f64 + 0.5) * sy);
+        let src = |x: usize, y: usize| {
+            let (pe, pn) = at(x, y);
             let px = (((pe - sw) * k) as usize).min(l.width - 1);
             let py = (((sn - pn) * k) as usize).min(l.height - 1);
             (px, py)
         };
+        let block = |(px, py): (usize, usize)| (py / l.tile_h) * across + px / l.tile_w;
         let mut blocks: Vec<usize> = (0..height)
             .flat_map(|y| (0..width).map(move |x| (x, y)))
-            .filter(|&(x, y)| owner[y * width + x] as usize == i)
-            .map(|(x, y)| {
-                let (px, py) = at(x, y);
-                (py / l.tile_h) * across + px / l.tile_w
-            })
+            .filter(|&(x, y)| usize::from(owner[y * width + x]) == i)
+            .map(|(x, y)| block(src(x, y)))
             .collect();
         blocks.sort_unstable();
         blocks.dedup();
-        let got: Vec<(usize, Vec<u8>)> = blocks
-            .par_iter()
-            .map(|&b| {
-                if down.load(Ordering::Relaxed) {
-                    return Err("host unreachable".to_string());
-                }
-                let px = fetch_block(client, url, l, b).inspect_err(failed)?;
-                Ok((b, px))
-            })
-            .collect::<Result<_, _>>()
-            .ok()?;
-        let got: std::collections::HashMap<usize, Vec<u8>> = got.into_iter().collect();
+        let got = kept.blocks(client, url, l, &blocks, down);
         for y in 0..height {
             for x in 0..width {
-                if owner[y * width + x] as usize != i {
+                if usize::from(owner[y * width + x]) != i {
                     continue;
                 }
-                let (px, py) = at(x, y);
-                let b = &got[&((py / l.tile_h) * across + px / l.tile_w)];
+                let (px, py) = src(x, y);
+                let Some(b) = &got[&block((px, py))] else {
+                    state[y * width + x] = Px::Failed;
+                    continue;
+                };
                 let o = ((py % l.tile_h) * l.tile_w + px % l.tile_w) * l.samples;
                 img.put_pixel(x as u32, y as u32, image::Rgb([b[o], b[o + 1], b[o + 2]]));
             }
         }
     }
-    Some(img)
+    let state = state.iter().any(|&p| p != Px::Came).then_some(state);
+    Drawn { img, state }
 }
 
 /// Whether a sheet's layout is one [`render_sheets`] reads: 3 or 4 samples a
@@ -541,8 +804,20 @@ fn sheet_layout(l: &Layout) -> bool {
         && l.offsets.len() >= l.width.div_ceil(l.tile_w) * l.height.div_ceil(l.tile_h)
 }
 
-fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, String> {
-    let head = get_range(client, url, 0, 65_536)?;
+/// Read the first IFD of a classic TIFF and the tile table it points to;
+/// [`Failure::Missing`] where the server has no such file.
+fn read_layout(client: &reqwest::blocking::Client, url: &str) -> Result<Layout, Failure> {
+    let head = super::fetch::get_range(client, url, 0, 65_536)?;
+    layout_from(client, url, head).map_err(Failure::Other)
+}
+
+/// The layout from the file's first 64 KiB, `head`, reading on where the
+/// directory or its tables lie past them.
+fn layout_from(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    head: Vec<u8>,
+) -> Result<Layout, String> {
     if head.len() < 8 {
         return Err("short TIFF header".into());
     }
@@ -728,8 +1003,9 @@ fn fetch_block(
 /// Fold one decoded block's pixels into the metre cells it covers. 256 pixels
 /// are 51.2 m, so every block seam cuts a column and a row of cells in two; such
 /// a cell is measured on the block that holds most of it (3 or more of its 5
-/// pixel rows and columns), which is always exactly one of the two.
-fn fill_cells(t: &mut PhotoTile, l: &Layout, i: usize, px: &[u8]) {
+/// pixel rows and columns), which is always exactly one of the two. A cell
+/// any of whose pixels is `absent` (the block's, row-major) has no photo.
+fn fill_cells(t: &mut PhotoTile, l: &Layout, i: usize, px: &[u8], absent: Option<&[bool]>) {
     let (bx, by) = (i % t.blocks_across, i / t.blocks_across);
     let (x0, y0) = (bx * l.tile_w, by * l.tile_h);
     let (x1, y1) = (x0 + l.tile_w, y0 + l.tile_h);
@@ -745,6 +1021,13 @@ fn fill_cells(t: &mut PhotoTile, l: &Layout, i: usize, px: &[u8]) {
         for c in x0 / PX_PER_M..(x1.div_ceil(PX_PER_M)).min(TILE) {
             let (px0, px1) = span(c, x0, x1);
             if px1 <= px0 || px1 - px0 < 3 {
+                continue;
+            }
+            let gap = |a: &[bool]| {
+                (py0..py1).any(|py| (px0..px1).any(|pxx| a[(py - y0) * l.tile_w + pxx - x0]))
+            };
+            if absent.is_some_and(gap) {
+                t.cells[r * TILE + c] = PhotoCell::default();
                 continue;
             }
             let (mut exg, mut green, mut lum, mut blue) = (0.0f32, 0u32, 0.0f32, 0.0f32);
@@ -780,5 +1063,85 @@ fn fill_cells(t: &mut PhotoTile, l: &Layout, i: usize, px: &[u8]) {
                 present: true,
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kept_blocks_go_oldest_first_past_the_bytes() {
+        let mut r = Recent::default();
+        let block = || Arc::new(vec![0u8; SHEET_BLOCK_BYTES / 3]);
+        r.put("a", 1, block());
+        r.put("a", 2, block());
+        r.put("b", 1, block());
+        // A block asked for is the latest again: the next one pushes out a 2.
+        assert!(r.get("a", 1).is_some());
+        r.put("b", 2, block());
+        assert!(r.get("a", 2).is_none());
+        assert!(r.get("a", 1).is_some() && r.get("b", 1).is_some() && r.get("b", 2).is_some());
+    }
+
+    /// Strips of tile 0_0 from the west: no sheet, a sheet the survey lacks,
+    /// one that cannot be had, and one of a single block of 512 pixels.
+    fn strips(e: f64, _n: f64) -> Option<(String, f64, f64)> {
+        let at = |name: &str, w: f64| Some((name.to_string(), w, 1000.0));
+        match e {
+            e if e < 102.4 => None,
+            e if e < 204.8 => at("missing", 102.4),
+            e if e < 307.2 => at("failing", 204.8),
+            _ => at("here", 307.2),
+        }
+    }
+
+    #[test]
+    fn sheets_missing_are_done_with_and_failing_ones_left_for_later() {
+        let kept = SheetCache::default();
+        {
+            let mut layouts = lock(&kept.layouts);
+            layouts.insert("missing".into(), Err(Px::Absent));
+            layouts.insert("failing".into(), Err(Px::Failed));
+            let here = Layout {
+                width: 512,
+                height: 512,
+                tile_w: 512,
+                tile_h: 512,
+                offsets: vec![0],
+                counts: vec![0],
+                compression: 1,
+                predictor: 1,
+                samples: 3,
+            };
+            layouts.insert("here".into(), Ok(Arc::new(here)));
+        }
+        let grey = [120u8, 130, 140].repeat(512 * 512);
+        lock(&kept.recent).put("here", 0, Arc::new(grey));
+        let client = reqwest::blocking::Client::new();
+        let down = AtomicBool::new(false);
+        let mut t = PhotoTile::new(WMS_ACROSS);
+        // The first eight blocks of the top row, a strip to two.
+        let todo: Vec<usize> = (0..8).collect();
+        let failed = fetch_rendered((0, 0), &todo, &mut t, true, &|rect, size| {
+            Some(render_sheets(
+                &client,
+                (strips, 5),
+                &kept,
+                rect,
+                size,
+                &down,
+            ))
+        });
+        assert_eq!(failed, 2);
+        assert_eq!(
+            t.blocks_in[..8],
+            [true, true, true, true, false, false, true, true]
+        );
+        let cell = |c: usize| t.cells[10 * TILE + c];
+        assert!(!cell(10).present && !cell(150).present && !cell(250).present);
+        assert!(cell(350).present);
+        assert_eq!(cell(350).rgb, [120, 130, 140]);
+        assert!(!down.load(Ordering::Relaxed));
     }
 }

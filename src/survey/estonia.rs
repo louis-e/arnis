@@ -251,6 +251,7 @@ pub static ESTONIA: Source = Source {
     },
     laser_plants: true,
     strict_pools: false,
+    paving_brighter: false,
     attribution: "Maa- ja Ruumiamet (open data licence)",
 };
 

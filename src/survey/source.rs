@@ -174,6 +174,8 @@ pub struct Source {
     pub photo: Photo,
     /// Ground-return intensity under which a block is paving and over which it is
     /// planted, when neither the photo nor the laser alone can calibrate it.
+    /// Where paving reads the brighter ([`Self::paving_brighter`]), the one
+    /// under which a block is planted and the one over which it is paving.
     pub intensity_defaults: (f32, f32),
     pub classes: LaserClasses,
     /// Whether the laser's own sign of plants (vegetation classes, or pulses
@@ -186,6 +188,13 @@ pub struct Source {
     /// points a square metre a cell's few returns are chance as often as
     /// water, and every bluish shadow on a street would be a pool.
     pub strict_pools: bool,
+    /// Whether flat paving returns a brighter ground intensity than lawn, the
+    /// other way round from the rest: Latvia's scans, whose lawn returns are
+    /// mostly low plants (see [`LaserClasses::vegetation`]) and the ground
+    /// returns left darker on lawn. The intensity is then read turned over
+    /// (see [`super::classify::Inputs::i_gnd`]), and paving is kept near
+    /// buildings only, since bare and trodden ground reads as bright there.
+    pub paving_brighter: bool,
     pub attribution: &'static str,
 }
 

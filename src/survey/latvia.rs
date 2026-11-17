@@ -12,8 +12,8 @@
 //!   7 noise, 9 water. Most lawn and meadow returns are low vegetation a few
 //!   centimetres up, read here as planted ground; the ground returns left
 //!   read darker on lawn than on paving, and bare or trodden ground as
-//!   bright as paving, so the intensity is turned over
-//!   ([`super::classify::turn_over`]) and paving kept near buildings only.
+//!   bright as paving, so the intensity is read turned over and paving kept
+//!   near buildings only ([`Source::paving_brighter`]).
 //! * Orthophoto: the open sixth cycle (2016 to 2018), RGB at 25 cm in
 //!   uncompressed GeoTIFF sheets of 2.5 km (1:5000, tiled 512 pixels), at
 //!   `https://s3.storage.pub.lvdc.gov.lv/lgia-opendata/ortofoto_rgb_v6/{sheet50}/
@@ -401,8 +401,9 @@ pub static LATVIA: Source = Source {
         sheet: photo_sheet,
         px_per_m: 4,
     },
-    // From the photo calibration in Riga-Bieriņi (2016, paving the brighter);
-    // a last resort.
+    // Lawn up to 40, paving past 60: Riga-Bieriņi's flat ground (2016)
+    // splits at 42, lawn about 1 and paving about 84, and its photo puts
+    // lawn at 0 and paving past 74. A last resort.
     intensity_defaults: (40.0, 60.0),
     // Low vegetation is lawn and meadow a few centimetres up: ground, and
     // vegetation too, so it reads as planted whatever its intensity.
@@ -416,6 +417,7 @@ pub static LATVIA: Source = Source {
     },
     laser_plants: true,
     strict_pools: true,
+    paving_brighter: true,
     attribution: "Latvijas Ģeotelpiskās informācijas aģentūra (CC BY 4.0)",
 };
 

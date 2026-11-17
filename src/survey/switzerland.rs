@@ -318,6 +318,7 @@ pub static SWITZERLAND: Source = Source {
     },
     laser_plants: true,
     strict_pools: false,
+    paving_brighter: false,
     attribution: "Federal Office of Topography swisstopo – swissSURFACE3D, SWISSIMAGE",
 };
 

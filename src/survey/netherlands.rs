@@ -259,6 +259,7 @@ pub static NETHERLANDS: Source = Source {
     },
     laser_plants: true,
     strict_pools: false,
+    paving_brighter: false,
     attribution: "AHN (CC0 / CC BY 4.0), Beeldmateriaal Nederland via PDOK (CC BY 4.0)",
 };
 

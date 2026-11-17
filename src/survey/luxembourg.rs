@@ -207,6 +207,7 @@ pub static LUXEMBOURG: Source = Source {
     },
     laser_plants: true,
     strict_pools: false,
+    paving_brighter: false,
     attribution: "Administration du cadastre et de la topographie, Luxembourg (CC0)",
 };
 
