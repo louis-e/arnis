@@ -1938,7 +1938,7 @@ fn generate_highways_internal(
             let lane_range = highway_lane_range(highway_type, &way.tags, scale_factor);
             // Decks keep the square their railings are laid out from; the masks read the same.
             let square_stamp = stamps_square(way);
-            // How far the road paves into a building standing against it.
+            // How far the road paves into a building standing against it, or a verge.
             let kept_by_walls = wall_core(way, highway_type, scale_factor);
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
@@ -2279,7 +2279,8 @@ fn generate_highways_internal(
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
                                 if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
-                                    && building_footprints.contains(set_x, set_z)
+                                    && (building_footprints.contains(set_x, set_z)
+                                        || editor.keeps_its_ground(set_x, set_z))
                                 {
                                     continue;
                                 }
@@ -3613,24 +3614,20 @@ pub(crate) fn stamps_square(way: &ProcessedWay) -> bool {
     is_bridge_way(way) && lays_deck(way)
 }
 
-/// The half-width a road keeps where a building stands against it, when narrower than the
-/// road: its lanes inside the parking rows, a two-way street with a sidewalk the width it
-/// would have without one, a pedestrian street a path's width. What the road gains past
-/// that, as in a narrow old-town street whose house fronts are mapped wider than they
-/// stand, stops at the walls instead of paving the ground floors. None for a road paved
-/// whole: a bridge deck, or a passage through a building.
+/// The half-width a road keeps where a building stands against it, or a verge with its
+/// grass or a street tree, when narrower than the road: its lanes inside the parking rows, a
+/// two-way street with a sidewalk the width it would have without one. What the road gains
+/// past that, as in a narrow old-town street whose house fronts are mapped wider than they
+/// stand, stops at the walls instead of paving the ground floors, and leaves the verge
+/// green. None for a road paved whole: a bridge deck, or a passage through a building.
 pub(crate) fn wall_core(way: &ProcessedWay, highway_type: &str, scale: f64) -> Option<i32> {
     if stamps_square(way) || way.tags.get("tunnel").map(String::as_str) == Some("building_passage")
     {
         return None;
     }
-    let halves = road_width::road_halves(highway_type, &way.tags, scale);
-    let core = if highway_type == "pedestrian" {
-        halves.lanes.min(1)
-    } else {
-        road_width::wall_half(highway_type, &way.tags, scale)
-    };
-    (core < halves.kerb).then_some(core)
+    let kerb = road_width::road_halves(highway_type, &way.tags, scale).kerb;
+    let core = road_width::wall_half(highway_type, &way.tags, scale);
+    (core < kerb).then_some(core)
 }
 
 /// How far a road's stamp reaches from a centreline cell along the unit direction
@@ -3855,7 +3852,8 @@ fn stamp_highway_surfaces(
                         continue;
                     }
                     if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
-                        && building_footprints.contains(bx + dx, bz + dz)
+                        && (building_footprints.contains(bx + dx, bz + dz)
+                            || editor.is_some_and(|e| e.keeps_its_ground(bx + dx, bz + dz)))
                     {
                         continue;
                     }

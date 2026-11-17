@@ -917,6 +917,62 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
+    /// Whether what a road gains past its lanes leaves (x, z) to the ground: land cover keeps
+    /// it green, or the canopy map grows a tree with its trunk within a block of it. Parking
+    /// rows and the second lane of a street pave over neither, so verges keep their grass
+    /// and street trees, as the plain road beside them did.
+    pub fn keeps_its_ground(&self, x: i32, z: i32) -> bool {
+        use crate::land_cover::{
+            LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_TREE_COVER,
+            LC_WETLAND,
+        };
+        let Some(ground) = self.ground.as_ref() else {
+            return false;
+        };
+        if matches!(
+            ground.cover_class(self.ground_point(x, z)),
+            LC_TREE_COVER
+                | LC_SHRUBLAND
+                | LC_GRASSLAND
+                | LC_CROPLAND
+                | LC_WETLAND
+                | LC_MANGROVES
+                | LC_MOSS
+        ) {
+            return true;
+        }
+        if !ground.has_canopy() || !ground.has_land_cover() {
+            return false;
+        }
+        let spacing = self.tree_slot_spacing();
+        // The trunk slots of the lattice cells around (x, z) that stand within a block of it.
+        let mut seen: [(i32, i32); 9] = [(i32::MIN, i32::MIN); 9];
+        for (k, (dx, dz)) in (-1..=1)
+            .flat_map(|dx| (-1..=1).map(move |dz| (dx, dz)))
+            .enumerate()
+        {
+            let slot = crate::trees::schematic::trunk_slot_s(x + dx, z + dz, spacing);
+            if (slot.0 - x).abs() > 1 || (slot.1 - z).abs() > 1 || seen[..k].contains(&slot) {
+                continue;
+            }
+            seen[k] = slot;
+            let (_, tree) = crate::ground_generation::canopy_verdict(
+                ground,
+                slot.0,
+                slot.1,
+                self.ground_origin_x,
+                self.ground_origin_z,
+                spacing,
+                self.tree_pack.as_deref(),
+                self.scale,
+            );
+            if tree {
+                return true;
+            }
+        }
+        false
+    }
+
     /// World (x, z) as a point on the shared `Ground` grid.
     #[inline(always)]
     fn ground_point(&self, x: i32, z: i32) -> crate::coordinate_system::cartesian::XZPoint {
