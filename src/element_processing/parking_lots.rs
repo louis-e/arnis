@@ -10,7 +10,7 @@ use crate::element_processing::surfaces::{get_blocks_for_surface, semirandom_sur
 use crate::floodfill_cache::{in_hole, FloodFillCache, Holes};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -130,27 +130,24 @@ fn convex_hull(mut points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 }
 
 /// Rows along the long side of the smallest rectangle around the outline, from the corner
-/// where its first row begins. Points added by clipping the lot to the area are left out
-/// where the mapped ones still span an area, so the grid does not turn with the area's edge.
+/// where its first row begins. A lot cut by the edge of the area is measured as drawn, but
+/// does not turn with that edge: a side the clip ran along it, between two points it added,
+/// gives no direction. Turned by its mapped corners alone, a lot mostly outside the area
+/// took whatever angle the few corners left inside gave, and its stalls ran across the
+/// street it lines.
 fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
     // Cell centres.
     let xz = |n: &ProcessedNode| (f64::from(n.x) + 0.5, f64::from(n.z) + 0.5);
-    let mapped = convex_hull(
-        nodes
-            .iter()
-            .filter(|n| !is_invented_node_id(n.id))
-            .map(xz)
-            .collect(),
-    );
-    // A ring cut down to a corner and its closing node, or mapped in a line, spans nothing.
-    let hull = if mapped.len() >= 3 {
-        mapped
-    } else {
-        convex_hull(nodes.iter().map(xz).collect())
-    };
+    let hull = convex_hull(nodes.iter().map(xz).collect());
     if hull.len() < 3 {
         return None;
     }
+    let mapped: FnvHashSet<(i32, i32)> = nodes
+        .iter()
+        .filter(|n| !is_invented_node_id(n.id))
+        .map(|n| (n.x, n.z))
+        .collect();
+    let is_mapped = |p: (f64, f64)| mapped.contains(&(p.0.floor() as i32, p.1.floor() as i32));
     let span = |d: (f64, f64)| {
         hull.iter()
             .map(|p| p.0 * d.0 + p.1 * d.1)
@@ -158,20 +155,26 @@ fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
                 (lo.min(s), hi.max(s))
             })
     };
-    // (area, long side's direction); the smallest rectangle has a side on the hull.
+    // (area, long side's direction); the smallest rectangle has a side on the hull. The
+    // sides along the area's edge count only where the hull has no other.
     let mut best: Option<(f64, (f64, f64))> = None;
-    for i in 0..hull.len() {
-        let (a, b) = (hull[i], hull[(i + 1) % hull.len()]);
-        let len = (b.0 - a.0).hypot(b.1 - a.1);
-        if len < 1e-6 {
-            continue;
+    for along_cut in [false, true] {
+        for i in 0..hull.len() {
+            let (a, b) = (hull[i], hull[(i + 1) % hull.len()]);
+            let len = (b.0 - a.0).hypot(b.1 - a.1);
+            if len < 1e-6 || (!along_cut && !is_mapped(a) && !is_mapped(b)) {
+                continue;
+            }
+            let e = ((b.0 - a.0) / len, (b.1 - a.1) / len);
+            let n = (-e.1, e.0);
+            let ((e0, e1), (n0, n1)) = (span(e), span(n));
+            let area = (e1 - e0) * (n1 - n0);
+            if best.is_none_or(|(a, _)| area < a - 1e-6) {
+                best = Some((area, if e1 - e0 >= n1 - n0 { e } else { n }));
+            }
         }
-        let e = ((b.0 - a.0) / len, (b.1 - a.1) / len);
-        let n = (-e.1, e.0);
-        let ((e0, e1), (n0, n1)) = (span(e), span(n));
-        let area = (e1 - e0) * (n1 - n0);
-        if best.is_none_or(|(a, _)| area < a - 1e-6) {
-            best = Some((area, if e1 - e0 >= n1 - n0 { e } else { n }));
+        if best.is_some() {
+            break;
         }
     }
     let (_, u) = best?;
@@ -454,10 +457,13 @@ pub fn generate_parking_lot(
     let Some(grid) = stall_grid(way) else {
         return;
     };
+    // Laid out along mapped aisles, whose lanes run down the grid's aisles.
+    let on_aisles = way.tags.contains_key(AISLE_TAG);
 
     for &(x, z) in &lot {
         // Stall sides on the left of each stall, a line across its front, and the stall
-        // ends at the aisle; the aisles keep the bare asphalt.
+        // ends at the aisle; the aisles keep the bare asphalt, and so do the lanes of a road
+        // the lot is mapped around. A mapped aisle's lanes reach to the stall ends' line.
         let (a, b) = grid.local(x, z);
         let across = (a.floor() as i32).rem_euclid(STALL_WIDTH);
         let along = (b.floor() as i32).rem_euclid(ROW_PERIOD);
@@ -466,12 +472,14 @@ pub fn generate_parking_lot(
         } else {
             along == STALL_LENGTH
         };
-        if line {
+        let lanes = editor.on_carriageway(x, z) && !(on_aisles && along == STALL_LENGTH);
+        if line && !lanes {
             editor.set_block(WHITE_CONCRETE, x, 0, z, Some(LOT_SURFACES), None);
         }
     }
 
-    // Lamps and cars, by the stall corners and middles the grid puts inside the lot.
+    // Lamps and cars, by the stall corners and middles the grid puts inside the lot, and
+    // off the lanes of any road through it.
     lot.sort_unstable();
     let in_lot = |x: i32, z: i32| lot.binary_search(&(x, z)).is_ok();
     if lot.is_empty() {
@@ -494,7 +502,11 @@ pub fn generate_parking_lot(
             let (a, b) = (f64::from(i) * w, f64::from(j) * p);
             // A slim metal lamp with a cool-white head, at every third stall of every other row.
             let corner = grid.cell(a + 0.5, b + 0.5);
-            if i.rem_euclid(3) == 0 && j.rem_euclid(2) == 0 && in_lot(corner.0, corner.1) {
+            if i.rem_euclid(3) == 0
+                && j.rem_euclid(2) == 0
+                && in_lot(corner.0, corner.1)
+                && !editor.on_carriageway(corner.0, corner.1)
+            {
                 let (x, z) = corner;
                 editor.set_block(SMOOTH_STONE, x, 1, z, None, None);
                 editor.set_block(ANDESITE_WALL, x, 2, z, None, None);
@@ -509,6 +521,11 @@ pub fn generate_parking_lot(
                 (0..=STALL_LENGTH).all(|db| {
                     let (x, z) = grid.cell(a + f64::from(da), b + f64::from(db));
                     in_lot(x, z)
+                        && (da == 0
+                            || da == STALL_WIDTH
+                            || db == 0
+                            || db == STALL_LENGTH
+                            || !editor.on_carriageway(x, z))
                 })
             });
             if inside {
@@ -615,6 +632,31 @@ mod tests {
         assert!(close((grid.u.0.abs(), grid.u.1.abs()), (1.0, 0.0)));
         // Mapped in a line, it spans no area at all.
         assert!(rectangle_grid(&[node(1, 0, 0), node(2, 9, 0), node(1, 0, 0)]).is_none());
+    }
+
+    #[test]
+    fn a_lot_cut_by_the_area_edge_keeps_its_rows_along_the_street() {
+        // Street-side parking along both kerbs of a street running west to east, cut at
+        // x = 0 by the edge of the area (Erding, Marienbader Straße). The eight mapped
+        // corners left inside alone made a rectangle turned 23 degrees, and the stalls ran
+        // across the street.
+        let cut = |id: u64, x: i32, z: i32| node((1 << 62) + id, x, z);
+        let mut nodes = vec![
+            cut(1, 0, 118),
+            node(2, 108, 114),
+            node(3, 105, 119),
+            node(4, 100, 120),
+            node(5, 100, 136),
+            node(6, 73, 137),
+            node(7, 73, 147),
+            node(8, 55, 148),
+            node(9, 54, 137),
+            cut(10, 0, 138),
+        ];
+        nodes.push(nodes[0].clone());
+        let grid = rectangle_grid(&nodes).unwrap();
+        let angle = grid.u.1.atan2(grid.u.0).to_degrees().rem_euclid(180.0);
+        assert!(angle.min(180.0 - angle) < 3.0, "{angle}");
     }
 
     #[test]
