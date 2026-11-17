@@ -854,5 +854,6 @@
   "measured_heights_tip": "Gives buildings that OpenStreetMap leaves without height or levels the height the laser measured, and flat roofs where it saw them.",
   "lidar_limit": "Download Limit",
   "lidar_limit_desc": "Most a run downloads for laser data.",
-  "lidar_limit_tip": "Most a run downloads for laser data. Cached scans do not count. Past it the run goes on without them. A square kilometre is about 100 MB."
+  "lidar_limit_tip": "Most a run downloads for laser data. Cached scans do not count. Past it the run goes on without them. A square kilometre is about 100 MB.",
+  "lidar_over_limit": "Laser data skipped: the area needs about {mb} MB, more than the Download Limit of {limit} MB. Raise it under Settings > Advanced > Laser Data."
 }

@@ -854,5 +854,6 @@
   "measured_heights_tip": "Budynkom bez wysokości i kondygnacji w OpenStreetMap nadaje wysokość zmierzoną laserem i płaskie dachy tam, gdzie je widział.",
   "lidar_limit": "Limit pobierania",
   "lidar_limit_desc": "Najwięcej danych laserowych na jedno uruchomienie.",
-  "lidar_limit_tip": "Najwięcej danych laserowych pobieranych na jedno uruchomienie. Skany w pamięci podręcznej się nie liczą. Powyżej generowanie idzie bez nich. Jeden km² to około 100 MB."
+  "lidar_limit_tip": "Najwięcej danych laserowych pobieranych na jedno uruchomienie. Skany w pamięci podręcznej się nie liczą. Powyżej generowanie idzie bez nich. Jeden km² to około 100 MB.",
+  "lidar_over_limit": "Pominięto dane laserowe: obszar wymaga ok. {mb} MB, więcej niż Limit pobierania ({limit} MB). Zwiększ go w Ustawienia personalizacji > Zaawansowane > Dane laserowe."
 }

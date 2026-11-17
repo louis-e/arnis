@@ -854,5 +854,6 @@
   "measured_heights_tip": "Dă clădirilor fără înălțime sau etaje în OpenStreetMap înălțimea măsurată de laser și acoperișuri plate unde le-a văzut.",
   "lidar_limit": "Limită de descărcare",
   "lidar_limit_desc": "Cât descarcă cel mult o rulare pentru datele laser.",
-  "lidar_limit_tip": "Cât descarcă cel mult o rulare pentru datele laser. Scanările din cache nu contează. Peste limită, rularea continuă fără ele. Un km² are circa 100 MB."
+  "lidar_limit_tip": "Cât descarcă cel mult o rulare pentru datele laser. Scanările din cache nu contează. Peste limită, rularea continuă fără ele. Un km² are circa 100 MB.",
+  "lidar_over_limit": "Datele laser au fost omise: zona are nevoie de circa {mb} MB, mai mult decât Limită de descărcare de {limit} MB. Mărește-o în Setări > Avansat > Date laser."
 }

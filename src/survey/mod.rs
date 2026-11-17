@@ -126,6 +126,8 @@ pub struct Plan {
     pub rect: (f64, f64, f64, f64),
     /// Megabytes of laser data not yet cached, estimated.
     pub download_mb: u32,
+    /// The tiles of a source read in whole files that are not yet cached.
+    pub missing: Vec<(i32, i32)>,
 }
 
 impl Plan {
@@ -184,15 +186,17 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
     }
     // Each tile's cache is read whole to check it: side by side.
     use rayon::prelude::*;
+    let mut missing = Vec::new();
     let download_mb = match sheet.laser {
         Laser::Whole { tile_mb, .. } => {
-            tiles
+            missing = tiles
                 .par_iter()
-                .filter(|&&(te, tn)| {
+                .copied()
+                .filter(|&(te, tn)| {
                     !laser::is_cached(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect))
                 })
-                .count() as u32
-                * tile_mb
+                .collect();
+            missing.len() as u32 * tile_mb
         }
         Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
             let missing: Vec<f64> = tiles
@@ -210,7 +214,65 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
         tiles,
         rect,
         download_mb,
+        missing,
     })
+}
+
+/// Megabytes the plan's missing whole files take, asked of the server (a HEAD
+/// each) where their addresses are fixed: Bavaria's tiles run from 70 MB to
+/// past 1 GB in the Alps, so the source's typical size can be far off. A file
+/// the server does not size counts at that.
+fn sized_download_mb(client: &reqwest::blocking::Client, plan: &Plan) -> u32 {
+    let Laser::Whole {
+        locate: Locate::Urls(urls),
+        tile_mb,
+    } = &plan.sheet.laser
+    else {
+        return plan.download_mb;
+    };
+    if plan.missing.is_empty() || crate::net::offline() {
+        return plan.download_mb;
+    }
+    use rayon::prelude::*;
+    let typical = u64::from(*tile_mb) * 1_000_000;
+    let bytes: Vec<u64> = plan
+        .missing
+        .par_iter()
+        .map(|&(te, tn)| {
+            urls(te, tn)
+                .first()
+                .and_then(|u| fetch::content_length(client, u))
+                .unwrap_or(typical)
+        })
+        .collect();
+    bytes.iter().sum::<u64>().div_ceil(1_000_000) as u32
+}
+
+/// The status message for laser data over the download limit, followed by the
+/// megabytes needed and the limit; the window says it in the user's language.
+pub const OVER_LIMIT: &str = "laser_over_limit:";
+
+/// Says the run goes on without laser data for its download size, how much it
+/// needs and how to allow it: `--lidar-max-mb` here, the Download Limit in the
+/// window.
+fn over_limit(need_mb: u32, max_mb: u32) {
+    println!(
+        "Laser data skipped: the area needs about {need_mb} MB of laser scans, more than the {max_mb} MB allowed. Allow it with --lidar-max-mb {}.",
+        limit_for(need_mb)
+    );
+    crate::progress::emit_gui_progress_update(
+        crate::progress::MESSAGE_ONLY,
+        &format!("{OVER_LIMIT} {need_mb} {max_mb}"),
+    );
+}
+
+/// The limit to suggest for `need_mb`: the window's next step (1, 2 or 5 GB),
+/// past those the next whole gigabyte.
+fn limit_for(need_mb: u32) -> u32 {
+    [250, 500, 1000, 2000, 5000]
+        .into_iter()
+        .find(|&step| step >= need_mb)
+        .unwrap_or(need_mb.div_ceil(1000) * 1000)
 }
 
 /// Fetch and classify the survey for `bbox`, sampled on a `grid_w x grid_h` grid
@@ -235,11 +297,14 @@ pub fn fetch_survey_data(
         );
         return None;
     }
-    if plan.download_mb > max_mb {
-        println!(
-            "Laser data skipped: it would download about {} MB of laser scans ({} allowed, see --lidar-max-mb)",
-            plan.download_mb, max_mb
-        );
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .ok()?;
+    let need_mb = sized_download_mb(&client, &plan);
+    if need_mb > max_mb {
+        over_limit(need_mb, max_mb);
         return None;
     }
     println!(
@@ -248,11 +313,6 @@ pub fn fetch_survey_data(
         plan.tiles.len(),
         if plan.tiles.len() == 1 { "" } else { "s" }
     );
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
-        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .ok()?;
     let (bytes0, area0) = (fetch::laser_bytes(), fetch::laser_area_m2());
     let debug = std::env::var_os("ARNIS_LASER_DEBUG").is_some();
     let clock = std::time::Instant::now();
@@ -626,5 +686,13 @@ mod tests {
         // Past the margin the world lies on it: kept, however thin.
         let past = (713_955.0, 5_353_059.0, 716_006.0, 5_354_941.0);
         assert!(!sliver((713, 5353), past));
+    }
+
+    #[test]
+    fn the_limit_offered_covers_the_need() {
+        assert_eq!(limit_for(480), 500);
+        assert_eq!(limit_for(880), 1000);
+        assert_eq!(limit_for(2001), 5000);
+        assert_eq!(limit_for(5200), 6000);
     }
 }

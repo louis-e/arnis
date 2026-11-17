@@ -188,6 +188,29 @@ enum Span {
     Tail(u64),
 }
 
+/// The size of the file at `url` as the server gives it (a HEAD request), or
+/// `None` when it does not say.
+pub fn content_length(client: &reqwest::blocking::Client, url: &str) -> Option<u64> {
+    let _permit = crate::net::request_permit();
+    // Offered gzip, Bavaria's server compresses even its LAZ files on the fly
+    // and then gives no length.
+    let resp = client
+        .head(url)
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .timeout(Duration::from_secs(20))
+        .send()
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.headers()
+        .get(reqwest::header::CONTENT_LENGTH)?
+        .to_str()
+        .ok()?
+        .parse()
+        .ok()
+}
+
 /// A whole small response.
 pub fn get_bytes(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, Failure> {
     get(client, url, None)
