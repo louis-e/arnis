@@ -1912,8 +1912,8 @@ fn generate_highways_internal(
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
             // The lanes the paint divides, inside any parking rows.
             let lane_range = highway_lane_range(highway_type, &way.tags, scale_factor);
-            // Decks and their ramps keep the square their rails are laid out from.
-            let square_stamp = is_bridge_member || is_bridge_ramp;
+            // Decks keep the square their railings are laid out from; the masks read the same.
+            let square_stamp = stamps_square(way);
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
 
@@ -2510,9 +2510,9 @@ fn generate_highways_internal(
                         // Side railings; stair_steps keeps the rail 4-connected on diagonals.
                         if let (Some(by), Some((perp_x, perp_z))) = (rail_y_here, bridge_rail_perp)
                         {
-                            // L1-projected stamp extent + 1, so the rail never lands on the deck.
+                            // The stamp's extent across + 1, so the rail never lands on the deck.
                             let rail_dist =
-                                block_range as f32 * (perp_x.abs() + perp_z.abs()) + 1.0;
+                                stamp_reach(block_range, square_stamp, perp_x, perp_z) + 1.0;
                             for (sign, prev_state, prev_parapet) in [
                                 (1.0_f32, &mut previous_rail_left, &mut previous_parapet_left),
                                 (
@@ -3639,10 +3639,29 @@ pub(crate) fn in_road_stamp(dx: i32, dz: i32, half: i32) -> bool {
     dx * dx + dz * dz <= half * half + half
 }
 
-/// Whether a way is stamped with a square rather than `in_road_stamp`'s disc, as decks are:
-/// their rails, parapets and piers are laid out from the square.
+/// Whether a way is stamped with a square rather than `in_road_stamp`'s disc: a bridge deck,
+/// whose railings, parapets and piers are laid out from the square. Its approach ramps take
+/// the disc like any road. Decided from the way alone, so the pre-scan masks and the
+/// renderer agree.
 pub(crate) fn stamps_square(way: &ProcessedWay) -> bool {
-    is_bridge_way(way)
+    is_bridge_way(way) && lays_deck(way)
+}
+
+/// How far a road's stamp reaches from a centreline cell along the unit direction
+/// `(px, pz)`: the furthest cell centre it covers that way.
+pub(crate) fn stamp_reach(half: i32, square: bool, px: f32, pz: f32) -> f32 {
+    if square {
+        return half as f32 * (px.abs() + pz.abs());
+    }
+    let mut reach = 0f32;
+    for dx in -half..=half {
+        for dz in -half..=half {
+            if in_road_stamp(dx, dz, half) {
+                reach = reach.max(dx as f32 * px + dz as f32 * pz);
+            }
+        }
+    }
+    reach
 }
 
 /// The road half of `collect_road_and_carriageway_coords`.
@@ -3995,6 +4014,47 @@ mod tests {
             mp(&[("highway", "pedestrian"), ("leisure", "park")]),
             Some(RelationArea::Leisure)
         );
+    }
+
+    #[test]
+    fn decks_stamp_a_square_and_everything_else_the_disc() {
+        let way = |pairs: &[(&str, &str)]| ProcessedWay {
+            id: 1,
+            nodes: vec![
+                ProcessedNode {
+                    id: 1,
+                    tags: HashMap::new(),
+                    x: 0,
+                    z: 0,
+                },
+                ProcessedNode {
+                    id: 2,
+                    tags: HashMap::new(),
+                    x: 9,
+                    z: 9,
+                },
+            ],
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        assert!(stamps_square(&way(&[
+            ("highway", "primary"),
+            ("bridge", "yes")
+        ])));
+        // An approach ramp is an ordinary way.
+        assert!(!stamps_square(&way(&[("highway", "primary")])));
+        assert!(!stamps_square(&way(&[
+            ("highway", "platform"),
+            ("bridge", "yes"),
+            ("area", "yes")
+        ])));
+        // Across a diagonal the disc reaches less far than the square's corner.
+        let d = std::f32::consts::FRAC_1_SQRT_2;
+        assert!((stamp_reach(3, true, d, -d) - 3.0 * 2.0 * d).abs() < 1e-5);
+        assert!((stamp_reach(3, false, d, -d) - 4.0 * d).abs() < 1e-5);
+        assert!((stamp_reach(3, false, 1.0, 0.0) - 3.0).abs() < 1e-5);
     }
 
     #[test]
