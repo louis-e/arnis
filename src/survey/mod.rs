@@ -617,6 +617,9 @@ fn mosaic(
         }
     }
     if !any {
+        if failed.is_empty() {
+            println!("Laser data: {} has no scans here", plan.sheet.name);
+        }
         return None;
     }
     Some(inp)

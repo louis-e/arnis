@@ -337,8 +337,8 @@ fn fetch_wms(
                 py1 - py0
             );
             // A busy WMS sometimes answers with an XML exception instead of the
-            // image; ask twice more before giving the blocks up. A request that
-            // got no answer at all is not repeated (the fetch has retried it).
+            // image, or with an error; ask twice more before giving the blocks
+            // up. A host that cannot be reached is not asked again.
             let mut img = None;
             for attempt in 0..3u64 {
                 if down.load(Ordering::Relaxed) {
@@ -349,12 +349,11 @@ fn fetch_wms(
                 }
                 let body = match super::fetch::get_bytes(client, &req) {
                     Ok(b) => b,
-                    Err(e) => {
-                        if unreachable(&e.to_string()) {
-                            down.store(true, Ordering::Relaxed);
-                        }
+                    Err(e) if unreachable(&e.to_string()) => {
+                        down.store(true, Ordering::Relaxed);
                         break;
                     }
+                    Err(_) => continue,
                 };
                 img = image::load_from_memory(&body)
                     .ok()
