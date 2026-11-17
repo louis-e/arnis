@@ -17,7 +17,8 @@
 //! the measured metres.
 //!
 //! An outline the laser mostly saw as something else (built after the scan, or
-//! mapped where nothing stands) is left alone.
+//! mapped where nothing stands) is left alone, and so is a roof past the 51 m
+//! the survey records: its height is unknown, and Overture's may be right.
 
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::ground::Ground;
@@ -27,6 +28,9 @@ use crate::osm_parser::{ProcessedElement, ProcessedWay};
 const MIN_COVER: f64 = 0.6;
 /// Outlines smaller than this are left to the generator.
 const MIN_BLOCKS: usize = 8;
+/// The highest height the survey records (255 fifths of a metre): a roof there
+/// may stand any height above it.
+const SATURATED: f32 = 51.0;
 
 /// Fill measured heights in place; returns how many buildings got one.
 pub fn apply(elements: &mut [ProcessedElement], ground: &Ground, xzbbox: &XZBBox) -> usize {
@@ -100,6 +104,9 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<(f32,
     roof.sort_by(f32::total_cmp);
     let at = |q: f64| roof[((roof.len() - 1) as f64 * q).round() as usize];
     let (eave, top) = (at(0.1), at(0.95));
+    if top >= SATURATED {
+        return None;
+    }
     if top - eave < 1.0 {
         Some((top, true))
     } else {
@@ -161,6 +168,55 @@ mod tests {
         assert_eq!(storeys("house", 2.9), None);
         assert_eq!(storeys("industrial", 9.0), None);
         assert_eq!(storeys("garage", 4.0), None);
+    }
+
+    /// A 20 x 20 block world whose laser saw a roof `byte` fifths of a metre up
+    /// over (2, 2) .. (12, 12), and a way around it.
+    fn roof(byte: u8) -> (Ground, ProcessedWay, XZBBox) {
+        let (w, h) = (20usize, 20usize);
+        let mut cells = vec![[0u8; 5]; w * h];
+        for z in 2..13 {
+            for x in 2..13 {
+                cells[z * w + x] = [super::super::classify::BUILDING, byte, 0, 0, 0];
+            }
+        }
+        let features = super::super::Features {
+            garden: false,
+            trees: false,
+            heights: true,
+        };
+        let mut ground = Ground::new_flat(0);
+        ground.set_world_dims(w, h);
+        ground.set_survey(Some(super::super::SurveyData::from_cells(
+            cells, w, h, features,
+        )));
+        let node = |id, x, z| crate::osm_parser::ProcessedNode {
+            id,
+            tags: Default::default(),
+            x,
+            z,
+        };
+        let way = ProcessedWay {
+            id: 1,
+            nodes: vec![
+                node(1, 2, 2),
+                node(2, 12, 2),
+                node(3, 12, 12),
+                node(4, 2, 12),
+                node(1, 2, 2),
+            ],
+            tags: Default::default(),
+        };
+        let xzbbox = XZBBox::rect_from_xz_lengths(19.0, 19.0).unwrap();
+        (ground, way, xzbbox)
+    }
+
+    #[test]
+    fn a_roof_past_the_highest_height_recorded_is_left_alone() {
+        let (ground, way, xzbbox) = roof(150);
+        assert_eq!(measure(&way, &ground, &xzbbox), Some((30.0, true)));
+        let (ground, way, xzbbox) = roof(255);
+        assert_eq!(measure(&way, &ground, &xzbbox), None);
     }
 
     #[test]
