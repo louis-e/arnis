@@ -520,11 +520,13 @@ type Urls = std::collections::HashMap<(i32, i32), Vec<String>>;
 /// Where to read each tile not already cached: a fixed address, candidates,
 /// or one lookup over the whole rectangle. Addresses cost nothing to work
 /// out, so every tile has them (a cached one never uses them); the lookup is
-/// made only when some tile is not cached. `None` when it cannot be made.
+/// made only when some tile is not cached, or one cached from an older
+/// campaign's zip is due to be checked again. `None` when it cannot be made.
 ///
 /// A lookup's answer is noted in the cache: the tiles it did not list as
 /// absent for the blocks the area wants (a lookup answers only for its part
-/// of a tile). [`Plan::recount`] then counts what is left.
+/// of a tile), and a zipped tile it lists at another address let go (see
+/// [`laser::supersede`]). [`Plan::recount`] then counts what is left.
 fn locate(client: &reqwest::blocking::Client, plan: &Plan) -> Option<Urls> {
     let root = cache_root();
     let mut urls = Urls::default();
@@ -542,7 +544,16 @@ fn locate(client: &reqwest::blocking::Client, plan: &Plan) -> Option<Urls> {
             }
         }
         Locate::Lookup(f) => {
-            if !uncached() {
+            let needed = uncached();
+            // Only to check old zips again: the cache serves whatever the
+            // answer, or if none comes.
+            let recheck = !needed
+                && !crate::net::offline()
+                && plan
+                    .tiles
+                    .iter()
+                    .any(|&t| laser::due_recheck(&root, &plan.sheet, t));
+            if !needed && !recheck {
                 return Some(urls);
             }
             if let Err(e) = crate::net::ensure_online("laser scans") {
@@ -551,6 +562,7 @@ fn locate(client: &reqwest::blocking::Client, plan: &Plan) -> Option<Urls> {
             }
             let found = match f(client, &plan.sheet, plan.rect) {
                 Ok(found) => found,
+                Err(_) if recheck => return Some(urls),
                 Err(e) => {
                     eprintln!("Warning: laser scan index unavailable: {e}");
                     crate::net::note_uncached("laser scans");
@@ -569,7 +581,13 @@ fn locate(client: &reqwest::blocking::Client, plan: &Plan) -> Option<Urls> {
                 let u = p.join("\n");
                 // For later runs, which may make no lookup (see `plan_in`).
                 laser::note_whole(&root, &plan.sheet, t, laser::is_zip(&u));
+                if plan.tiles.contains(&t) {
+                    laser::supersede(&root, &plan.sheet, t, &u);
+                }
                 urls.insert(t, vec![u]);
+            }
+            if recheck {
+                return Some(urls);
             }
             for &t in plan.tiles.iter().filter(|t| !urls.contains_key(t)) {
                 let none = laser::lacking(&root, &plan.sheet, t.0, t.1, &plan.want(t));

@@ -58,6 +58,9 @@ const ABSENT_DAYS: u64 = 30;
 /// lookup is one small request, and an index that answered empty in a hiccup,
 /// or had not listed a delivery yet, is not believed for long.
 const LOOKUP_ABSENT_DAYS: u64 = 7;
+/// A tile cached from a zip (an older campaign, read whole) is looked up again
+/// after this long, so that a newer delivery replaces it.
+const ZIP_RECHECK_DAYS: u64 = 30;
 
 pub struct LaserTile {
     pub n_all: Vec<u8>,
@@ -335,6 +338,36 @@ pub fn missing_km2(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool])
 /// start says it holds them, or the source is known to have none of them.
 pub fn is_cached(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -> bool {
     !lacking(root, source, te, tn, want).contains(&true)
+}
+
+/// Whether tile `t` is cached from a zip (an older campaign, see [`is_zip`])
+/// long enough ago that the source's index should be asked whether a newer
+/// delivery has replaced it.
+pub fn due_recheck(root: &Path, source: &Sheet, (te, tn): (i32, i32)) -> bool {
+    let path = cache_path(root, source, te, tn);
+    LaserTile::read_head(&path).is_some_and(|(_, origin)| is_zip(&origin))
+        && !fresh(&path, ZIP_RECHECK_DAYS)
+}
+
+/// After a lookup listed tile `t` at `url`: a tile cached from a zip that is
+/// no longer what the index lists (a newer campaign, or the tile now
+/// cloud-optimised) is let go, so the run reads the newer delivery and counts
+/// it in the download; one still listed is kept for another
+/// [`ZIP_RECHECK_DAYS`]. Returns whether it was let go.
+pub fn supersede(root: &Path, source: &Sheet, (te, tn): (i32, i32), url: &str) -> bool {
+    let path = cache_path(root, source, te, tn);
+    match LaserTile::read_head(&path) {
+        Some((_, origin)) if is_zip(&origin) && origin != url => {
+            std::fs::remove_file(&path).is_ok()
+        }
+        Some((_, origin)) if is_zip(&origin) => {
+            if let Ok(f) = std::fs::File::options().write(true).open(&path) {
+                let _ = f.set_modified(std::time::SystemTime::now());
+            }
+            false
+        }
+        _ => false,
+    }
 }
 
 /// The tile's measurements over the blocks wanted, from the cache or else read
@@ -1562,6 +1595,32 @@ mod tests {
             unzip(&zipped, &root.join("t.las")),
             Err(Failure::Unusable(_))
         ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_zipped_tile_is_let_go_when_the_index_lists_a_newer_delivery() {
+        let root = temp_root("supersede");
+        let swiss = Sheet::at(&super::super::switzerland::SWITZERLAND, 8.28);
+        let zip = "https://example.org/swisssurface3d_2019_2663-1210.las.zip";
+        let mut t = LaserTile::empty(zip);
+        t.blocks = vec![true; BLOCKS * BLOCKS];
+        std::fs::create_dir_all(root.join(swiss.dir())).unwrap();
+        let path = cache_path(&root, &swiss, 2663, 1210);
+        t.write(&path).unwrap();
+        assert!(!due_recheck(&root, &swiss, (2663, 1210)));
+        let old = std::time::SystemTime::now()
+            - std::time::Duration::from_secs((ZIP_RECHECK_DAYS + 1) * 86_400);
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(old).unwrap();
+        assert!(due_recheck(&root, &swiss, (2663, 1210)));
+        // Still the delivery: kept, and not due again for a while.
+        assert!(!supersede(&root, &swiss, (2663, 1210), zip));
+        assert!(path.exists() && !due_recheck(&root, &swiss, (2663, 1210)));
+        // Now cloud-optimised: let go, to be read afresh.
+        let copc = "https://example.org/swisssurface3d_2024_2663-1210.copc.laz";
+        assert!(supersede(&root, &swiss, (2663, 1210), copc));
+        assert!(!path.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
