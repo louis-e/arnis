@@ -29,6 +29,11 @@ const ROW_PERIOD: i32 = STALL_LENGTH + AISLE_WIDTH;
 /// rows run in, as a unit vector, and a point on the aisle, "ux uz x z".
 const AISLE_TAG: &str = "arnis:parking_aisle";
 
+/// Tag `lay_out_whole_lots` leaves on a lot: the grid its stalls are laid out on, worked out
+/// from its whole mapped outline and the aisles in it before the area clips either, as
+/// "ux uz ox oz aisle". Every piece of a One World the lot reaches into lays it out alike.
+const GRID_TAG: &str = "arnis:stall_grid";
+
 /// What a stall line or the asphalt may be laid over.
 const LOT_SURFACES: &[Block] = &[
     BLACK_CONCRETE,
@@ -110,6 +115,29 @@ impl StallGrid {
                 self.origin.1 - shift * self.u.1,
             ),
             ..self
+        }
+    }
+
+    /// The grid as `GRID_TAG` records it, with whether it runs along a mapped aisle.
+    fn encode(&self, on_aisle: bool) -> String {
+        format!(
+            "{} {} {} {} {}",
+            self.u.0,
+            self.u.1,
+            self.origin.0,
+            self.origin.1,
+            u8::from(on_aisle)
+        )
+    }
+
+    fn decode(tag: &str) -> Option<(Self, bool)> {
+        let v: Vec<f64> = tag
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        match v[..] {
+            [ux, uz, ox, oz, aisle] => Some((Self::along((ux, uz), (ox, oz)), aisle != 0.0)),
+            _ => None,
         }
     }
 
@@ -210,24 +238,95 @@ fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
     ))
 }
 
+/// The grid an `AISLE_TAG` lays a lot out on: along the aisle where it runs near an axis,
+/// else the world's rows.
+fn aisle_grid(tag: &str) -> Option<StallGrid> {
+    let v: Vec<f64> = tag
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    match v[..] {
+        [ux, uz, x, z] => Some(
+            StallGrid::axis((ux, uz))
+                .map_or_else(StallGrid::world, |u| StallGrid::from_aisle(u, (x, z))),
+        ),
+        _ => None,
+    }
+}
+
 /// The grid a lot's stalls are laid out on.
+#[cfg(test)]
 fn stall_grid(way: &ProcessedWay) -> Option<StallGrid> {
-    let aisle = way.tags.get(AISLE_TAG).and_then(|aisle| {
-        let v: Vec<f64> = aisle
-            .split_whitespace()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        match v[..] {
-            [ux, uz, x, z] => Some(
-                StallGrid::axis((ux, uz))
-                    .map_or_else(StallGrid::world, |u| StallGrid::from_aisle(u, (x, z))),
-            ),
-            _ => None,
+    stall_layout(way).map(|(grid, _)| grid)
+}
+
+/// The grid a lot's stalls are laid out on, and whether it runs along a mapped aisle: the
+/// one worked out from the whole lot where the parser could, else from what the area left
+/// of it.
+fn stall_layout(way: &ProcessedWay) -> Option<(StallGrid, bool)> {
+    if let Some(layout) = way.tags.get(GRID_TAG).and_then(|t| StallGrid::decode(t)) {
+        return Some(layout);
+    }
+    match way.tags.get(AISLE_TAG).and_then(|t| aisle_grid(t)) {
+        Some(grid) => Some((grid.on_world_grid(), grid != StallGrid::world())),
+        None => rectangle_grid(&way.nodes).map(|grid| (grid.on_world_grid(), false)),
+    }
+}
+
+/// Lays out every surface lot from its whole mapped outline, `lot_ways` for the lots mapped
+/// as ways and the unclipped member ways `unclipped` for multipolygons, along the parking
+/// aisles mapped in it, `aisles` as mapped, before the area clips any of them: two pieces of
+/// a One World that each hold part of a lot draw its rows alike, meeting at the seam. The
+/// grid goes in `GRID_TAG`.
+pub(crate) fn lay_out_whole_lots(
+    elements: &mut [ProcessedElement],
+    lot_ways: &HashMap<u64, Vec<ProcessedNode>>,
+    aisles: Vec<ProcessedWay>,
+    unclipped: &HashMap<u64, std::sync::Arc<ProcessedWay>>,
+) {
+    let aisles: Vec<ProcessedElement> = aisles.into_iter().map(ProcessedElement::Way).collect();
+    let index = AisleIndex::build(&aisles);
+    for element in elements.iter_mut() {
+        let rings: Vec<&[ProcessedNode]> = match &*element {
+            ProcessedElement::Way(w) => match lot_ways.get(&w.id) {
+                Some(nodes) => vec![&nodes[..]],
+                None => continue,
+            },
+            ProcessedElement::Relation(r) if is_surface_lot(&r.tags) => r
+                .members
+                .iter()
+                .filter(|m| m.role == ProcessedMemberRole::Outer)
+                .map(|m| {
+                    unclipped
+                        .get(&m.way.id)
+                        .filter(|w| is_closed(&w.nodes))
+                        .map_or(&m.way.nodes[..], |w| &w.nodes[..])
+                })
+                .filter(|nodes| is_closed(nodes))
+                .collect(),
+            _ => continue,
+        };
+        if rings.is_empty() {
+            continue;
         }
-    });
-    aisle
-        .or_else(|| rectangle_grid(&way.nodes))
-        .map(StallGrid::on_world_grid)
+        let layout = match index.aisle_in(&rings).and_then(|t| aisle_grid(&t)) {
+            Some(grid) => Some((grid.on_world_grid(), grid != StallGrid::world())),
+            None => {
+                let nodes: Vec<ProcessedNode> =
+                    rings.iter().flat_map(|r| r.iter().cloned()).collect();
+                rectangle_grid(&nodes).map(|grid| (grid.on_world_grid(), false))
+            }
+        };
+        let Some((grid, on_aisle)) = layout else {
+            continue;
+        };
+        let tag = grid.encode(on_aisle);
+        match element {
+            ProcessedElement::Way(w) => w.tags.insert(GRID_TAG.to_string(), tag),
+            ProcessedElement::Relation(r) => r.tags.insert(GRID_TAG.to_string(), tag),
+            ProcessedElement::Node(_) => None,
+        };
+    }
 }
 
 /// Whether (x, z) lies inside a closed ring, by crossings.
@@ -481,12 +580,11 @@ pub fn generate_parking_lot(
         );
     }
     // A lot too thin to lay out stays bare asphalt.
-    let Some(grid) = stall_grid(way) else {
+    // Laid out along mapped aisles, whose lanes run down the grid's aisles.
+    let Some((grid, on_aisles)) = stall_layout(way) else {
         return;
     };
-    // Laid out along mapped aisles, whose lanes run down the grid's aisles.
     let world = grid == StallGrid::world();
-    let on_aisles = way.tags.contains_key(AISLE_TAG) && !world;
 
     for &(x, z) in &lot {
         // Stall sides on the left of each stall, a line across its front, and the stall
@@ -818,5 +916,170 @@ mod tests {
         };
         let grid = stall_grid(lot).unwrap();
         assert!(close((grid.u.0.abs(), grid.u.1.abs()), (0.0, 1.0)));
+    }
+
+    /// The pieces of a lot a One World cuts at x = 20 or z = 20, either side kept, as the
+    /// clipper leaves them: the corners inside and the points it added on the cut.
+    fn pieces() -> Vec<Vec<ProcessedNode>> {
+        let cut = |id: u64, x: i32, z: i32| node((1 << 62) + id, x, z);
+        let closed = |mut nodes: Vec<ProcessedNode>| {
+            nodes.push(nodes[0].clone());
+            nodes
+        };
+        vec![
+            // West of x = 20, and east of it.
+            closed(vec![
+                node(1, 0, 0),
+                cut(1, 20, 0),
+                cut(2, 20, 40),
+                node(4, 0, 40),
+            ]),
+            closed(vec![
+                cut(1, 20, 0),
+                node(2, 60, 0),
+                node(3, 60, 40),
+                cut(2, 20, 40),
+            ]),
+            // North of z = 20, and south of it.
+            closed(vec![
+                node(1, 0, 0),
+                node(2, 60, 0),
+                cut(3, 60, 20),
+                cut(4, 0, 20),
+            ]),
+            closed(vec![
+                cut(4, 0, 20),
+                cut(3, 60, 20),
+                node(3, 60, 40),
+                node(4, 0, 40),
+            ]),
+        ]
+    }
+
+    #[test]
+    fn a_lot_one_world_cuts_lays_out_its_rows_alike_in_every_piece() {
+        // A 60 x 40 lot, long east to west.
+        let whole = ring(&[(0, 0), (60, 0), (60, 40), (0, 40)]);
+        let lot = |nodes: Vec<ProcessedNode>| {
+            ProcessedElement::Way(ProcessedWay {
+                id: 7,
+                nodes,
+                tags: HashMap::from([("amenity".to_string(), "parking".to_string())]),
+            })
+        };
+        let lot_ways = HashMap::from([(7u64, whole.clone())]);
+        let layout = |nodes: Vec<ProcessedNode>| {
+            let mut elements = vec![lot(nodes)];
+            lay_out_whole_lots(&mut elements, &lot_ways, Vec::new(), &HashMap::new());
+            match &elements[0] {
+                ProcessedElement::Way(w) => stall_layout(w).unwrap(),
+                _ => unreachable!(),
+            }
+        };
+        let reference = layout(whole.clone());
+        assert!(close(reference.0.u, (1.0, 0.0)) || close(reference.0.u, (-1.0, 0.0)));
+        for piece in pieces() {
+            let got = layout(piece.clone());
+            // The same rows, the same way round, from the same start: the stall lines meet.
+            assert_eq!(got, reference, "{piece:?}");
+        }
+        // Drawn from what the cut left, the pieces came out turned and shifted.
+        let clipped: Vec<_> = pieces()
+            .into_iter()
+            .filter_map(|nodes| rectangle_grid(&nodes).map(StallGrid::on_world_grid))
+            .collect();
+        assert!(clipped.iter().any(|g| *g != reference.0), "{clipped:?}");
+    }
+
+    #[test]
+    fn a_lot_mapped_as_a_multipolygon_is_laid_out_and_paved_round_its_hole() {
+        use crate::element_processing::RelationArea;
+        use crate::floodfill_cache::{FloodFillCache, InnerRings};
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation};
+        use clap::Parser;
+        use std::sync::Arc;
+        let tags = HashMap::from([
+            ("type".to_string(), "multipolygon".to_string()),
+            ("amenity".to_string(), "parking".to_string()),
+        ]);
+        assert_eq!(RelationArea::of(&tags), Some(RelationArea::Parking));
+        // The outer ring as mapped, and as the area's edge at z = 30 left it; a kiosk inside.
+        let outer = Arc::new(ProcessedWay {
+            id: 11,
+            nodes: ring(&[(2, 2), (50, 2), (50, 40), (2, 40)]),
+            tags: HashMap::new(),
+        });
+        let clipped = ProcessedWay {
+            id: 11,
+            nodes: {
+                let cut = |id: u64, x: i32, z: i32| node((1 << 62) + id, x, z);
+                let mut n = vec![node(1, 2, 2), node(2, 50, 2), cut(1, 50, 30), cut(2, 2, 30)];
+                n.push(n[0].clone());
+                n
+            },
+            tags: HashMap::new(),
+        };
+        let kiosk = ProcessedWay {
+            id: 12,
+            nodes: ring(&[(20, 10), (26, 10), (26, 16), (20, 16)]),
+            tags: HashMap::new(),
+        };
+        let member = |way: ProcessedWay, role| ProcessedMember {
+            role,
+            way: Arc::new(way),
+        };
+        let mut elements = vec![ProcessedElement::Relation(ProcessedRelation {
+            id: 3,
+            tags,
+            members: vec![
+                member(clipped, ProcessedMemberRole::Outer),
+                member(kiosk, ProcessedMemberRole::Inner),
+            ],
+        })];
+        let unclipped = HashMap::from([(11u64, Arc::clone(&outer))]);
+        lay_out_whole_lots(&mut elements, &HashMap::new(), Vec::new(), &unclipped);
+        let ProcessedElement::Relation(rel) = &elements[0] else {
+            unreachable!()
+        };
+        // Laid out from the whole outer ring, not the piece the edge left.
+        let whole = ProcessedWay {
+            id: 11,
+            nodes: outer.nodes.clone(),
+            tags: HashMap::new(),
+        };
+        let expected = rectangle_grid(&whole.nodes).map(StallGrid::on_world_grid);
+        assert!(rel.tags.contains_key(GRID_TAG));
+        // As data_processing draws it: each outer ring with the relation's tags, less its holes.
+        let xzbbox =
+            crate::coordinate_system::cartesian::XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let cache = FloodFillCache::new();
+        let inners = InnerRings::of(rel);
+        for m in rel
+            .members
+            .iter()
+            .filter(|m| m.role == ProcessedMemberRole::Outer)
+        {
+            let holes = cache.holes_in(&m.way, &inners, None);
+            let way = ProcessedWay {
+                id: m.way.id,
+                nodes: m.way.nodes.clone(),
+                tags: rel.tags.clone(),
+            };
+            assert_eq!(stall_grid(&way), expected);
+            generate_parking_lot(&mut editor, &way, &args, &cache, holes.as_ref());
+        }
+        let asphalt: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA, WHITE_CONCRETE];
+        assert!(editor.check_for_block(10, 0, 20, Some(asphalt)));
+        assert!(
+            !editor.check_for_block(23, 0, 13, Some(asphalt)),
+            "the kiosk's hole"
+        );
+        let lines = (3..50)
+            .flat_map(|x| (3..30).map(move |z| (x, z)))
+            .filter(|&(x, z)| editor.check_for_block(x, 0, z, Some(&[WHITE_CONCRETE])))
+            .count();
+        assert!(lines > 20, "{lines} stall line cells");
     }
 }

@@ -1162,6 +1162,11 @@ pub fn parse_osm_data(
     let mut total_node_refs: u64 = 0;
     let mut ways_missing_nodes: u64 = 0;
 
+    // Surface lots as mapped and the parking aisles, unclipped: a lot is laid out from the
+    // whole of it, so every piece of a One World draws its rows alike.
+    let mut lot_ways: HashMap<u64, Vec<ProcessedNode>> = HashMap::new();
+    let mut lot_aisles: Vec<ProcessedWay> = Vec::new();
+
     // Second pass: process ways and clip them to bbox
     for element in data.ways {
         if !seen_ways.insert(element.id) {
@@ -1184,6 +1189,20 @@ pub fn parse_osm_data(
 
         // Clip the way to bbox to reduce node count dramatically
         let tags = filter_tags(element.tags.unwrap_or_default());
+
+        let closed = nodes.len() >= 4 && nodes.first().map(|n| n.id) == nodes.last().map(|n| n.id);
+        if closed && crate::element_processing::parking_lots::is_surface_lot(&tags) {
+            lot_ways.insert(element.id, nodes.clone());
+        }
+        if tags.get("service").map(String::as_str) == Some("parking_aisle")
+            && tags.contains_key("highway")
+        {
+            lot_aisles.push(ProcessedWay {
+                id: element.id,
+                tags: tags.clone(),
+                nodes: nodes.clone(),
+            });
+        }
 
         // A lift the area cuts must not end in the station beyond the cut.
         let lift_ends = match (nodes.first(), nodes.last()) {
@@ -1376,6 +1395,20 @@ pub fn parse_osm_data(
     if !repeated_outers.is_empty() {
         processed_elements.retain(
             |e| !matches!(e, ProcessedElement::Way(way) if repeated_outers.contains(&way.id)),
+        );
+    }
+
+    if !lot_ways.is_empty()
+        || processed_elements.iter().any(|e| {
+            matches!(e, ProcessedElement::Relation(r)
+                if crate::element_processing::parking_lots::is_surface_lot(&r.tags))
+        })
+    {
+        crate::element_processing::parking_lots::lay_out_whole_lots(
+            &mut processed_elements,
+            &lot_ways,
+            lot_aisles,
+            &ways_map,
         );
     }
 
