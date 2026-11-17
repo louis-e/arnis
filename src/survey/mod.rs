@@ -332,7 +332,7 @@ pub fn fetch_survey_data(
         return None;
     }
     let plan = plan(bbox)?;
-    let (e0, n0, e1, n1) = plan.rect;
+    let (e0, _, _, n1) = plan.rect;
     if plan.too_large() {
         println!(
             "Laser data skipped: the area is {:.0} km², it is used for up to {MAX_AREA_KM2:.0}",
