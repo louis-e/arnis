@@ -151,9 +151,14 @@ fn leisure_area(
                     continue;
                 }
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
+                // Only cells in this editor, halo included so the tiles agree where a
+                // patch reaches across. Woods and scrub the land cover sees in a park
+                // keep their floor.
                 let lawn = matches!(leisure_type.as_str(), "park" | "garden")
+                    && editor.in_bounds(x, z)
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
-                    && !editor.surface_is_sealed(x, z);
+                    && !editor.surface_is_sealed(x, z)
+                    && crate::land_cover::mown_cover(editor.land_cover_class(x, z));
                 if lawn {
                     editor.mark_ground(crate::world_editor::GroundMark::Lawn, x, z);
                 }
@@ -164,11 +169,29 @@ fn leisure_area(
                 // read as grass here and only the mask tells them apart. Halo cells
                 // are left to the tile that owns them, whose own random sequence
                 // decides what grows there.
-                if lawn && editor.owns(x, z) && !editor.is_lc_water(x, z) {
+                let plants = matches!(leisure_type.as_str(), "park" | "garden")
+                    && editor.owns(x, z)
+                    && !editor.is_lc_water(x, z)
+                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    && !editor.surface_is_sealed(x, z);
+                if plants {
                     let random_choice: i32 = rng.random_range(0..1000);
 
-                    // A mown lawn: the odd flower and tuft, bushes and trees as before.
+                    // A mown lawn takes the odd flower and tuft, the park's woods and
+                    // scrub their flowers, ferns and grass; bushes and trees in both.
                     match random_choice {
+                        0..30 if !lawn => {
+                            if random_choice < 22 {
+                                crate::ground_decoration::place_scattered_flower(
+                                    editor,
+                                    x,
+                                    z,
+                                    crate::ground_decoration::FlowerSetting::Garden,
+                                );
+                            } else {
+                                editor.set_block(FERN, x, 1, z, None, None);
+                            }
+                        }
                         0..15 => {
                             crate::ground_decoration::place_scattered_flower(
                                 editor,
@@ -176,6 +199,9 @@ fn leisure_area(
                                 z,
                                 crate::ground_decoration::FlowerSetting::Garden,
                             );
+                        }
+                        30..90 if !lawn => {
+                            editor.set_block(GRASS, x, 1, z, None, None);
                         }
                         30..45 => {
                             editor.set_block(GRASS, x, 1, z, None, None);

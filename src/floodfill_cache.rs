@@ -403,10 +403,25 @@ impl CoarseMask {
         self.cell_set(cx, cz)
     }
 
-    /// Whether a marked cell lies within `reach` cells of the one holding (x, z).
-    pub fn any_near(&self, x: i32, z: i32, reach: i32) -> bool {
-        let (cx, cz) = self.cell_of(x, z);
-        (-reach..=reach).any(|dz| (-reach..=reach).any(|dx| self.cell_set(cx + dx, cz + dz)))
+    /// The world-grid cell holding block coordinate `v`.
+    pub fn cell_index(v: i32) -> i32 {
+        v.div_euclid(Self::CELL)
+    }
+
+    /// Whether a marked cell lies in the inclusive range of world-grid cells.
+    pub fn any_in(&self, cx: (i32, i32), cz: (i32, i32)) -> bool {
+        let (ox, oz) = (self.min_x, self.min_z);
+        (cz.0..=cz.1).any(|z| (cx.0..=cx.1).any(|x| self.cell_set(x - ox, z - oz)))
+    }
+
+    /// Marks every cell a block of the inclusive x range in row `z` falls in.
+    pub fn set_span(&mut self, x0: i32, x1: i32, z: i32) {
+        let cz = z.div_euclid(Self::CELL) - self.min_z;
+        for cx in x0.div_euclid(Self::CELL)..=x1.div_euclid(Self::CELL) {
+            if let Some(i) = self.cell(cx - self.min_x, cz) {
+                self.bits[i / 64] |= 1 << (i % 64);
+            }
+        }
     }
 }
 
@@ -1322,7 +1337,10 @@ mod tests {
         // Cells sit on the world grid: the whole cell is marked, its neighbours are not.
         assert!(mask.contains(0, 0) && mask.contains(3, 3));
         assert!(!mask.contains(4, 2) && !mask.contains(-1, 2));
-        assert!(mask.any_near(15, 2, 3) && !mask.any_near(16, 2, 3));
+        // Windows are in world-grid cells: (15, 2) is in cell (3, 0), (16, 2) in (4, 0).
+        assert!(mask.any_in((0, 6), (-3, 3)) && !mask.any_in((1, 7), (-3, 3)));
+        assert_eq!(CoarseMask::cell_index(15), 3);
+        assert_eq!(CoarseMask::cell_index(-1), -1);
         // A box with another corner sees the same cells.
         let shifted = XZBBox::rect_from_min_max(-7, -3, 40, 40).unwrap();
         let mut other = CoarseMask::new(&shifted);

@@ -920,6 +920,13 @@ pub fn generate_ground_region(
                                 surface_block
                             };
 
+                            // The garden is laid where no mapped feature holds the column
+                            // and no snow covers it; its plants and trees grow only there.
+                            let garden_laid = gardened
+                                && surface_block != SNOW_BLOCK
+                                && (steep_override
+                                    || !editor.block_exists_absolute(x, ground_y, z));
+
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
                                 // Use blacklist to avoid replacing water/bedrock and
@@ -1116,17 +1123,9 @@ pub fn generate_ground_region(
                                     None,
                                 );
                             // Trees can also grow through stone surfaces (urban tree cover)
-                            // A garden holds trees whatever ground its climate gives it.
+                            // A laid garden holds trees whatever ground its climate gives it.
                             let ground_allows_trees = ground_is_natural
-                                || (gardened
-                                    && !sealed
-                                    && editor.check_for_block_absolute(
-                                        x,
-                                        ground_y,
-                                        z,
-                                        Some(&[surface_block]),
-                                        None,
-                                    ))
+                                || (garden_laid && !sealed)
                                 || (!sealed
                                     && editor.check_for_block_absolute(
                                         x,
@@ -1288,7 +1287,7 @@ pub fn generate_ground_region(
                                     }
                                     // A garden: a lawn with the odd tuft, flower and shrub.
                                     land_cover::LC_BUILT_UP
-                                        if gardened && ground_is_natural && !mown =>
+                                        if garden_laid && ground_is_natural && !mown =>
                                     {
                                         let roll = rng.random_range(0..1000);
                                         if roll < 8 {
@@ -1704,26 +1703,80 @@ pub fn generate_ground_region(
 /// How far a garden looks around it, in blocks at the run's scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct GardenReach {
-    /// Coarse cells to the nearest low dwelling, or tall building: about 12 m. At most 7,
-    /// so it stays inside the 32-block halo a One World piece builds past its seam.
+    /// Coarse cells to the nearest low dwelling, or tall building: about 12 m, at most 7
+    /// cells. A piece of a One World builds 32 blocks past its seam, and `seam_window`
+    /// keeps the search inside that, which this one reach is bound by.
     cells: i32,
-    /// Blocks from mapped paving that stay paved: about 3 m.
-    pave: i32,
+    /// Blocks of paving kept beside streets and car parks: about 3 m.
+    street: i32,
+    /// Blocks of paving kept beside footways, paths, driveways and other mapped paving:
+    /// about 1 m, none on a small map.
+    path: i32,
     /// Blocks from a wall a patio takes: about 1 m.
     wall: i32,
 }
 
 impl GardenReach {
-    const MAX_PAVE: i32 = 6;
-
     fn at(scale: f64) -> Self {
-        let blocks = |m: f64, most: i32| ((m * scale).round() as i32).clamp(1, most);
+        let blocks = |m: f64| (m * scale).round() as i32;
         let cell = f64::from(crate::floodfill_cache::CoarseMask::CELL);
         Self {
             cells: ((12.0 * scale / cell).ceil() as i32).clamp(1, 7),
-            pave: blocks(3.0, Self::MAX_PAVE),
-            wall: blocks(1.0, 2),
+            street: blocks(3.0).max(1),
+            path: blocks(1.0).max(0),
+            wall: blocks(1.0).max(1),
         }
+    }
+}
+
+/// The world-grid cells a garden in coarse cell `c` looks through for dwellings and
+/// tall buildings along one axis, at most `reach` either way. A piece of a One World
+/// builds `PIECE_HALO_BLOCKS` past each seam, which lie on region edges, and decides the
+/// gardens there too, since trees rooted in them reach across. So within that halo of a
+/// region edge the window reaches no further from the edge than the halo does: both
+/// pieces then hold every mark it covers and agree.
+fn seam_window(c: i32, reach: i32) -> (i32, i32) {
+    const REGION: i32 = 512 / crate::floodfill_cache::CoarseMask::CELL;
+    const HALO: i32 =
+        crate::one_world::PIECE_HALO_BLOCKS / crate::floodfill_cache::CoarseMask::CELL;
+    let into = c.rem_euclid(REGION);
+    let before_next = REGION - 1 - into;
+    let mut window = (c - reach, c + reach);
+    if into < HALO {
+        window.1 = window.1.min(c + HALO - 1 - into);
+    }
+    if before_next < HALO {
+        window.0 = window.0.max(c - (HALO - 1 - before_next));
+    }
+    window
+}
+
+/// Running sums of a square grid of `side`, for counting set cells in any rectangle.
+struct GridSums {
+    side: usize,
+    sums: Vec<u32>,
+}
+
+impl GridSums {
+    fn new(side: usize, set: impl Fn(usize, usize) -> bool) -> Self {
+        let w = side + 1;
+        let mut sums = vec![0u32; w * w];
+        for z in 0..side {
+            for x in 0..side {
+                sums[(z + 1) * w + x + 1] =
+                    u32::from(set(x, z)) + sums[z * w + x + 1] + sums[(z + 1) * w + x]
+                        - sums[z * w + x];
+            }
+        }
+        Self { side, sums }
+    }
+
+    /// Whether any cell of the inclusive square of `r` around (x, z) is set.
+    fn any_around(&self, x: usize, z: usize, r: usize) -> bool {
+        let w = self.side + 1;
+        let (x0, z0, x1, z1) = (x - r, z - r, x + r + 1, z + r + 1);
+        self.sums[z1 * w + x1] + self.sums[z0 * w + x0]
+            > self.sums[z0 * w + x1] + self.sums[z1 * w + x0]
     }
 }
 
@@ -1735,47 +1788,54 @@ fn garden_columns(
     chunk_x: i32,
     chunk_z: i32,
 ) -> Option<Box<[bool; 256]>> {
-    const MOST: i32 = 16 + 2 * GardenReach::MAX_PAVE;
+    use crate::floodfill_cache::CoarseMask;
     use crate::world_editor::GroundMark;
     let dwellings = editor.ground_marks(GroundMark::Dwelling)?;
     let tall = editor.ground_marks(GroundMark::Tall);
-    let commercial = editor.ground_marks(GroundMark::Commercial);
-    let (pave, wall, cells) = (reach.pave, reach.wall, reach.cells);
-    let side = 16 + 2 * pave;
+    let land = editor.garden_land();
+    let margin = reach.street.max(reach.path).max(reach.wall);
+    let side = (16 + 2 * margin) as usize;
     let (x0, z0) = (chunk_x << 4, chunk_z << 4);
-    let mut paved = [false; (MOST * MOST) as usize];
-    let mut built = [false; (MOST * MOST) as usize];
-    for dz in 0..side {
-        for dx in 0..side {
-            let (x, z) = (x0 + dx - pave, z0 + dz - pave);
-            paved[(dz * side + dx) as usize] = editor.surface_is_sealed(x, z);
-            built[(dz * side + dx) as usize] = footprints.contains(x, z);
+    let at = |dx: usize, dz: usize| (x0 - margin + dx as i32, z0 - margin + dz as i32);
+    // Without the shared street mask (a test editor) all paving keeps the street's margin.
+    let streets = GridSums::new(side, |dx, dz| {
+        let (x, z) = at(dx, dz);
+        match land {
+            Some(land) => land.streets.contains(x, z),
+            None => editor.surface_is_sealed(x, z),
         }
-    }
+    });
+    let sealed = GridSums::new(side, |dx, dz| {
+        let (x, z) = at(dx, dz);
+        editor.surface_is_sealed(x, z)
+    });
+    let built = GridSums::new(side, |dx, dz| {
+        let (x, z) = at(dx, dz);
+        footprints.contains(x, z)
+    });
     let mut out = Box::new([false; 256]);
     let mut any = false;
     for cz in (0..16).step_by(4) {
         for cx in (0..16).step_by(4) {
             let (x, z) = (x0 + cx, z0 + cz);
-            if !dwellings.any_near(x, z, cells)
-                || tall.is_some_and(|m| m.any_near(x, z, cells))
-                || commercial.is_some_and(|m| m.contains(x, z))
+            let wx = seam_window(CoarseMask::cell_index(x), reach.cells);
+            let wz = seam_window(CoarseMask::cell_index(z), reach.cells);
+            if !dwellings.any_in(wx, wz)
+                || tall.is_some_and(|m| m.any_in(wx, wz))
+                || land.is_some_and(|l| l.commercial.contains(x, z))
             {
                 continue;
             }
             for lz in cz..cz + 4 {
                 for lx in cx..cx + 4 {
-                    if built[((lz + pave) * side + lx + pave) as usize] {
+                    let (gx, gz) = ((lx + margin) as usize, (lz + margin) as usize);
+                    if built.any_around(gx, gz, 0) {
                         continue;
                     }
-                    let paved_near = (0..=2 * pave).any(|dz| {
-                        (0..=2 * pave).any(|dx| paved[((lz + dz) * side + lx + dx) as usize])
-                    });
-                    let at_wall = (pave - wall..=pave + wall).any(|dz| {
-                        (pave - wall..=pave + wall)
-                            .any(|dx| built[((lz + dz) * side + lx + dx) as usize])
-                    });
-                    let patio = at_wall && ground_noise(x0 + lx, z0 + lz, 9, SALT_PATIO) < 0.5;
+                    let paved_near = streets.any_around(gx, gz, reach.street as usize)
+                        || sealed.any_around(gx, gz, reach.path as usize);
+                    let patio = built.any_around(gx, gz, reach.wall as usize)
+                        && ground_noise(x0 + lx, z0 + lz, 9, SALT_PATIO) < 0.5;
                     if !paved_near && !patio {
                         out[(lz * 16 + lx) as usize] = true;
                         any = true;
@@ -2093,16 +2153,63 @@ mod tests {
         editor
     }
 
+    /// Shares the commercial land of `elements` and the streets among the sealed cells.
+    fn with_garden_land(
+        editor: &mut WorldEditor,
+        bbox: &XZBBox,
+        elements: &[crate::osm_parser::ProcessedElement],
+        streets: &[(i32, i32)],
+    ) {
+        let mut street_mask = crate::floodfill_cache::CoordinateBitmap::new(bbox);
+        for &(x, z) in streets {
+            street_mask.set(x, z);
+        }
+        editor.set_garden_land(std::sync::Arc::new(crate::world_editor::GardenLand {
+            commercial: crate::element_processing::landuse::commercial_land(elements, bbox),
+            streets: street_mask,
+        }));
+    }
+
+    fn landuse_way(
+        id: u64,
+        value: &str,
+        (x0, z0): (i32, i32),
+        (x1, z1): (i32, i32),
+    ) -> crate::osm_parser::ProcessedWay {
+        let node = |i: u64, x: i32, z: i32| crate::osm_parser::ProcessedNode {
+            id: id * 10 + i,
+            tags: std::collections::HashMap::new(),
+            x,
+            z,
+        };
+        crate::osm_parser::ProcessedWay {
+            id,
+            nodes: vec![
+                node(0, x0, z0),
+                node(1, x1, z0),
+                node(2, x1, z1),
+                node(3, x0, z1),
+                node(0, x0, z0),
+            ],
+            tags: std::collections::HashMap::from([("landuse".to_string(), value.to_string())]),
+        }
+    }
+
     #[test]
     fn gardens_lie_behind_houses_away_from_paving() {
+        use crate::osm_parser::ProcessedElement;
         use crate::world_editor::GroundMark;
         let bbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
-        // A street along z = 0..=1, a house at x 4..12, z 6..12.
+        // A street along z = 0..=1, a footway down x = 15, a house at x 4..12, z 6..12.
         let street: Vec<(i32, i32)> = (0..64).flat_map(|x| [(x, 0), (x, 1)]).collect();
+        let footway: Vec<(i32, i32)> = (0..64).map(|z| (15, z)).collect();
+        let sealed: Vec<(i32, i32)> = street.iter().chain(&footway).copied().collect();
         let mut footprints = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
-        let mut editor = garden_editor(&bbox, &street);
+        let mut editor = garden_editor(&bbox, &sealed);
+        with_garden_land(&mut editor, &bbox, &[], &street);
+        let reach = GardenReach::at(1.0);
         assert!(
-            garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).is_none(),
+            garden_columns(&editor, &footprints, reach, 0, 0).is_none(),
             "no house, no garden"
         );
         for x in 4..12 {
@@ -2111,59 +2218,229 @@ mod tests {
                 footprints.set(x, z);
             }
         }
-        let g = garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).expect("a garden");
+        let g = garden_columns(&editor, &footprints, reach, 0, 0).expect("a garden");
         let at = |x: i32, z: i32| g[(z * 16 + x) as usize];
         assert!(at(8, 14), "behind the house");
         assert!(!at(8, 8), "inside the house");
-        assert!(!at(8, 3) && !at(14, 4), "beside the street");
-        assert!(at(14, 5), "four blocks from the street");
+        assert!(!at(8, 3) && !at(13, 4), "three metres from the street");
+        assert!(at(13, 5), "four blocks from the street");
+        // A footway keeps only a step of paving beside it, so a front garden reaches it.
+        assert!(!at(14, 8) && at(13, 8), "one block from the footway");
         // A tower among the houses makes it a city block, paved as before.
         editor.mark_ground(GroundMark::Tall, 6, 14);
-        assert!(garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).is_none());
-        // So does commercial land, where it lies.
-        let mut editor = garden_editor(&bbox, &street);
+        assert!(garden_columns(&editor, &footprints, reach, 0, 0).is_none());
+        // So does commercial land, where it lies. It leaves its ground to the land cover
+        // and is never placed, so it comes from the element list.
+        let mut editor = garden_editor(&bbox, &sealed);
+        let land = [
+            ProcessedElement::Way(landuse_way(1, "commercial", (0, 12), (7, 15))),
+            ProcessedElement::Way(landuse_way(2, "residential", (8, 12), (14, 15))),
+        ];
+        with_garden_land(&mut editor, &bbox, &land, &street);
         for x in 4..12 {
             for z in 6..12 {
                 editor.mark_ground(GroundMark::Dwelling, x, z);
             }
         }
-        for x in 0..8 {
-            for z in 12..16 {
-                editor.mark_ground(GroundMark::Commercial, x, z);
+        let g = garden_columns(&editor, &footprints, reach, 0, 0).expect("a garden");
+        assert!(!g[14 * 16 + 4] && g[14 * 16 + 9]);
+        // Retail land the same.
+        let mut editor = garden_editor(&bbox, &sealed);
+        let land = [ProcessedElement::Way(landuse_way(
+            3,
+            "retail",
+            (0, 12),
+            (7, 15),
+        ))];
+        with_garden_land(&mut editor, &bbox, &land, &street);
+        for x in 4..12 {
+            for z in 6..12 {
+                editor.mark_ground(GroundMark::Dwelling, x, z);
             }
         }
-        let g = garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).expect("a garden");
+        let g = garden_columns(&editor, &footprints, reach, 0, 0).expect("a garden");
         assert!(!g[14 * 16 + 4] && g[14 * 16 + 9]);
     }
 
-    /// The reaches are lengths, so they follow the scale, and the dwelling reach stays
-    /// inside the halo a One World piece builds past its seam.
+    /// The reaches are lengths, so they follow the scale at any scale, and the dwelling
+    /// reach stays inside the halo a One World piece builds past its seam.
     #[test]
     fn garden_reach_follows_the_scale() {
         let at = |scale| {
             let r = GardenReach::at(scale);
-            (r.cells, r.pave, r.wall)
+            (r.cells, r.street, r.path, r.wall)
         };
-        assert_eq!(at(1.0), (3, 3, 1));
-        assert_eq!(at(0.5), (2, 2, 1));
-        assert_eq!(at(0.25), (1, 1, 1));
-        assert_eq!(at(2.0), (6, 6, 2));
-        for scale in [0.1, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0] {
+        assert_eq!(at(1.0), (3, 3, 1, 1));
+        assert_eq!(at(0.5), (2, 2, 1, 1));
+        assert_eq!(at(0.25), (1, 1, 0, 1));
+        assert_eq!(at(2.0), (6, 6, 2, 2));
+        assert_eq!(at(4.0), (7, 12, 4, 4));
+        for scale in [0.1, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0] {
             let r = GardenReach::at(scale);
             let farthest = (r.cells + 1) * crate::floodfill_cache::CoarseMask::CELL - 1;
             assert!(farthest < crate::one_world::PIECE_HALO_BLOCKS, "{scale}");
-            assert!((1..=GardenReach::MAX_PAVE).contains(&r.pave));
         }
-        // At half scale a garden lies as far from the street, in metres, as at full scale.
+        // A garden lies as far from the street, in metres, at every scale.
         let bbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
         let street: Vec<(i32, i32)> = (0..64).map(|x| (x, 0)).collect();
         let footprints = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
         let mut editor = garden_editor(&bbox, &street);
+        with_garden_land(&mut editor, &bbox, &[], &street);
         editor.mark_ground(crate::world_editor::GroundMark::Dwelling, 8, 8);
-        let g = garden_columns(&editor, &footprints, GardenReach::at(0.5), 0, 0).unwrap();
-        assert!(!g[2 * 16 + 8] && g[3 * 16 + 8]);
-        let g = garden_columns(&editor, &footprints, GardenReach::at(1.0), 0, 0).unwrap();
-        assert!(!g[3 * 16 + 8] && g[4 * 16 + 8]);
+        for (scale, last_paved) in [(0.5, 2), (1.0, 3), (2.0, 6), (4.0, 12)] {
+            let g = garden_columns(&editor, &footprints, GardenReach::at(scale), 0, 0).unwrap();
+            let first = last_paved + 1;
+            assert!(!g[last_paved * 16 + 8] && g[first * 16 + 8], "{scale}");
+        }
+    }
+
+    /// Two pieces of a One World meet at x = 512, each building 32 blocks past it and
+    /// knowing only the buildings that reach into what it builds. Where both build, they
+    /// decide every garden alike, at any scale, so trees rooted there agree too.
+    #[test]
+    fn pieces_agree_on_the_gardens_either_side_of_a_seam() {
+        use crate::world_editor::GroundMark;
+        let halo = crate::one_world::PIECE_HALO_BLOCKS;
+        let west = XZBBox::rect_from_min_max(-halo, 0, 511 + halo, 63).unwrap();
+        let east = XZBBox::rect_from_min_max(512 - halo, 0, 1023 + halo, 63).unwrap();
+        let whole = XZBBox::rect_from_min_max(-halo, 0, 1023 + halo, 63).unwrap();
+        // Houses and a tower on both sides, some in a halo, some just past one.
+        let houses = [
+            (440, 20),
+            (470, 30),
+            (500, 10),
+            (508, 40),
+            (520, 20),
+            (530, 44),
+            (548, 12),
+            (575, 30),
+        ];
+        let towers = [(489, 50), (546, 50)];
+        let mut footprints = crate::floodfill_cache::CoordinateBitmap::new(&whole);
+        let street: Vec<(i32, i32)> = (-halo..1023 + halo).map(|x| (x, 0)).collect();
+        // Each piece marks only the cells inside what it builds.
+        fn piece<'a>(
+            bbox: &'a XZBBox,
+            street: &[(i32, i32)],
+            marks: &[(GroundMark, (i32, i32))],
+        ) -> WorldEditor<'a> {
+            let mut editor = garden_editor(bbox, street);
+            for &(kind, (bx, bz)) in marks {
+                for x in bx..bx + 6 {
+                    for z in bz..bz + 6 {
+                        editor.mark_ground(kind, x, z);
+                    }
+                }
+            }
+            editor
+        }
+        let marks: Vec<(GroundMark, (i32, i32))> = houses
+            .iter()
+            .map(|&h| (GroundMark::Dwelling, h))
+            .chain(towers.iter().map(|&t| (GroundMark::Tall, t)))
+            .collect();
+        for &(hx, hz) in houses.iter().chain(&towers) {
+            for x in hx..hx + 6 {
+                for z in hz..hz + 6 {
+                    footprints.set(x, z);
+                }
+            }
+        }
+        let (w, e) = (piece(&west, &street, &marks), piece(&east, &street, &marks));
+        for scale in [0.5, 1.0, 2.0, 4.0] {
+            let reach = GardenReach::at(scale);
+            for chunk_x in (512 - halo) / 16..(512 + halo) / 16 {
+                for chunk_z in 0..4 {
+                    assert_eq!(
+                        garden_columns(&w, &footprints, reach, chunk_x, chunk_z),
+                        garden_columns(&e, &footprints, reach, chunk_x, chunk_z),
+                        "chunk {chunk_x},{chunk_z} at scale {scale}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Garden plants and trees grow only where the garden was laid: a farmyard, a
+    /// construction site or any mapped ground on built-up land keeps what it had.
+    #[test]
+    fn garden_plants_grow_only_where_the_garden_was_laid() {
+        use crate::land_cover::{InlandWater, LandCoverData, LC_BUILT_UP};
+        use crate::world_editor::GroundMark;
+        use clap::Parser;
+        const SIDE: usize = 64;
+        let bbox = XZBBox::rect_from_min_max(0, 0, SIDE as i32 - 1, SIDE as i32 - 1).unwrap();
+        let args = crate::args::Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let street: Vec<(i32, i32)> = (0..SIDE as i32).map(|x| (x, 0)).collect();
+        // Plants on x 33.. (mapped farmyard) and on x 2..31 (open), counted with and
+        // without the houses that make the open part a garden.
+        let run = |houses: bool| {
+            let lc = LandCoverData {
+                grid: vec![vec![LC_BUILT_UP; SIDE]; SIDE],
+                water_distance: vec![vec![0; SIDE]; SIDE],
+                water_blend_cache: Default::default(),
+                beach_tiles: Default::default(),
+                inland_water: InlandWater::new(SIDE, SIDE),
+                width: SIDE,
+                height: SIDE,
+                cells_per_meter: 1.0,
+            };
+            let ground =
+                crate::ground::Ground::new_elevation_test(vec![vec![8.0; SIDE]; SIDE], SIDE, SIDE)
+                    .with_land_cover_test(lc);
+            let mut editor = garden_editor(&bbox, &street);
+            with_garden_land(&mut editor, &bbox, &[], &street);
+            editor.set_ground(std::sync::Arc::new(ground.clone()));
+            let footprints = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
+            if houses {
+                for x in 0..SIDE as i32 {
+                    for z in 60..64 {
+                        editor.mark_ground(GroundMark::Dwelling, x, z);
+                    }
+                }
+                for x in 28..36 {
+                    for z in 20..28 {
+                        editor.mark_ground(GroundMark::Dwelling, x, z);
+                    }
+                }
+            }
+            for x in 33..SIDE as i32 {
+                for z in 0..SIDE as i32 {
+                    editor.set_block(COARSE_DIRT, x, 0, z, None, None);
+                }
+            }
+            let empty = crate::floodfill_cache::CoordinateBitmap::new_empty();
+            generate_ground_region(
+                &mut editor,
+                &ground,
+                &args,
+                &bbox,
+                &footprints,
+                &empty,
+                &BridgeSurfaceMap::empty(),
+                0,
+                SIDE as i32 - 1,
+                0,
+                SIDE as i32 - 1,
+                false,
+            );
+            let planted = |xs: std::ops::Range<i32>| {
+                xs.flat_map(|x| (4..SIDE as i32).map(move |z| (x, z)))
+                    .filter(|&(x, z)| {
+                        let y = editor.get_ground_level(x, z);
+                        editor.block_exists_absolute(x, y + 1, z)
+                    })
+                    .count()
+            };
+            (planted(33..SIDE as i32), planted(2..31))
+        };
+        let (mapped_before, open_before) = run(false);
+        let (mapped_after, open_after) = run(true);
+        assert_eq!(
+            mapped_before, mapped_after,
+            "the farmyard grows no garden plants"
+        );
+        assert!(open_after > open_before, "{open_before} -> {open_after}");
     }
 
     #[test]

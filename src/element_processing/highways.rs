@@ -3698,6 +3698,55 @@ pub fn collect_road_and_carriageway_coords(
     (roads, carriageways)
 }
 
+/// Where a garden keeps a few metres of paving: the carriageways as the renderer stamps
+/// them, less driveways, which a garden comes up to like a path, and the surface car parks.
+pub fn collect_garden_streets(
+    elements: &[ProcessedElement],
+    editor: &WorldEditor,
+    xzbbox: &XZBBox,
+    scale: f64,
+    water_detail: crate::water_detail::WaterDetail,
+    car_park_cells: impl Fn(&ProcessedWay) -> Option<std::sync::Arc<Vec<(i32, i32)>>>,
+) -> CoordinateBitmap {
+    let mut streets = CoordinateBitmap::new(xzbbox);
+    stamp_highway_surfaces(
+        elements,
+        Some(editor),
+        scale,
+        water_detail,
+        |element| {
+            !matches!(element, ProcessedElement::Way(w)
+                if w.tags.get("service").map(String::as_str) == Some("driveway"))
+        },
+        |carriageway, x, z| {
+            if carriageway {
+                streets.set(x, z);
+            }
+        },
+    );
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        if is_surface_car_park(&way.tags) {
+            for &(x, z) in car_park_cells(way).iter().flat_map(|cells| cells.iter()) {
+                streets.set(x, z);
+            }
+        }
+    }
+    streets
+}
+
+/// A car park on the ground: `amenity=parking`, not in a building, under or on one.
+pub(crate) fn is_surface_car_park(tags: &HashMap<String, String>) -> bool {
+    tags.get("amenity").map(String::as_str) == Some("parking")
+        && !tags.contains_key("building")
+        && !matches!(
+            tags.get("parking").map(String::as_str),
+            Some("multi-storey" | "underground" | "rooftop")
+        )
+}
+
 /// The road and path surfaces at grade: what `collect_road_and_carriageway_coords` stamps
 /// of the ways `keep` lets through, less every bridge deck, the ends where an approach
 /// meets one included. From the tags alone, before the ground is final, so a tunnel counts
