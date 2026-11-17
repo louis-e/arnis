@@ -203,7 +203,8 @@ pub struct Args {
     pub canopy_height: bool,
 
     /// Use open airborne laser scans and aerial photos where a region publishes them
-    /// (Bavaria, France, the Netherlands, parts of Switzerland). Off by default: the
+    /// (Bavaria, France, the Netherlands, parts of Switzerland, much of the United
+    /// States, parts of Canada). Off by default: the
     /// first run of an area downloads about 100 MB a square kilometre. The
     /// features below follow it. Never used for One World pieces, and skipped for
     /// areas over 16 km² or past --lidar-max-mb.

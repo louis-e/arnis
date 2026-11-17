@@ -12,7 +12,7 @@
 //!   tile's photo is read 51.2 m block by block with range requests.
 
 use super::crs::Crs;
-use super::source::{Laser, LaserClasses, Photo, Source};
+use super::source::{Grid, Laser, LaserClasses, Photo, Source};
 
 /// The state outline, simplified to about a kilometre and pushed out by about two,
 /// so tiles along the border are asked for and anything beyond is not.
@@ -341,7 +341,7 @@ const OUTLINE: &[(f64, f64)] = &[
 pub static BAVARIA: Source = Source {
     id: "bavaria",
     name: "Bavaria",
-    crs: Crs::Utm(32),
+    grid: Grid::Fixed(Crs::Utm(32)),
     outline: &[OUTLINE],
     laser: Laser::Whole {
         url: laser_url,
@@ -356,8 +356,10 @@ pub static BAVARIA: Source = Source {
         building: &[6],
         object: &[20],
         vegetation: &[],
+        unsorted: &[],
     },
     laser_plants: false,
+    strict_pools: false,
     attribution: "Bayerische Vermessungsverwaltung – www.geodaten.bayern.de (CC BY 4.0)",
 };
 

@@ -848,7 +848,7 @@
   "settings_nav_lidar": "Gärten, Bäume, Höhen",
   "lidar": "Laserdaten",
   "lidar_desc": "Gemessene Details, wo eine Region ihre Scans veröffentlicht.",
-  "lidar_tip": "Liest offene Laserscans und Luftbilder für Details, die OpenStreetMap fehlen, wo eine Region sie veröffentlicht. Nicht für One World oder Gebiete über 16 km². Für Bayern, Frankreich, die Niederlande und Teile der Schweiz.",
+  "lidar_tip": "Liest offene Laserscans und Luftbilder für Details, die OpenStreetMap fehlen, wo eine Region sie veröffentlicht. Nicht für One World oder Gebiete über 16 km². Für Bayern, Frankreich, die Niederlande, Teile der Schweiz, große Teile der USA und Teile Kanadas.",
   "measured_trees": "Gemessene Bäume",
   "measured_trees_desc": "Bäume, wo der Laser sie sah, in ihrer Höhe.",
   "measured_trees_tip": "Setzt Bäume dorthin, wo der Laser sie sah, in ihrer gemessenen Höhe, statt der globalen Kronenhöhenkarte. Kartierte Bäume erhalten ebenfalls die gemessene Höhe.",

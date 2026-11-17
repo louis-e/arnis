@@ -14,6 +14,10 @@ pub struct LaserClasses {
     /// The object classes that are vegetation. Empty where the source does not
     /// tell vegetation apart; the pulse's returns then stand in for it.
     pub vegetation: &'static [u8],
+    /// Object classes left unsorted beside the vegetation classes, whose plants
+    /// the pulse's returns tell: where only some of a source's scans sort out
+    /// vegetation, the rest leave it all in these.
+    pub unsorted: &'static [u8],
 }
 
 /// A rectangle in the source's grid metres: west, south, east, north.
@@ -38,15 +42,90 @@ pub enum Laser {
         /// across, for the estimate: more than a whole tile's share, since the
         /// coarse levels of the octree span the whole tile.
         mb_per_km2: u32,
+        /// Whether each file names its own grid (its WKT record), which may be
+        /// another than the area's: a survey in the next UTM zone.
+        own_grid: bool,
     },
+    /// Entwine point tiles (EPT): one octree per survey, each node its own small
+    /// LAZ file, in Web Mercator. The locator gives each tile its survey's
+    /// `ept.json`; only the nodes over the area are read, down to the density
+    /// needed.
+    Ept { locate: Locate, mb_per_km2: u32 },
 }
 
 /// How a COPC source's tile URLs are found.
 pub enum Locate {
     /// Candidate URLs of a tile, best first; a missing one answers 403 or 404.
     Urls(fn(i32, i32) -> Vec<String>),
-    /// One lookup over a rectangle: the URL of every tile the source has there.
-    Lookup(fn(&reqwest::blocking::Client, Rect) -> Result<TileUrls, String>),
+    /// One lookup over a rectangle: the files over every tile the source has
+    /// there, all read into the tile (several where the source's files do not
+    /// follow the grid's kilometres).
+    Lookup(fn(&reqwest::blocking::Client, &Sheet, Rect) -> Result<TileUrls, String>),
+}
+
+/// The grid a source's areas are measured on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grid {
+    Fixed(Crs),
+    /// The NAD83 UTM zone of each area's middle, for sources that span many.
+    Nad83Utm,
+}
+
+/// A source on the grid of one area. Derefs to the source.
+#[derive(Clone, Copy)]
+pub struct Sheet {
+    pub source: &'static Source,
+    pub crs: Crs,
+}
+
+impl std::ops::Deref for Sheet {
+    type Target = Source;
+    fn deref(&self) -> &Source {
+        self.source
+    }
+}
+
+impl Sheet {
+    /// The source on the grid for an area around longitude `lon`.
+    pub fn at(source: &'static Source, lon: f64) -> Sheet {
+        let crs = match source.grid {
+            Grid::Fixed(crs) => crs,
+            Grid::Nad83Utm => Crs::Nad83Utm(super::crs::utm_zone(lon)),
+        };
+        Sheet { source, crs }
+    }
+
+    /// Cache folder of the sheet under the laser cache root: the source's, and
+    /// one per zone where the grid changes with the area.
+    pub fn dir(&self) -> std::path::PathBuf {
+        match (self.source.grid, self.crs) {
+            (Grid::Nad83Utm, Crs::Nad83Utm(zone)) => {
+                std::path::Path::new(self.source.id).join(format!("utm{zone}"))
+            }
+            _ => std::path::PathBuf::from(self.source.id),
+        }
+    }
+
+    /// The 1 km tiles (south-west corners in km) a grid rectangle touches, only
+    /// those whose centre or a corner is inside the source's outline.
+    pub fn tiles(&self, (e0, n0, e1, n1): Rect) -> Vec<(i32, i32)> {
+        let mut out = Vec::new();
+        for te in (e0 / 1000.0).floor() as i32..=((e1 - 1e-6) / 1000.0).floor() as i32 {
+            for tn in (n0 / 1000.0).floor() as i32..=((n1 - 1e-6) / 1000.0).floor() as i32 {
+                let probe = [(0.5, 0.5), (0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
+                if probe.iter().any(|&(fe, fn_)| {
+                    let (lat, lon) = self.crs.inverse(
+                        (f64::from(te) + fe) * 1000.0,
+                        (f64::from(tn) + fn_) * 1000.0,
+                    );
+                    self.source.contains(lat, lon)
+                }) {
+                    out.push((te, tn));
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Where a source's aerial photos come from.
@@ -59,6 +138,8 @@ pub enum Photo {
         url: &'static str,
         layer: &'static str,
     },
+    /// No open photo: the classes come from the laser alone.
+    None,
 }
 
 pub struct Source {
@@ -66,7 +147,7 @@ pub struct Source {
     pub id: &'static str,
     pub name: &'static str,
     /// The grid of the source's 1 km tiles.
-    pub crs: Crs,
+    pub grid: Grid,
     /// Where the source has data, as rings of (lat, lon). Requests never leave it.
     pub outline: &'static [&'static [(f64, f64)]],
     pub laser: Laser,
@@ -80,6 +161,11 @@ pub struct Source {
     /// vegetation, or its photo is flown leaf-off so bare crowns do not read
     /// green. Bavaria's rules were tuned on the photo alone.
     pub laser_plants: bool,
+    /// Whether a pool needs cells the laser returned nothing from, rather than
+    /// fewer returns than around: where scans are as sparse as two to five
+    /// points a square metre a cell's few returns are chance as often as
+    /// water, and every bluish shadow on a street would be a pool.
+    pub strict_pools: bool,
     pub attribution: &'static str,
 }
 
@@ -88,6 +174,8 @@ pub static SOURCES: &[&Source] = &[
     &super::france::FRANCE,
     &super::netherlands::NETHERLANDS,
     &super::switzerland::SWITZERLAND,
+    &super::usa::USA,
+    &super::canada::CANADA,
 ];
 
 impl Source {
@@ -121,27 +209,6 @@ impl Source {
             let lat = s + (n - s) * i as f64 / steps_lat as f64;
             (0..=steps_lon).any(|j| self.contains(lat, w + (e - w) * j as f64 / steps_lon as f64))
         })
-    }
-
-    /// The source's 1 km tiles (south-west corners in km) a grid rectangle
-    /// touches, only those whose centre or a corner is inside the outline.
-    pub fn tiles(&self, (e0, n0, e1, n1): Rect) -> Vec<(i32, i32)> {
-        let mut out = Vec::new();
-        for te in (e0 / 1000.0).floor() as i32..=((e1 - 1e-6) / 1000.0).floor() as i32 {
-            for tn in (n0 / 1000.0).floor() as i32..=((n1 - 1e-6) / 1000.0).floor() as i32 {
-                let probe = [(0.5, 0.5), (0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
-                if probe.iter().any(|&(fe, fn_)| {
-                    let (lat, lon) = self.crs.inverse(
-                        (f64::from(te) + fe) * 1000.0,
-                        (f64::from(tn) + fn_) * 1000.0,
-                    );
-                    self.contains(lat, lon)
-                }) {
-                    out.push((te, tn));
-                }
-            }
-        }
-        out
     }
 }
 
@@ -184,11 +251,29 @@ mod tests {
         assert_eq!(which(50.85, 4.35), None); // Brussels
         assert_eq!(which(51.51, -0.13), None); // London
         assert_eq!(which(41.39, 2.17), None); // Barcelona
+        assert_eq!(which(42.28, -83.74), Some("usa")); // Ann Arbor
+        assert_eq!(which(47.61, -122.33), Some("usa")); // Seattle
+        assert_eq!(which(25.77, -80.19), Some("usa")); // Miami
+        assert_eq!(which(61.22, -149.9), Some("usa")); // Anchorage
+        assert_eq!(which(21.31, -157.86), Some("usa")); // Honolulu
+        assert_eq!(which(18.47, -66.1), Some("usa")); // San Juan
+        assert_eq!(which(43.65, -79.38), Some("canada")); // Toronto
+        assert_eq!(which(49.28, -123.12), Some("canada")); // Vancouver
+        assert_eq!(which(45.42, -75.69), Some("canada")); // Ottawa
+        assert_eq!(which(44.65, -63.57), Some("canada")); // Halifax
+                                                          // Across the border from each other.
+        assert_eq!(which(42.331, -83.046), Some("usa")); // Detroit
+        assert_eq!(which(42.30, -83.02), Some("canada")); // Windsor
+        assert_eq!(which(49.002, -122.76), Some("canada")); // White Rock
+        assert_eq!(which(48.99, -122.75), Some("usa")); // Blaine
+        assert_eq!(which(43.09, -79.07), Some("canada")); // Niagara Falls, Ontario
+        assert_eq!(which(43.095, -79.04), Some("usa")); // Niagara Falls, New York
+        assert_eq!(which(19.43, -99.13), None); // Mexico City
     }
 
     #[test]
     fn tiles_stay_inside_the_outline() {
-        let fr = &super::super::france::FRANCE;
+        let fr = Sheet::at(&super::super::france::FRANCE, 2.35);
         // A rectangle around Paris: all four tiles are in.
         assert_eq!(
             fr.tiles((650_500.0, 6_862_500.0, 651_500.0, 6_863_500.0))

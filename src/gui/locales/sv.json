@@ -848,7 +848,7 @@
   "settings_nav_lidar": "Trädgårdar, träd, höjder",
   "lidar": "Laserdata",
   "lidar_desc": "Uppmätta detaljer där en region publicerar sina skanningar.",
-  "lidar_tip": "Läser öppen laserskanning och flygfoton för detaljer OpenStreetMap saknar, där en region publicerar dem. Inte för One World eller områden över 16 km². Täcker Bayern, Frankrike, Nederländerna och delar av Schweiz.",
+  "lidar_tip": "Läser öppen laserskanning och flygfoton för detaljer OpenStreetMap saknar, där en region publicerar dem. Inte för One World eller områden över 16 km². Täcker Bayern, Frankrike, Nederländerna, delar av Schweiz, stora delar av USA och delar av Kanada.",
   "measured_trees": "Uppmätta träd",
   "measured_trees_desc": "Träd där lasern såg dem, i sin höjd.",
   "measured_trees_tip": "Placerar träd där lasern såg dem, i uppmätt höjd, i stället för den globala trädkronekartan. Karterade träd får också den uppmätta höjden.",

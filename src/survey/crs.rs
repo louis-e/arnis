@@ -10,7 +10,16 @@
 //!   fold in the Bessel datum shift and keep within a metre of RDNAPTRANS over
 //!   the Netherlands;
 //! * Swiss LV95 (EPSG:2056) by swisstopo's approximate formulas, within about a
-//!   metre over Switzerland.
+//!   metre over Switzerland;
+//! * NAD83 UTM (EPSG:26901-26923) by the same series as UTM. NAD83 and WGS84
+//!   differ by a metre or two, as PROJ's own default (a null transformation)
+//!   has it; OpenStreetMap in North America is traced on NAD83 photos anyway;
+//! * Web Mercator (EPSG:3857), the spherical formulas on the WGS84 radius.
+//!
+//! A source's points can come in another grid than the one the area is
+//! measured on (USGS's point clouds are in Web Mercator); over a tile, an
+//! [`Affine`] fitted at its middle carries them across to well under a
+//! decimetre.
 
 use super::utm;
 
@@ -21,26 +30,36 @@ pub enum Crs {
     Lambert93,
     RdNew,
     Lv95,
+    /// Northern UTM zone on NAD83.
+    Nad83Utm(u8),
+    WebMercator,
+}
+
+/// The UTM zone of a longitude.
+pub fn utm_zone(lon: f64) -> u8 {
+    (((lon + 180.0) / 6.0).floor() as i32).rem_euclid(60) as u8 + 1
 }
 
 impl Crs {
     /// Latitude and longitude in degrees to (easting, northing) in metres.
     pub fn forward(self, lat: f64, lon: f64) -> (f64, f64) {
         match self {
-            Crs::Utm(zone) => utm::to_utm(lat, lon, zone),
+            Crs::Utm(zone) | Crs::Nad83Utm(zone) => utm::to_utm(lat, lon, zone),
             Crs::Lambert93 => lambert93::forward(lat, lon),
             Crs::RdNew => rd::forward(lat, lon),
             Crs::Lv95 => lv95::forward(lat, lon),
+            Crs::WebMercator => mercator::forward(lat, lon),
         }
     }
 
     /// (easting, northing) in metres to latitude and longitude in degrees.
     pub fn inverse(self, x: f64, y: f64) -> (f64, f64) {
         match self {
-            Crs::Utm(zone) => utm::from_utm(x, y, zone),
+            Crs::Utm(zone) | Crs::Nad83Utm(zone) => utm::from_utm(x, y, zone),
             Crs::Lambert93 => lambert93::inverse(x, y),
             Crs::RdNew => rd::inverse(x, y),
             Crs::Lv95 => lv95::inverse(x, y),
+            Crs::WebMercator => mercator::inverse(x, y),
         }
     }
 
@@ -51,7 +70,123 @@ impl Crs {
             Crs::Lambert93 => 2154,
             Crs::RdNew => 28992,
             Crs::Lv95 => 2056,
+            Crs::Nad83Utm(zone) => 26900 + u32::from(zone),
+            Crs::WebMercator => 3857,
         }
+    }
+}
+
+/// The grid an OGC WKT (version 1, as LAS files carry it) names, where it is a
+/// northern UTM zone in metres; `None` for anything else (state planes, feet,
+/// MTM), which the survey then does not read.
+pub fn from_wkt(wkt: &str) -> Option<Crs> {
+    // Only the projected part: a compound grid's vertical part may come after.
+    let proj = &wkt[wkt.find("PROJCS[")?..];
+    let proj = proj.split("VERT_CS[").next().unwrap_or(proj);
+    if !proj.contains("PROJECTION[\"Transverse_Mercator\"]") || wkt.to_lowercase().contains("foot")
+    {
+        return None;
+    }
+    let param = |name: &str| -> Option<f64> {
+        let at = proj.find(&format!("PARAMETER[\"{name}\","))? + name.len() + 13;
+        proj[at..].split([']', ',']).next()?.trim().parse().ok()
+    };
+    let (lat0, lon0) = (param("latitude_of_origin")?, param("central_meridian")?);
+    let (k, fe, fn_) = (
+        param("scale_factor")?,
+        param("false_easting")?,
+        param("false_northing")?,
+    );
+    let zone = (lon0 + 183.0) / 6.0;
+    let utm = lat0 == 0.0
+        && (k - 0.9996).abs() < 1e-9
+        && fe == 500_000.0
+        && fn_ == 0.0
+        && zone.fract() == 0.0
+        && (1.0..=60.0).contains(&zone);
+    utm.then_some(Crs::Nad83Utm(zone as u8))
+}
+
+/// `to = a * from + b`, a linear map between two grids that holds near where it
+/// was fitted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Affine {
+    /// x' = m[0] x + m[1] y + m[2]; y' = m[3] x + m[4] y + m[5].
+    pub m: [f64; 6],
+}
+
+impl Affine {
+    /// The map from grid `from` to grid `to` around the point (`x`, `y`) of
+    /// `to`, by central differences over `d` metres either way.
+    pub fn fit(from: Crs, to: Crs, (x, y): (f64, f64), d: f64) -> Affine {
+        let at = |dx: f64, dy: f64| {
+            let (lat, lon) = to.inverse(x + dx, y + dy);
+            from.forward(lat, lon)
+        };
+        let c = at(0.0, 0.0);
+        let (e, w) = (at(d, 0.0), at(-d, 0.0));
+        let (n, s) = (at(0.0, d), at(0.0, -d));
+        // The map `to -> from` near the point, then its inverse.
+        let (a, b) = ((e.0 - w.0) / (2.0 * d), (n.0 - s.0) / (2.0 * d));
+        let (c2, d2) = ((e.1 - w.1) / (2.0 * d), (n.1 - s.1) / (2.0 * d));
+        let det = a * d2 - b * c2;
+        let (ia, ib, ic, id) = (d2 / det, -b / det, -c2 / det, a / det);
+        Affine {
+            m: [
+                ia,
+                ib,
+                x - ia * c.0 - ib * c.1,
+                ic,
+                id,
+                y - ic * c.0 - id * c.1,
+            ],
+        }
+    }
+
+    pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
+        let m = &self.m;
+        (m[0] * x + m[1] * y + m[2], m[3] * x + m[4] * y + m[5])
+    }
+
+    /// The map back.
+    pub fn inverse(&self) -> Affine {
+        let m = &self.m;
+        let det = m[0] * m[4] - m[1] * m[3];
+        let (a, b, c, d) = (m[4] / det, -m[1] / det, -m[3] / det, m[0] / det);
+        Affine {
+            m: [a, b, -a * m[2] - b * m[5], c, d, -c * m[2] - d * m[5]],
+        }
+    }
+
+    /// The rectangle (west, south, east, north) holding the image of one.
+    pub fn rect(&self, (x0, y0, x1, y1): (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
+        let pts = [(x0, y0), (x0, y1), (x1, y0), (x1, y1)].map(|(x, y)| self.apply(x, y));
+        let (mut a, mut b, mut c, mut d) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for (x, y) in pts {
+            a = a.min(x);
+            b = b.min(y);
+            c = c.max(x);
+            d = d.max(y);
+        }
+        (a, b, c, d)
+    }
+}
+
+/// Spherical Web Mercator on the WGS84 semi-major axis.
+mod mercator {
+    const R: f64 = 6_378_137.0;
+
+    pub fn forward(lat: f64, lon: f64) -> (f64, f64) {
+        let phi = lat.to_radians();
+        (
+            R * lon.to_radians(),
+            R * (std::f64::consts::FRAC_PI_4 + phi / 2.0).tan().ln(),
+        )
+    }
+
+    pub fn inverse(x: f64, y: f64) -> (f64, f64) {
+        let lat = 2.0 * (y / R).exp().atan() - std::f64::consts::FRAC_PI_2;
+        (lat.to_degrees(), (x / R).to_degrees())
     }
 }
 
@@ -316,6 +451,105 @@ mod tests {
             ],
             1.5,
         );
+    }
+
+    #[test]
+    fn nad83_utm_matches_proj() {
+        check(
+            Crs::Nad83Utm(17),
+            &[
+                (42.275, -83.76, 272_401.660, 4_683_998.969),
+                (42.0, -80.5, 541_408.867, 4_649_897.125),
+                (35.0, -84.0, 226_201.904, 3_877_156.692),
+            ],
+            0.01,
+        );
+        check(
+            Crs::Nad83Utm(10),
+            &[(47.61, -122.33, 550_354.404, 5_273_172.275)],
+            0.01,
+        );
+        // PROJ shifts Hawaii's NAD83 half a metre from WGS84; the survey takes
+        // the two as one, as in the rest of the country, so the reference is
+        // WGS84's zone (EPSG:32604).
+        check(
+            Crs::Nad83Utm(4),
+            &[(21.31, -157.86, 618_238.268, 2_356_884.330)],
+            0.01,
+        );
+        assert_eq!(Crs::Nad83Utm(17).epsg(), 26917);
+        assert_eq!(utm_zone(-83.76), 17);
+        assert_eq!(utm_zone(-122.33), 10);
+        assert_eq!(utm_zone(11.9), 32);
+        assert_eq!(utm_zone(174.77), 60);
+    }
+
+    #[test]
+    fn wkt_names_utm_zones_and_nothing_else() {
+        let ottawa = r#"PROJCS["NAD83(CSRS) / UTM zone 18N",GEOGCS["NAD83(CSRS)",DATUM["NAD83_Canadian_Spatial_Reference_System",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6140"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4617"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","2959"]]"#;
+        assert_eq!(from_wkt(ottawa), Some(Crs::Nad83Utm(18)));
+        let compound = format!(
+            r#"COMPD_CS["NAD83(CSRS) / UTM zone 12N + CGVD2013(CGG2013) height",{},VERT_CS["CGVD2013(CGG2013) height",VERT_DATUM["Canadian Geodetic Vertical Datum of 2013 (CGG2013)",2005],UNIT["metre",1],AXIS["Gravity-related height",UP]]]"#,
+            ottawa.replace("-75]", "-111]")
+        );
+        assert_eq!(from_wkt(&compound), Some(Crs::Nad83Utm(12)));
+        // MTM zone 8 (Montérégie), feet, and no projection at all.
+        let mtm = ottawa
+            .replace("0.9996", "0.9999")
+            .replace("500000", "304800")
+            .replace("-75]", "-73.5]");
+        assert_eq!(from_wkt(&mtm), None);
+        let feet = ottawa.replace(
+            r#"UNIT["metre",1,"#,
+            r#"UNIT["US survey foot",0.3048006096012192,"#,
+        );
+        assert_eq!(from_wkt(&feet), None);
+        assert_eq!(from_wkt(r#"GEOGCS["WGS 84"]"#), None);
+    }
+
+    #[test]
+    fn web_mercator_matches_proj() {
+        check(
+            Crs::WebMercator,
+            &[
+                (40.0, -105.0, -11_688_546.533, 4_865_942.280),
+                (47.61, -122.33, -13_617_713.309, 6_042_216.250),
+                (61.22, -149.9, -16_686_791.670, 8_676_514.367),
+                (25.77, -80.19, -8_926_709.967, 2_970_622.233),
+            ],
+            0.01,
+        );
+    }
+
+    #[test]
+    fn affine_carries_mercator_to_utm_within_a_decimetre() {
+        let (to, from) = (Crs::Nad83Utm(17), Crs::WebMercator);
+        let centre = (272_500.0, 4_684_500.0);
+        let f = Affine::fit(from, to, centre, 250.0);
+        // Anywhere within a 1.2 km square around the middle.
+        for (dx, dy) in [
+            (-600.0, -600.0),
+            (600.0, 0.0),
+            (0.0, 600.0),
+            (450.0, -520.0),
+        ] {
+            let (x, y) = (centre.0 + dx, centre.1 + dy);
+            let (lat, lon) = to.inverse(x, y);
+            let (mx, my) = from.forward(lat, lon);
+            let (gx, gy) = f.apply(mx, my);
+            assert!(
+                (gx - x).abs() < 0.1 && (gy - y).abs() < 0.1,
+                "{dx} {dy}: {gx} {gy}"
+            );
+            let (bx, by) = f.inverse().apply(x, y);
+            assert!((bx - mx).abs() < 0.2 && (by - my).abs() < 0.2);
+        }
+        // Across a zone border too: zone 16 points into the zone 17 grid.
+        let f = Affine::fit(Crs::Nad83Utm(16), to, (250_000.0, 4_500_000.0), 250.0);
+        let (lat, lon) = to.inverse(250_400.0, 4_500_300.0);
+        let (x16, y16) = Crs::Nad83Utm(16).forward(lat, lon);
+        let (gx, gy) = f.apply(x16, y16);
+        assert!((gx - 250_400.0).abs() < 0.1 && (gy - 4_500_300.0).abs() < 0.1);
     }
 
     #[test]

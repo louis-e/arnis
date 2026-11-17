@@ -14,7 +14,7 @@
 //! "IGN".
 
 use super::crs::Crs;
-use super::source::{Laser, LaserClasses, Locate, Photo, Rect, Source, TileUrls};
+use super::source::{Grid, Laser, LaserClasses, Locate, Photo, Rect, Sheet, Source, TileUrls};
 
 /// Mainland France and Corsica, simplified to about a kilometre and pushed out
 /// by about two. From OpenStreetMap (relation 1403916), © OpenStreetMap
@@ -651,11 +651,12 @@ const OUTLINE: &[&[(f64, f64)]] = &[
 pub static FRANCE: Source = Source {
     id: "france",
     name: "IGN LiDAR HD",
-    crs: Crs::Lambert93,
+    grid: Grid::Fixed(Crs::Lambert93),
     outline: OUTLINE,
     laser: Laser::Copc {
         locate: Locate::Lookup(lookup),
         mb_per_km2: 110,
+        own_grid: false,
     },
     photo: Photo::Wms {
         url: "https://data.geopf.fr/wms-r",
@@ -669,14 +670,20 @@ pub static FRANCE: Source = Source {
         building: &[6],
         object: &[1, 3, 4, 5, 64, 67],
         vegetation: &[3, 4, 5],
+        unsorted: &[],
     },
     laser_plants: true,
+    strict_pools: false,
     attribution: "IGN – LiDAR HD, BD ORTHO (Licence Ouverte Etalab 2.0)",
 };
 
 /// The LiDAR HD tiles over a rectangle, from the metadata WFS. Where a tile was
 /// delivered twice, the later edition wins.
-fn lookup(client: &reqwest::blocking::Client, (e0, n0, e1, n1): Rect) -> Result<TileUrls, String> {
+fn lookup(
+    client: &reqwest::blocking::Client,
+    _: &Sheet,
+    (e0, n0, e1, n1): Rect,
+) -> Result<TileUrls, String> {
     let url = format!(
         "https://data.geopf.fr/wfs/ows?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature\
          &TYPENAMES=IGNF_LIDAR-HD_METADONNEE:metadata&OUTPUTFORMAT=application/json\

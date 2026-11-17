@@ -848,7 +848,7 @@
   "settings_nav_lidar": "Jardins, arbres, hauteurs",
   "lidar": "Données laser",
   "lidar_desc": "Détails mesurés là où une région publie ses scans.",
-  "lidar_tip": "Lit des scans laser et photos aériennes ouverts pour les détails absents d'OpenStreetMap, là où une région les publie. Pas pour One World ni au-delà de 16 km². Couvre la Bavière, la France, les Pays-Bas et une partie de la Suisse.",
+  "lidar_tip": "Lit des scans laser et photos aériennes ouverts pour les détails absents d'OpenStreetMap, là où une région les publie. Pas pour One World ni au-delà de 16 km². Couvre la Bavière, la France, les Pays-Bas, une partie de la Suisse, la majeure partie des États-Unis et une partie du Canada.",
   "measured_trees": "Arbres mesurés",
   "measured_trees_desc": "Les arbres où le laser les a vus, à leur hauteur.",
   "measured_trees_tip": "Place les arbres là où le laser les a vus, à leur hauteur mesurée, au lieu de la carte mondiale de canopée. Les arbres cartographiés prennent aussi la hauteur mesurée.",

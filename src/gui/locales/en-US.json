@@ -848,7 +848,7 @@
   "settings_nav_lidar": "Gardens, trees, heights",
   "lidar": "Laser Data",
   "lidar_desc": "Measured detail where a region publishes its scans.",
-  "lidar_tip": "Reads open laser scans and aerial photos for detail OpenStreetMap lacks, where a region publishes them. Not used for One World or areas over 16 km². Covers Bavaria, France, the Netherlands and parts of Switzerland.",
+  "lidar_tip": "Reads open laser scans and aerial photos for detail OpenStreetMap lacks, where a region publishes them. Not used for One World or areas over 16 km². Covers Bavaria, France, the Netherlands, parts of Switzerland, much of the US and parts of Canada.",
   "measured_trees": "Measured Trees",
   "measured_trees_desc": "Trees where the laser saw them, at their height.",
   "measured_trees_tip": "Places trees where the laser saw them, at their measured height, instead of the global canopy map. Mapped trees take the measured height too.",

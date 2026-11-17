@@ -848,7 +848,7 @@
   "settings_nav_lidar": "Sodai, medžiai, aukščiai",
   "lidar": "Lazerio duomenys",
   "lidar_desc": "Išmatuotos detalės ten, kur regionas skelbia skenavimus.",
-  "lidar_tip": "Skaito atvirus lazerinius skenavimus ir aerofotonuotraukas detalėms, kurių trūksta OpenStreetMap, kur regionas juos skelbia. Nenaudojama One World ir didesnėms nei 16 km² teritorijoms. Apima Bavariją, Prancūziją, Nyderlandus ir dalį Šveicarijos.",
+  "lidar_tip": "Skaito atvirus lazerinius skenavimus ir aerofotonuotraukas detalėms, kurių trūksta OpenStreetMap, kur regionas juos skelbia. Nenaudojama One World ir didesnėms nei 16 km² teritorijoms. Apima Bavariją, Prancūziją, Nyderlandus, dalį Šveicarijos, didžiąją dalį JAV ir dalį Kanados.",
   "measured_trees": "Išmatuoti medžiai",
   "measured_trees_desc": "Medžiai ten, kur juos matė lazeris, jų aukščio.",
   "measured_trees_tip": "Medžius stato ten, kur juos matė lazeris, išmatuoto aukščio, vietoj pasaulinio lajų žemėlapio. Pažymėti medžiai irgi gauna išmatuotą aukštį.",

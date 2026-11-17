@@ -13,7 +13,7 @@
 //! `(b - max(r, g)) / 255` and the mean colour. Cached per tile with a record of
 //! which 256-pixel blocks are in, so a later area fetches only what is missing.
 
-use super::source::{Photo, Source};
+use super::source::{Photo, Sheet};
 use std::path::{Path, PathBuf};
 
 pub const TILE: usize = 1000;
@@ -52,8 +52,8 @@ struct Layout {
     samples: usize,
 }
 
-pub fn cache_path(root: &Path, source: &Source, te: i32, tn: i32) -> PathBuf {
-    root.join(source.id).join(format!("photo_{te}_{tn}.bin"))
+pub fn cache_path(root: &Path, source: &Sheet, te: i32, tn: i32) -> PathBuf {
+    root.join(source.dir()).join(format!("photo_{te}_{tn}.bin"))
 }
 
 impl PhotoTile {
@@ -125,11 +125,14 @@ impl PhotoTile {
 pub fn tile(
     client: &reqwest::blocking::Client,
     root: &Path,
-    source: &Source,
+    source: &Sheet,
     te: i32,
     tn: i32,
     (c0, r0, c1, r1): (usize, usize, usize, usize),
 ) -> Option<PhotoTile> {
+    if matches!(source.photo, Photo::None) {
+        return None;
+    }
     let path = cache_path(root, source, te, tn);
     let cached = PhotoTile::read(&path);
     let needed = |t: &PhotoTile| -> Vec<usize> {
@@ -157,6 +160,7 @@ pub fn tile(
         return cached;
     }
     let url = match source.photo {
+        Photo::None => return cached,
         Photo::TiledTiff(url) => url(te, tn),
         Photo::Wms { url, layer } => {
             let mut t = match cached {
@@ -207,7 +211,7 @@ pub fn tile(
 /// Cache what was fetched and hand it on.
 fn finish(
     root: &Path,
-    source: &Source,
+    source: &Sheet,
     (te, tn): (i32, i32),
     t: PhotoTile,
     failed: usize,
@@ -216,7 +220,7 @@ fn finish(
         eprintln!("Warning: {failed} aerial photo blocks of {te}_{tn} failed");
         crate::net::note_uncached("aerial photos");
     }
-    let _ = std::fs::create_dir_all(root.join(source.id));
+    let _ = std::fs::create_dir_all(root.join(source.dir()));
     if let Err(e) = t.write(&cache_path(root, source, te, tn)) {
         eprintln!("Warning: aerial photo {te}_{tn} not cached: {e}");
     }
@@ -242,7 +246,7 @@ const WMS_CHUNK: usize = 8;
 /// them into `t`. Returns how many failed.
 fn fetch_wms(
     client: &reqwest::blocking::Client,
-    source: &Source,
+    source: &Sheet,
     (url, layer): (&str, &str),
     (te, tn): (i32, i32),
     todo: &[usize],

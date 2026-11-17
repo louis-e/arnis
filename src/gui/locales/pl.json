@@ -848,7 +848,7 @@
   "settings_nav_lidar": "Ogrody, drzewa, wysokości",
   "lidar": "Dane laserowe",
   "lidar_desc": "Zmierzone szczegóły tam, gdzie region publikuje skany.",
-  "lidar_tip": "Czyta otwarte skany laserowe i zdjęcia lotnicze dla szczegółów, których brak w OpenStreetMap, tam gdzie region je publikuje. Nie dla One World ani obszarów ponad 16 km². Obejmuje Bawarię, Francję, Holandię i część Szwajcarii.",
+  "lidar_tip": "Czyta otwarte skany laserowe i zdjęcia lotnicze dla szczegółów, których brak w OpenStreetMap, tam gdzie region je publikuje. Nie dla One World ani obszarów ponad 16 km². Obejmuje Bawarię, Francję, Holandię, część Szwajcarii, większość USA i część Kanady.",
   "measured_trees": "Zmierzone drzewa",
   "measured_trees_desc": "Drzewa tam, gdzie widział je laser, w ich wysokości.",
   "measured_trees_tip": "Stawia drzewa tam, gdzie widział je laser, w zmierzonej wysokości, zamiast globalnej mapy koron. Zmapowane drzewa też dostają zmierzoną wysokość.",

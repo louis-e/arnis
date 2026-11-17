@@ -11,7 +11,7 @@
 //! Data, attribution required).
 
 use super::crs::Crs;
-use super::source::{Laser, LaserClasses, Locate, Photo, Rect, Source, TileUrls};
+use super::source::{Grid, Laser, LaserClasses, Locate, Photo, Rect, Sheet, Source, TileUrls};
 
 /// Switzerland, simplified to about a kilometre and pushed out by about two.
 /// From OpenStreetMap (relation 51701), © OpenStreetMap contributors, ODbL.
@@ -292,11 +292,12 @@ const OUTLINE: &[&[(f64, f64)]] = &[&[
 pub static SWITZERLAND: Source = Source {
     id: "switzerland",
     name: "swissSURFACE3D",
-    crs: Crs::Lv95,
+    grid: Grid::Fixed(Crs::Lv95),
     outline: OUTLINE,
     laser: Laser::Copc {
         locate: Locate::Lookup(lookup),
         mb_per_km2: 90,
+        own_grid: false,
     },
     photo: Photo::Wms {
         url: "https://wms.geo.admin.ch/",
@@ -309,14 +310,20 @@ pub static SWITZERLAND: Source = Source {
         building: &[6],
         object: &[1, 3],
         vegetation: &[3],
+        unsorted: &[],
     },
     laser_plants: true,
+    strict_pools: false,
     attribution: "Federal Office of Topography swisstopo – swissSURFACE3D, SWISSIMAGE",
 };
 
 /// The COPC tiles over a rectangle, from the STAC API; the latest campaign of a
 /// tile wins.
-fn lookup(client: &reqwest::blocking::Client, (e0, n0, e1, n1): Rect) -> Result<TileUrls, String> {
+fn lookup(
+    client: &reqwest::blocking::Client,
+    _: &Sheet,
+    (e0, n0, e1, n1): Rect,
+) -> Result<TileUrls, String> {
     let crs = Crs::Lv95;
     let corners = [(e0, n0), (e0, n1), (e1, n0), (e1, n1)].map(|(e, n)| crs.inverse(e, n));
     let (mut s, mut w, mut n, mut e) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);

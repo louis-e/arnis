@@ -9,6 +9,7 @@
 //! the density asked for. Neighbouring nodes are fetched in one request, and each
 //! node is its own LAZ chunk, decoded on its own.
 
+use super::crs::Affine;
 use super::fetch::{self, Failure};
 use super::source::Rect;
 use laz::record::{LayeredPointRecordDecompressor, RecordDecompressor};
@@ -19,6 +20,8 @@ pub struct Header {
     pub layout: PointLayout,
     /// Extent of the points: west, south, east, north.
     pub bounds: Rect,
+    /// The file's grid as OGC WKT, where it names one.
+    pub wkt: Option<String>,
     info: Info,
     laz: LazVlr,
 }
@@ -82,6 +85,7 @@ fn parse_header(h: &[u8]) -> Result<(Header, u64), String> {
     let bounds = (f64_at(187), f64_at(203), f64_at(179), f64_at(195));
     let mut info = None;
     let mut laz = None;
+    let mut wkt = None;
     let mut pos = header_size as usize;
     for _ in 0..n_vlrs {
         if pos + 54 > h.len() {
@@ -105,6 +109,9 @@ fn parse_header(h: &[u8]) -> Result<(Header, u64), String> {
             });
         } else if user == "laszip encoded" && id == 22204 {
             laz = Some(LazVlr::read_from(&h[data..data + len]).map_err(|e| e.to_string())?);
+        } else if user == "LASF_Projection" && id == 2112 {
+            let text = String::from_utf8_lossy(&h[data..data + len]);
+            wkt = Some(text.trim_end_matches('\0').to_string());
         }
         pos = data + len;
     }
@@ -122,6 +129,7 @@ fn parse_header(h: &[u8]) -> Result<(Header, u64), String> {
                 offset,
             },
             bounds,
+            wkt,
             info,
             laz,
         },
@@ -238,13 +246,19 @@ pub fn merge_ranges(nodes: &[Node], max_gap: u64, max_len: u64) -> Vec<(u64, u64
     out
 }
 
-/// Read the header, records and hierarchy of a COPC file. `Missing` when the
-/// server has no such file.
+/// Where a file's points go: from its WKT (when it has one), the map from its
+/// grid onto the area's, or `None` when they share one.
+pub type Place<'a> = dyn Fn(Option<&str>) -> Result<Option<Affine>, String> + Sync + 'a;
+
+/// Read the header, records and hierarchy of a COPC file over `window` (in the
+/// area's grid; `place` says how the file's sits to it). Returns the window in
+/// the file's grid too. `Missing` when the server has no such file.
 pub fn open(
     client: &reqwest::blocking::Client,
     url: &str,
     window: Rect,
-) -> Result<(Header, Vec<Node>, usize), Failure> {
+    place: &Place,
+) -> Result<(Header, Vec<Node>, usize, Rect), Failure> {
     let mut head = fetch::get_range(client, url, 0, HEAD)?;
     let mut requests = 1;
     fetch::count_laser_bytes(head.len() as u64);
@@ -260,6 +274,10 @@ pub fn open(
                 _ => return Err(Failure::Other(e)),
             },
         }
+    };
+    let window = match place(header.wkt.as_deref()).map_err(Failure::Other)? {
+        Some(f) => f.inverse().rect(window),
+        None => window,
     };
     let info = header.info;
     let mut nodes = Vec::new();
@@ -278,7 +296,7 @@ pub fn open(
             return Err(Failure::Other("hierarchy too large".into()));
         }
     }
-    Ok((header, nodes, requests))
+    Ok((header, nodes, requests, window))
 }
 
 /// Read the points of `window` at `target` points a square metre, handing each
@@ -290,10 +308,11 @@ pub fn read(
     window: Rect,
     target: f64,
     threads: usize,
+    place: &Place,
     visit: &(dyn Fn(&PointLayout, &[u8]) + Sync),
 ) -> Result<ReadStats, Failure> {
     use rayon::prelude::*;
-    let (header, nodes, requests) = open(client, url, window)?;
+    let (header, nodes, requests, window) = open(client, url, window, place)?;
     let level = choose_level(&header.info, &nodes, header.bounds, target);
     let chosen = select(&header.info, &nodes, window, level);
     let ranges = merge_ranges(&chosen, 256 * 1024, 24 * 1024 * 1024);
