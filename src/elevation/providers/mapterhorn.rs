@@ -6,7 +6,9 @@
 
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
-use crate::elevation::provider::{ElevationProvider, RawElevationGrid, SourcePixels, SourceRow};
+use crate::elevation::provider::{
+    ElevationProvider, FineTerrain, RawElevationGrid, SourcePixels, SourceRow,
+};
 use crate::elevation::providers::tile_math::MAX_TILES_PER_FETCH;
 use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
@@ -95,10 +97,12 @@ impl ElevationProvider for Mapterhorn {
 
         let (height_grid, source_pixels) =
             sample_grid(bbox, zoom, &outcome, &cache_dir, grid_width, grid_height);
+        let fine_terrain = fine_terrain(bbox, &source_pixels, grid_width, grid_height, &cache_dir);
 
         Ok(RawElevationGrid {
             heights_meters: height_grid,
             source_pixels: Some(source_pixels),
+            fine_terrain,
         })
     }
 }
@@ -210,6 +214,8 @@ pub(crate) fn cache_files(
     // A level the probe found empty has markers on the probed tiles only; the fetch read the
     // rest from coarser tiles, which stand in for them.
     let probed_empty = keys.iter().any(|k| k.marker_path(dir).exists());
+    // Whether a tile past the GLO-30 levels is read, which fetches the source coverage too.
+    let mut reads_fine = false;
     let mut files: Vec<PathBuf> = keys
         .into_iter()
         .map(|k| {
@@ -221,15 +227,19 @@ pub(crate) fn cache_files(
             if probed_empty && !tile.exists() {
                 let coarser = std::iter::successors(k.parent(), TileKey::parent)
                     .take_while(|a| a.z >= MIN_ZOOM)
-                    .map(|a| a.cache_path(dir))
-                    .find(|p| p.exists());
+                    .find(|a| a.cache_path(dir).exists());
                 if let Some(coarser) = coarser {
-                    return coarser;
+                    reads_fine |= coarser.z > GLO30_TOP_ZOOM;
+                    return coarser.cache_path(dir);
                 }
             }
+            reads_fine |= k.z > GLO30_TOP_ZOOM;
             tile
         })
         .collect();
+    if reads_fine {
+        files.extend(super::mapterhorn_coverage::cache_files(dir, bbox));
+    }
     files.sort_unstable();
     files.dedup();
     files
@@ -667,6 +677,71 @@ fn source_pixel_m(bbox: &LLBBox, z: u8, top_zoom: u8) -> f64 {
     }
 }
 
+/// Ground spacing of the `FineTerrain` lattice, and the most points along its longer side.
+const FINE_LATTICE_M: f64 = 8.0;
+const FINE_LATTICE_MAX: usize = 2048;
+
+/// Where the grid read laser-scanned terrain: inside a fine source's coverage polygon, from
+/// a level past the GLO-30 ones. `None` where it read no such level, or where the coverage
+/// could not be had; the heights then count as coarse throughout.
+fn fine_terrain(
+    bbox: &LLBBox,
+    source: &SourcePixels,
+    grid_width: usize,
+    grid_height: usize,
+    cache_dir: &Path,
+) -> Option<FineTerrain> {
+    if grid_width < 2 || grid_height < 2 || source.height() != grid_height {
+        return None;
+    }
+    // Samples from z12 and below count at least that zoom's pixel; finer ones at half it.
+    let past_glo30 = (pixel_m(bbox, GLO30_TOP_ZOOM, TILE_PX) * 0.75) as f32;
+    if !(0..grid_height).any(|gy| source.row(gy).runs().iter().any(|&(_, m)| m < past_glo30)) {
+        return None;
+    }
+    let coverage = match super::mapterhorn_coverage::fetch(bbox, cache_dir) {
+        Ok(coverage) => coverage,
+        Err(e) => {
+            eprintln!(
+                "Warning: Mapterhorn's source coverage is unavailable ({e}); its LiDAR terrain is repaired like coarse data"
+            );
+            crate::net::note_uncached("elevation coverage (Mapterhorn)");
+            return None;
+        }
+    };
+    if coverage.is_empty() {
+        return None;
+    }
+    let cell_m = grid_cell_m(bbox, grid_width, grid_height);
+    let step = ((FINE_LATTICE_M / cell_m).round() as usize)
+        .clamp(1, 8)
+        .max(grid_width.max(grid_height).div_ceil(FINE_LATTICE_MAX));
+    let (cols, rows) = FineTerrain::dims(grid_width, grid_height, step);
+    let gx = |i: usize| (i * step).min(grid_width - 1);
+    let gy = |j: usize| (j * step).min(grid_height - 1);
+    let xs: Vec<f64> = (0..cols)
+        .map(|i| {
+            let lng = bbox.min().lng()
+                + gx(i) as f64 / (grid_width - 1) as f64 * (bbox.max().lng() - bbox.min().lng());
+            (lng + 180.0) / 360.0
+        })
+        .collect();
+    let ys: Vec<f64> = (0..rows)
+        .map(|j| norm_y_for_lat(row_lat(bbox, gy(j), grid_height)))
+        .collect();
+    let covered = coverage.covered(&xs, &ys);
+    let fine: Vec<bool> = (0..rows)
+        .flat_map(|j| (0..cols).map(move |i| (i, j)))
+        .map(|(i, j)| covered[j][i] && source.at(gx(i), gy(j)) < past_glo30)
+        .collect();
+    let terrain = FineTerrain::new(step, cols, rows, fine);
+    println!(
+        "Mapterhorn coverage: laser-scanned terrain under {:.1}% of the area",
+        terrain.count() as f64 * 100.0 / (cols * rows) as f64
+    );
+    Some(terrain)
+}
+
 /// Sample the grid in row chunks, decoding only the tiles each chunk needs,
 /// so decoded-tile memory stays at a few tile rows instead of the whole fetch.
 fn sample_grid(
@@ -934,6 +1009,21 @@ mod tests {
         let files = cache_files(dir, &bbox, w, h);
         assert!(files.iter().all(|f| f.exists()), "{files:?}");
         assert!(files.len() < keys.len());
+    }
+
+    /// A fetch that reads levels past GLO-30 reads the source coverage too.
+    #[test]
+    fn fine_levels_bring_the_source_coverage_into_the_cache_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let bbox = LLBBox::new(49.0189, 12.0933, 49.0241, 12.1011).unwrap();
+        let (w, h) = (571, 572);
+        assert!(choose_zoom(&bbox, w, h) > GLO30_TOP_ZOOM);
+        let files = cache_files(dir, &bbox, w, h);
+        assert!(files.contains(&dir.join("attribution.json")), "{files:?}");
+        // A coarse grid reads GLO-30 levels only.
+        let files = cache_files(dir, &bbox, 6, 6);
+        assert!(!files.contains(&dir.join("attribution.json")), "{files:?}");
     }
 
     fn flat_tile(height_m: f64) -> TileImage {

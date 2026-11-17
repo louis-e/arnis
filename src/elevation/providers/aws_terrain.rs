@@ -166,6 +166,7 @@ impl ElevationProvider for AwsTerrain {
             // Terrarium mixes 3 m LiDAR and 30 m SRTM into one zoom, so the source behind a
             // pixel is unknown.
             source_pixels: None,
+            fine_terrain: None,
         })
     }
 }
