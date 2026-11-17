@@ -127,10 +127,17 @@ const PAVED_CELL: i32 = 32;
 /// they are drawn, railway tracks as wide as a wagon, and the squares, car parks, bus
 /// stations and railway yards mapped as areas. On these the laser sees parked vans,
 /// buses, wagons, market stalls and awnings, and a square's paving can read as a pool.
+///
+/// A driveway leads up to a garage's door, or past its side, so the garage reaches onto
+/// it: a candidate is only left out for standing mostly on one (a car or van parked
+/// there). The garage boxes and carports of a car park mapped as such are what the
+/// laser sees there.
 struct Paved {
     /// Centreline segments of the roads, paths and tracks, each with the reach of its
     /// surface.
     lines: Vec<Line>,
+    /// Whether each of `lines` is a driveway's.
+    driveway: Vec<bool>,
     /// Outlines of the squares, car parks, bus stations and railway yards.
     areas: Vec<Vec<(f64, f64)>>,
     /// Indices into `lines` by `PAVED_CELL` cell.
@@ -154,17 +161,23 @@ impl Paved {
                     .is_none_or(|l| l == 0)
         };
         let is_area = |t: &HashMap<String, String>| {
+            let garages = matches!(
+                t.get("parking").map(String::as_str),
+                Some("garage_boxes" | "carports")
+            );
             (t.contains_key("highway") && t.get("area").map(String::as_str) == Some("yes"))
                 || (matches!(
                     t.get("amenity").map(String::as_str),
                     Some("parking" | "bus_station")
-                ) && !t.contains_key("building"))
+                ) && !t.contains_key("building")
+                    && !garages)
                 || t.get("landuse").map(String::as_str) == Some("railway")
         };
         // A wagon is some 3 m across, so half of that and the half block a road gets.
         let track_reach = (1.5 * scale).max(1.0) + 0.5;
         let mut paved = Paved {
             lines: Vec::new(),
+            driveway: Vec::new(),
             areas: Vec::new(),
             buckets: FnvHashMap::default(),
         };
@@ -183,6 +196,7 @@ impl Paved {
                 {
                     for pair in w.nodes.windows(2) {
                         paved.lines.push((xz(&pair[0]), xz(&pair[1]), track_reach));
+                        paved.driveway.push(false);
                     }
                 }
                 ProcessedElement::Way(w) => {
@@ -196,8 +210,11 @@ impl Paved {
                         continue;
                     }
                     let reach = f64::from(highway_block_range(kind, t, scale)) + 0.5;
+                    let driveway = kind == "service"
+                        && t.get("service").map(String::as_str) == Some("driveway");
                     for pair in w.nodes.windows(2) {
                         paved.lines.push((xz(&pair[0]), xz(&pair[1]), reach));
+                        paved.driveway.push(driveway);
                     }
                 }
                 ProcessedElement::Relation(r) if is_area(t) => {
@@ -225,25 +242,84 @@ impl Paved {
         paved
     }
 
-    /// Whether the cell centre (x, z) lies on a road, a square or a car park.
-    fn covers(&self, x: f64, z: f64) -> bool {
+    /// The `lines` whose surface the cell centre (x, z) lies on.
+    fn lines_at(&self, x: f64, z: f64) -> impl Iterator<Item = usize> + '_ {
         let cell = (
             (x / f64::from(PAVED_CELL)).floor() as i32,
             (z / f64::from(PAVED_CELL)).floor() as i32,
         );
-        let on_line = self.buckets.get(&cell).into_iter().flatten().any(|&i| {
-            let ((ax, az), (bx, bz), reach) = self.lines[i];
-            let (dx, dz) = (bx - ax, bz - az);
-            let len2 = dx * dx + dz * dz;
-            let t = if len2 > 0.0 {
-                (((x - ax) * dx + (z - az) * dz) / len2).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            (x - ax - t * dx).hypot(z - az - t * dz) <= reach
-        });
-        on_line || self.areas.iter().any(|ring| ring_contains(ring, x, z))
+        self.buckets
+            .get(&cell)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(move |&i| {
+                let ((ax, az), (bx, bz), reach) = self.lines[i];
+                let (dx, dz) = (bx - ax, bz - az);
+                let len2 = dx * dx + dz * dz;
+                let t = if len2 > 0.0 {
+                    (((x - ax) * dx + (z - az) * dz) / len2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                (x - ax - t * dx).hypot(z - az - t * dz) <= reach
+            })
     }
+
+    /// Whether the cell centre (x, z) lies on a road, a square or a car park.
+    fn covers(&self, x: f64, z: f64) -> bool {
+        self.lines_at(x, z).any(|i| !self.driveway[i])
+            || self.areas.iter().any(|ring| ring_contains(ring, x, z))
+    }
+
+    /// Whether the cell centre (x, z) lies on a driveway.
+    fn on_driveway(&self, x: f64, z: f64) -> bool {
+        self.lines_at(x, z).any(|i| self.driveway[i])
+    }
+
+    /// Whether more than half of the blocks inside or on the convex outline `ring`
+    /// lie on a driveway.
+    fn mostly_on_driveway(&self, ring: &[ProcessedNode]) -> bool {
+        let pts: Vec<(f64, f64)> = ring
+            .iter()
+            .map(|n| (f64::from(n.x), f64::from(n.z)))
+            .collect();
+        let (Some(x0), Some(x1)) = (
+            ring.iter().map(|n| n.x).min(),
+            ring.iter().map(|n| n.x).max(),
+        ) else {
+            return false;
+        };
+        let (Some(z0), Some(z1)) = (
+            ring.iter().map(|n| n.z).min(),
+            ring.iter().map(|n| n.z).max(),
+        ) else {
+            return false;
+        };
+        let (mut all, mut on) = (0usize, 0usize);
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                let (fx, fz) = (f64::from(x), f64::from(z));
+                if in_convex(&pts, fx, fz) {
+                    all += 1;
+                    on += usize::from(self.on_driveway(fx + 0.5, fz + 0.5));
+                }
+            }
+        }
+        2 * on > all
+    }
+}
+
+/// Whether (x, z) lies inside or on a convex ring, wound either way.
+fn in_convex(ring: &[(f64, f64)], x: f64, z: f64) -> bool {
+    let (mut pos, mut neg) = (false, false);
+    for pair in ring.windows(2) {
+        let ((ax, az), (bx, bz)) = (pair[0], pair[1]);
+        let c = (bx - ax) * (z - az) - (bz - az) * (x - ax);
+        pos |= c > 1e-9;
+        neg |= c < -1e-9;
+    }
+    !(pos && neg)
 }
 
 /// Even-odd point in a closed ring.
@@ -318,12 +394,15 @@ pub fn merge(
                 w.nodes.iter().map(|p| f64::from(p.x)).sum::<f64>() / n + 0.5,
                 w.nodes.iter().map(|p| f64::from(p.z)).sum::<f64>() / n + 0.5,
             );
-            let on_paving = w
-                .nodes
-                .iter()
-                .map(|p| (f64::from(p.x) + 0.5, f64::from(p.z) + 0.5))
-                .chain(std::iter::once(centre))
-                .any(|(x, z)| paved.covers(x, z));
+            let points = || {
+                w.nodes
+                    .iter()
+                    .map(|p| (f64::from(p.x) + 0.5, f64::from(p.z) + 0.5))
+                    .chain(std::iter::once(centre))
+            };
+            // On a driveway only where most of it stands on one.
+            let on_paving =
+                points().any(|(x, z)| paved.covers(x, z)) || paved.mostly_on_driveway(&w.nodes);
             let mapped = blockers.iter().any(|&(ba, bb, bc, bd, building)| {
                 let overlaps = a <= bc && c >= ba && b <= bd && d >= bb;
                 // A shed only yields to buildings; a pool to buildings and pools.
@@ -506,6 +585,61 @@ mod tests {
             })
             .collect();
         assert_eq!(kept, vec![ID_BASE + 256, ID_BASE + 1024]);
+    }
+
+    // A garage at the end of its driveway, the driveway drawn up to its door, a garage
+    // the driveway passes, and the garages of a garage-box court are kept; a van
+    // parked on a driveway is not.
+    #[test]
+    fn garages_stand_at_the_end_of_their_driveways() {
+        let line = |id: u64, tags: &[(&str, &str)], from: (i32, i32), to: (i32, i32)| {
+            ProcessedElement::Way(ProcessedWay {
+                id,
+                nodes: [(1, from), (2, to)]
+                    .iter()
+                    .map(|&(k, (x, z))| ProcessedNode {
+                        id: id + k,
+                        tags: HashMap::new(),
+                        x,
+                        z,
+                    })
+                    .collect(),
+                tags: tags
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            })
+        };
+        let driveway = [("highway", "service"), ("service", "driveway")];
+        let existing = vec![
+            // From the street at z = 0 up to the garage door at z = 20.
+            line(1, &driveway, (10, 0), (10, 20)),
+            line(4, &driveway, (40, 0), (40, 20)),
+            way(
+                7,
+                &[("amenity", "parking"), ("parking", "garage_boxes")],
+                60,
+                0,
+                90,
+                30,
+            ),
+        ];
+        let cands = vec![
+            way(ID_BASE, &[("building", "garage")], 8, 20, 13, 26), // its garage
+            way(ID_BASE + 256, &[("building", "garage")], 39, 8, 41, 13), // the van
+            way(ID_BASE + 512, &[("building", "garage")], 65, 5, 70, 10), // a box
+            way(ID_BASE + 768, &[("building", "garage")], 12, 5, 16, 10), // beside
+        ];
+        let (kept, on_paved) = merge(cands, &existing, 1.0);
+        let kept: Vec<u64> = kept
+            .into_iter()
+            .map(|e| match e {
+                ProcessedElement::Way(w) => w.id,
+                _ => 0,
+            })
+            .collect();
+        assert_eq!(kept, vec![ID_BASE, ID_BASE + 512, ID_BASE + 768]);
+        assert_eq!(on_paved, 1);
     }
 
     // A wagon standing on a siding and a bus in its station are no sheds; a shed
