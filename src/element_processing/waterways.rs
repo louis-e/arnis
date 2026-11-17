@@ -3,7 +3,7 @@ use crate::bresenham::bresenham_line;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::field_texture::PLOT_PLANTS;
 use crate::floodfill_cache::RoadMaskBitmap;
-use crate::osm_parser::ProcessedWay;
+use crate::osm_parser::{ProcessedNode, ProcessedWay};
 use crate::water_depth::{at_bore, carve_water_column, BigWaterField};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -78,15 +78,10 @@ pub fn generate_waterways(
                     prev = None;
                     continue;
                 }
-                // A one-block channel steps diagonally from cell to cell; the corner keeps
-                // its water joined side to side.
-                if waterway_width == 1 {
-                    if let Some((px, _)) = prev.filter(|&(px, pz)| px != bx && pz != bz) {
-                        create_water_channel(editor, px, bz, 1, seg_water_y, bed);
-                    }
+                for (x, z) in channel_cells_at(bx, bz, prev, waterway_width) {
+                    fill_channel_cell(editor, x, z, seg_water_y, bed);
                 }
                 prev = Some((bx, bz));
-                create_water_channel(editor, bx, bz, waterway_width, seg_water_y, bed);
             }
         }
     }
@@ -193,56 +188,97 @@ pub fn channel_reach(width: i32) -> (i32, i32) {
     ((width - 1) / 2, width / 2)
 }
 
-/// Creates a water channel at a target water level with the given width.
-/// Skips blocks where terrain is above the water surface, with a small tolerance
-/// to avoid gaps on gentle slopes (can create stepped banks).
-fn create_water_channel(
-    editor: &mut WorldEditor,
-    center_x: i32,
-    center_z: i32,
+/// The cells a channel `width` blocks wide draws for its centreline cell (x, z), reached
+/// from centreline cell `prev`: the `channel_reach` square around it, and for a one-block
+/// channel that steps diagonally, the corner that joins the two cells side to side.
+pub fn channel_cells_at(
+    x: i32,
+    z: i32,
+    prev: Option<(i32, i32)>,
     width: i32,
+) -> impl Iterator<Item = (i32, i32)> {
+    let (before, after) = channel_reach(width);
+    let corner = prev
+        .filter(|&(px, pz)| width <= 1 && px != x && pz != z)
+        .map(|(px, _)| (px, z));
+    corner.into_iter().chain(
+        ((x - before)..=(x + after))
+            .flat_map(move |cx| ((z - before)..=(z + after)).map(move |cz| (cx, cz))),
+    )
+}
+
+/// Every cell a channel `width` blocks wide draws along `nodes`, as `channel_cells_at`
+/// gives them for each cell of its centreline: the footprint the water masks share with the
+/// drawn channel. Segments that come no nearer than the channel's reach to the inclusive
+/// `area` (min x, max x, min z, max z) are skipped. A cell may come more than once.
+pub fn channel_cells(
+    nodes: &[ProcessedNode],
+    width: i32,
+    area: (i32, i32, i32, i32),
+    mut cell: impl FnMut(i32, i32),
+) {
+    let (before, after) = channel_reach(width);
+    let reach = before.max(after) + 1;
+    let mut prev = None;
+    for pair in nodes.windows(2) {
+        let (a, b) = (pair[0].xz(), pair[1].xz());
+        if a.x.max(b.x).saturating_add(reach) < area.0
+            || a.x.min(b.x).saturating_sub(reach) > area.1
+            || a.z.max(b.z).saturating_add(reach) < area.2
+            || a.z.min(b.z).saturating_sub(reach) > area.3
+        {
+            prev = None;
+            continue;
+        }
+        for (x, _, z) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
+            for (cx, cz) in channel_cells_at(x, z, prev, width) {
+                cell(cx, cz);
+            }
+            prev = Some((x, z));
+        }
+    }
+}
+
+/// Water in one cell of a channel whose surface is `target_water_y` there. Skips the cell
+/// where the terrain is above that surface, with a small tolerance to avoid gaps on gentle
+/// slopes (can create stepped banks).
+fn fill_channel_cell(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
     target_water_y: i32,
     bed: &ChannelBed,
 ) {
     const BANK_TOLERANCE: i32 = 2;
-    let (before, after) = channel_reach(width);
+    let ground_y = editor.get_ground_level(x, z);
+    // Only place water where terrain is at or below the water surface,
+    // but allow small elevation steps to avoid gaps on gentle slopes.
+    let water_y = if ground_y <= target_water_y {
+        target_water_y
+    } else if ground_y <= target_water_y + BANK_TOLERANCE
+        && !editor.block_exists_absolute(x, ground_y, z)
+    {
+        ground_y
+    } else {
+        return;
+    };
 
-    for x in (center_x - before)..=(center_x + after) {
-        for z in (center_z - before)..=(center_z + after) {
-            let ground_y = editor.get_ground_level(x, z);
-            // Only place water where terrain is at or below the water surface,
-            // but allow small elevation steps to avoid gaps on gentle slopes.
-            let water_y = if ground_y <= target_water_y {
-                Some(target_water_y)
-            } else if ground_y <= target_water_y + BANK_TOLERANCE
-                && !editor.block_exists_absolute(x, ground_y, z)
-            {
-                Some(ground_y)
-            } else {
-                None
-            };
-
-            if let Some(water_y) = water_y {
-                editor.set_block_absolute(WATER, x, water_y, z, None, None);
-                // A river's or missed canal's depth and bed, unless a road or bore owns it.
-                let missed = || !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
-                let under_deck =
-                    || bed.decks.deck_clears(x, z, water_y) && !bed.decks.over_grade_way(x, z);
-                if (bed.field.is_river(x, z) || missed())
-                    && (!bed.road_mask.contains(x, z) || under_deck())
-                    && !at_bore(bed.field, bed.tunnel_footprint, x, z)
-                    && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
-                {
-                    let depth = bed.field.depth_at(x, z);
-                    carve_water_column(editor, x, z, water_y, depth, bed.road_mask, bed.field);
-                }
-
-                // Clear vegetation above the water, a sunflower's top half too.
-                editor.set_block_absolute(AIR, x, water_y + 1, z, Some(PLOT_PLANTS), None);
-                editor.set_block_absolute(AIR, x, water_y + 2, z, Some(&[SUNFLOWER_UPPER]), None);
-            }
-        }
+    editor.set_block_absolute(WATER, x, water_y, z, None, None);
+    // A river's or missed canal's depth and bed, unless a road or bore owns it.
+    let missed = || !editor.is_lc_water(x, z) && editor.is_mapped_water(x, z);
+    let under_deck = || bed.decks.deck_clears(x, z, water_y) && !bed.decks.over_grade_way(x, z);
+    if (bed.field.is_river(x, z) || missed())
+        && (!bed.road_mask.contains(x, z) || under_deck())
+        && !at_bore(bed.field, bed.tunnel_footprint, x, z)
+        && editor.check_for_block_absolute(x, water_y, z, Some(&[WATER]), None)
+    {
+        let depth = bed.field.depth_at(x, z);
+        carve_water_column(editor, x, z, water_y, depth, bed.road_mask, bed.field);
     }
+
+    // Clear vegetation above the water, a sunflower's top half too.
+    editor.set_block_absolute(AIR, x, water_y + 1, z, Some(PLOT_PLANTS), None);
+    editor.set_block_absolute(AIR, x, water_y + 2, z, Some(&[SUNFLOWER_UPPER]), None);
 }
 
 #[cfg(test)]
@@ -456,6 +492,45 @@ mod waterway_profile_tests {
             .filter(|&(x, z)| wet(x, z))
             .count();
         assert_eq!(total, 31 + 30);
+    }
+
+    /// The water masks stamp `channel_cells`, so they must be the cells the channel draws.
+    #[test]
+    fn the_masks_footprint_is_the_drawn_channel() {
+        let bbox = world_bbox();
+        for (kind, width) in [("ditch", None), ("stream", None), ("stream", Some("2"))] {
+            let mut editor = editor_over_slope(&bbox, 8.0, 0.0);
+            let mut way = stream(10, 40);
+            way.tags.insert("waterway".to_string(), kind.to_string());
+            if let Some(w) = width {
+                way.tags.insert("width".to_string(), w.to_string());
+            }
+            // A bend: diagonal, then straight.
+            way.nodes[0].x = 10;
+            way.nodes[1].x = 40;
+            way.nodes.push(ProcessedNode {
+                id: 3,
+                tags: HashMap::new(),
+                x: 40,
+                z: 55,
+            });
+            generate_waterways(&mut editor, &way, None, &no_bed());
+            let drawn: std::collections::BTreeSet<(i32, i32)> = (0..SIDE as i32)
+                .flat_map(|x| (0..SIDE as i32).map(move |z| (x, z)))
+                .filter(|&(x, z)| !water_ys(&editor, x, z).is_empty())
+                .collect();
+            let mut stamped = std::collections::BTreeSet::new();
+            let w = capped_waterway_width(kind, &way.tags, None);
+            channel_cells(
+                &way.nodes,
+                w,
+                (0, SIDE as i32 - 1, 0, SIDE as i32 - 1),
+                |x, z| {
+                    stamped.insert((x, z));
+                },
+            );
+            assert_eq!(drawn, stamped, "{kind} {width:?}");
+        }
     }
 
     #[test]

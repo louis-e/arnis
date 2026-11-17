@@ -3,7 +3,6 @@
 use rayon::prelude::*;
 use std::collections::{HashMap, VecDeque};
 
-use crate::bresenham::bresenham_line;
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::floodfill_cache::hole_groups;
@@ -24,6 +23,7 @@ struct WaterContext {
     width: usize,
 }
 
+/// `channel_width_cap` narrows line waterways as their drawing does (`capped_waterway_width`).
 pub fn apply_osm_water_override(
     land_cover: &mut LandCoverData,
     heights: &mut [Vec<f32>],
@@ -31,6 +31,7 @@ pub fn apply_osm_water_override(
     world_height: usize,
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
+    channel_width_cap: Option<i32>,
 ) {
     let width = land_cover.width;
     let height = land_cover.height;
@@ -60,6 +61,7 @@ pub fn apply_osm_water_override(
         true,
         elements,
         xzbbox,
+        channel_width_cap,
     );
     land_cover.inland_water = inland;
 
@@ -109,6 +111,7 @@ pub fn mark_inland_water(
     world_height: usize,
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
+    channel_width_cap: Option<i32>,
 ) {
     let (width, height) = (land_cover.width, land_cover.height);
     if width < 2 || height < 2 || world_width < 2 || world_height < 2 {
@@ -120,8 +123,18 @@ pub fn mark_inland_water(
     );
     let reach = inland_reach(land_cover);
     let grid = &mut land_cover.grid;
-    land_cover.inland_water =
-        rasterize_osm_water(grid, &[], None, scale, reach, false, elements, xzbbox).1;
+    land_cover.inland_water = rasterize_osm_water(
+        grid,
+        &[],
+        None,
+        scale,
+        reach,
+        false,
+        elements,
+        xzbbox,
+        channel_width_cap,
+    )
+    .1;
 }
 
 /// How far the inland mark spreads from mapped water, in grid cells.
@@ -190,6 +203,7 @@ fn rasterize_osm_water(
     write: bool,
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
+    channel_width_cap: Option<i32>,
 ) -> (usize, InlandWater) {
     let height = grid.len();
     let width = grid.first().map_or(0, |r| r.len());
@@ -241,14 +255,16 @@ fn rasterize_osm_water(
                     {
                         continue;
                     }
-                    let waterway_width = crate::element_processing::waterways::waterway_width(
-                        waterway_type,
-                        &way.tags,
-                    );
+                    let waterway_width =
+                        crate::element_processing::waterways::capped_waterway_width(
+                            waterway_type,
+                            &way.tags,
+                            channel_width_cap,
+                        );
                     changed += rasterize_line(
                         grid,
                         &way.nodes,
-                        crate::element_processing::waterways::channel_reach(waterway_width),
+                        waterway_width,
                         heights,
                         context,
                         min_x,
@@ -584,7 +600,7 @@ fn point_in_sorted_ranges(x: f64, sorted: &[f64]) -> bool {
 fn rasterize_line(
     grid: &mut [Vec<u8>],
     nodes: &[ProcessedNode],
-    (before, after): (i32, i32),
+    channel_width: i32,
     heights: &[Vec<f32>],
     context: Option<&WaterContext>,
     min_x_world: i32,
@@ -598,59 +614,38 @@ fn rasterize_line(
     write: bool,
     mut inland: Option<&mut InlandWater>,
 ) -> usize {
-    if nodes.len() < 2 || before < 0 || after < 0 {
+    if nodes.len() < 2 {
         return 0;
     }
     let width_i32 = width as i32;
     let height_i32 = height as i32;
-    let margin = before.max(after);
     let mut count = 0;
-    for pair in nodes.windows(2) {
-        let (x1, z1) = (pair[0].x, pair[0].z);
-        let (x2, z2) = (pair[1].x, pair[1].z);
-        // Skip segments whose bbox+margin doesn't intersect the world bbox.
-        let seg_min_x = x1.min(x2) - margin;
-        let seg_max_x = x1.max(x2) + margin;
-        let seg_min_z = z1.min(z2) - margin;
-        let seg_max_z = z1.max(z2) + margin;
-        if seg_max_x < min_x_world
-            || seg_min_x > max_x_world
-            || seg_max_z < min_z_world
-            || seg_min_z > max_z_world
-        {
-            continue;
+    // The cells the channel draws, so the water it marks is the water it gets.
+    let area = (min_x_world, max_x_world, min_z_world, max_z_world);
+    crate::element_processing::waterways::channel_cells(nodes, channel_width, area, |wx, wz| {
+        let rel_x = wx - min_x_world;
+        let rel_z = wz - min_z_world;
+        if rel_x < 0 || rel_z < 0 {
+            return;
         }
-        for (bx, _, bz) in bresenham_line(x1, 0, z1, x2, 0, z2) {
-            for dx in -before..=after {
-                for dz in -before..=after {
-                    let wx = bx + dx;
-                    let wz = bz + dz;
-                    let rel_x = wx - min_x_world;
-                    let rel_z = wz - min_z_world;
-                    if rel_x < 0 || rel_z < 0 {
-                        continue;
-                    }
-                    let gx = (rel_x as f64 * scale_to_grid_x).round() as i32;
-                    let gz = (rel_z as f64 * scale_to_grid_z).round() as i32;
-                    if gx < 0 || gz < 0 || gx >= width_i32 || gz >= height_i32 {
-                        continue;
-                    }
-                    let gx_u = gx as usize;
-                    let gz_u = gz as usize;
-                    if let Some(m) = inland.as_deref_mut() {
-                        m.set(gx_u, gz_u);
-                    }
-                    if !write || !passes_water_guard(heights, context, gx_u, gz_u) {
-                        continue;
-                    }
-                    if grid[gz_u][gx_u] != LC_WATER {
-                        grid[gz_u][gx_u] = LC_WATER;
-                        count += 1;
-                    }
-                }
-            }
+        let gx = (rel_x as f64 * scale_to_grid_x).round() as i32;
+        let gz = (rel_z as f64 * scale_to_grid_z).round() as i32;
+        if gx < 0 || gz < 0 || gx >= width_i32 || gz >= height_i32 {
+            return;
         }
-    }
+        let gx_u = gx as usize;
+        let gz_u = gz as usize;
+        if let Some(m) = inland.as_deref_mut() {
+            m.set(gx_u, gz_u);
+        }
+        if !write || !passes_water_guard(heights, context, gx_u, gz_u) {
+            return;
+        }
+        if grid[gz_u][gx_u] != LC_WATER {
+            grid[gz_u][gx_u] = LC_WATER;
+            count += 1;
+        }
+    });
     count
 }
 
@@ -934,7 +929,7 @@ mod tests {
             ),
         ];
         let before = lc.grid.clone();
-        mark_inland_water(&mut lc, 32, 32, &elements, &bbox);
+        mark_inland_water(&mut lc, 32, 32, &elements, &bbox, None);
         assert!(lc.inland_water.get(5, 5));
         // The lake's mark spreads three steps, the harbour's water stays sea.
         assert!(lc.inland_water.get(13, 5));
@@ -976,7 +971,7 @@ mod tests {
             ),
             water_way(3, &[("waterway", "dock")], square(24, 0, 31, 7)),
         ];
-        mark_inland_water(&mut lc, 32, 8, &elements, &bbox);
+        mark_inland_water(&mut lc, 32, 8, &elements, &bbox, None);
         assert!(lc.inland_water.get(12, 4));
         assert!(!lc.inland_water.get(20, 4));
         assert!(!lc.inland_water.get(28, 4));

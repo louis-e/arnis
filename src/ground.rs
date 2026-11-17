@@ -862,7 +862,13 @@ impl Ground {
     }
 
     /// Force LC_WATER inside OSM water and sink it onto that water; flat worlds only mark inland.
-    pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
+    /// `channel_width_cap` narrows line waterways as their drawing does.
+    pub fn apply_osm_water_override(
+        &mut self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        channel_width_cap: Option<i32>,
+    ) {
         use crate::land_cover::osm_water_override::{apply_osm_water_override, mark_inland_water};
         let (world_width, world_height) = self.world_dims();
         let Ground {
@@ -883,9 +889,17 @@ impl Ground {
                     world_height,
                     elements,
                     xzbbox,
+                    channel_width_cap,
                 );
             }
-            None => mark_inland_water(lc, world_width, world_height, elements, xzbbox),
+            None => mark_inland_water(
+                lc,
+                world_width,
+                world_height,
+                elements,
+                xzbbox,
+                channel_width_cap,
+            ),
         }
     }
 
@@ -895,6 +909,7 @@ impl Ground {
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
         scale: f64,
+        channel_width_cap: Option<i32>,
     ) {
         let (world_width, world_height) = self.world_dims();
         let Some(lc) = self.land_cover.as_mut() else {
@@ -907,6 +922,7 @@ impl Ground {
             elements,
             xzbbox,
             scale,
+            channel_width_cap,
         );
     }
 

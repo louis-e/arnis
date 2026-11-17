@@ -5,11 +5,11 @@
 use crate::block_definitions::{
     Block, ANDESITE, CLAY, COARSE_DIRT, DIRT, GRAVEL, MOSSY_COBBLESTONE, MUD, SAND, STONE,
 };
-use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::water_areas::PolygonEdges;
 use crate::element_processing::waterways::{
-    capped_waterway_width, channel_reach, is_channel_waterway, is_underground_waterway,
+    capped_waterway_width, channel_cells, channel_reach, is_channel_waterway,
+    is_underground_waterway,
 };
 use crate::ground::Ground;
 use crate::ground_generation::ground_noise;
@@ -215,8 +215,8 @@ impl PolyRings {
 
 struct LineRiver<'a> {
     way: &'a ProcessedWay,
-    /// Cells the drawn ribbon reaches either side of the line (`channel_reach`).
-    reach: (i32, i32),
+    /// Width of the drawn ribbon, in blocks.
+    width: i32,
 }
 
 /// What one tile has to read: indices into the classified geometry.
@@ -271,7 +271,8 @@ fn build_field_tiled(elements: &[ProcessedElement], inp: &FieldInputs, halo: i32
     };
     let mut work = vec![TileWork::default(); tw * th];
     for (i, lr) in lines.iter().enumerate() {
-        let r = lr.reach.0.max(lr.reach.1);
+        let (before, after) = channel_reach(lr.width);
+        let r = before.max(after);
         for pair in lr.way.nodes.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
             let seg = (a.x.min(b.x), a.x.max(b.x), a.z.min(b.z), a.z.max(b.z));
@@ -671,10 +672,7 @@ fn classify<'a>(
                     continue;
                 }
                 let width = capped_waterway_width(wt, &way.tags, channel_width_cap);
-                lines.push(LineRiver {
-                    way,
-                    reach: channel_reach(width),
-                });
+                lines.push(LineRiver { way, width });
             }
             ProcessedElement::Relation(rel) => {
                 let polys = if is_river_polygon_tags(&rel.tags) {
@@ -710,25 +708,24 @@ impl Lat {
     }
 }
 
-/// The ribbon `create_water_channel` draws, geometry only.
+/// The ribbon the channel draws (`channel_cells`), geometry only.
 fn stamp_line(lr: &LineRiver, lat: &Lat, mask: &mut [bool], hw_line: &mut [u8]) {
-    let (before, after) = lr.reach;
+    let (before, after) = channel_reach(lr.width);
     // The ribbon's centre is this far from its bank.
     let hw = (before.max(after) + 1).clamp(1, 255) as u8;
-    for pair in lr.way.nodes.windows(2) {
-        let (a, b) = (pair[0].xz(), pair[1].xz());
-        for (bx, _, bz) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
-            for x in (bx - before)..=(bx + after) {
-                for z in (bz - before)..=(bz + after) {
-                    if let Some(i) = lat.idx(x, z) {
-                        mask[i] = true;
-                        // Max, so overlapping ways give the same field in any order.
-                        hw_line[i] = hw_line[i].max(hw);
-                    }
-                }
-            }
+    let area = (
+        lat.min_x,
+        lat.min_x + lat.w as i32 - 1,
+        lat.min_z,
+        lat.min_z + lat.h as i32 - 1,
+    );
+    channel_cells(&lr.way.nodes, lr.width, area, |x, z| {
+        if let Some(i) = lat.idx(x, z) {
+            mask[i] = true;
+            // Max, so overlapping ways give the same field in any order.
+            hw_line[i] = hw_line[i].max(hw);
         }
-    }
+    });
 }
 
 fn rasterize_poly(p: &PolyRings, lat: &Lat, out: &mut [bool]) {

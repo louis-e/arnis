@@ -13,7 +13,8 @@ use crate::element_processing::bridges::is_bridge_way;
 use crate::element_processing::highways::highway_block_range;
 use crate::element_processing::swimming_pools::is_swimming_pool;
 use crate::element_processing::waterways::{
-    is_channel_waterway, is_underground_waterway, waterway_width, MAX_WATERWAY_WIDTH,
+    capped_waterway_width, channel_cells, is_channel_waterway, is_underground_waterway,
+    MAX_WATERWAY_WIDTH,
 };
 use crate::land_cover::{
     compute_water_distance, nearest_land_class, LandCoverData, LC_BUILT_UP, LC_WATER,
@@ -32,6 +33,7 @@ const POOL_MARGIN_BLOCKS: f64 = 2.0;
 /// A pool window past this many cells is a broken outline, not a pool.
 const MAX_POOL_WINDOW_CELLS: usize = 1 << 20;
 
+/// `channel_width_cap` narrows line waterways as their drawing does (`capped_waterway_width`).
 pub fn apply_osm_land_override(
     land_cover: &mut LandCoverData,
     world_width: usize,
@@ -39,6 +41,7 @@ pub fn apply_osm_land_override(
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
     scale: f64,
+    channel_width_cap: Option<i32>,
 ) {
     let width = land_cover.width;
     let height = land_cover.height;
@@ -101,8 +104,9 @@ pub fn apply_osm_land_override(
                     }
                 } else if let Some(kind) = way.tags.get("waterway") {
                     if is_channel_waterway(kind) && !is_underground_waterway(&way.tags) {
-                        let half = (waterway_width(kind, &way.tags) / 2).max(0);
-                        stamp_line(&mut water_line, &way.nodes, half, &map, xzbbox);
+                        let width = capped_waterway_width(kind, &way.tags, channel_width_cap)
+                            .min(MAX_WATERWAY_WIDTH);
+                        stamp_channel(&mut water_line, &way.nodes, width, &map, xzbbox);
                     }
                 } else if let Some(half) = land_line_half_width(way, scale) {
                     stamp_line(&mut land, &way.nodes, half, &map, xzbbox);
@@ -414,6 +418,30 @@ fn fill_rings(bits: &mut [u64], rings: &[Vec<ProcessedNode>], map: &GridMap) {
     }
 }
 
+/// Stamp the cells a channel `width` blocks wide draws (`channel_cells`) into a grid bitset.
+fn stamp_channel(
+    bits: &mut [u64],
+    nodes: &[ProcessedNode],
+    width: i32,
+    map: &GridMap,
+    xzbbox: &XZBBox,
+) {
+    let (w, h) = (map.width as i64, map.height as i64);
+    let area = (
+        xzbbox.min_x(),
+        xzbbox.max_x(),
+        xzbbox.min_z(),
+        xzbbox.max_z(),
+    );
+    channel_cells(nodes, width, area, |x, z| {
+        let gx = map.gx(x).round() as i64;
+        let gz = map.gz(z).round() as i64;
+        if gx >= 0 && gz >= 0 && gx < w && gz < h {
+            set_bit(bits, gz as usize * map.width + gx as usize);
+        }
+    });
+}
+
 /// Stamp a polyline of the given half width (in world blocks) into a grid bitset.
 fn stamp_line(
     bits: &mut [u64],
@@ -621,7 +649,7 @@ mod tests {
     }
 
     fn run(lc: &mut LandCoverData, bbox: &XZBBox, elements: &[ProcessedElement]) {
-        apply_osm_land_override(lc, 60, 60, elements, bbox, 1.0);
+        apply_osm_land_override(lc, 60, 60, elements, bbox, 1.0, None);
     }
 
     #[test]
