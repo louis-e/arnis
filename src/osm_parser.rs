@@ -69,6 +69,16 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
         if k == "start_date" {
             return keep_start_date;
         }
+        // A building's outline source tells a surveyed wall line (a cadastre,
+        // the Dutch BAG) from a roof traced from the air.
+        if keep_start_date
+            && matches!(
+                k.as_str(),
+                "source" | "source:geometry" | "source:outline" | "ref:bag"
+            )
+        {
+            return true;
+        }
         // The house number feeds the door plate; the rest of addr:* stays out.
         if k == "addr:housenumber" {
             return true;
@@ -4559,6 +4569,24 @@ mod lifecycle_tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn buildings_keep_the_source_of_their_outline() {
+        let kept = filter_tags(tags(&[
+            ("building", "yes"),
+            ("source", "cadastre-dgi-fr"),
+            ("ref:bag", "363100012345678"),
+            ("source:date", "2015"),
+        ]));
+        assert_eq!(
+            kept.get("source").map(String::as_str),
+            Some("cadastre-dgi-fr")
+        );
+        assert!(kept.contains_key("ref:bag"));
+        assert!(!kept.contains_key("source:date"));
+        let road = filter_tags(tags(&[("highway", "residential"), ("source", "Bing")]));
+        assert!(!road.contains_key("source"));
     }
 
     #[test]

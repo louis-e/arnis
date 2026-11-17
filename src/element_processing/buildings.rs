@@ -3194,9 +3194,6 @@ struct BuildingConfig {
     building_height: i32,
     /// Gross block height of one upper floor (see `floor_cycle_for`).
     floor_cycle: i32,
-    /// Rows the ground floor has over the upper ones, slab row included (see
-    /// `ground_floor_bonus`).
-    ground_bonus: i32,
     is_tall_building: bool,
     start_y_offset: i32,
     abs_terrain_offset: i32,
@@ -3585,19 +3582,12 @@ impl BuildingConfig {
         self.is_photo_column(bx, bz) || self.preset_shell.contains(&(bx, bz))
     }
 
-    /// The wall height with the full ground-floor bonus, which thresholds
-    /// tuned before low buildings gave a row of it up read.
-    #[inline]
-    fn full_floor_height(&self) -> i32 {
-        self.building_height + GROUND_FLOOR_BONUS - self.ground_bonus
-    }
-
-    /// Grammar anchor: the ground-floor bonus at ground level; elevated parts
-    /// already carry it in their min_level offset, keeping stacked bands in phase.
+    /// Grammar anchor: +2 at ground level; elevated parts already carry the
+    /// bonus in their min_level offset, keeping stacked bands in phase.
     #[inline]
     fn grammar_anchor(&self) -> i32 {
         if self.is_ground_level {
-            self.ground_bonus
+            GROUND_FLOOR_BONUS
         } else {
             0
         }
@@ -6655,94 +6645,6 @@ fn infer_building_height(
 /// floor slab row (the "+2" in the wall grammar).
 const GROUND_FLOOR_BONUS: i32 = 2;
 
-/// Ground-floor bonus of a low building: one row, so a shop window or a door
-/// still has a row of wall over it below the eave.
-const LOW_RISE_GROUND_BONUS: i32 = 1;
-
-/// The ground-floor bonus of a building with `levels` mapped storeys at
-/// `floor_cycle`. Measured against laser scans, low buildings came out too
-/// tall with it: one storey 8.8 m against 4.3 m, kiosks and market stalls
-/// twice their height, two commercial storeys some 4 m over. A single storey
-/// therefore keeps one row of it, as do two at the commercial cycle (with
-/// none, the eave sat on the window heads and shop fronts lost their height);
-/// two housing storeys, three and more of any kind, and halls (whose one
-/// storey is a hall 6 to 10 m high) measured right and keep it all, as does
-/// a one-storey shop with room for a fascia over its windows.
-fn ground_floor_bonus(levels: f64, floor_cycle: i32, hall: bool) -> i32 {
-    if !hall && (levels < 2.0 || (levels < 3.0 && floor_cycle >= 4)) {
-        LOW_RISE_GROUND_BONUS
-    } else {
-        GROUND_FLOOR_BONUS
-    }
-}
-
-/// Square metres of a footprint of `cells` blocks at `scale` blocks per metre.
-fn footprint_m2(cells: usize, scale: f64) -> f64 {
-    cells as f64 / (scale * scale).max(f64::EPSILON)
-}
-
-/// Whether a building's storeys are halls: a factory, warehouse or hangar, or
-/// any footprint of 1000 m2 and more (a supermarket, a retail box).
-fn is_hall(tags: &HashMap<String, String>, footprint_m2: Option<f64>) -> bool {
-    matches!(
-        tags.get("building").map(String::as_str),
-        Some("industrial" | "warehouse" | "hangar" | "manufacture" | "factory" | "barn")
-    ) || footprint_m2.is_some_and(|m2| m2 >= 1000.0)
-}
-
-/// Whether a building with `levels` storeys keeps the full ground-floor
-/// bonus: a hall, a car park (whose decks are counted from its height), or a
-/// one-storey shop big enough for a fascia band (`top_band_for`), whose shop
-/// windows need the room under it.
-fn keeps_full_ground_floor(
-    tags: &HashMap<String, String>,
-    footprint_m2: Option<f64>,
-    levels: f64,
-) -> bool {
-    is_hall(tags, footprint_m2)
-        || tags.get("building").map(String::as_str) == Some("parking")
-        || tags.get("parking").map(String::as_str) == Some("multi-storey")
-        || (levels < 2.0
-            && matches!(
-                tags.get("building").map(String::as_str),
-                Some("commercial" | "retail" | "supermarket" | "shop")
-            )
-            && footprint_m2.is_some_and(|m2| m2 >= 150.0))
-}
-
-/// The ground-floor bonus `calculate_building_height` laid a building's walls
-/// with, so the wall grammar is anchored on the same rows: the low-rise rule
-/// for storeys mapped on a ground-level building, the full bonus for a mapped
-/// height or an inferred one.
-fn mapped_ground_bonus(
-    tags: &HashMap<String, String>,
-    min_level: i32,
-    relation_levels: Option<i32>,
-    floor_cycle: i32,
-    footprint_m2: Option<f64>,
-) -> i32 {
-    if min_level > 0
-        || tags.contains_key("building:part")
-        || parse_building_height_tag(tags).is_some()
-    {
-        return GROUND_FLOOR_BONUS;
-    }
-    // The relation's storeys win over the way's, as they do for the height.
-    let levels = relation_levels.map(f64::from).or_else(|| {
-        tags.get("building:levels")
-            .and_then(|v| v.trim().parse::<f64>().ok())
-            .filter(|l| *l >= 1.0)
-    });
-    match levels {
-        Some(levels) => ground_floor_bonus(
-            levels,
-            floor_cycle,
-            keeps_full_ground_floor(tags, footprint_m2, levels),
-        ),
-        None => GROUND_FLOOR_BONUS,
-    }
-}
-
 /// Untagged building way id -> wall heights, in metres, of the tagged
 /// buildings it shares a wall with (two or more nodes).
 pub type NeighbourHeights = FnvHashMap<u64, Vec<f64>>;
@@ -6789,26 +6691,6 @@ fn landmark_neighbour(tags: &HashMap<String, String>) -> bool {
         || tags.contains_key("tower:type")
 }
 
-/// Cells a flood fill of a closed ring gives, the ring itself left out:
-/// the lattice points strictly inside it (Pick's theorem), so a footprint
-/// counts the same here as `cached_footprint_size` does in generation.
-fn ring_interior_cells(nodes: &[ProcessedNode]) -> usize {
-    let boundary: i64 = nodes
-        .windows(2)
-        .map(|w| {
-            let (mut a, mut b) = (
-                i64::from(w[0].x - w[1].x).abs(),
-                i64::from(w[0].z - w[1].z).abs(),
-            );
-            while b != 0 {
-                (a, b) = (b, a % b);
-            }
-            a
-        })
-        .sum();
-    (ring_area_blocks(nodes) - boundary as f64 / 2.0 + 1.0).max(0.0) as usize
-}
-
 /// Height in metres of a tagged neighbour's walls, the eave an untagged
 /// building beside it rises towards: storeys without the roof over them, a
 /// mapped `height` less the roof under it (a mapped `roof:height`, else the
@@ -6829,11 +6711,7 @@ fn neighbour_walls_m(
     {
         return None;
     }
-    let hint = HeightHint {
-        footprint_m2: Some(footprint_m2(ring_interior_cells(nodes), scale)),
-        ..HeightHint::default()
-    };
-    let (walls, _) = mapped_parts(tags, hint)?;
+    let (walls, _) = mapped_parts(tags, HeightHint::default())?;
     let Some(height) = parse_building_height_tag(tags) else {
         return Some(walls);
     };
@@ -7050,9 +6928,6 @@ fn takes_commercial_rhythm(
 pub(crate) struct HeightHint {
     pub height_m: Option<f64>,
     pub levels: Option<f64>,
-    /// The footprint in square metres, where known, which makes a big box a
-    /// hall whose one storey keeps the full ground-floor bonus.
-    pub footprint_m2: Option<f64>,
 }
 
 /// Pitched shapes whose rise `mapped_height_roof_rise` takes out of a mapped `height`.
@@ -7122,16 +6997,7 @@ fn mapped_parts(tags: &HashMap<String, String>, hint: HeightHint) -> Option<(f64
     if takes_commercial_rhythm(levels > 7.0, building_type, cycle, tags) {
         cycle = 4;
     }
-    let bonus = if tags.contains_key("building:part") {
-        GROUND_FLOOR_BONUS
-    } else {
-        ground_floor_bonus(
-            levels,
-            cycle,
-            keeps_full_ground_floor(tags, hint.footprint_m2, levels),
-        )
-    };
-    let walls = levels * f64::from(cycle) + f64::from(bonus);
+    let walls = levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS);
     if walls > MAX_PLAUSIBLE_HEIGHT_M {
         return None;
     }
@@ -7320,13 +7186,7 @@ fn calculate_building_height(
                 let bonus = if min_level > 0 {
                     0.0
                 } else {
-                    f64::from(mapped_ground_bonus(
-                        &element.tags,
-                        min_level,
-                        relation_levels,
-                        floor_cycle,
-                        Some(footprint_m2(footprint_area, scale_factor)),
-                    ))
+                    GROUND_FLOOR_BONUS as f64
                 };
                 building_height =
                     (((lev * floor_cycle as f64 + bonus) * scale_factor) as i32).max(3);
@@ -7393,17 +7253,7 @@ fn calculate_building_height(
     // Relation levels only estimate the height, an explicit height tag wins
     if !has_explicit_height {
         if let Some(levels) = relation_levels {
-            let bonus = if min_level > 0 {
-                0
-            } else {
-                mapped_ground_bonus(
-                    &element.tags,
-                    min_level,
-                    relation_levels,
-                    floor_cycle,
-                    Some(footprint_m2(footprint_area, scale_factor)),
-                )
-            };
+            let bonus = if min_level > 0 { 0 } else { GROUND_FLOOR_BONUS };
             building_height = multiply_scale(
                 (levels - min_level).max(1) * floor_cycle + bonus,
                 scale_factor,
@@ -7883,6 +7733,18 @@ fn door_style_for(category: BuildingCategory, wall_block: Block, group_seed: u64
     }
 }
 
+/// The longest segment of a facade that is not a party wall.
+fn longest_free_segment(facade: &FacadePlan) -> Option<usize> {
+    facade
+        .segments
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
+        .filter(|(_, s)| s.class != FacadeClass::Party)
+        .max_by_key(|(_, s)| s.len)
+        .map(|(i, _)| i)
+}
+
 /// Plans a synthetic street-facing entrance for buildings whose outline has no
 /// mapped entrance node. Every ordinary ground-level building gets one door.
 fn plan_synthetic_entrance(
@@ -7927,15 +7789,27 @@ fn plan_synthetic_entrance(
     } else if let Some(front) = facade.front_segment {
         front
     } else {
-        // Rural fallback: the longest non-party segment still gets a door.
+        longest_free_segment(facade)?
+    };
+    // A front the step under the eave left too short for a door, which it
+    // had on the outline, hands the door to the longest free wall instead.
+    let too_short = |i: usize| {
+        let n = |k: usize| element.nodes.get(k).map(|n| (n.x, n.z));
+        let span = match (n(i), n(i + 1)) {
+            (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()) + 1,
+            _ => 0,
+        };
         facade
             .segments
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
-            .filter(|(_, s)| s.class != FacadeClass::Party)
-            .max_by_key(|(_, s)| s.len)
-            .map(|(i, _)| i)?
+            .get(i)
+            .and_then(|s| s.as_ref())
+            .is_none_or(|s| s.len < 4)
+            || span < 5
+    };
+    let seg_index = if too_short(seg_index) && config.eave_outline.is_some() {
+        longest_free_segment(facade).filter(|&i| !too_short(i))?
+    } else {
+        seg_index
     };
 
     let seg = facade.segments.get(seg_index)?.as_ref()?;
@@ -11007,14 +10881,16 @@ fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
 fn outline_traces_walls(tags: &HashMap<String, String>) -> bool {
     const SURVEYS: [&str; 6] = ["cadastr", "kadast", "katast", "catast", "alkis", "lantm"];
     const REGISTERS: [&str; 2] = ["bag", "dkm"];
-    tags.iter()
-        .filter(|(k, _)| k.as_str() == "source" || k.starts_with("source:"))
-        .any(|(_, v)| {
-            let v = v.to_lowercase();
-            SURVEYS.iter().any(|s| v.contains(s))
-                || v.split(|c: char| !c.is_alphanumeric())
-                    .any(|word| REGISTERS.contains(&word))
-        })
+    tags.contains_key("ref:bag")
+        || tags
+            .iter()
+            .filter(|(k, _)| k.as_str() == "source" || k.starts_with("source:"))
+            .any(|(_, v)| {
+                let v = v.to_lowercase();
+                SURVEYS.iter().any(|s| v.contains(s))
+                    || v.split(|c: char| !c.is_alphanumeric())
+                        .any(|word| REGISTERS.contains(&word))
+            })
 }
 
 /// Whether a roof of this type hangs an eave out past its walls: the gabled and
@@ -13416,7 +13292,7 @@ fn generate_corner_downpipes(
     facade: &FacadePlan,
     stepped: Option<&SteppedOutline>,
 ) {
-    if config.full_floor_height() < 10
+    if config.building_height < 10
         || config.condition != BuildingCondition::Normal
         || !config.has_windows
     {
@@ -14438,17 +14314,6 @@ pub fn generate_buildings(
         _ => None,
     };
     let building_height = blended_height.unwrap_or(building_height);
-    // The rows of taller ground floor the walls were laid with. Thresholds
-    // tuned before low buildings gave one up read the height with all of it,
-    // so such a building keeps the detail it had.
-    let ground_bonus = mapped_ground_bonus(
-        &element.tags,
-        min_level,
-        relation_levels,
-        floor_cycle,
-        Some(footprint_m2(cached_footprint_size, scale_factor)),
-    );
-    let full_floor_rows = GROUND_FLOOR_BONUS - ground_bonus;
 
     // A building going up is a frame of slabs and columns, not a finished shell.
     if BuildingCondition::from_tags(&element.tags) == BuildingCondition::Construction
@@ -14529,7 +14394,7 @@ pub fn generate_buildings(
         element,
         category,
         cached_footprint_size,
-        building_height + full_floor_rows,
+        building_height,
         facade.has_any_street,
     );
 
@@ -14972,7 +14837,6 @@ pub fn generate_buildings(
         is_ground_level: min_level_offset == 0,
         building_height: effective_building_height,
         floor_cycle,
-        ground_bonus,
         is_tall_building,
         start_y_offset,
         abs_terrain_offset,
@@ -15005,7 +14869,7 @@ pub fn generate_buildings(
             || flat_parapet_for(
                 group_seed,
                 style.roof_type,
-                effective_building_height + full_floor_rows,
+                effective_building_height,
                 category,
                 condition,
                 roof_ctx.region,
@@ -21169,97 +21033,9 @@ mod height_tests {
             let way = way_with_tags(&[("building", kind), ("building:levels", "2")]);
             let cycle = floor_cycle_for(kind, &way.tags, false, true);
             let (h, _) = calculate_building_height(&way, kind, 0, 1.0, None, cycle, 100, 1);
-            let anchor = mapped_ground_bonus(&way.tags, 0, None, cycle, Some(100.0));
-            assert_eq!((h - anchor) / cycle, 2, "{kind}");
+            assert_eq!((h - GROUND_FLOOR_BONUS) / cycle, 2, "{kind}");
             assert_eq!(h, 8, "{kind}");
         }
-    }
-
-    // One storey keeps one row of the taller ground floor, as do two at the
-    // commercial cycle: a market stall measured 4.3 m and came out 9.6 m. Two
-    // housing storeys and three and more of any kind keep all of it.
-    #[test]
-    fn low_buildings_keep_one_row_of_the_ground_floor_bonus() {
-        assert_eq!(ground_floor_bonus(1.0, 3, false), LOW_RISE_GROUND_BONUS);
-        assert_eq!(ground_floor_bonus(1.0, 4, false), LOW_RISE_GROUND_BONUS);
-        assert_eq!(ground_floor_bonus(2.0, 3, false), GROUND_FLOOR_BONUS);
-        assert_eq!(ground_floor_bonus(2.0, 4, false), LOW_RISE_GROUND_BONUS);
-        assert_eq!(ground_floor_bonus(3.0, 4, false), GROUND_FLOOR_BONUS);
-        // A hall's one storey is a hall.
-        assert_eq!(ground_floor_bonus(1.0, 4, true), GROUND_FLOOR_BONUS);
-        let height = |tags: &[(&str, &str)], cycle: i32| {
-            calculate_building_height(&way_with_tags(tags), "yes", 0, 1.0, None, cycle, 100, 1).0
-        };
-        let kiosk = [("building", "kiosk"), ("building:levels", "1")];
-        assert_eq!(height(&kiosk, 4), 5);
-        let bungalow = [("building", "house"), ("building:levels", "1")];
-        assert_eq!(height(&bungalow, 3), 4);
-        let shop = [("building", "retail"), ("building:levels", "2")];
-        assert_eq!(height(&shop, 4), 9);
-        let house = [("building", "house"), ("building:levels", "2")];
-        assert_eq!(height(&house, 3), 8);
-        let flats = [("building", "apartments"), ("building:levels", "3")];
-        assert_eq!(height(&flats, 3), 11);
-        let warehouse = [("building", "warehouse"), ("building:levels", "1")];
-        assert_eq!(height(&warehouse, 4), 6);
-        let supermarket = [("building", "retail"), ("building:levels", "1")];
-        let big = calculate_building_height(
-            &way_with_tags(&supermarket),
-            "retail",
-            0,
-            1.0,
-            None,
-            4,
-            2500,
-            1,
-        );
-        assert_eq!(big.0, 6);
-        // A one-storey shop with room for a fascia over its windows keeps it too.
-        let shop_box = [("building", "retail"), ("building:levels", "1")];
-        let boxed =
-            calculate_building_height(&way_with_tags(&shop_box), "retail", 0, 1.0, None, 4, 600, 1);
-        assert_eq!(boxed.0, 6);
-        // A car park's decks are counted from its height, so it keeps them all.
-        let car_park = [("building", "parking"), ("building:levels", "2")];
-        assert_eq!(height(&car_park, 4), 10);
-        let shop_deck = [
-            ("building", "retail"),
-            ("parking", "multi-storey"),
-            ("building:levels", "2"),
-        ];
-        assert_eq!(height(&shop_deck, 4), 10);
-        // A part keeps the bonus its stacked siblings are laid out by.
-        let part = [("building:part", "yes"), ("building:levels", "1")];
-        assert_eq!(height(&part, 4), 6);
-        // The wall grammar is anchored on the same rows.
-        assert_eq!(
-            mapped_ground_bonus(&way_with_tags(&kiosk).tags, 0, None, 4, Some(80.0)),
-            LOW_RISE_GROUND_BONUS
-        );
-        assert_eq!(
-            mapped_ground_bonus(&way_with_tags(&[]).tags, 0, None, 4, None),
-            GROUND_FLOOR_BONUS
-        );
-        assert_eq!(
-            mapped_ground_bonus(&way_with_tags(&[]).tags, 0, Some(1), 4, Some(80.0)),
-            LOW_RISE_GROUND_BONUS
-        );
-        // Elsewhere the walls are estimated the same way.
-        let walls = |tags: &[(&str, &str)]| {
-            mapped_walls_m(&way_with_tags(tags).tags, HeightHint::default()).map(|(m, _)| m)
-        };
-        assert_eq!(walls(&kiosk), Some(5.0));
-        assert_eq!(walls(&flats), Some(11.0));
-        // A retail box's one storey is a hall there too, where its footprint is known.
-        let big = HeightHint {
-            footprint_m2: Some(2500.0),
-            ..HeightHint::default()
-        };
-        assert_eq!(
-            mapped_walls_m(&way_with_tags(&supermarket).tags, big).map(|(m, _)| m),
-            Some(6.0)
-        );
-        assert_eq!(walls(&supermarket), Some(5.0));
     }
 
     // height spans walls plus roof; roof:height comes off the wall span
@@ -21320,8 +21096,7 @@ mod height_tests {
     fn implausible_height_is_ignored() {
         let way = way_with_tags(&[("height", "1640"), ("building:levels", "2")]);
         let (h, tall) = calculate_building_height(&way, "yes", 0, 1.0, None, 4, 100, 1);
-        // Two storeys at the commercial cycle, with one row of ground-floor bonus.
-        assert_eq!(h, 9);
+        assert_eq!(h, 10);
         assert!(!tall);
 
         let way = way_with_tags(&[("height", "828")]);
@@ -21416,7 +21191,6 @@ mod height_tests {
         let hint = HeightHint {
             height_m: None,
             levels: Some(100.0),
-            footprint_m2: None,
         };
         let hinted =
             |pairs: &[(&str, &str)]| mapped_top_m(&way_with_tags(pairs).tags, hint, 20.0, 40.0);
@@ -22507,23 +22281,16 @@ mod style_tests {
             "Bayerische Vermessungsverwaltung, Kataster"
         )]));
         assert!(src(&[("source", "BAG")]));
+        assert!(src(&[
+            ("building", "house"),
+            ("ref:bag", "363100012345678")
+        ]));
         assert!(src(&[("source", "3dshapes;BAG")]));
         assert!(src(&[("source:outline", "basemap.at;DKM")]));
         assert!(!src(&[("source", "Bing")]));
         assert!(!src(&[("source", "survey")]));
         assert!(!src(&[("source", "esri/World_Imagery; bagnoli survey")]));
         assert!(!src(&[("building", "house")]));
-    }
-
-    // Thresholds tuned on the full ground floor read the height with all of
-    // it, so a low building keeps its downpipes, detail and parapet.
-    #[test]
-    fn low_buildings_read_thresholds_with_the_full_ground_floor() {
-        let mut config = test_config(9, false, false);
-        config.ground_bonus = LOW_RISE_GROUND_BONUS;
-        assert_eq!(config.full_floor_height(), 10);
-        config.ground_bonus = GROUND_FLOOR_BONUS;
-        assert_eq!(config.full_floor_height(), 9);
     }
 
     #[test]
@@ -22724,7 +22491,6 @@ mod style_tests {
             is_ground_level: true,
             building_height: height,
             floor_cycle: 4,
-            ground_bonus: GROUND_FLOOR_BONUS,
             is_tall_building: false,
             start_y_offset: 0,
             abs_terrain_offset: 0,
