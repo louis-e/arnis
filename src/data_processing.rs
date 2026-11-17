@@ -1409,6 +1409,10 @@ pub fn generate_world_with_options(
     mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
     let mapped_trunks = Arc::new(mapped_trunks);
     editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+    // Where trunks stand, mapped or grown from the canopy map, found once: the road masks and
+    // the roads ask about them for every cell past a road's core.
+    editor.index_standing_trunks();
+    let standing_trunks = editor.standing_trunks();
 
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
@@ -2087,6 +2091,9 @@ pub fn generate_world_with_options(
             tile_editor.set_mapped_paths(Arc::clone(&mapped_paths));
             tile_editor.set_junctions(Arc::clone(&road_junctions));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+            if let Some(trunks) = &standing_trunks {
+                tile_editor.set_standing_trunks(Arc::clone(trunks));
+            }
             tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));
             tile_editor.set_fuel_index(Arc::clone(&fuel_index));

@@ -285,6 +285,11 @@ impl MappedTrunks {
         })
     }
 
+    /// Where each mapped trunk stands.
+    pub fn positions(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
+        self.trunks.iter().map(|&(_, _, x, z)| (x, z))
+    }
+
     pub fn under_crown(&self, x: i32, z: i32) -> bool {
         if self.trunks.is_empty() {
             return false;

@@ -226,6 +226,27 @@ pub(crate) struct WorldMetadata {
     pub scale: f64,
 }
 
+/// Where a trunk stands, unless something paves over it, over an area and a margin round
+/// it: every mapped tree's, and the canopy map's trunk slots that grow a tree outside every
+/// mapped tree's crown. `WorldEditor::index_standing_trunks` finds them.
+pub struct StandingTrunks {
+    bits: crate::floodfill_cache::CoordinateBitmap,
+    min: (i32, i32),
+    max: (i32, i32),
+}
+
+impl StandingTrunks {
+    /// Whether a trunk that `stands` says will stand lies within a block of (x, z) along both
+    /// axes; `None` where the cells round (x, z) reach past the indexed bounds.
+    fn within_a_block(&self, x: i32, z: i32, stands: impl Fn(i32, i32) -> bool) -> Option<bool> {
+        let inside = x > self.min.0 && z > self.min.1 && x < self.max.0 && z < self.max.1;
+        inside.then(|| {
+            (x - 1..=x + 1)
+                .any(|tx| (z - 1..=z + 1).any(|tz| self.bits.contains(tx, tz) && stands(tx, tz)))
+        })
+    }
+}
+
 /// The main world editor struct for placing blocks and saving worlds.
 ///
 /// The lifetime `'a` is tied to the `XZBBox` reference, which defines
@@ -251,6 +272,9 @@ pub struct WorldEditor<'a> {
     junctions: Option<Arc<Vec<u64>>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
+    /// Where the mapped and the canopy's trunks stand, found once for the area; shared via
+    /// Arc with the tile editors.
+    standing_trunks: Option<Arc<StandingTrunks>>,
     /// Where `man_made=crane` stands, shared via Arc with the tile editors.
     mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
     /// Lift lines and terminals, kept free of trees.
@@ -380,6 +404,7 @@ impl<'a> WorldEditor<'a> {
             mapped_paths: None,
             junctions: None,
             mapped_trunks: None,
+            standing_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
             stations: None,
@@ -458,6 +483,7 @@ impl<'a> WorldEditor<'a> {
             mapped_paths: None,
             junctions: None,
             mapped_trunks: None,
+            standing_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
             stations: None,
@@ -536,6 +562,7 @@ impl<'a> WorldEditor<'a> {
             mapped_paths: None,
             junctions: None,
             mapped_trunks: None,
+            standing_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
             stations: None,
@@ -715,6 +742,7 @@ impl<'a> WorldEditor<'a> {
         self.carriageway = None;
         self.mapped_paths = None;
         self.mapped_trunks = None;
+        self.standing_trunks = None;
     }
 
     /// Sets where mapped cranes stand (shared across the main and tile editors).
@@ -833,6 +861,80 @@ impl<'a> WorldEditor<'a> {
     /// Sets the mapped tree trunks (shared across the main and tile editors).
     pub fn set_mapped_trunks(&mut self, trunks: Arc<crate::trees::mapped::MappedTrunks>) {
         self.mapped_trunks = Some(trunks);
+    }
+
+    /// Finds, once for the area and a margin round it, where the mapped trees stand their
+    /// trunks and which of the canopy's trunk slots grow a tree outside every mapped tree's
+    /// crown, so `keeps_its_ground` reads them rather than working each out again for every
+    /// cell it is asked about. Runs after the ground, the tree pack and the mapped trunks
+    /// are set.
+    pub fn index_standing_trunks(&mut self) {
+        use rayon::prelude::*;
+        let (min_x, min_z) = (self.xzbbox.min_x() - 2, self.xzbbox.min_z() - 2);
+        let (max_x, max_z) = (self.xzbbox.max_x() + 2, self.xzbbox.max_z() + 2);
+        let Ok(bounds) = XZBBox::rect_from_min_max(min_x, min_z, max_x, max_z) else {
+            return;
+        };
+        let mut bits = crate::floodfill_cache::CoordinateBitmap::new(&bounds);
+        for (x, z) in self.mapped_trunks.iter().flat_map(|t| t.positions()) {
+            bits.set(x, z);
+        }
+        let spacing = self.tree_slot_spacing();
+        let s = spacing.max(1);
+        let editor = &*self;
+        // Each lattice cell holds one slot, inside the cell; a row's cells start a shift
+        // along it, as `trunk_slot_s` lays them out. Without canopy and land cover data no
+        // canopy trunk keeps a verge.
+        let canopy = self
+            .ground
+            .as_deref()
+            .filter(|g| g.has_canopy() && g.has_land_cover());
+        let slots: Vec<(i32, i32)> = canopy.map_or_else(Vec::new, |ground| {
+            (min_z.div_euclid(s)..=max_z.div_euclid(s))
+                .into_par_iter()
+                .flat_map_iter(|cz| {
+                    let (x0, z0) = crate::trees::schematic::slot_cell(0, cz * s, s);
+                    let shift = x0.rem_euclid(s);
+                    let cells = (min_x - shift).div_euclid(s)..=(max_x - shift).div_euclid(s);
+                    cells.filter_map(move |k| {
+                        let slot = crate::trees::schematic::trunk_slot_s(k * s + shift, z0, s);
+                        let stands = (min_x..=max_x).contains(&slot.0)
+                            && (min_z..=max_z).contains(&slot.1)
+                            && !editor.under_mapped_crown(slot.0, slot.1)
+                            && crate::ground_generation::canopy_verdict(
+                                ground,
+                                slot.0,
+                                slot.1,
+                                editor.ground_origin_x,
+                                editor.ground_origin_z,
+                                spacing,
+                                editor.tree_pack.as_deref(),
+                                editor.scale,
+                            )
+                            .1;
+                        stands.then_some(slot)
+                    })
+                })
+                .collect()
+        });
+        for (x, z) in slots {
+            bits.set(x, z);
+        }
+        self.standing_trunks = Some(Arc::new(StandingTrunks {
+            bits,
+            min: (min_x, min_z),
+            max: (max_x, max_z),
+        }));
+    }
+
+    /// The trunks `index_standing_trunks` found, to share with the tile editors.
+    pub fn standing_trunks(&self) -> Option<Arc<StandingTrunks>> {
+        self.standing_trunks.clone()
+    }
+
+    /// Sets the trunks found for the area (shared across the main and tile editors).
+    pub fn set_standing_trunks(&mut self, trunks: Arc<StandingTrunks>) {
+        self.standing_trunks = Some(trunks);
     }
 
     /// True under the crown of a tree OSM maps.
@@ -966,6 +1068,27 @@ impl<'a> WorldEditor<'a> {
             LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_TREE_COVER,
             LC_WETLAND,
         };
+        let green = |ground: &Ground| {
+            matches!(
+                ground.cover_class(self.ground_point(x, z)),
+                LC_TREE_COVER
+                    | LC_SHRUBLAND
+                    | LC_GRASSLAND
+                    | LC_CROPLAND
+                    | LC_WETLAND
+                    | LC_MANGROVES
+                    | LC_MOSS
+            )
+        };
+        // Every canopy slot lies in its own lattice cell, so the trunks within a block of
+        // (x, z) are the indexed ones among the cells round it.
+        if let Some(near) = self
+            .standing_trunks
+            .as_ref()
+            .and_then(|t| t.within_a_block(x, z, |tx, tz| !paved(tx, tz)))
+        {
+            return near || self.ground.as_deref().is_some_and(green);
+        }
         if self
             .mapped_trunks
             .as_ref()
@@ -976,16 +1099,7 @@ impl<'a> WorldEditor<'a> {
         let Some(ground) = self.ground.as_ref() else {
             return false;
         };
-        if matches!(
-            ground.cover_class(self.ground_point(x, z)),
-            LC_TREE_COVER
-                | LC_SHRUBLAND
-                | LC_GRASSLAND
-                | LC_CROPLAND
-                | LC_WETLAND
-                | LC_MANGROVES
-                | LC_MOSS
-        ) {
+        if green(ground) {
             return true;
         }
         if !ground.has_canopy() || !ground.has_land_cover() {

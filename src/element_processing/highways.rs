@@ -3894,6 +3894,7 @@ pub fn collect_road_and_carriageway_coords(
             water_detail,
             building_footprints,
             None,
+            false,
             |carriageway, x, z| {
                 if !carriageway {
                     found.set(x, z);
@@ -3914,6 +3915,7 @@ pub fn collect_road_and_carriageway_coords(
         water_detail,
         building_footprints,
         Some(&paths),
+        false,
         |carriageway, x, z| {
             roads.set(x, z);
             if carriageway {
@@ -4060,7 +4062,9 @@ pub(crate) fn is_mapped_path(way: &ProcessedWay, highway_type: &str) -> bool {
 /// Hands `stamp` every road and path surface cell, with whether its way carries vehicles,
 /// and `skipped` every cell a road's stamp covers but `cut_beside` leaves unpaved. Without
 /// `paths`, only the sidewalks mapped as their own ways; with them, every way, a road's
-/// parking rows and second lane stopping at those sidewalks.
+/// parking rows and second lane stopping at those sidewalks. With `lanes_only`, only the
+/// carriageway lanes, for a caller that reads nothing else: the rest of each stamp is
+/// neither stamped nor looked into for a cut.
 #[allow(clippy::too_many_arguments)]
 fn stamp_highway_surfaces(
     elements: &[ProcessedElement],
@@ -4069,6 +4073,7 @@ fn stamp_highway_surfaces(
     water_detail: crate::water_detail::WaterDetail,
     building_footprints: &CoordinateBitmap,
     paths: Option<&CoordinateBitmap>,
+    lanes_only: bool,
     mut stamp: impl FnMut(bool, i32, i32),
     mut skipped: impl FnMut(i32, i32),
 ) {
@@ -4091,6 +4096,7 @@ fn stamp_highway_surfaces(
         None => HashSet::new(),
     };
 
+    let mut stamp_cells: Vec<(i32, i32, bool, bool)> = Vec::new();
     for element in elements {
         let ProcessedElement::Way(way) = element else {
             continue;
@@ -4111,6 +4117,9 @@ fn stamp_highway_surfaces(
         // Only the lanes count as carriageway; the parking rows outside them do not.
         let lane_range = highway_lane_range(highway_type, &way.tags, scale);
         let carriageway = is_carriageway(highway_type);
+        if lanes_only && !carriageway {
+            continue;
+        }
         let drowned = drowning.filter(|_| {
             water_detail.drowns_crossing(scale, &way.tags)
                 && !way.nodes.iter().any(|n| bridge_nodes.contains(&(n.x, n.z)))
@@ -4135,40 +4144,89 @@ fn stamp_highway_surfaces(
 
         let square = stamps_square(way);
         let kept_by_walls = wall_core(way, highway_type, scale);
+        // The stamp's cells, worked out once for the way: whether each lies past the core,
+        // where the road stops at what stands beside it, and whether it is carriageway.
+        stamp_cells.clear();
+        for dx in -block_range..=block_range {
+            for dz in -block_range..=block_range {
+                if !square && !in_road_stamp(dx, dz, block_range) {
+                    continue;
+                }
+                let past_core = kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core));
+                let in_lanes = if square {
+                    dx.abs() <= lane_range && dz.abs() <= lane_range
+                } else {
+                    in_road_stamp(dx, dz, lane_range)
+                };
+                if lanes_only && !in_lanes {
+                    continue;
+                }
+                stamp_cells.push((dx, dz, past_core, carriageway && in_lanes));
+            }
+        }
+        // Whether a cell past the core is cut is the cell's own, and the stamps along a way
+        // overlap: what one point found, by offset in its stamp, the next reads back.
+        let side = (2 * block_range + 1) as usize;
+        let at =
+            |dx: i32, dz: i32| (dz + block_range) as usize * side + (dx + block_range) as usize;
+        let (mut found, mut last_found) = match kept_by_walls {
+            Some(_) => (
+                vec![Verdict::Unknown; side * side],
+                vec![Verdict::Unknown; side * side],
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
+        let mut last: Option<(i32, i32)> = None;
         for (i, &(bx, bz)) in points.iter().enumerate() {
             let skip_water = drowned_points.as_ref().is_some_and(|d| d[i]);
-            for dx in -block_range..=block_range {
-                for dz in -block_range..=block_range {
-                    if !square && !in_road_stamp(dx, dz, block_range) {
-                        continue;
-                    }
-                    if skip_water && drowned.is_some_and(|e| fills(e, bx + dx, bz + dz)) {
-                        continue;
-                    }
-                    if kept_by_walls.is_some_and(|core| {
-                        !in_road_stamp(dx, dz, core)
-                            && cut_beside(
+            found.fill(Verdict::Unknown);
+            for &(dx, dz, past_core, lanes) in &stamp_cells {
+                let (x, z) = (bx + dx, bz + dz);
+                if skip_water && drowned.is_some_and(|e| fills(e, x, z)) {
+                    continue;
+                }
+                if let Some(core) = kept_by_walls.filter(|_| past_core) {
+                    let known = last
+                        .map(|(lx, lz)| (x - lx, z - lz))
+                        .filter(|&(ox, oz)| ox.abs() <= block_range && oz.abs() <= block_range)
+                        .map_or(Verdict::Unknown, |(ox, oz)| last_found[at(ox, oz)]);
+                    let cut = match known {
+                        Verdict::Unknown => {
+                            let cut = cut_beside(
                                 |sx, sz| near_centreline(way, core, sx, sz),
                                 building_footprints,
                                 editor,
                                 |px, pz| paths.is_some_and(|p| p.contains(px, pz)),
-                                bx + dx,
-                                bz + dz,
-                            )
-                    }) {
-                        skipped(bx + dx, bz + dz);
+                                x,
+                                z,
+                            );
+                            // Told once, by the point that finds it, not by every one after.
+                            if cut {
+                                skipped(x, z);
+                            }
+                            cut
+                        }
+                        known => known == Verdict::Cut,
+                    };
+                    found[at(dx, dz)] = if cut { Verdict::Cut } else { Verdict::Kept };
+                    if cut {
                         continue;
                     }
-                    let in_lanes = if square {
-                        dx.abs() <= lane_range && dz.abs() <= lane_range
-                    } else {
-                        in_road_stamp(dx, dz, lane_range)
-                    };
-                    stamp(carriageway && in_lanes, bx + dx, bz + dz);
                 }
+                stamp(lanes, x, z);
             }
+            std::mem::swap(&mut found, &mut last_found);
+            last = Some((bx, bz));
         }
     }
+}
+
+/// What `stamp_highway_surfaces` found of a cell past a road's core.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Unknown,
+    Cut,
+    Kept,
 }
 
 /// Collect all (x, z) coordinates covered by highways tagged
@@ -6426,6 +6484,75 @@ mod tests {
         assert!(!editor.keeps_its_ground(trunk.0 + 1, trunk.1, |x, z| (x, z) == trunk));
     }
 
+    /// The trunks found once for the area keep the ground the slots worked out cell by cell
+    /// keep, mapped ones among them.
+    #[test]
+    fn the_trunk_index_keeps_the_ground_the_slots_keep() {
+        use crate::canopy::CanopyData;
+        use crate::land_cover::{LandCoverData, LC_BUILT_UP};
+        let built_up = LandCoverData {
+            grid: vec![vec![LC_BUILT_UP]],
+            water_distance: vec![vec![0]],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
+            width: 1,
+            height: 1,
+            cells_per_meter: 1.0,
+        };
+        let xzbbox = XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        // A patchy canopy, so some slots grow a tree and some do not.
+        let heights: Vec<u8> = (0..64 * 64)
+            .map(|i| {
+                if (i % 64 * 7 + i / 64 * 13) % 5 < 2 {
+                    20
+                } else {
+                    0
+                }
+            })
+            .collect();
+        editor.set_ground(std::sync::Arc::new(
+            crate::ground::Ground::new_flat_canopy_test(
+                CanopyData::from_grid(heights, 64, 64),
+                64,
+                64,
+            )
+            .with_land_cover_test(built_up),
+        ));
+        let mapped = vec![ProcessedElement::Node(ProcessedNode {
+            id: 9,
+            tags: [("natural".to_string(), "tree".to_string())].into(),
+            x: 12,
+            z: 40,
+        })];
+        editor.set_mapped_trunks(std::sync::Arc::new(
+            crate::trees::mapped::MappedTrunks::collect(&mapped, 1.0),
+        ));
+        let lanes = |_: i32, z: i32| (28..=32).contains(&z) || z == 40;
+        let answers = |editor: &WorldEditor| {
+            (0..64)
+                .flat_map(|x| (0..64).map(move |z| (x, z)))
+                .map(|(x, z)| {
+                    (
+                        editor.keeps_its_ground(x, z, |_, _| false),
+                        editor.keeps_its_ground(x, z, lanes),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let one_by_one = answers(&editor);
+        editor.index_standing_trunks();
+        assert_eq!(answers(&editor), one_by_one);
+        let kept = one_by_one.iter().filter(|a| a.0).count();
+        assert!(kept > 0 && kept < 64 * 64);
+        assert!(
+            one_by_one.iter().any(|a| a.0 != a.1),
+            "the lanes pave over some"
+        );
+        assert!(one_by_one[12 * 64 + 41].0 && !one_by_one[12 * 64 + 41].1);
+    }
+
     /// Cars parked across the kerb get a stall line every stall, kerb to lane edge, on their
     /// side only; the lanes stay bare.
     #[test]
@@ -6533,6 +6660,62 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A caller that reads only the lanes gets them as the whole stamp gives them, the
+    /// second lane cut at a house front as there.
+    #[test]
+    fn the_lanes_alone_come_as_the_whole_stamp_gives_them() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let editor = tunnel_editor(&xzbbox, flat_ground());
+        let elems = vec![
+            ProcessedElement::Way(way_between(
+                1,
+                (10, 50),
+                (110, 50),
+                &[("highway", "residential"), ("sidewalk", "both")],
+            )),
+            ProcessedElement::Way(way_between(
+                2,
+                (10, 40),
+                (110, 40),
+                &[("highway", "footway")],
+            )),
+        ];
+        let mut houses = CoordinateBitmap::new(&xzbbox);
+        for x in 40..=60 {
+            for z in 50..=60 {
+                houses.set(x, z);
+            }
+        }
+        let none = CoordinateBitmap::new_empty();
+        let lanes = |footprints: &CoordinateBitmap, lanes_only: bool| {
+            let mut cells = Vec::new();
+            stamp_highway_surfaces(
+                &elems,
+                Some(&editor),
+                1.0,
+                Default::default(),
+                footprints,
+                Some(&none),
+                lanes_only,
+                |carriageway, x, z| {
+                    if carriageway {
+                        cells.push((x, z));
+                    }
+                },
+                |_, _| {},
+            );
+            cells.sort_unstable();
+            cells.dedup();
+            cells
+        };
+        let open = lanes(&none, false);
+        let walled = lanes(&houses, false);
+        assert!(!walled.is_empty());
+        assert_ne!(walled, open, "the houses cut the second lane");
+        assert_eq!(lanes(&none, true), open);
+        assert_eq!(lanes(&houses, true), walled);
     }
 
     /// The renderer leaves unpaved what the masks leave out: the second lane of a street
