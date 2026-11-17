@@ -1085,14 +1085,14 @@ impl CarNetwork {
                     stations.push((s, stop, cap));
                 }
 
-                let (points, arcs): (Vec<Waypoint>, Vec<f64>) = stations
+                let (points, arcs): (Vec<Waypoint>, Vec<f64>) = with_steps(stations, &y_at)
                     .into_iter()
-                    .map(|(s, stop, cap)| {
+                    .map(|(s, stop, cap, y)| {
                         let (x, z) = path.point_at(s);
                         (
                             Waypoint {
                                 x: (x * 10.0).round() / 10.0,
-                                y: y_at(s),
+                                y,
                                 z: (z * 10.0).round() / 10.0,
                                 stop: stop.map(|(g, _)| g),
                                 holds: stop.map_or(Holds::All, |(_, h)| h),
@@ -2153,6 +2153,48 @@ fn refine(
     }
 }
 
+/// The stations with each one's height, and a point on either side of every step the road
+/// takes between two of them, both at the step's top. A car's height follows the straight
+/// line between points, which across a step cuts into its top block: a car waiting there sat
+/// half sunk in the road. Risen to the top before the step, it stands on it.
+fn with_steps(
+    stations: Vec<(f64, Stop, Option<i32>)>,
+    y_at: &impl Fn(f64) -> f64,
+) -> Vec<(f64, Stop, Option<i32>, f64)> {
+    const PROBE: f64 = 0.25;
+    let mut out: Vec<(f64, Stop, Option<i32>, f64)> = Vec::with_capacity(stations.len());
+    for (s, stop, cap) in stations {
+        let mut y = y_at(s);
+        if let Some(&(a, ..)) = out.last() {
+            let mut prev = (a, y_at(a));
+            let mut t = a + PROBE;
+            loop {
+                let at = t.min(s);
+                let here = y_at(at);
+                if here != prev.1 {
+                    let top = here.max(prev.1);
+                    match out.last_mut() {
+                        Some(last) if prev.0 - last.0 < 0.05 => last.3 = last.3.max(top),
+                        _ => out.push((prev.0, None, None, top)),
+                    }
+                    if s - at < 0.05 {
+                        y = y.max(top);
+                    } else {
+                        out.push((at, None, None, top));
+                    }
+                }
+                if at >= s {
+                    break;
+                }
+                prev = (at, here);
+                t += PROBE;
+            }
+        }
+        out.push((s, stop, cap, y));
+    }
+    out
+}
+
 /// The stricter of two speed caps.
 fn lower(a: Option<i32>, b: Option<i32>) -> Option<i32> {
     match (a, b) {
@@ -2916,6 +2958,32 @@ mod tests {
                 let line = y_at(a) + (y_at(b) - y_at(a)) * (s - a) / (b - a);
                 assert!((y_at(s) - line).abs() < 1.0, "{a}..{b} at {s}: {at:?}");
             }
+        }
+    }
+
+    /// A car between two waypoints rides the straight line; across a step it never cuts
+    /// into the higher block, up the step or down it.
+    #[test]
+    fn a_car_never_sinks_into_a_step() {
+        for (lo, hi) in [(65.0, 66.0), (66.0, 65.0)] {
+            let y_at = |s: f64| if s < 6.3 { lo } else { hi };
+            let stations = vec![(0.0, None, None), (4.0, None, None), (10.0, None, None)];
+            let points = with_steps(stations, &y_at);
+            for pair in points.windows(2) {
+                let (a, ya, b, yb) = (pair[0].0, pair[0].3, pair[1].0, pair[1].3);
+                assert!(b > a, "{points:?}");
+                for i in 0..=20 {
+                    let s = a + (b - a) * f64::from(i) / 20.0;
+                    let line = ya + (yb - ya) * (s - a) / (b - a);
+                    assert!(
+                        line >= y_at(s) - 1e-9,
+                        "{lo}->{hi} at {s}: {line} {points:?}"
+                    );
+                }
+            }
+            // The stations themselves are kept, at the ground's height where flat.
+            assert_eq!(points.first().map(|p| p.3), Some(lo));
+            assert_eq!(points.last().map(|p| p.3), Some(hi));
         }
     }
 
