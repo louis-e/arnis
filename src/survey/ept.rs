@@ -168,8 +168,8 @@ pub fn read(
     let body = fetch::get_bytes(client, url)?;
     fetch::count_laser_bytes(body.len() as u64);
     let json: serde_json::Value =
-        serde_json::from_slice(&body).map_err(|e| Failure::Other(e.to_string()))?;
-    let info = parse_info(&json).map_err(Failure::Other)?;
+        serde_json::from_slice(&body).map_err(|e| Failure::Unusable(e.to_string()))?;
+    let info = parse_info(&json).map_err(Failure::Unusable)?;
     // Web Mercator stretches the ground by 1 / cos(latitude) each way.
     let (lat, _) = Crs::WebMercator.inverse(0.0, (window.1 + window.3) / 2.0);
     let ground = lat.to_radians().cos().powi(2);
@@ -181,7 +181,8 @@ pub fn read(
         let page = fetch::get_bytes(
             client,
             &format!("{base}/ept-hierarchy/{l}-{x}-{y}-{z}.json"),
-        )?;
+        )
+        .map_err(Failure::of_part)?;
         requests += 1;
         fetch::count_laser_bytes(page.len() as u64);
         let page: serde_json::Value =
@@ -209,7 +210,8 @@ pub fn read(
         chosen
             .par_iter()
             .map(|n| {
-                let data = fetch::get_bytes(client, &format!("{base}/ept-data/{}.laz", n.key()))?;
+                let data = fetch::get_bytes(client, &format!("{base}/ept-data/{}.laz", n.key()))
+                    .map_err(Failure::of_part)?;
                 fetch::count_laser_bytes(data.len() as u64);
                 let (layout, recs) = decode(&data).map_err(Failure::Other)?;
                 visit(&layout, &recs);

@@ -34,14 +34,29 @@ pub enum Failure {
     /// The server has no such file (404, or 403 from object stores that answer
     /// so for a missing key).
     Missing,
+    /// The file is there but of a kind this reader cannot use (a grid it does
+    /// not know, a header out of range): skipped, as it would be every time.
+    Unusable(String),
     Other(String),
+}
+
+impl Failure {
+    /// The failure of a request for part of a file whose header was read: the
+    /// file is there, so a part the server does not have is an error, not a
+    /// missing file.
+    pub fn of_part(self) -> Failure {
+        match self {
+            Failure::Missing => Failure::Other("part of the file is missing".into()),
+            f => f,
+        }
+    }
 }
 
 impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Failure::Missing => write!(f, "not found"),
-            Failure::Other(e) => write!(f, "{e}"),
+            Failure::Unusable(e) | Failure::Other(e) => write!(f, "{e}"),
         }
     }
 }

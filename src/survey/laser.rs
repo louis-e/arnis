@@ -221,7 +221,19 @@ fn absent_marker(root: &Path, source: &Sheet, te: i32, tn: i32) -> PathBuf {
         .join(format!("tile_{te}_{tn}.absent"))
 }
 
+/// Whether the source gives each tile its own address. Only then does a tile
+/// whose files are all missing say the source has none there: a lookup
+/// answers for the part of a tile an area asks about.
+fn fixed_addresses(source: &Sheet) -> bool {
+    let (Laser::Whole { locate, .. } | Laser::Copc { locate, .. } | Laser::Ept { locate, .. }) =
+        &source.laser;
+    matches!(locate, super::source::Locate::Urls(_))
+}
+
 fn known_absent(root: &Path, source: &Sheet, te: i32, tn: i32) -> bool {
+    if !fixed_addresses(source) {
+        return false;
+    }
     std::fs::metadata(absent_marker(root, source, te, tn))
         .and_then(|m| m.modified())
         .ok()
@@ -260,8 +272,10 @@ pub fn is_cached(root: &Path, source: &Sheet, te: i32, tn: i32, want: &[bool]) -
 }
 
 /// The tile's measurements over the blocks wanted, from the cache or else read
-/// from the first of `urls` the server has. No URLs means the source has no
-/// such tile.
+/// from the first of `urls` the server has. No URLs means the source has
+/// nothing for this area there. A file this reader cannot use is passed over
+/// with a warning; one that fails part-way fails the tile, and nothing of it
+/// is cached.
 pub fn tile(
     client: &reqwest::blocking::Client,
     root: &Path,
@@ -276,6 +290,8 @@ pub fn tile(
     crate::net::ensure_online("laser scans")?;
     std::fs::create_dir_all(root.join(source.dir())).map_err(|e| e.to_string())?;
     let path = cache_path(root, source, te, tn);
+    // Absent only when the server has none of the tile's files.
+    let mut all_missing = !urls.is_empty();
     for url in urls {
         let got = match source.laser {
             Laser::Whole { .. } => read_whole(client, root, source, te, tn, url),
@@ -298,10 +314,18 @@ pub fn tile(
                 return Ok(Fetched::Tile(Box::new(t)));
             }
             Err(Failure::Missing) => continue,
+            Err(Failure::Unusable(e)) => {
+                eprintln!("Warning: laser scan {te}_{tn} passed over: {e}");
+                all_missing = false;
+            }
             Err(Failure::Other(e)) => return Err(format!("{url}: {e}")),
         }
     }
-    let _ = std::fs::write(absent_marker(root, source, te, tn), b"");
+    // A lookup's answer is for the area's part of the tile: another area may
+    // find files there, so only a fixed address that is missing is marked.
+    if all_missing && fixed_addresses(source) {
+        let _ = std::fs::write(absent_marker(root, source, te, tn), b"");
+    }
     Ok(Fetched::Absent)
 }
 
@@ -354,8 +378,12 @@ fn read_copc(
     };
     // A tile made of several files (one line each) is read from all of them
     // that exist; a file it does not reach costs only its header.
+    // A file that is missing, or one this reader cannot use, adds no points
+    // and is passed over; one that fails part-way fails the tile, so the
+    // points the others gave are never cached as all there is.
     let area = (window.2 - window.0) * (window.3 - window.1);
     let mut found = false;
+    let mut unusable = None;
     for file in url.split('\n') {
         let stats = match source.laser {
             // EPT points are in Web Mercator: carried onto the grid by a map
@@ -399,6 +427,13 @@ fn read_copc(
         let stats = match stats {
             Ok(s) => s,
             Err(Failure::Missing) => continue,
+            Err(Failure::Unusable(e)) => {
+                if url.contains('\n') {
+                    eprintln!("Warning: laser scan {te}_{tn} leaves out {file}: {e}");
+                }
+                unusable = Some(e);
+                continue;
+            }
             Err(e) => return Err(e),
         };
         found = true;
@@ -415,7 +450,7 @@ fn read_copc(
         }
     }
     if !found {
-        return Err(Failure::Missing);
+        return Err(unusable.map_or(Failure::Missing, Failure::Unusable));
     }
     fetch::count_laser_area(area);
     let measured = m

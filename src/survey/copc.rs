@@ -252,7 +252,8 @@ pub type Place<'a> = dyn Fn(Option<&str>) -> Result<Option<Affine>, String> + Sy
 
 /// Read the header, records and hierarchy of a COPC file over `window` (in the
 /// area's grid; `place` says how the file's sits to it). Returns the window in
-/// the file's grid too. `Missing` when the server has no such file.
+/// the file's grid too. `Missing` when the server has no such file, `Unusable`
+/// when it is not one this reader can use.
 pub fn open(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -267,15 +268,15 @@ pub fn open(
             Ok((h, _)) => break h,
             Err(e) => match e.strip_prefix("need ").and_then(|n| n.parse::<u64>().ok()) {
                 Some(n) if n > head.len() as u64 && n < 16 * HEAD => {
-                    head = fetch::get_range(client, url, 0, n)?;
+                    head = fetch::get_range(client, url, 0, n).map_err(Failure::of_part)?;
                     requests += 1;
                     fetch::count_laser_bytes(head.len() as u64);
                 }
-                _ => return Err(Failure::Other(e)),
+                _ => return Err(Failure::Unusable(e)),
             },
         }
     };
-    let window = match place(header.wkt.as_deref()).map_err(Failure::Other)? {
+    let window = match place(header.wkt.as_deref()).map_err(Failure::Unusable)? {
         Some(f) => f.inverse().rect(window),
         None => window,
     };
@@ -286,7 +287,7 @@ pub fn open(
         if level > 0 && overlap(node_rect(&info, level, x, y), window) <= 0.0 {
             continue;
         }
-        let page = fetch::get_range(client, url, offset, size)?;
+        let page = fetch::get_range(client, url, offset, size).map_err(Failure::of_part)?;
         requests += 1;
         fetch::count_laser_bytes(page.len() as u64);
         let (n, p) = parse_page(&page);
@@ -332,7 +333,7 @@ pub fn read(
         ranges
             .par_iter()
             .map(|(start, len, group)| {
-                let data = fetch::get_range(client, url, *start, *len)?;
+                let data = fetch::get_range(client, url, *start, *len).map_err(Failure::of_part)?;
                 fetch::count_laser_bytes(data.len() as u64);
                 if data.len() as u64 != *len {
                     return Err(Failure::Other("short range".into()));

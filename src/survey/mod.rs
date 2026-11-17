@@ -485,6 +485,7 @@ fn mosaic(
                 }
                 Err(e) => {
                     eprintln!("Warning: laser scan index unavailable: {e}");
+                    crate::net::note_uncached("laser scans");
                     return None;
                 }
             }
@@ -508,14 +509,13 @@ fn mosaic(
         photo: photo_cells,
         ..
     } = &mut inp;
-    let laser_failed = std::sync::atomic::AtomicBool::new(false);
     let next = std::sync::atomic::AtomicUsize::new(0);
     let mut failed: Vec<((i32, i32), String)> = Vec::new();
     let mut any = false;
     std::thread::scope(|s| {
         let photos = s.spawn(|| {
             if photo_on {
-                fill_photos(client, plan, &root, photo_cells, &laser_failed);
+                fill_photos(client, plan, &root, photo_cells);
             }
         });
         // Plain threads, not a Rayon pool: they wait their turn to download
@@ -529,7 +529,11 @@ fn mosaic(
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some(&t) = plan.tiles.get(i) else { break };
                 let u = urls.get(&t).map_or(&[][..], Vec::as_slice);
-                let got = laser::tile(client, root, &plan.sheet, t, &plan.want(t), u);
+                // A reader that trips over a file's data costs that tile only.
+                let got = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    laser::tile(client, root, &plan.sheet, t, &plan.want(t), u)
+                }))
+                .unwrap_or_else(|_| Err("the file's data could not be read".to_string()));
                 if tx.send((t, got)).is_err() {
                     break;
                 }
@@ -541,7 +545,6 @@ fn mosaic(
                 Ok(laser::Fetched::Tile(t)) => t,
                 Ok(laser::Fetched::Absent) => continue,
                 Err(e) => {
-                    laser_failed.store(true, std::sync::atomic::Ordering::Relaxed);
                     failed.push(((te, tn), e));
                     continue;
                 }
@@ -559,18 +562,26 @@ fn mosaic(
                 i_gnd_q[mc] = t.i_gnd[tc];
             });
         }
-        if let Err(e) = photos.join() {
-            std::panic::resume_unwind(e);
+        // The photo only helps the laser along: whatever stopped it, the
+        // laser goes on with the cells that came.
+        if photos.join().is_err() {
+            eprintln!(
+                "Warning: aerial photos stopped part-way; the laser goes on without the rest"
+            );
         }
     });
-    // The first tile in the plan's order that failed speaks for all.
-    if let Some(((te, tn), e)) = plan
-        .tiles
-        .iter()
-        .find_map(|t| failed.iter().find(|(f, _)| f == t))
-    {
-        eprintln!("Warning: laser scan {te}_{tn} unavailable: {e}");
-        return None;
+    // A tile that failed goes without laser data, as one the source does not
+    // have; the others still count. A later run fetches it again.
+    if !failed.is_empty() {
+        crate::net::note_uncached("laser scans");
+        for t in &plan.tiles {
+            if let Some((_, e)) = failed.iter().find(|(f, _)| f == t) {
+                eprintln!(
+                    "Warning: laser scan {}_{} unavailable, its part of the area goes without: {e}",
+                    t.0, t.1
+                );
+            }
+        }
     }
     if !any {
         return None;
@@ -579,14 +590,12 @@ fn mosaic(
 }
 
 /// The photo's cells over the plan's rectangle, tile by tile as they come (only
-/// the part of each tile the rectangle covers). Tiles not yet begun are left
-/// once `stop` is set: the laser failed, and the mosaic with it.
+/// the part of each tile the rectangle covers).
 fn fill_photos(
     client: &reqwest::blocking::Client,
     plan: &Plan,
     root: &std::path::Path,
     cells: &mut [photo::PhotoCell],
-    stop: &std::sync::atomic::AtomicBool,
 ) {
     use rayon::prelude::*;
     let (e0, n0, e1, n1) = plan.rect;
@@ -594,9 +603,6 @@ fn fill_photos(
     // Set by the first request that finds the photo's host unreachable.
     let down = std::sync::atomic::AtomicBool::new(false);
     let each = |&(te, tn): &(i32, i32)| {
-        if stop.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
         let (te0, tn1) = (f64::from(te) * 1000.0, f64::from(tn + 1) * 1000.0);
         let c0 = (e0 - te0).max(0.0) as usize;
         let c1 = ((e1 - te0).min(1000.0)) as usize;
