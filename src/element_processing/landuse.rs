@@ -206,6 +206,8 @@ fn landuse_area(
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     let plants_here = crate::element_processing::natural::piece_plants_at(args);
     let woods_by_cell = crate::element_processing::natural::woods_by_cell(args);
+    // Commercial and retail land is marked from the element list (`commercial_land`).
+    let wild = matches!(landuse_tag.as_str(), "forest" | "meadow");
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
             continue;
@@ -218,6 +220,9 @@ fn landuse_area(
                 rng.random_range(0..100);
             }
             continue;
+        }
+        if wild {
+            editor.mark_ground(crate::world_editor::GroundMark::Wild, x, z);
         }
         let plot = field_layout.as_ref().map(|l| l.plot_at(x, z));
         let climate = editor.local_climate(x, z).unwrap_or(area_climate);
@@ -279,6 +284,14 @@ fn landuse_area(
             }
         } else if !is_protected {
             editor.set_block(actual_block, x, 0, z, None, None);
+        }
+        // Not `landuse=grass`, which is also mapped on rural meadows.
+        if matches!(landuse_tag.as_str(), "village_green" | "recreation_ground")
+            && !editor.surface_is_sealed(x, z)
+            && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+            && crate::land_cover::mown_cover(editor.land_cover_class(x, z))
+        {
+            editor.mark_ground(crate::world_editor::GroundMark::Lawn, x, z);
         }
 
         // Nothing is scattered on land-cover water: the depth carve turns these
@@ -647,6 +660,155 @@ pub fn generate_place(
     // Place ground blocks
     for &(x, z) in floor_area.iter() {
         editor.set_block(block_type, x, 0, z, None, None);
+    }
+}
+
+/// Commercial and retail land, ways and multipolygons, on the gardens' coarse grid: its
+/// open ground stays paved. From the element list, since commercial land leaves its
+/// ground to the land cover and is never filled while elements are placed.
+pub fn commercial_land(
+    elements: &[crate::osm_parser::ProcessedElement],
+    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
+) -> crate::floodfill_cache::CoarseMask {
+    use crate::coordinate_system::cartesian::XZPoint;
+    use crate::osm_parser::{ProcessedElement, ProcessedNode};
+    let commercial = |tags: &std::collections::HashMap<String, String>| {
+        matches!(
+            tags.get("landuse").map(String::as_str),
+            Some("commercial" | "retail")
+        )
+    };
+    let ring = |nodes: &[ProcessedNode]| -> Option<Vec<XZPoint>> {
+        let (first, last) = (nodes.first()?, nodes.last()?);
+        (nodes.len() >= 4 && first.x == last.x && first.z == last.z)
+            .then(|| nodes.iter().map(ProcessedNode::xz).collect())
+    };
+    let mut mask = crate::floodfill_cache::CoarseMask::new(xzbbox);
+    let mut fill = |outers: Vec<Vec<XZPoint>>, inners: Vec<Vec<XZPoint>>| {
+        let Some((z0, z1)) = outers
+            .iter()
+            .flatten()
+            .fold(None, |b: Option<(i32, i32)>, p| {
+                Some(b.map_or((p.z, p.z), |(lo, hi)| (lo.min(p.z), hi.max(p.z))))
+            })
+        else {
+            return;
+        };
+        let edges = crate::element_processing::water_areas::PolygonEdges::new(&outers, &inners);
+        for z in z0.max(xzbbox.min_z())..=z1.min(xzbbox.max_z()) {
+            for (x0, x1) in edges.row_spans(z, xzbbox.min_x(), xzbbox.max_x()) {
+                mask.set_span(x0, x1, z);
+            }
+        }
+    };
+    for element in elements {
+        match element {
+            ProcessedElement::Way(way) if commercial(&way.tags) => {
+                if let Some(r) = ring(&way.nodes) {
+                    fill(vec![r], Vec::new());
+                }
+            }
+            ProcessedElement::Relation(rel) if commercial(&rel.tags) => {
+                let (mut outers, mut inners) = (Vec::new(), Vec::new());
+                for m in &rel.members {
+                    match m.role {
+                        ProcessedMemberRole::Outer => outers.push(m.way.nodes.clone()),
+                        ProcessedMemberRole::Inner => inners.push(m.way.nodes.clone()),
+                        ProcessedMemberRole::Part => {}
+                    }
+                }
+                super::merge_way_segments(&mut outers);
+                super::merge_way_segments(&mut inners);
+                let outers: Vec<_> = outers.iter().filter_map(|r| ring(r)).collect();
+                let inners = inners.iter().filter_map(|r| ring(r)).collect();
+                if !outers.is_empty() {
+                    fill(outers, inners);
+                }
+            }
+            _ => {}
+        }
+    }
+    mask
+}
+
+#[cfg(test)]
+mod commercial_land_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::osm_parser::{ProcessedElement, ProcessedMember, ProcessedNode};
+    use std::collections::HashMap;
+
+    fn square(id: u64, (x0, z0): (i32, i32), (x1, z1): (i32, i32)) -> ProcessedWay {
+        let node = |i: u64, x: i32, z: i32| ProcessedNode {
+            id: id * 10 + i,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        ProcessedWay {
+            id,
+            nodes: vec![
+                node(0, x0, z0),
+                node(1, x1, z0),
+                node(2, x1, z1),
+                node(3, x0, z1),
+                node(0, x0, z0),
+            ],
+            tags: HashMap::new(),
+        }
+    }
+
+    fn tagged(mut way: ProcessedWay, k: &str, v: &str) -> ProcessedWay {
+        way.tags.insert(k.to_string(), v.to_string());
+        way
+    }
+
+    /// Commercial land paints no ground and is never filled while elements are placed,
+    /// so it is marked from the element list: ways and multipolygons, holes left out,
+    /// retail as well, and nothing else.
+    #[test]
+    fn commercial_and_retail_land_is_marked_from_the_element_list() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 199, 199).unwrap();
+        let elements = vec![
+            ProcessedElement::Way(tagged(
+                square(1, (10, 10), (40, 40)),
+                "landuse",
+                "commercial",
+            )),
+            ProcessedElement::Way(tagged(square(2, (60, 10), (80, 30)), "landuse", "retail")),
+            ProcessedElement::Way(tagged(
+                square(3, (100, 10), (130, 40)),
+                "landuse",
+                "residential",
+            )),
+            ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+                id: 9,
+                tags: HashMap::from([
+                    ("type".to_string(), "multipolygon".to_string()),
+                    ("landuse".to_string(), "commercial".to_string()),
+                ]),
+                members: vec![
+                    ProcessedMember {
+                        role: ProcessedMemberRole::Outer,
+                        way: std::sync::Arc::new(square(4, (10, 100), (90, 180))),
+                    },
+                    ProcessedMember {
+                        role: ProcessedMemberRole::Inner,
+                        way: std::sync::Arc::new(square(5, (30, 120), (70, 160))),
+                    },
+                ],
+            }),
+        ];
+        // The landuse pass itself leaves commercial land alone.
+        assert!(!crate::element_processing::landuse_paints_ground(
+            elements[0].tags()
+        ));
+        let mask = commercial_land(&elements, &bbox);
+        assert!(mask.contains(25, 25) && mask.contains(70, 20));
+        assert!(!mask.contains(115, 25), "residential");
+        assert!(mask.contains(20, 110) && mask.contains(85, 175));
+        assert!(!mask.contains(50, 140), "the hole");
+        assert!(!mask.contains(150, 150));
     }
 }
 

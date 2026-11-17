@@ -513,15 +513,15 @@ fn process_element(
                     waterways::generate_waterways(
                         editor,
                         way,
-                        args.water.water_detail.channel_width_cap(args.scale),
+                        waterways::ChannelShape {
+                            width_cap: args.water.water_detail.channel_width_cap(args.scale),
+                            roads_at_grade: big_water_field.roads_at_grade(),
+                        },
                         &waterways::ChannelBed {
                             field: big_water_field,
                             road_mask,
                             tunnel_footprint,
                             decks: bridge_surface,
-                            piped_under_roads: (args.water.river_bed != Default::default()
-                                || args.water.water_detail != Default::default())
-                            .then_some(bridge_surface),
                         },
                     );
                 }
@@ -1251,6 +1251,8 @@ pub fn generate_world_with_options(
         );
     }
 
+    let mut ground = ground;
+    let roads_at_grade = ground.take_roads_at_grade();
     let ground = Arc::new(ground);
     let mut bench = crate::bench::Bench::new(args.benchmark);
     crate::world_editor::reset_section_counters(args.benchmark);
@@ -1285,6 +1287,7 @@ pub fn generate_world_with_options(
         args.water.water_detail,
         args.scale,
     );
+    big_water_field.pipe_channels_under(roads_at_grade);
     big_water_field.set_river_bed(crate::river_bed::compute_river_bed_field(
         args.water.river_bed,
         &elements,
@@ -1293,7 +1296,10 @@ pub fn generate_world_with_options(
         &xzbbox,
         &clip_bbox,
         args.scale,
-        args.water.water_detail.channel_width_cap(args.scale),
+        waterways::ChannelShape {
+            width_cap: args.water.water_detail.channel_width_cap(args.scale),
+            roads_at_grade: big_water_field.roads_at_grade(),
+        },
     ));
     let big_water_field = Arc::new(big_water_field);
     // Resolved once here: a body spanning many tiles must not be measured per tile.
@@ -1398,6 +1404,21 @@ pub fn generate_world_with_options(
     editor.set_sealed_surface(Arc::clone(&sealed_surface));
 
     editor.set_carriageway(Arc::clone(&carriageway));
+
+    // What the gardens read besides the marks: commercial land, which is never filled
+    // while elements are placed, and the streets and car parks that keep paving beside them.
+    let garden_land = Arc::new(crate::world_editor::GardenLand {
+        commercial: crate::element_processing::landuse::commercial_land(&elements, &xzbbox),
+        streets: highways::collect_garden_streets(
+            &elements,
+            &editor,
+            &clip_bbox,
+            args.scale,
+            args.water.water_detail,
+            |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
+        ),
+    });
+    editor.set_garden_land(Arc::clone(&garden_land));
 
     let mut mapped_trunks = crate::trees::mapped::MappedTrunks::collect(&elements, args.scale);
     let crown_r = crate::element_processing::tree::crown_probe_blocks(args.scale);
@@ -2031,6 +2052,7 @@ pub fn generate_world_with_options(
             }
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
             tile_editor.set_carriageway(Arc::clone(&carriageway));
+            tile_editor.set_garden_land(Arc::clone(&garden_land));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));
@@ -2628,6 +2650,8 @@ pub fn generate_world_with_options(
     }
     drop(sealed_surface);
     drop(carriageway);
+    editor.release_garden_land();
+    drop(garden_land);
     // The barrier clearance shares the road mask, so it goes first.
     drop(barrier_clearance);
     drop(road_mask);

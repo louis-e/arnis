@@ -707,6 +707,15 @@ fn grow_patch(
         if !site.contains(x, z) || editor.surface_is_sealed(x, z) {
             continue;
         }
+        // Mown lawns take no wild patches; pond plants and shade mushrooms still grow.
+        if editor.is_lawn(x, z)
+            && !matches!(
+                feature,
+                Feature::LilyPads | Feature::SugarCane | Feature::Mushrooms
+            )
+        {
+            continue;
+        }
         let y = site.ground_y(editor, x, z);
         let stays_in_habitat = match feature {
             // Pads float on the pools, cane grows on whatever bank the water has.
