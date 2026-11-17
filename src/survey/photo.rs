@@ -65,33 +65,42 @@ impl PhotoTile {
         }
     }
 
+    /// Read a cached tile a row at a time from the decompressor. `None` unless
+    /// the file is whole and of this version.
     fn read(path: &Path) -> Option<Self> {
-        let raw = zstd::decode_all(std::fs::File::open(path).ok()?).ok()?;
-        if raw.len() < 12 || &raw[..8] != MAGIC {
+        use std::io::Read;
+        let mut d = zstd::Decoder::new(std::fs::File::open(path).ok()?).ok()?;
+        let mut head = [0u8; 12];
+        d.read_exact(&mut head).ok()?;
+        if &head[..8] != MAGIC {
             return None;
         }
-        let across = u32::from_le_bytes(raw[8..12].try_into().ok()?) as usize;
-        let nb = across * across;
-        if raw.len() != 12 + nb + CELLS * 8 {
+        let across = u32::from_le_bytes(head[8..12].try_into().ok()?) as usize;
+        if across > TILE {
             return None;
         }
-        let blocks_in = raw[12..12 + nb].iter().map(|&b| b != 0).collect();
-        let cells = raw[12 + nb..]
-            .as_chunks::<8>()
-            .0
-            .iter()
-            .map(|c| PhotoCell {
+        let mut blocks_in = vec![0u8; across * across];
+        d.read_exact(&mut blocks_in).ok()?;
+        let mut cells = Vec::with_capacity(CELLS);
+        let mut row = vec![0u8; TILE * 8];
+        for _ in 0..TILE {
+            d.read_exact(&mut row).ok()?;
+            cells.extend(row.as_chunks::<8>().0.iter().map(|c| PhotoCell {
                 exg: c[0] as i8,
                 green: c[1],
                 lum: c[2],
                 blue: c[3] as i8,
                 rgb: [c[4], c[5], c[6]],
                 present: c[7] != 0,
-            })
-            .collect();
+            }));
+        }
+        // Nothing may follow.
+        if d.read(&mut [0u8; 1]).ok()? != 0 {
+            return None;
+        }
         Some(PhotoTile {
             cells,
-            blocks_in,
+            blocks_in: blocks_in.into_iter().map(|b| b != 0).collect(),
             blocks_across: across,
         })
     }

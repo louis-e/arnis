@@ -34,7 +34,7 @@ use super::fetch::{self, Failure};
 use super::source::{Laser, Rect, Sheet};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 pub const TILE: usize = 1000;
 const CELLS: usize = TILE * TILE;
@@ -139,36 +139,46 @@ impl LaserTile {
         std::fs::rename(tmp, path)
     }
 
+    /// Read a cached tile, each layer straight from the decompressor. `None`
+    /// unless the file is whole and of this version and density.
     fn read(path: &Path) -> Option<Self> {
-        let raw = zstd::decode_all(std::fs::File::open(path).ok()?).ok()?;
+        let mut d = zstd::Decoder::new(std::fs::File::open(path).ok()?).ok()?;
         let nb = BLOCKS * BLOCKS;
-        if raw.len() < 9 + nb + 2 || &raw[..8] != MAGIC || raw[8] != (target_density() * 10.0) as u8
-        {
+        let mut head = vec![0u8; 9 + nb + 2];
+        d.read_exact(&mut head).ok()?;
+        if &head[..8] != MAGIC || head[8] != (target_density() * 10.0) as u8 {
             return None;
         }
-        let blocks = raw[9..9 + nb].iter().map(|&b| b != 0).collect();
-        let at = 9 + nb;
-        let olen = usize::from(u16::from_le_bytes([raw[at], raw[at + 1]]));
-        let origin = String::from_utf8(raw.get(at + 2..at + 2 + olen)?.to_vec()).ok()?;
-        let base = at + 2 + olen;
-        if raw.len() != base + CELLS * 9 {
-            return None;
-        }
-        let layer = |i: usize| raw[base + i * CELLS..base + (i + 1) * CELLS].to_vec();
-        let i_gnd = raw[base + 7 * CELLS..]
+        let blocks = head[9..9 + nb].iter().map(|&b| b != 0).collect();
+        let olen = usize::from(u16::from_le_bytes([head[9 + nb], head[10 + nb]]));
+        let mut origin = vec![0u8; olen];
+        d.read_exact(&mut origin).ok()?;
+        let origin = String::from_utf8(origin).ok()?;
+        let mut layer = |len: usize| {
+            let mut v = vec![0u8; len];
+            d.read_exact(&mut v).ok().map(|_| v)
+        };
+        let (n_all, n_gnd, n_obj) = (layer(CELLS)?, layer(CELLS)?, layer(CELLS)?);
+        let (n_bld, n_veg, h_obj, h_bld) =
+            (layer(CELLS)?, layer(CELLS)?, layer(CELLS)?, layer(CELLS)?);
+        let i_gnd = layer(2 * CELLS)?
             .as_chunks::<2>()
             .0
             .iter()
             .map(|&b| u16::from_le_bytes(b))
             .collect();
+        // Nothing may follow.
+        if d.read(&mut [0u8; 1]).ok()? != 0 {
+            return None;
+        }
         Some(LaserTile {
-            n_all: layer(0),
-            n_gnd: layer(1),
-            n_obj: layer(2),
-            n_bld: layer(3),
-            n_veg: layer(4),
-            h_obj: layer(5),
-            h_bld: layer(6),
+            n_all,
+            n_gnd,
+            n_obj,
+            n_bld,
+            n_veg,
+            h_obj,
+            h_bld,
             i_gnd,
             blocks,
             origin,
@@ -270,6 +280,9 @@ pub fn tile(
         let got = match source.laser {
             Laser::Whole { .. } => read_whole(client, root, source, te, tn, url),
             Laser::Copc { .. } | Laser::Ept { .. } => {
+                // A COPC or EPT tile decodes as it downloads: a turn at both.
+                let _download = DOWNLOADS.enter(DOWNLOADS_AT_ONCE);
+                let _decode = DECODES.enter(decodes_at_once());
                 let mut t = LaserTile::read(&path)
                     .filter(|t| t.origin == *url)
                     .unwrap_or_else(|| LaserTile::empty(url));
@@ -428,6 +441,7 @@ fn read_whole(
         .join(format!("tile_{te}_{tn}.laz.part{}", std::process::id()));
     let other = |e: String| Failure::Other(e);
     {
+        let _turn = DOWNLOADS.enter(DOWNLOADS_AT_ONCE);
         let _permit = crate::net::request_permit();
         let mut resp = client
             .get(url)
@@ -445,10 +459,80 @@ fn read_whole(
         fetch::count_laser_bytes(n);
         fetch::count_laser_area(1e6);
     }
-    let measured = measure_file(&tmp, source, te, tn, url);
+    let measured = {
+        let _turn = DECODES.enter(decodes_at_once());
+        measure_file(&tmp, source, te, tn, url)
+    };
     let _ = std::fs::remove_file(&tmp);
     measured.map_err(other)
 }
+
+/// Turns at something only so many may do at once.
+struct Gate {
+    busy: Mutex<usize>,
+    freed: Condvar,
+}
+
+/// A turn at a [`Gate`], given back on drop.
+struct Turn(&'static Gate);
+
+impl Gate {
+    const fn new() -> Self {
+        Gate {
+            busy: Mutex::new(0),
+            freed: Condvar::new(),
+        }
+    }
+
+    /// Wait until fewer than `limit` hold a turn, then take one.
+    fn enter(&'static self, limit: usize) -> Turn {
+        let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        while *busy >= limit.max(1) {
+            busy = self.freed.wait(busy).unwrap_or_else(|e| e.into_inner());
+        }
+        *busy += 1;
+        Turn(self)
+    }
+}
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        *self.0.busy.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+        self.0.freed.notify_all();
+    }
+}
+
+/// Laser files downloaded at once: two, whatever else is in flight. One server
+/// usually holds all of a source's tiles.
+static DOWNLOADS: Gate = Gate::new();
+const DOWNLOADS_AT_ONCE: usize = 2;
+
+/// Tiles decoded at once. A dense tile holds its points, about 11 bytes each,
+/// some 250 MB for 20 million, until they are boiled down.
+static DECODES: Gate = Gate::new();
+
+/// Two decodes at a time on a machine of 8 GB or more that has 2 GB free as
+/// the decode starts (or a `--ram-budget-mb` of that), else one.
+fn decodes_at_once() -> usize {
+    static TOTAL_MB: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let total_mb = *TOTAL_MB.get_or_init(|| {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        sys.total_memory() / (1024 * 1024)
+    });
+    // An 8 GB machine reports a little under 8 GiB where the firmware keeps
+    // some for itself.
+    let roomy = total_mb >= 7 * 1024 + 512;
+    if roomy && crate::data_processing::available_memory_mb() >= 2048 {
+        2
+    } else {
+        1
+    }
+}
+
+/// Tiles of an area worked on at once, on plain threads: while some decode,
+/// the next download.
+pub const TILES_AT_ONCE: usize = 4;
 
 /// The parts of a LAS header reading a whole file needs.
 struct Header {

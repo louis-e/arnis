@@ -164,10 +164,12 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
         (n1 + MARGIN_M).ceil(),
     );
     let tiles = sheet.tiles(rect);
+    // Each tile's cache is read whole to check it: side by side.
+    use rayon::prelude::*;
     let download_mb = match sheet.laser {
         Laser::Whole { tile_mb, .. } => {
             tiles
-                .iter()
+                .par_iter()
                 .filter(|&&(te, tn)| {
                     !laser::is_cached(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect))
                 })
@@ -175,12 +177,13 @@ pub fn plan_in(root: &std::path::Path, bbox: &LLBBox) -> Option<Plan> {
                 * tile_mb
         }
         Laser::Copc { mb_per_km2, .. } | Laser::Ept { mb_per_km2, .. } => {
-            let km2: f64 = tiles
-                .iter()
+            let missing: Vec<f64> = tiles
+                .par_iter()
                 .map(|&(te, tn)| {
                     laser::missing_km2(root, &sheet, te, tn, &laser::blocks_for(te, tn, rect))
                 })
-                .sum();
+                .collect();
+            let km2: f64 = missing.iter().sum();
             (km2 * f64::from(mb_per_km2)).ceil() as u32
         }
     };
@@ -233,11 +236,26 @@ pub fn fetch_survey_data(
         .build()
         .ok()?;
     let (bytes0, area0) = (fetch::laser_bytes(), fetch::laser_area_m2());
+    let debug = std::env::var_os("ARNIS_LASER_DEBUG").is_some();
+    let clock = std::time::Instant::now();
+    let lap = |what: &str| {
+        if debug {
+            let mut sys = sysinfo::System::new();
+            let pid = sysinfo::Pid::from_u32(std::process::id());
+            sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+            let rss = sys.process(pid).map_or(0, |p| p.memory() >> 20);
+            eprintln!(
+                "laser timing: {what} by {:.2} s, {rss} MB resident",
+                clock.elapsed().as_secs_f64()
+            );
+        }
+    };
     // Heights read only the laser's roofs; lawns and trees need the photo too.
     let mut inputs = mosaic(&client, &plan, features.garden || features.trees)?;
     if !plan.sheet.classes.unsorted.is_empty() {
         classify::crowns_not_roofs(&mut inputs);
     }
+    lap("mosaic");
     let (bytes, area) = (
         fetch::laser_bytes() - bytes0,
         fetch::laser_area_m2() - area0,
@@ -251,6 +269,7 @@ pub fn fetch_survey_data(
         );
     }
     let (thresholds, how) = classify::calibrate(&inputs, plan.sheet.intensity_defaults);
+    lap("thresholds");
     println!(
         "Laser data: {:.0} points a square metre, lawn intensity from the {}",
         classify::median_density(&inputs),
@@ -261,6 +280,7 @@ pub fn fetch_survey_data(
         }
     );
     let classes = classify::classify(&inputs, thresholds);
+    lap("classes");
     if let Some(path) = std::env::var_os("ARNIS_LASER_DUMP") {
         dump(&inputs, &classes, thresholds, std::path::Path::new(&path));
     }
@@ -268,23 +288,30 @@ pub fn fetch_survey_data(
     drop(inputs);
 
     // Sample onto the world grid: cell (gx, gz) sits at the bbox's west edge plus
-    // gx steps, north edge minus gz steps, as the canopy and land cover do.
+    // gx steps, north edge minus gz steps, as the canopy and land cover do. Rows
+    // side by side: the projection is most of the work.
+    use rayon::prelude::*;
     let lat_step = (bbox.min().lat() - bbox.max().lat()) / (grid_h - 1) as f64;
     let lon_step = (bbox.max().lng() - bbox.min().lng()) / (grid_w - 1) as f64;
     let mut cells = vec![[0u8; 5]; grid_w * grid_h];
-    for gz in 0..grid_h {
-        let lat = bbox.max().lat() + lat_step * gz as f64;
-        for gx in 0..grid_w {
-            let lon = bbox.min().lng() + lon_step * gx as f64;
-            let (e, n) = plan.sheet.crs.forward(lat, lon);
-            let (col, row) = ((e - e0).floor(), (n1 - n).floor());
-            if col < 0.0 || row < 0.0 || col >= w as f64 || row >= h as f64 {
-                continue;
+    cells
+        .par_chunks_mut(grid_w)
+        .enumerate()
+        .for_each(|(gz, row_cells)| {
+            let lat = bbox.max().lat() + lat_step * gz as f64;
+            for (gx, cell) in row_cells.iter_mut().enumerate() {
+                let lon = bbox.min().lng() + lon_step * gx as f64;
+                let (e, n) = plan.sheet.crs.forward(lat, lon);
+                let (col, row) = ((e - e0).floor(), (n1 - n).floor());
+                if col < 0.0 || row < 0.0 || col >= w as f64 || row >= h as f64 {
+                    continue;
+                }
+                let o = classes[row as usize * w + col as usize];
+                *cell = [o.class, o.height_q, o.color[0], o.color[1], o.color[2]];
             }
-            let o = classes[row as usize * w + col as usize];
-            cells[gz * grid_w + gx] = [o.class, o.height_q, o.color[0], o.color[1], o.color[2]];
-        }
-    }
+        });
+    drop(classes);
+    lap("sampling");
     println!("Laser data: {}", plan.sheet.attribution);
     let data = SurveyData {
         cells,
@@ -306,7 +333,6 @@ fn mosaic(
     plan: &Plan,
     with_photo: bool,
 ) -> Option<classify::Inputs> {
-    use rayon::prelude::*;
     let (e0, n0, e1, n1) = plan.rect;
     let (w, h) = ((e1 - e0) as usize, (n1 - n0) as usize);
     let root = cache_root();
@@ -315,23 +341,24 @@ fn mosaic(
     inp.strict_pools = plan.sheet.strict_pools;
 
     // Where to read each tile not already cached: a fixed address, candidates,
-    // or one lookup over the whole rectangle.
-    let uncached: Vec<(i32, i32)> = plan
-        .tiles
-        .iter()
-        .copied()
-        .filter(|&t| laser::cached(&root, &plan.sheet, t.0, t.1, &plan.want(t)).is_none())
-        .collect();
+    // or one lookup over the whole rectangle. Addresses cost nothing to work
+    // out, so every tile has them (a cached one never uses them); the lookup is
+    // made only when some tile is not cached.
     let mut urls: std::collections::HashMap<(i32, i32), Vec<String>> = Default::default();
     let (Laser::Whole { locate, .. } | Laser::Copc { locate, .. } | Laser::Ept { locate, .. }) =
         &plan.sheet.laser;
+    let uncached = || {
+        plan.tiles
+            .iter()
+            .any(|&t| laser::cached(&root, &plan.sheet, t.0, t.1, &plan.want(t)).is_none())
+    };
     match locate {
         Locate::Urls(f) => {
-            for &(te, tn) in &uncached {
+            for &(te, tn) in &plan.tiles {
                 urls.insert((te, tn), f(te, tn));
             }
         }
-        Locate::Lookup(f) if !uncached.is_empty() => {
+        Locate::Lookup(f) if uncached() => {
             if let Err(e) = crate::net::ensure_online("laser scans") {
                 eprintln!("Warning: {e}");
                 return None;
@@ -366,81 +393,125 @@ fn mosaic(
         Locate::Lookup(_) => {}
     }
 
-    // Laser tiles two at a time: each takes a few hundred MB while it is decoded.
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(2)
-        .build()
-        .ok()?;
-    let tiles: Vec<((i32, i32), Result<laser::Fetched, String>)> = pool.install(|| {
-        plan.tiles
-            .par_iter()
-            .map(|&t| {
-                let none = Vec::new();
-                let u = urls.get(&t).unwrap_or(&none);
-                (
-                    t,
-                    laser::tile(client, &root, &plan.sheet, t, &plan.want(t), u),
-                )
-            })
-            .collect()
-    });
+    // The photo downloads beside the laser tiles: they come from other servers,
+    // or from one that paces every request itself. Each tile goes into the
+    // mosaic as it comes and is let go.
+    let photo_on = with_photo && std::env::var_os("ARNIS_LASER_NO_PHOTO").is_none();
+    let classify::Inputs {
+        n_all,
+        n_gnd,
+        n_obj,
+        n_bld,
+        n_veg,
+        h_obj_q,
+        h_bld_q,
+        i_gnd_q,
+        photo: photo_cells,
+        ..
+    } = &mut inp;
+    let laser_failed = std::sync::atomic::AtomicBool::new(false);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut failed: Vec<((i32, i32), String)> = Vec::new();
     let mut any = false;
-    for ((te, tn), t) in tiles {
-        let t = match t {
-            Ok(laser::Fetched::Tile(t)) => t,
-            Ok(laser::Fetched::Absent) => continue,
-            Err(e) => {
-                eprintln!("Warning: laser scan {te}_{tn} unavailable: {e}");
-                return None;
+    std::thread::scope(|s| {
+        let photos = s.spawn(|| {
+            if photo_on {
+                fill_photos(client, plan, &root, photo_cells, &laser_failed);
             }
-        };
-        any = true;
-        let (te0, tn1) = (f64::from(te) * 1000.0, f64::from(tn + 1) * 1000.0);
-        for_overlap(plan.rect, te0, tn1, |mc, tc| {
-            inp.n_all[mc] = t.n_all[tc];
-            inp.n_gnd[mc] = t.n_gnd[tc];
-            inp.n_obj[mc] = t.n_obj[tc];
-            inp.n_bld[mc] = t.n_bld[tc];
-            inp.n_veg[mc] = t.n_veg[tc];
-            inp.h_obj_q[mc] = t.h_obj[tc];
-            inp.h_bld_q[mc] = t.h_bld[tc];
-            inp.i_gnd_q[mc] = t.i_gnd[tc];
         });
+        // Plain threads, not a Rayon pool: they wait their turn to download
+        // and decode (see `laser::tile`), and a decode's own Rayon work must
+        // never pick up another tile while it holds a turn.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (next, urls, root) = (&next, &urls, &root);
+        for _ in 0..laser::TILES_AT_ONCE.min(plan.tiles.len()) {
+            let tx = tx.clone();
+            s.spawn(move || loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(&t) = plan.tiles.get(i) else { break };
+                let u = urls.get(&t).map_or(&[][..], Vec::as_slice);
+                let got = laser::tile(client, root, &plan.sheet, t, &plan.want(t), u);
+                if tx.send((t, got)).is_err() {
+                    break;
+                }
+            });
+        }
+        drop(tx);
+        for ((te, tn), got) in rx {
+            let t = match got {
+                Ok(laser::Fetched::Tile(t)) => t,
+                Ok(laser::Fetched::Absent) => continue,
+                Err(e) => {
+                    laser_failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                    failed.push(((te, tn), e));
+                    continue;
+                }
+            };
+            any = true;
+            let (te0, tn1) = (f64::from(te) * 1000.0, f64::from(tn + 1) * 1000.0);
+            for_overlap(plan.rect, te0, tn1, |mc, tc| {
+                n_all[mc] = t.n_all[tc];
+                n_gnd[mc] = t.n_gnd[tc];
+                n_obj[mc] = t.n_obj[tc];
+                n_bld[mc] = t.n_bld[tc];
+                n_veg[mc] = t.n_veg[tc];
+                h_obj_q[mc] = t.h_obj[tc];
+                h_bld_q[mc] = t.h_bld[tc];
+                i_gnd_q[mc] = t.i_gnd[tc];
+            });
+        }
+        if let Err(e) = photos.join() {
+            std::panic::resume_unwind(e);
+        }
+    });
+    // The first tile in the plan's order that failed speaks for all.
+    if let Some(((te, tn), e)) = plan
+        .tiles
+        .iter()
+        .find_map(|t| failed.iter().find(|(f, _)| f == t))
+    {
+        eprintln!("Warning: laser scan {te}_{tn} unavailable: {e}");
+        return None;
     }
     if !any {
         return None;
     }
+    Some(inp)
+}
 
-    // Photo: only the cells of each tile the rectangle covers.
-    if !with_photo || std::env::var_os("ARNIS_LASER_NO_PHOTO").is_some() {
-        return Some(inp);
-    }
-    let photos: Vec<((i32, i32), Option<photo::PhotoTile>)> = plan
-        .tiles
-        .par_iter()
-        .map(|&(te, tn)| {
-            let (te0, tn1) = (f64::from(te) * 1000.0, f64::from(tn + 1) * 1000.0);
-            let c0 = (e0 - te0).max(0.0) as usize;
-            let c1 = ((e1 - te0).min(1000.0)) as usize;
-            let r0 = (tn1 - n1).max(0.0) as usize;
-            let r1 = ((tn1 - n0).min(1000.0)) as usize;
-            (
-                (te, tn),
-                photo::tile(client, &root, &plan.sheet, te, tn, (c0, r0, c1, r1)),
-            )
-        })
-        .collect();
-    for ((te, tn), p) in photos {
-        let Some(p) = p else { continue };
+/// The photo's cells over the plan's rectangle, tile by tile as they come (only
+/// the part of each tile the rectangle covers). Tiles not yet begun are left
+/// once `stop` is set: the laser failed, and the mosaic with it.
+fn fill_photos(
+    client: &reqwest::blocking::Client,
+    plan: &Plan,
+    root: &std::path::Path,
+    cells: &mut [photo::PhotoCell],
+    stop: &std::sync::atomic::AtomicBool,
+) {
+    use rayon::prelude::*;
+    let (e0, n0, e1, n1) = plan.rect;
+    let cells = std::sync::Mutex::new(cells);
+    plan.tiles.par_iter().for_each(|&(te, tn)| {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let (te0, tn1) = (f64::from(te) * 1000.0, f64::from(tn + 1) * 1000.0);
+        let c0 = (e0 - te0).max(0.0) as usize;
+        let c1 = ((e1 - te0).min(1000.0)) as usize;
+        let r0 = (tn1 - n1).max(0.0) as usize;
+        let r1 = ((tn1 - n0).min(1000.0)) as usize;
+        let Some(p) = photo::tile(client, root, &plan.sheet, te, tn, (c0, r0, c1, r1)) else {
+            return;
+        };
+        let mut cells = cells.lock().unwrap_or_else(|e| e.into_inner());
         for_overlap(plan.rect, te0, tn1, |mc, tc| {
             let c = p.cells[tc];
             if c.present {
-                inp.photo[mc] = c;
+                cells[mc] = c;
             }
         });
-    }
-    Some(inp)
+    });
 }
 
 /// Debugging aid (`ARNIS_LASER_DUMP=out.png`): the classes on the metre grid,
