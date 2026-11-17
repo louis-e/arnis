@@ -2716,8 +2716,8 @@ fn generate_highways_internal(
                                 .iter()
                                 .filter(|m| m.covers(t))
                             {
-                                // Across the lanes, not the parking rows beside them.
-                                let reach = stamp_reach(lane_range, square_stamp, perp_x, perp_z);
+                                // Kerb to kerb: nobody parks by a junction or a crossing.
+                                let reach = stamp_reach(block_range, square_stamp, perp_x, perp_z);
                                 let spacing = perp_x.abs() + perp_z.abs();
                                 let r = block_range + 1;
                                 for dx in -r..=r {
