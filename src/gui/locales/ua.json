@@ -509,6 +509,7 @@
   "reason_token": "Вкажіть токен Mapillary.",
   "reason_outbreak": "Вимкніть «Зомбі-спалах».",
   "reason_disasters": "Вимкніть «Катастрофи».",
+  "reason_scale_laser": "Встановіть «Масштаб світу» на 0,75 або більше.",
   "new_badge": "Нове",
   "meld_open_folder": "Відкрити теку",
   "meld_plan_download": "Завантажити зараз",

@@ -509,6 +509,7 @@
   "reason_token": "Mapillary 토큰을 입력하세요.",
   "reason_outbreak": "좀비 아웃브레이크를 끄세요.",
   "reason_disasters": "재난을 끄세요.",
+  "reason_scale_laser": "세계 규모를 0.75 이상으로 설정하세요.",
   "new_badge": "새 기능",
   "meld_open_folder": "폴더 열기",
   "meld_plan_download": "지금 다운로드",

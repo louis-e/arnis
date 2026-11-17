@@ -509,6 +509,7 @@
   "reason_token": "მიუთითეთ Mapillary ტოკენი.",
   "reason_outbreak": "გამორთეთ „ზომბების ეპიდემია“.",
   "reason_disasters": "გამორთეთ „კატასტროფები“.",
+  "reason_scale_laser": "„მსოფლიოს მასშტაბი“ დააყენეთ 0.75-ზე ან მეტზე.",
   "new_badge": "ახალი",
   "meld_open_folder": "საქაღალდის გახსნა",
   "meld_plan_download": "ჩამოტვირთვა ახლა",

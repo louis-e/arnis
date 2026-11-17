@@ -509,6 +509,7 @@
   "reason_token": "Podaj token Mapillary.",
   "reason_outbreak": "Wyłącz Epidemię zombie.",
   "reason_disasters": "Wyłącz Katastrofy.",
+  "reason_scale_laser": "Ustaw Skala świata na 0,75 lub więcej.",
   "new_badge": "Nowość",
   "meld_open_folder": "Otwórz folder",
   "meld_plan_download": "Pobierz teraz",

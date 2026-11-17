@@ -1417,6 +1417,7 @@ function initSettings() {
 
   slider.addEventListener("input", refreshScaleDisplay);
   slider.addEventListener("input", refreshBboxSelectionInfo);
+  slider.addEventListener("input", refreshLidarRows);
   // Double-click to reset world scale to default (1.00).
   // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
@@ -3768,6 +3769,7 @@ const ROW_REASONS = {
   reason_token: ['Enter a Mapillary Token.', 'mapillary-token'],
   reason_outbreak: ['Turn off Zombie Outbreak.', 'zombie-outbreak-toggle'],
   reason_disasters: ['Turn off Disasters.', 'disasters-toggle'],
+  reason_scale_laser: ['Set World Scale to 0.75 or more.', 'scale-value-slider'],
 };
 
 // The key of the first check that fails, as [ok, key] pairs; null when all pass.
@@ -3843,13 +3845,20 @@ function setSettingsRowAvailable(inputId, available, reason = null) {
   }
 }
 
-// Laser data is Earth-only and never used for One World. Its features and limit sit in the
-// same block and show only while the master switch is on, as the Live rows under One World do.
+// Laser data is Earth-only, never used for One World, and needs a World Scale of 0.75 or more
+// (mirrors LASER_MIN_SCALE in src/args.rs). Its features and limit sit in the same block and show
+// only while the master switch is on, as the Live rows under One World do.
 const LASER_ROWS = ['garden-detail-row', 'measured-trees-row', 'measured-heights-row', 'lidar-limit-row'];
+const LASER_MIN_SCALE = 0.75;
 function refreshLidarRows() {
   const master = document.getElementById('lidar-toggle');
   if (!master) return;
-  const reason = why([selectedCelestialBody === 'earth', 'reason_earth'], [!isOneWorldEnabled(), 'reason_not_one_world']);
+  const scale = parseFloat(document.getElementById('scale-value-slider')?.value ?? '1');
+  const reason = why(
+    [selectedCelestialBody === 'earth', 'reason_earth'],
+    [!isOneWorldEnabled(), 'reason_not_one_world'],
+    [!(scale < LASER_MIN_SCALE), 'reason_scale_laser'],
+  );
   setSettingsRowAvailable('lidar-toggle', !reason, reason);
   const open = !reason && master.checked;
   // Squares the card's lower corners while its rows hang under it, as One World does.

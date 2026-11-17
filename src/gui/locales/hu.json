@@ -509,6 +509,7 @@
   "reason_token": "Add meg a Mapillary tokent.",
   "reason_outbreak": "Kapcsold ki a Zombijárványt.",
   "reason_disasters": "Kapcsold ki a Katasztrófákat.",
+  "reason_scale_laser": "Állítsd a(z) Világ nagysága értékét legalább 0,75-re.",
   "new_badge": "Új",
   "meld_open_folder": "Mappa megnyitása",
   "meld_plan_download": "Letöltés most",

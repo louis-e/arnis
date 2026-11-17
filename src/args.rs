@@ -1256,6 +1256,10 @@ impl GenerationMode {
 /// pillars, and fixed-size props come to dominate the scene. Objects are skipped instead.
 pub const OBJECT_SKIP_SCALE: f64 = 0.3;
 
+/// Below this many blocks a metre laser data is not used: a hedge would be a
+/// fraction of a block. The window greys Laser Data out below it too.
+pub const LASER_MIN_SCALE: f64 = 0.75;
+
 /// Smallest usable scale. Below this a country-sized bbox degenerates into a few hundred
 /// blocks and terrain detail is lost entirely.
 pub const MIN_SCALE: f64 = 0.05;
@@ -1352,8 +1356,25 @@ impl Args {
             heights: self.measured_heights,
         };
         let any = f.garden || f.trees || f.heights;
-        (self.lidar && any && self.body.is_earth() && !self.one_world && self.scale >= 0.75)
-            .then_some(f)
+        (self.lidar && any && self.lidar_off_reason().is_none()).then_some(f)
+    }
+
+    /// Why a run that asks for laser data cannot have it, for the log.
+    pub fn lidar_off_reason(&self) -> Option<String> {
+        if !self.lidar {
+            None
+        } else if !self.body.is_earth() {
+            Some("it is the Earth's only".to_string())
+        } else if self.one_world {
+            Some("One World does not use it".to_string())
+        } else if self.scale < LASER_MIN_SCALE {
+            Some(format!(
+                "it needs a scale of {LASER_MIN_SCALE} or more, and this run's is {:.2}",
+                self.scale
+            ))
+        } else {
+            None
+        }
     }
 
     /// The Mapillary token, if one was given and is not blank.

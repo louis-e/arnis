@@ -509,6 +509,7 @@
   "reason_token": "Introdu un token Mapillary.",
   "reason_outbreak": "Dezactivează Invazie de zombi.",
   "reason_disasters": "Dezactivează Dezastre.",
+  "reason_scale_laser": "Setează Scara lumii la 0,75 sau mai mult.",
   "new_badge": "Nou",
   "meld_open_folder": "Deschide folderul",
   "meld_plan_download": "Descarcă acum",

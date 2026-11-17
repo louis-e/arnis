@@ -509,6 +509,7 @@
   "reason_token": "Gib einen Mapillary-Token ein.",
   "reason_outbreak": "Schalte Zombie-Ausbruch aus.",
   "reason_disasters": "Schalte Katastrophen aus.",
+  "reason_scale_laser": "Setze Weltmaßstab auf 0,75 oder mehr.",
   "new_badge": "Neu",
   "meld_open_folder": "Ordner öffnen",
   "meld_plan_download": "Jetzt herunterladen",

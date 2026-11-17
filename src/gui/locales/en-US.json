@@ -509,6 +509,7 @@
   "reason_token": "Enter a Mapillary Token.",
   "reason_outbreak": "Turn off Zombie Outbreak.",
   "reason_disasters": "Turn off Disasters.",
+  "reason_scale_laser": "Set World Scale to 0.75 or more.",
   "new_badge": "New",
   "meld_open_folder": "Open folder",
   "meld_plan_download": "Download now",

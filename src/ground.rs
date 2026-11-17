@@ -1696,7 +1696,12 @@ pub fn generate_ground_data(
 /// Laser data on the grid the canopy map is sampled on, so the two line up. None
 /// unless the run asks for a laser feature it can have and a source covers the area.
 fn fetch_survey(args: &Args, bbox: &LLBBox) -> Option<crate::survey::SurveyData> {
-    let features = args.lidar_features()?;
+    let Some(features) = args.lidar_features() else {
+        if let Some(why) = args.lidar_off_reason() {
+            println!("Laser data off: {why}");
+        }
+        return None;
+    };
     let frame = GroundFrame::from_args(args, bbox);
     let plan = frame.fetch_plan(bbox, args.scale);
     let (grid_w, grid_h) = plan.grid_dims();

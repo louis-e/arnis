@@ -509,6 +509,7 @@
   "reason_token": "أدخل رمز Mapillary.",
   "reason_outbreak": "أوقف تفشّي الزومبي.",
   "reason_disasters": "أوقف الكوارث.",
+  "reason_scale_laser": "اضبط «مقياس العالم» على 0.75 أو أكثر.",
   "new_badge": "جديد",
   "meld_open_folder": "فتح المجلد",
   "meld_plan_download": "نزّل الآن",

@@ -509,6 +509,7 @@
   "reason_token": "Informe um token do Mapillary.",
   "reason_outbreak": "Desative Surto zumbi.",
   "reason_disasters": "Desative Desastres.",
+  "reason_scale_laser": "Defina Escala do mundo como 0,75 ou mais.",
   "new_badge": "Novo",
   "meld_open_folder": "Abrir pasta",
   "meld_plan_download": "Baixar agora",
