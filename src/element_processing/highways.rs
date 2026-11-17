@@ -1904,9 +1904,12 @@ fn generate_highways_internal(
                 } else {
                     ROAD_PROTECTED_SURFACES
                 };
-            // A sidewalk is drawn over a road's parking row, though not over its lanes, so
-            // the two meet at the kerb whichever is built first.
-            let is_sidewalk = way.tags.get("footway").map(String::as_str) == Some("sidewalk");
+            // A sidewalk, or a crossing out to the lanes, is drawn over a road's parking row
+            // though not over its lanes, so the two meet at the kerb whichever is built first.
+            let is_sidewalk = matches!(
+                way.tags.get("footway").map(String::as_str),
+                Some("sidewalk" | "crossing")
+            );
 
             // Canonical width (shared with prescan/bridge consumers).
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
@@ -2684,11 +2687,8 @@ fn generate_highways_internal(
                                 .iter()
                                 .filter(|m| m.covers(t))
                             {
-                                let reach = if square_stamp {
-                                    block_range as f32 * (perp_x.abs() + perp_z.abs())
-                                } else {
-                                    block_range as f32
-                                };
+                                // Across the lanes, not the parking rows beside them.
+                                let reach = stamp_reach(lane_range, square_stamp, perp_x, perp_z);
                                 let spacing = perp_x.abs() + perp_z.abs();
                                 let r = block_range + 1;
                                 for dx in -r..=r {
@@ -2986,11 +2986,8 @@ fn runway_centerline_dash_on(s: f32, scale: f64) -> bool {
 }
 
 /// Parses an OSM `width=*` value in metres (tolerates a trailing "m").
-// Parse an OSM width=* tag in metres, tolerating a trailing "m"/" m".
 pub(crate) fn parse_width_tag_m(tags: &HashMap<String, String>) -> Option<f64> {
-    let raw = tags.get("width")?;
-    let s = raw.trim().trim_end_matches('m').trim();
-    s.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+    road_width::metres(tags.get("width")?)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

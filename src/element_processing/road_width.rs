@@ -3,7 +3,7 @@
 //! Widths are worked out in metres, then turned into a half-width in blocks either side of
 //! the centreline cell, so a road `2 * half + 1` blocks across.
 
-use crate::element_processing::highways::highway_default_lanes;
+use crate::element_processing::highways::{highway_default_lanes, parse_width_tag_m};
 use crate::element_processing::raceways;
 use std::collections::HashMap;
 
@@ -62,7 +62,7 @@ fn fixed_half(highway_type: &str, tags: &HashMap<String, String>) -> Option<i32>
 }
 
 /// Parses a length in metres, tolerating a trailing "m".
-fn metres(raw: &str) -> Option<f64> {
+pub(crate) fn metres(raw: &str) -> Option<f64> {
     let s = raw.trim().trim_end_matches('m').trim();
     s.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
 }
@@ -158,7 +158,7 @@ pub(crate) fn road_halves(
     } else {
         highway_type
     };
-    let width = tags.get("width").and_then(|w| metres(w));
+    let width = parse_width_tag_m(tags);
     let (lanes, kerb) = if let Some(half) = fixed_half(highway_type, tags) {
         let half = width.map_or(half, half_of);
         (half, half)

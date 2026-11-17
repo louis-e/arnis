@@ -822,6 +822,9 @@ fn process_element(
                             flood_fill_cache,
                             holes.as_ref(),
                         );
+                        if signage {
+                            signage::generate_parking_signage(editor, &way, road_mask);
+                        }
                     }
                 }
             }

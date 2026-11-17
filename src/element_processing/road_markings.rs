@@ -7,7 +7,8 @@ use crate::bresenham::bresenham_line;
 use crate::clipping::is_invented_node_id;
 use crate::decals::region::SignRegion;
 use crate::element_processing::highways::{
-    highway_block_range, in_road_stamp, lane_marking_count, stamps_square, surface_palette,
+    highway_block_range, highway_lane_range, in_road_stamp, lane_marking_count, stamp_reach,
+    stamps_square, surface_palette,
 };
 use crate::element_processing::raceways::RacewayPaint;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -158,6 +159,8 @@ struct Road<'a> {
     /// +1 one-way along the way, -1 against it, 0 two-way.
     oneway: i8,
     half: i32,
+    /// The traffic lanes inside any parking rows, which crossings and stop lines span.
+    lanes: i32,
     /// Stamped as a deck's square rather than the disc.
     square: bool,
     marked: bool,
@@ -167,13 +170,10 @@ struct Road<'a> {
 }
 
 impl Road<'_> {
-    /// How far the road's surface reaches across it, along the unit perpendicular `(px, pz)`.
-    fn reach(&self, px: f32, pz: f32) -> i32 {
-        if self.square {
-            (self.half as f32 * (px.abs() + pz.abs())).round() as i32
-        } else {
-            self.half
-        }
+    /// How far a stamp of `half` reaches across the road, along the unit perpendicular
+    /// `(px, pz)`.
+    fn reach(&self, half: i32, px: f32, pz: f32) -> i32 {
+        stamp_reach(half, self.square, px, pz).round() as i32
     }
 }
 
@@ -615,6 +615,7 @@ impl RoadMarkingIndex {
                     ring: is_roundabout(&way.tags),
                     oneway: oneway_sign(highway, &way.tags),
                     half: highway_block_range(highway, &way.tags, scale),
+                    lanes: highway_lane_range(highway, &way.tags, scale),
                     square: stamps_square(way),
                     marked: lane_marking_count(highway, &way.tags) >= 2,
                     palette: surface_palette(highway, &way.tags),
@@ -713,9 +714,11 @@ impl RoadMarkingIndex {
                         .map(|c| (c.x, c.z))
                         .filter(|&(x, z)| to_crossing(x, z) <= road.half + paint)
                         .collect();
+                    // Zebras span the lanes; a crossing over a parking row is paved like a
+                    // kerb built out to the lanes.
                     let clip = CarriagewayClip {
                         centre,
-                        half: road.half,
+                        half: road.lanes,
                         square: road.square,
                         palette: road.palette,
                     };
@@ -743,7 +746,7 @@ impl RoadMarkingIndex {
                         let last = (0..cells.len()).rev().find(|&k| {
                             let (ux, uz) = local_dir(cells, k, (1.0, 0.0));
                             let (px, pz) = (-uz, ux);
-                            let w = road.reach(px, pz);
+                            let w = road.reach(road.lanes, px, pz);
                             (-w..=w).any(|p| {
                                 let x = cells[k].x + (px * p as f32).round() as i32;
                                 let z = cells[k].z + (pz * p as f32).round() as i32;
@@ -1336,7 +1339,7 @@ impl RoadMarkingIndex {
                 let (ux, uz) = local_dir(&arm.cells, s, arm.unit);
                 let (px, pz) = (-uz, ux);
                 let c = &arm.cells[s];
-                let w = roads[c.road].reach(px, pz);
+                let w = roads[c.road].reach(roads[c.road].half, px, pz);
                 let blocked = (-w..=w).any(|p| {
                     let x = (c.x as f32 + px * p as f32).round() as i32;
                     let z = (c.z as f32 + pz * p as f32).round() as i32;
@@ -2187,6 +2190,32 @@ mod tests {
         assert!(!clips.iter().any(|c| c.contains(12, 4)));
         // The last painted cell is (11, 3); the lane line keeps a clear row past it.
         assert!(index.way(1).expect("gap").in_gap(12 + 60));
+    }
+
+    #[test]
+    fn a_zebra_spans_the_lanes_not_the_parking_rows() {
+        let elements = vec![
+            way(
+                1,
+                vec![plain(10, -60, 0), plain(2, 0, 0), plain(11, 60, 0)],
+                &[("highway", "secondary"), ("parking:both", "lane")],
+            ),
+            way(
+                5,
+                vec![plain(20, 0, -20), plain(2, 0, 0), plain(21, 0, 20)],
+                &[
+                    ("highway", "footway"),
+                    ("footway", "crossing"),
+                    ("crossing", "zebra"),
+                ],
+            ),
+        ];
+        let index = build(&elements);
+        let clips = index.crossing_clips(5).expect("clipped");
+        // 7 m of lanes between two rows of parked cars: the road is 11 wide, its lanes 7.
+        assert_eq!(highway_block_range("secondary", elements[0].tags(), 1.0), 5);
+        assert!(clips.iter().any(|c| c.contains(0, 3)));
+        assert!(!clips.iter().any(|c| c.contains(0, 4)));
     }
 
     #[test]

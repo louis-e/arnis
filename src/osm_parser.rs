@@ -2629,8 +2629,9 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     false
 }
 
-/// Relations whose outer members are filled as areas: natural, landuse, leisure, and
-/// the piers and breakwaters drawn as decks and mounds.
+/// Relations whose outer members are filled as areas: natural, landuse, leisure, golf, camp
+/// site and cemetery grounds, pedestrian squares and other highway areas, surface parking
+/// lots, and the piers and breakwaters drawn as decks and mounds.
 fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
     tags.contains_key("natural")
         || tags.contains_key("landuse")

@@ -49,7 +49,7 @@ pub fn maybe_park_car_facing(editor: &mut WorldEditor, cx: i32, cz: i32, yaw: f6
     park(editor, cx, cz, base_y, yaw, coord_hash(cx, cz), i32::MAX);
 }
 
-/// Like `maybe_place_car`, on a deck whose surface is `base_y`, with only cars at most
+/// Like `maybe_park_car_facing`, on a deck whose surface is `base_y`, with only cars at most
 /// `max_height` blocks tall. Decks stacked over one another draw their own cars.
 pub fn maybe_place_car_on_deck(
     editor: &mut WorldEditor,
