@@ -835,6 +835,16 @@ impl CarNetwork {
         // Where a way's lanes break for a level crossing.
         let break_at = |way: u64, node: u64| crossings.and_then(|c| c.break_at(way, node));
 
+        // How far from a node the widest lanes through it reach: parking rows left out, so
+        // cars turn on the lanes' asphalt rather than across the corner past the rows.
+        let mut lanes_reach: FnvHashMap<u64, i32> = FnvHashMap::default();
+        for (way, half, _) in &roads {
+            let lanes = highway_lane_range(&way.tags["highway"], &way.tags, scale).min(*half);
+            for n in way.nodes.iter() {
+                let reach = lanes_reach.entry(n.id).or_default();
+                *reach = (*reach).max(lanes);
+            }
+        }
         let mut pieces: Vec<Piece> = Vec::new();
         for (way, half, oneway) in &roads {
             let lanes = highway_lane_range(&way.tags["highway"], &way.tags, scale).min(*half);
@@ -918,10 +928,10 @@ impl CarNetwork {
                     || end.z - world.min_z() < 3
                     || world.max_z() - end.z < 3;
                 let turns_back = lane.reverse.is_some() && arms(last) <= 1 && !edge;
-                // Lanes stop short of a junction, so turning cars cut across it.
+                // Lanes stop short of a junction's lanes, so turning cars cut across it.
                 let trim = |id: u64| {
                     if junction(id) {
-                        junctions.widest(id) as f64 + 1.0
+                        lanes_reach.get(&id).copied().unwrap_or(1) as f64 + 1.0
                     } else {
                         0.0
                     }
@@ -3760,6 +3770,64 @@ mod tests {
         for seg in &net.segments {
             assert!(seg.next.iter().all(|t| t.crossing == (seg.next.len() == 3)));
         }
+    }
+
+    #[test]
+    fn cars_turn_across_the_lanes_not_the_corners_past_the_parking_rows() {
+        let parked = [
+            ("parking:both", "lane"),
+            ("parking:both:orientation", "perpendicular"),
+        ];
+        let elements = vec![
+            road(
+                1,
+                vec![
+                    node(1, -100, 0, &[]),
+                    node(9, 0, 0, &[]),
+                    node(2, 100, 0, &[]),
+                ],
+                &parked,
+            ),
+            road(
+                2,
+                vec![
+                    node(3, 0, -100, &[]),
+                    node(9, 0, 0, &[]),
+                    node(4, 0, 100, &[]),
+                ],
+                &parked,
+            ),
+        ];
+        let ProcessedElement::Way(way) = &elements[0] else {
+            unreachable!()
+        };
+        let lanes = highway_lane_range("residential", &way.tags, 1.0);
+        assert!(lanes + 2 < highway_block_range("residential", &way.tags, 1.0));
+        let net = CarNetwork::build(&elements, 1.0, false, false, &world(), flat, open);
+        // Each jump from a lane's end to the next lane's entry runs over one road's lanes or
+        // the other's, never over the corner between them, where the parking rows' kerbs meet.
+        let reach = lanes as f64 + 1.5;
+        let mut jumps = 0;
+        for seg in &net.segments {
+            let a = seg.points.last().unwrap();
+            for turn in &seg.next {
+                let b = &net.segments[turn.lane].points[turn.entry];
+                for k in 0..=20 {
+                    let t = k as f64 / 20.0;
+                    let (x, z) = (a.x + (b.x - a.x) * t - 0.5, a.z + (b.z - a.z) * t - 0.5);
+                    assert!(
+                        x.abs() <= reach || z.abs() <= reach,
+                        "({:.1}, {:.1}) -> ({:.1}, {:.1}) passes ({x:.1}, {z:.1})",
+                        a.x,
+                        a.z,
+                        b.x,
+                        b.z
+                    );
+                }
+                jumps += 1;
+            }
+        }
+        assert!(jumps >= 12, "{jumps}");
     }
 
     #[test]
