@@ -20,13 +20,14 @@ use colored::Colorize;
 ///    stands.
 ///
 /// `overture_wanted` says whether the run asked Overture for buildings, for the
-/// line saying it had none here.
+/// line saying it had none here; `scale` is the world's, for the roads' width.
 pub fn merge(
     parsed_elements: &mut Vec<ProcessedElement>,
     overture: OvertureData,
     ground: &Ground,
     xzbbox: &XZBBox,
     overture_wanted: bool,
+    scale: f64,
 ) {
     let OvertureData {
         elements: overture_elements,
@@ -67,6 +68,7 @@ pub fn merge(
     let measured = crate::survey::elements::merge(
         crate::survey::elements::candidates(ground, xzbbox),
         parsed_elements,
+        scale,
     );
     if !measured.is_empty() {
         println!(
@@ -151,6 +153,7 @@ mod tests {
             &ground(),
             &xzbbox,
             false,
+            1.0,
         );
         let tags = elements[0].tags();
         assert_eq!(tags.get("building:levels").map(String::as_str), Some("2"));

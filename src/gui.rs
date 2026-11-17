@@ -3650,6 +3650,7 @@ fn gui_start_generation(
                         &ground,
                         &xzbbox,
                         args.overture && !args.skip_objects(),
+                        args.scale,
                     );
 
                     osm_parser::sort_by_priority(&mut parsed_elements);

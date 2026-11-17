@@ -4,12 +4,15 @@
 //! pool coping and every edition's blocks, and they meet OSM the way Overture
 //! buildings do: a survey shed whose outline reaches any mapped or Overture
 //! building is dropped, a survey pool that reaches a mapped pool or any building
-//! is dropped. OSM always wins.
+//! is dropped, and neither stands on a mapped road, square or car park. OSM always
+//! wins.
 
 use super::grid::{label, shapes};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::element_processing::highways::highway_block_range;
 use crate::ground::Ground;
-use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
+use fnv::FnvHashMap;
 use std::collections::HashMap;
 
 /// Id range of the survey's elements, clear of OSM's and of Overture's hashes.
@@ -102,12 +105,140 @@ pub fn candidates(ground: &Ground, xzbbox: &XZBBox) -> Vec<ProcessedElement> {
     out
 }
 
+/// Side of the cells the mapped roads are bucketed in.
+const PAVED_CELL: i32 = 32;
+
+/// Where the survey's sheds and pools cannot stand: the mapped roads and paths as wide as
+/// they are drawn, and the squares and car parks mapped as areas. On these the laser sees
+/// parked vans, market stalls and awnings, and a square's paving can read as a pool.
+struct Paved {
+    /// Centreline segments of the roads and paths, each with the reach of its surface.
+    lines: Vec<((f64, f64), (f64, f64), f64)>,
+    /// Outlines of the squares and car parks.
+    areas: Vec<Vec<(f64, f64)>>,
+    /// Indices into `lines` by `PAVED_CELL` cell.
+    buckets: FnvHashMap<(i32, i32), Vec<usize>>,
+}
+
+impl Paved {
+    fn of(existing: &[ProcessedElement], scale: f64) -> Self {
+        let xz = |n: &ProcessedNode| (f64::from(n.x) + 0.5, f64::from(n.z) + 0.5);
+        let closed = |w: &ProcessedWay| {
+            w.nodes.len() >= 4
+                && w.nodes.first().map(|n| (n.x, n.z)) == w.nodes.last().map(|n| (n.x, n.z))
+        };
+        // Drawn on the ground, not under it or over it.
+        let on_ground = |t: &HashMap<String, String>| {
+            !t.get("tunnel").is_some_and(|v| v != "no")
+                && !t.get("bridge").is_some_and(|v| v != "no")
+                && !t.get("indoor").is_some_and(|v| v != "no")
+                && t.get("layer")
+                    .and_then(|l| l.parse::<i32>().ok())
+                    .is_none_or(|l| l == 0)
+        };
+        let is_area = |t: &HashMap<String, String>| {
+            (t.contains_key("highway") && t.get("area").map(String::as_str) == Some("yes"))
+                || (t.get("amenity").map(String::as_str) == Some("parking")
+                    && !t.contains_key("building"))
+        };
+        let mut paved = Paved {
+            lines: Vec::new(),
+            areas: Vec::new(),
+            buckets: FnvHashMap::default(),
+        };
+        for el in existing {
+            let t = el.tags();
+            if !on_ground(t) {
+                continue;
+            }
+            match el {
+                ProcessedElement::Way(w) if is_area(t) && closed(w) => {
+                    paved.areas.push(w.nodes.iter().map(xz).collect());
+                }
+                ProcessedElement::Way(w) => {
+                    let Some(kind) = t.get("highway") else {
+                        continue;
+                    };
+                    if matches!(
+                        kind.as_str(),
+                        "proposed" | "abandoned" | "razed" | "disused" | "platform"
+                    ) {
+                        continue;
+                    }
+                    let reach = f64::from(highway_block_range(kind, t, scale)) + 0.5;
+                    for pair in w.nodes.windows(2) {
+                        paved.lines.push((xz(&pair[0]), xz(&pair[1]), reach));
+                    }
+                }
+                ProcessedElement::Relation(r) if is_area(t) => {
+                    for m in r
+                        .members
+                        .iter()
+                        .filter(|m| m.role == ProcessedMemberRole::Outer && closed(&m.way))
+                    {
+                        paved.areas.push(m.way.nodes.iter().map(xz).collect());
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (i, &(a, b, reach)) in paved.lines.iter().enumerate() {
+            let cell = |v: f64| (v / f64::from(PAVED_CELL)).floor() as i32;
+            let (x0, x1) = (cell(a.0.min(b.0) - reach), cell(a.0.max(b.0) + reach));
+            let (z0, z1) = (cell(a.1.min(b.1) - reach), cell(a.1.max(b.1) + reach));
+            for cx in x0..=x1 {
+                for cz in z0..=z1 {
+                    paved.buckets.entry((cx, cz)).or_default().push(i);
+                }
+            }
+        }
+        paved
+    }
+
+    /// Whether the cell centre (x, z) lies on a road, a square or a car park.
+    fn covers(&self, x: f64, z: f64) -> bool {
+        let cell = (
+            (x / f64::from(PAVED_CELL)).floor() as i32,
+            (z / f64::from(PAVED_CELL)).floor() as i32,
+        );
+        let on_line = self.buckets.get(&cell).into_iter().flatten().any(|&i| {
+            let ((ax, az), (bx, bz), reach) = self.lines[i];
+            let (dx, dz) = (bx - ax, bz - az);
+            let len2 = dx * dx + dz * dz;
+            let t = if len2 > 0.0 {
+                (((x - ax) * dx + (z - az) * dz) / len2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (x - ax - t * dx).hypot(z - az - t * dz) <= reach
+        });
+        on_line || self.areas.iter().any(|ring| ring_contains(ring, x, z))
+    }
+}
+
+/// Even-odd point in a closed ring.
+fn ring_contains(ring: &[(f64, f64)], x: f64, z: f64) -> bool {
+    let mut inside = false;
+    let mut j = ring.len() - 1;
+    for i in 0..ring.len() {
+        let ((xi, zi), (xj, zj)) = (ring[i], ring[j]);
+        if (zi > z) != (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
 /// Keep the candidates that meet nothing mapped: sheds clear of every building,
-/// pools clear of every building and every mapped pool.
+/// pools clear of every building and every mapped pool, and both off the mapped roads,
+/// squares and car parks, at the roads' drawn width for the world's `scale`.
 pub fn merge(
     candidates: Vec<ProcessedElement>,
     existing: &[ProcessedElement],
+    scale: f64,
 ) -> Vec<ProcessedElement> {
+    let paved = Paved::of(existing, scale);
     let bbox_of = |w: &ProcessedWay| {
         let xs = w.nodes.iter().map(|n| n.x);
         let zs = w.nodes.iter().map(|n| n.z);
@@ -150,11 +281,23 @@ pub fn merge(
             };
             let is_pool = w.tags.contains_key("leisure");
             let (a, b, c, d) = bbox_of(w);
-            !blockers.iter().any(|&(ba, bb, bc, bd, building)| {
-                let overlaps = a <= bc && c >= ba && b <= bd && d >= bb;
-                // A shed only yields to buildings; a pool to buildings and pools.
-                overlaps && (building || is_pool)
-            })
+            let n = w.nodes.len().max(1) as f64;
+            let centre = (
+                w.nodes.iter().map(|p| f64::from(p.x)).sum::<f64>() / n + 0.5,
+                w.nodes.iter().map(|p| f64::from(p.z)).sum::<f64>() / n + 0.5,
+            );
+            let on_paving = w
+                .nodes
+                .iter()
+                .map(|p| (f64::from(p.x) + 0.5, f64::from(p.z) + 0.5))
+                .chain(std::iter::once(centre))
+                .any(|(x, z)| paved.covers(x, z));
+            !on_paving
+                && !blockers.iter().any(|&(ba, bb, bc, bd, building)| {
+                    let overlaps = a <= bc && c >= ba && b <= bd && d >= bb;
+                    // A shed only yields to buildings; a pool to buildings and pools.
+                    overlaps && (building || is_pool)
+                })
         })
         .collect()
 }
@@ -256,7 +399,7 @@ mod tests {
             ), // free
             way(ID_BASE + 1024, &[("building", "shed")], 32, 31, 34, 33), // on a mapped pool
         ];
-        let kept: Vec<u64> = merge(cands, &existing)
+        let kept: Vec<u64> = merge(cands, &existing, 1.0)
             .into_iter()
             .map(|e| match e {
                 ProcessedElement::Way(w) => w.id,
@@ -264,5 +407,68 @@ mod tests {
             })
             .collect();
         assert_eq!(kept, vec![ID_BASE + 256, ID_BASE + 768, ID_BASE + 1024]);
+    }
+
+    // The laser saw a van parked in the street and a market's awnings on a square; a
+    // shed beside the street is kept.
+    #[test]
+    fn nothing_stands_on_mapped_roads_or_squares() {
+        let road = ProcessedElement::Way(ProcessedWay {
+            id: 1,
+            nodes: [(1, 0), (2, 100)]
+                .iter()
+                .map(|&(id, x)| ProcessedNode {
+                    id,
+                    tags: HashMap::new(),
+                    x,
+                    z: 20,
+                })
+                .collect(),
+            tags: [("highway", "residential")]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        });
+        let existing = vec![
+            road,
+            way(
+                3,
+                &[("highway", "pedestrian"), ("area", "yes")],
+                0,
+                40,
+                30,
+                70,
+            ),
+            way(4, &[("amenity", "parking")], 60, 40, 90, 70),
+        ];
+        let cands = vec![
+            way(ID_BASE, &[("building", "shed")], 10, 19, 13, 21), // on the street
+            way(ID_BASE + 256, &[("building", "shed")], 30, 24, 33, 27), // beside it
+            way(
+                ID_BASE + 512,
+                &[("leisure", "swimming_pool")],
+                10,
+                50,
+                14,
+                53,
+            ), // on the square
+            way(ID_BASE + 768, &[("building", "garage")], 70, 50, 74, 55), // in the car park
+            way(
+                ID_BASE + 1024,
+                &[("leisure", "swimming_pool")],
+                40,
+                80,
+                45,
+                84,
+            ), // in a garden
+        ];
+        let kept: Vec<u64> = merge(cands, &existing, 1.0)
+            .into_iter()
+            .map(|e| match e {
+                ProcessedElement::Way(w) => w.id,
+                _ => 0,
+            })
+            .collect();
+        assert_eq!(kept, vec![ID_BASE + 256, ID_BASE + 1024]);
     }
 }

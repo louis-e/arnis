@@ -1060,6 +1060,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         &ground,
         &xzbbox,
         args.overture && !skip_objects,
+        args.scale,
     );
 
     osm_parser::sort_by_priority(&mut parsed_elements);
