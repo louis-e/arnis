@@ -226,6 +226,33 @@ pub(crate) struct WorldMetadata {
     pub scale: f64,
 }
 
+/// What the coarse ground marks record, for the ground pass to read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroundMark {
+    /// Mown lawns of parks and greens.
+    Lawn,
+    /// Woods, scrub and meadows mapped on their own, never mown even inside a park.
+    Wild,
+    /// Footprints of houses and other low dwellings, whose grounds are gardens.
+    Dwelling,
+    /// Footprints of buildings over four storeys, near which open ground stays paved.
+    Tall,
+}
+
+impl GroundMark {
+    const COUNT: usize = 4;
+}
+
+/// What the gardens read besides the marks, built once from the element list before
+/// anything is placed and shared with the tile editors.
+pub struct GardenLand {
+    /// Commercial and retail land, whose open ground stays paved.
+    pub commercial: crate::floodfill_cache::CoarseMask,
+    /// Streets and car parks, which keep a few metres of paving beside them; footways,
+    /// paths and driveways keep only a step's width (the sealed-surface mask).
+    pub streets: crate::floodfill_cache::CoordinateBitmap,
+}
+
 /// The main world editor struct for placing blocks and saving worlds.
 ///
 /// The lifetime `'a` is tied to the `XZBBox` reference, which defines
@@ -272,6 +299,10 @@ pub struct WorldEditor<'a> {
     support_columns: FnvHashMap<(i32, i32), Block>,
     /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
     hedge_columns: FnvHashSet<(i32, i32)>,
+    /// Coarse marks the ground pass reads, one mask per `GroundMark`.
+    ground_marks: [Option<crate::floodfill_cache::CoarseMask>; GroundMark::COUNT],
+    /// Commercial land and streets for the gardens, shared via Arc with the tile editors.
+    garden_land: Option<Arc<GardenLand>>,
     /// Street lamp columns, checked for water once the fill is done.
     lamp_columns: Vec<(i32, i32)>,
     /// Benches and bins as their cells, checked for water once the fill is done.
@@ -383,6 +414,8 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            ground_marks: Default::default(),
+            garden_land: None,
             lamp_columns: Vec::new(),
             furniture: Vec::new(),
             rail_heights: None,
@@ -459,6 +492,8 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            ground_marks: Default::default(),
+            garden_land: None,
             lamp_columns: Vec::new(),
             furniture: Vec::new(),
             rail_heights: None,
@@ -535,6 +570,8 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            ground_marks: Default::default(),
+            garden_land: None,
             lamp_columns: Vec::new(),
             furniture: Vec::new(),
             rail_heights: None,
@@ -1713,6 +1750,49 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_hedge(&mut self, x: i32, z: i32) {
         self.hedge_columns.insert((x, z));
+    }
+
+    /// Mark column (x, z) as `kind`, to the nearest few blocks.
+    pub fn mark_ground(&mut self, kind: GroundMark, x: i32, z: i32) {
+        let bbox = self.xzbbox;
+        self.ground_marks[kind as usize]
+            .get_or_insert_with(|| crate::floodfill_cache::CoarseMask::new(bbox))
+            .set(x, z);
+    }
+
+    /// The marks of `kind` made so far, if any.
+    #[inline]
+    pub fn ground_marks(&self, kind: GroundMark) -> Option<&crate::floodfill_cache::CoarseMask> {
+        self.ground_marks[kind as usize].as_ref()
+    }
+
+    /// Whether (x, z) lies on a mown lawn: a park's, outside any wild area mapped in it.
+    #[inline]
+    pub fn is_lawn(&self, x: i32, z: i32) -> bool {
+        let marked = |kind| self.ground_marks(kind).is_some_and(|m| m.contains(x, z));
+        marked(GroundMark::Lawn) && !marked(GroundMark::Wild)
+    }
+
+    /// Shares the commercial land and streets the gardens read.
+    pub fn set_garden_land(&mut self, land: Arc<GardenLand>) {
+        self.garden_land = Some(land);
+    }
+
+    /// The commercial land and streets the gardens read, if set.
+    #[inline]
+    pub fn garden_land(&self) -> Option<&GardenLand> {
+        self.garden_land.as_deref()
+    }
+
+    /// Drops this editor's share of the garden land once the ground is laid.
+    pub fn release_garden_land(&mut self) {
+        self.garden_land = None;
+    }
+
+    /// The land cover class under (x, z), when the run has land cover.
+    pub fn land_cover_class(&self, x: i32, z: i32) -> Option<u8> {
+        let ground = self.ground.as_ref().filter(|g| g.has_land_cover())?;
+        Some(ground.cover_class(self.ground_point(x, z)))
     }
 
     /// Shares the record of where rails were laid (across the main and tile editors).

@@ -342,6 +342,89 @@ pub type RoadMaskBitmap = CoordinateBitmap;
 /// once from the element list instead, before anything is placed.
 pub type SealedSurfaceBitmap = CoordinateBitmap;
 
+/// One bit per `CELL` x `CELL` columns over a box, for marks that need not be exact.
+pub struct CoarseMask {
+    bits: Vec<u64>,
+    min_x: i32,
+    min_z: i32,
+    width: i32,
+    height: i32,
+}
+
+// Cells sit on the world grid, not the box's corner, so overlapping tile editors agree.
+impl CoarseMask {
+    pub const CELL: i32 = 4;
+
+    pub fn new(xzbbox: &XZBBox) -> Self {
+        let (min_x, min_z) = (
+            xzbbox.min_x().div_euclid(Self::CELL),
+            xzbbox.min_z().div_euclid(Self::CELL),
+        );
+        let (width, height) = (
+            xzbbox.max_x().div_euclid(Self::CELL) - min_x + 1,
+            xzbbox.max_z().div_euclid(Self::CELL) - min_z + 1,
+        );
+        let n = (width as usize) * (height as usize);
+        Self {
+            bits: vec![0; n.div_ceil(64)],
+            min_x,
+            min_z,
+            width,
+            height,
+        }
+    }
+
+    fn cell(&self, cx: i32, cz: i32) -> Option<usize> {
+        ((0..self.width).contains(&cx) && (0..self.height).contains(&cz))
+            .then(|| cz as usize * self.width as usize + cx as usize)
+    }
+
+    fn cell_of(&self, x: i32, z: i32) -> (i32, i32) {
+        (
+            x.div_euclid(Self::CELL) - self.min_x,
+            z.div_euclid(Self::CELL) - self.min_z,
+        )
+    }
+
+    pub fn set(&mut self, x: i32, z: i32) {
+        let (cx, cz) = self.cell_of(x, z);
+        if let Some(i) = self.cell(cx, cz) {
+            self.bits[i / 64] |= 1 << (i % 64);
+        }
+    }
+
+    fn cell_set(&self, cx: i32, cz: i32) -> bool {
+        self.cell(cx, cz)
+            .is_some_and(|i| self.bits[i / 64] & (1 << (i % 64)) != 0)
+    }
+
+    pub fn contains(&self, x: i32, z: i32) -> bool {
+        let (cx, cz) = self.cell_of(x, z);
+        self.cell_set(cx, cz)
+    }
+
+    /// The world-grid cell holding block coordinate `v`.
+    pub fn cell_index(v: i32) -> i32 {
+        v.div_euclid(Self::CELL)
+    }
+
+    /// Whether a marked cell lies in the inclusive range of world-grid cells.
+    pub fn any_in(&self, cx: (i32, i32), cz: (i32, i32)) -> bool {
+        let (ox, oz) = (self.min_x, self.min_z);
+        (cz.0..=cz.1).any(|z| (cx.0..=cx.1).any(|x| self.cell_set(x - ox, z - oz)))
+    }
+
+    /// Marks every cell a block of the inclusive x range in row `z` falls in.
+    pub fn set_span(&mut self, x0: i32, x1: i32, z: i32) {
+        let cz = z.div_euclid(Self::CELL) - self.min_z;
+        for cx in x0.div_euclid(Self::CELL)..=x1.div_euclid(Self::CELL) {
+            if let Some(i) = self.cell(cx - self.min_x, cz) {
+                self.bits[i / 64] |= 1 << (i % 64);
+            }
+        }
+    }
+}
+
 /// Leisure areas rendered as a managed or paved surface. Trees, flowers and
 /// grass tufts on these read as a bug, so they join the sealed-surface mask.
 pub(crate) const SEALED_LEISURE: &[&str] = &[
@@ -1244,6 +1327,31 @@ mod tests {
     use super::*;
     use crate::osm_parser::ProcessedNode;
     use std::collections::HashMap;
+
+    #[test]
+    fn coarse_mask_marks_cells_and_finds_them_nearby() {
+        let bbox = XZBBox::rect_from_min_max(-10, -10, 90, 70).unwrap();
+        let mut mask = CoarseMask::new(&bbox);
+        assert!(!mask.contains(0, 0));
+        mask.set(1, 2);
+        // Cells sit on the world grid: the whole cell is marked, its neighbours are not.
+        assert!(mask.contains(0, 0) && mask.contains(3, 3));
+        assert!(!mask.contains(4, 2) && !mask.contains(-1, 2));
+        // Windows are in world-grid cells: (15, 2) is in cell (3, 0), (16, 2) in (4, 0).
+        assert!(mask.any_in((0, 6), (-3, 3)) && !mask.any_in((1, 7), (-3, 3)));
+        assert_eq!(CoarseMask::cell_index(15), 3);
+        assert_eq!(CoarseMask::cell_index(-1), -1);
+        // A box with another corner sees the same cells.
+        let shifted = XZBBox::rect_from_min_max(-7, -3, 40, 40).unwrap();
+        let mut other = CoarseMask::new(&shifted);
+        other.set(1, 2);
+        assert!(other.contains(0, 0) && other.contains(3, 3) && !other.contains(-1, 2));
+        // Outside the box nothing is marked or found.
+        mask.set(500, 500);
+        assert!(!mask.contains(500, 500));
+        mask.set(90, 70);
+        assert!(mask.contains(90, 70));
+    }
 
     fn way(points: &[(i32, i32)]) -> ProcessedWay {
         ProcessedWay {

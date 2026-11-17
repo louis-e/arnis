@@ -30,7 +30,7 @@ pub enum WaterDetail {
     /// The water every scale gets today
     #[default]
     Default,
-    /// Rounded bed depths; on small maps also bowls, narrower streams and water over short unbridged crossings
+    /// Rounded bed depths; on small maps also bowls, narrower rivers and wide streams, and water over short unbridged crossings
     Scaled,
 }
 
@@ -44,10 +44,10 @@ impl WaterDetail {
         self == Self::Scaled && scale < BOWL_BELOW_SCALE
     }
 
-    /// Widest line waterway to draw, or `None` for the tagged width. `create_water_channel`
-    /// paints `width / 2 + 1` either side, so 3 draws 5 wide; streams and ditches draw 3 wide.
+    /// Widest line waterway to draw, or `None` for the tagged width. Streams and ditches
+    /// draw 3 wide at most (`capped_waterway_width`).
     pub fn channel_width_cap(self, scale: f64) -> Option<i32> {
-        (self == Self::Scaled && scale < 0.7).then_some(3)
+        (self == Self::Scaled && scale < 0.7).then_some(5)
     }
 
     /// True when a road with these tags may be left off a short water crossing. The road
@@ -196,7 +196,7 @@ mod tests {
     fn scaled_gates_follow_scale() {
         let s = WaterDetail::Scaled;
         assert!(s.uses_bowl(0.25) && !s.uses_bowl(0.5));
-        assert_eq!(s.channel_width_cap(0.5), Some(3));
+        assert_eq!(s.channel_width_cap(0.5), Some(5));
         assert_eq!(s.channel_width_cap(1.0), None);
         let tags = HashMap::new();
         assert!(s.drowns_crossing(0.5, &tags) && !s.drowns_crossing(0.6, &tags));
