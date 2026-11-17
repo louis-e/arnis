@@ -113,21 +113,23 @@ fn convex_hull(mut points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 
 /// Rows along the long side of the smallest rectangle around the outline, from the corner
 /// where its first row begins. Points added by clipping the lot to the area are left out
-/// where enough mapped ones remain, so the grid does not turn with the area's edge.
+/// where the mapped ones still span an area, so the grid does not turn with the area's edge.
 fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
     // Cell centres.
     let xz = |n: &ProcessedNode| (f64::from(n.x) + 0.5, f64::from(n.z) + 0.5);
-    let mapped: Vec<(f64, f64)> = nodes
-        .iter()
-        .filter(|n| !is_invented_node_id(n.id))
-        .map(xz)
-        .collect();
-    let points = if mapped.len() >= 3 {
+    let mapped = convex_hull(
+        nodes
+            .iter()
+            .filter(|n| !is_invented_node_id(n.id))
+            .map(xz)
+            .collect(),
+    );
+    // A ring cut down to a corner and its closing node, or mapped in a line, spans nothing.
+    let hull = if mapped.len() >= 3 {
         mapped
     } else {
-        nodes.iter().map(xz).collect()
+        convex_hull(nodes.iter().map(xz).collect())
     };
-    let hull = convex_hull(points);
     if hull.len() < 3 {
         return None;
     }
@@ -348,10 +350,6 @@ pub fn generate_parking_lot(
         .copied()
         .filter(|&(x, z)| !editor.nested_area_owns(x, z) && !in_hole(holes, x, z))
         .collect();
-    let Some(grid) = stall_grid(way) else {
-        return;
-    };
-
     for &(x, z) in &lot {
         editor.set_block(
             semirandom_surface(x, z, block_types),
@@ -361,6 +359,13 @@ pub fn generate_parking_lot(
             Some(LOT_SURFACES),
             None,
         );
+    }
+    // A lot too thin to lay out stays bare asphalt.
+    let Some(grid) = stall_grid(way) else {
+        return;
+    };
+
+    for &(x, z) in &lot {
         // Stall sides on the left of each stall, a line across its front, and the stall
         // ends at the aisle; the aisles keep the bare asphalt.
         let (a, b) = grid.local(x, z);
@@ -483,6 +488,23 @@ mod tests {
             let (a, b) = grid.local(n.x, n.z);
             assert!(a > -1.0 && b > -1.0, "{a} {b}");
         }
+    }
+
+    #[test]
+    fn a_lot_cut_down_to_a_corner_still_gets_a_grid() {
+        // The area's edge cuts the lot: two mapped corners (the first doubled as the closing
+        // node) and the points the clip added.
+        let mut nodes = vec![
+            node(1, 0, 0),
+            node(2, 40, 0),
+            node((1 << 62) + 1, 40, 20),
+            node((1 << 62) + 2, 0, 20),
+        ];
+        nodes.push(nodes[0].clone());
+        let grid = rectangle_grid(&nodes).expect("a grid from the clipped outline");
+        assert!(close((grid.u.0.abs(), grid.u.1.abs()), (1.0, 0.0)));
+        // Mapped in a line, it spans no area at all.
+        assert!(rectangle_grid(&[node(1, 0, 0), node(2, 9, 0), node(1, 0, 0)]).is_none());
     }
 
     #[test]
