@@ -3643,21 +3643,14 @@ fn gui_start_generation(
                         &crate::projection::ProjectionSpec::from_args(&args),
                     );
 
-                    let overture::OvertureData {
-                        elements: overture_elements,
-                        hints: overture_hints,
-                        ..
-                    } = overture_data;
-
-                    // Fill height/levels on OSM buildings that have neither
-                    overture_hints.apply(&mut parsed_elements);
-
-                    // Merge supplementary Overture buildings against parsed OSM
-                    if !overture_elements.is_empty() {
-                        let unique_overture =
-                            overture::deduplicate_against_osm(overture_elements, &parsed_elements);
-                        parsed_elements.extend(unique_overture);
-                    }
+                    // The same merge as run_cli: measured heights, Overture, garden buildings.
+                    crate::building_sources::merge(
+                        &mut parsed_elements,
+                        overture_data,
+                        &ground,
+                        &xzbbox,
+                        args.overture && !args.skip_objects(),
+                    );
 
                     osm_parser::sort_by_priority(&mut parsed_elements);
 

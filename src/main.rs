@@ -10,6 +10,7 @@ mod block_definitions;
 mod block_palette;
 mod bresenham;
 mod building_facades;
+mod building_sources;
 mod canopy;
 mod caves;
 mod celestial;
@@ -1052,59 +1053,14 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         );
     bench.mark("parse_osm");
 
-    // Merge the Overture buildings now that the OSM elements are parsed.
-    let overture::OvertureData {
-        elements: overture_elements,
-        hints: overture_hints,
-        ..
-    } = overture_data;
-
-    // Measured heights first: where the laser saw a building, its roof beats
-    // Overture's estimate. Both only fill buildings OSM gives no height.
-    let measured_heights = survey::heights::apply(&mut parsed_elements, &ground, &xzbbox);
-    if measured_heights > 0 {
-        println!(
-            "  Measured heights for {} buildings from laser scans",
-            measured_heights.to_string().bright_white().bold()
-        );
-    }
-
-    // Fill height/levels on OSM buildings that have neither, before the
-    // footprints are merged (Overture's own ways carry their tags already).
-    let enriched = overture_hints.apply(&mut parsed_elements);
-    if enriched > 0 {
-        println!(
-            "  Filled heights on {} OSM buildings from Overture Maps",
-            enriched.to_string().bright_white().bold()
-        );
-    }
-
-    if !overture_elements.is_empty() {
-        let before_count = parsed_elements.len();
-        let unique_overture =
-            overture::deduplicate_against_osm(overture_elements, &parsed_elements);
-        parsed_elements.extend(unique_overture);
-        let added = parsed_elements.len() - before_count;
-        println!(
-            "  Added {} buildings from Overture Maps",
-            added.to_string().bright_white().bold()
-        );
-    } else if args.overture && !skip_objects && enriched == 0 {
-        println!("  No additional buildings from Overture Maps for this area");
-    }
-
-    // Sheds, garages and pools garden detail measured, where nothing mapped stands.
-    let measured = survey::elements::merge(
-        survey::elements::candidates(&ground, &xzbbox),
-        &parsed_elements,
+    // OSM's buildings with what the laser and Overture add, the same as the window.
+    building_sources::merge(
+        &mut parsed_elements,
+        overture_data,
+        &ground,
+        &xzbbox,
+        args.overture && !skip_objects,
     );
-    if !measured.is_empty() {
-        println!(
-            "  Added {} sheds, garages and pools from garden detail",
-            measured.len().to_string().bright_white().bold()
-        );
-        parsed_elements.extend(measured);
-    }
 
     osm_parser::sort_by_priority(&mut parsed_elements);
     bench.mark("sort_priority");

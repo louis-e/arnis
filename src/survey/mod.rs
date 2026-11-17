@@ -73,6 +73,23 @@ pub struct SurveyData {
 }
 
 impl SurveyData {
+    /// A survey from its raw cells, for tests elsewhere.
+    #[cfg(test)]
+    pub fn from_cells(
+        cells: Vec<[u8; 5]>,
+        width: usize,
+        height: usize,
+        features: Features,
+    ) -> Self {
+        assert_eq!(cells.len(), width * height);
+        SurveyData {
+            cells,
+            width,
+            height,
+            features,
+        }
+    }
+
     pub fn remap_rows_to_mercator(&mut self, lat_top: f64, lat_bottom: f64) {
         let rows = self.height;
         crate::grid_ops::remap_flat_rows_nearest(&mut self.cells, self.width, |gz| {
