@@ -401,6 +401,7 @@ fn process_element(
                     tunnel_footprint,
                     tunnel_cells,
                     road_markings,
+                    building_footprints,
                 );
                 if signage {
                     signage::generate_highway_way_signage(editor, way, building_footprints);
@@ -643,6 +644,7 @@ fn process_element(
                     tunnel_footprint,
                     tunnel_cells,
                     road_markings,
+                    building_footprints,
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
@@ -1412,6 +1414,7 @@ pub fn generate_world_with_options(
         &clip_bbox,
         args.scale,
         args.water.water_detail,
+        &building_footprints,
     );
     let road_mask = Arc::new(road_mask);
     let carriageway = Arc::new(if carriageway.is_empty() {

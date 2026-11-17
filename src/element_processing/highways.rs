@@ -562,6 +562,7 @@ pub fn generate_highways(
     tunnel_footprint: &CoordinateBitmap,
     tunnel_cells: &mut Vec<HighwayTunnelCell>,
     markings: &RoadMarkingIndex,
+    building_footprints: &CoordinateBitmap,
 ) {
     if let ProcessedElement::Way(way) = element {
         if let Some(cars) = editor.car_network() {
@@ -593,6 +594,7 @@ pub fn generate_highways(
         tunnel_portals,
         tunnel_footprint,
         markings,
+        building_footprints,
     );
 }
 
@@ -1658,6 +1660,7 @@ fn generate_highways_internal(
     tunnel_portals: &TunnelPortalMap,
     tunnel_footprint: &CoordinateBitmap,
     markings: &RoadMarkingIndex,
+    building_footprints: &CoordinateBitmap,
 ) {
     // Shared `indoor=yes` / layer parsing for the whole function. Indoor
     // highways must never produce elevated geometry (they sit inside
@@ -1917,6 +1920,8 @@ fn generate_highways_internal(
             let lane_range = highway_lane_range(highway_type, &way.tags, scale_factor);
             // Decks keep the square their railings are laid out from; the masks read the same.
             let square_stamp = stamps_square(way);
+            // How far the road paves into a building standing against it.
+            let kept_by_walls = wall_core(way, highway_type, scale_factor);
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
 
@@ -2255,6 +2260,11 @@ fn generate_highways_internal(
                                 }
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
+                                if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
+                                    && building_footprints.contains(set_x, set_z)
+                                {
+                                    continue;
+                                }
                                 if drown_over_water
                                     && !road_mask.contains(set_x, set_z)
                                     && editor.is_lc_water(set_x, set_z)
@@ -3644,6 +3654,25 @@ pub(crate) fn stamps_square(way: &ProcessedWay) -> bool {
     is_bridge_way(way) && lays_deck(way)
 }
 
+/// The half-width a road keeps where a building stands against it, when narrower than the
+/// road: its lanes inside the parking rows, a pedestrian street a path's width. What the road
+/// gains past that, as in a narrow old-town street whose house fronts are mapped wider than
+/// they stand, stops at the walls instead of paving the ground floors. None for a road paved
+/// whole: a bridge deck, or a passage through a building.
+pub(crate) fn wall_core(way: &ProcessedWay, highway_type: &str, scale: f64) -> Option<i32> {
+    if stamps_square(way) || way.tags.get("tunnel").map(String::as_str) == Some("building_passage")
+    {
+        return None;
+    }
+    let halves = road_width::road_halves(highway_type, &way.tags, scale);
+    let core = if highway_type == "pedestrian" {
+        halves.lanes.min(1)
+    } else {
+        halves.lanes
+    };
+    (core < halves.kerb).then_some(core)
+}
+
 /// How far a road's stamp reaches from a centreline cell along the unit direction
 /// `(px, pz)`: the furthest cell centre it covers that way.
 pub(crate) fn stamp_reach(half: i32, square: bool, px: f32, pz: f32) -> f32 {
@@ -3670,7 +3699,15 @@ pub fn collect_road_surface_coords(
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
 ) -> CoordinateBitmap {
-    collect_road_and_carriageway_coords(elements, editor, xzbbox, scale, water_detail).0
+    collect_road_and_carriageway_coords(
+        elements,
+        editor,
+        xzbbox,
+        scale,
+        water_detail,
+        &CoordinateBitmap::new_empty(),
+    )
+    .0
 }
 
 /// True for highway types that carry vehicles rather than people on foot, bike or horse.
@@ -3757,6 +3794,7 @@ pub fn collect_road_and_carriageway_coords(
     xzbbox: &XZBBox,
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
+    building_footprints: &CoordinateBitmap,
 ) -> (CoordinateBitmap, CoordinateBitmap) {
     let mut roads = CoordinateBitmap::new(xzbbox);
     let mut carriageways = CoordinateBitmap::new(xzbbox);
@@ -3766,6 +3804,7 @@ pub fn collect_road_and_carriageway_coords(
         editor,
         scale,
         water_detail,
+        building_footprints,
         |carriageway, x, z| {
             roads.set(x, z);
             if carriageway {
@@ -3782,6 +3821,7 @@ fn stamp_highway_surfaces(
     editor: Option<&WorldEditor>,
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
+    building_footprints: &CoordinateBitmap,
     mut stamp: impl FnMut(bool, i32, i32),
 ) {
     // A way that meets a bridge is its ramp or its approach, and keeps its surface.
@@ -3843,6 +3883,7 @@ fn stamp_highway_surfaces(
         });
 
         let square = stamps_square(way);
+        let kept_by_walls = wall_core(way, highway_type, scale);
         for (i, &(bx, bz)) in points.iter().enumerate() {
             let skip_water = drowned_points.as_ref().is_some_and(|d| d[i]);
             for dx in -block_range..=block_range {
@@ -3851,6 +3892,11 @@ fn stamp_highway_surfaces(
                         continue;
                     }
                     if skip_water && drowned.is_some_and(|e| fills(e, bx + dx, bz + dz)) {
+                        continue;
+                    }
+                    if kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core))
+                        && building_footprints.contains(bx + dx, bz + dz)
+                    {
                         continue;
                     }
                     let in_lanes = if square {
@@ -4052,6 +4098,37 @@ mod tests {
         assert!((stamp_reach(3, true, d, -d) - 3.0 * 2.0 * d).abs() < 1e-5);
         assert!((stamp_reach(3, false, d, -d) - 4.0 * d).abs() < 1e-5);
         assert!((stamp_reach(3, false, 1.0, 0.0) - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn only_what_a_road_gains_past_its_lanes_stops_at_walls() {
+        let way = |pairs: &[(&str, &str)]| ProcessedWay {
+            id: 1,
+            nodes: Vec::new(),
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let core = |pairs: &[(&str, &str)]| wall_core(&way(pairs), pairs[0].1, 1.0);
+        assert_eq!(core(&[("highway", "residential")]), None);
+        assert_eq!(
+            core(&[("highway", "residential"), ("parking:both", "lane")]),
+            Some(2)
+        );
+        assert_eq!(core(&[("highway", "pedestrian")]), Some(1));
+        assert_eq!(
+            core(&[("highway", "pedestrian"), ("tunnel", "building_passage")]),
+            None
+        );
+        assert_eq!(
+            core(&[
+                ("highway", "residential"),
+                ("parking:both", "lane"),
+                ("bridge", "yes")
+            ]),
+            None
+        );
     }
 
     #[test]
@@ -4503,6 +4580,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
     }
@@ -4539,6 +4617,7 @@ mod tests {
             &empty,
             &mut Vec::new(),
             &markings,
+            &CoordinateBitmap::new_empty(),
         );
         for z in [44, 56] {
             assert!(
@@ -4590,6 +4669,7 @@ mod tests {
             &empty,
             &mut Vec::new(),
             &markings,
+            &CoordinateBitmap::new_empty(),
         );
         assert!(editor.check_for_block(200, 0, 56, Some(&[WHITE_CONCRETE])));
     }
@@ -4630,6 +4710,7 @@ mod tests {
                 &empty,
                 &mut Vec::new(),
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
     }
@@ -4842,6 +4923,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &markings,
+                &CoordinateBitmap::new_empty(),
             );
         }
     }
@@ -5347,6 +5429,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
         crate::ground_generation::generate_ground_region(
@@ -6011,6 +6094,7 @@ mod tests {
                 &footprint,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
         crate::ground_generation::generate_ground_region(
@@ -6351,6 +6435,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
     }
