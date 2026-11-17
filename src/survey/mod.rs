@@ -448,6 +448,7 @@ fn mosaic(
     let (e0, n0, e1, n1) = plan.rect;
     let (w, h) = ((e1 - e0) as usize, (n1 - n0) as usize);
     let root = cache_root();
+    laser::sweep_leftovers(&root.join(plan.sheet.dir()));
     let mut inp = classify::Inputs::new(w, h);
     inp.laser_plants = plan.sheet.laser_plants;
     inp.strict_pools = plan.sheet.strict_pools;

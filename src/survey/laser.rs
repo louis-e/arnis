@@ -471,9 +471,11 @@ fn read_whole(
     url: &str,
 ) -> Result<LaserTile, Failure> {
     // Download to a temporary file: the decoder needs to seek to the chunk table.
-    let tmp = root
-        .join(source.dir())
-        .join(format!("tile_{te}_{tn}.laz.part{}", std::process::id()));
+    // It goes when this returns, whichever way.
+    let tmp = Partial(
+        root.join(source.dir())
+            .join(format!("tile_{te}_{tn}.laz.part{}", std::process::id())),
+    );
     let other = |e: String| Failure::Other(e);
     {
         let _turn = DOWNLOADS.enter(DOWNLOADS_AT_ONCE);
@@ -488,7 +490,7 @@ fn read_whole(
         if !resp.status().is_success() {
             return Err(other(format!("HTTP {}", resp.status())));
         }
-        let mut file = std::fs::File::create(&tmp).map_err(|e| other(e.to_string()))?;
+        let mut file = std::fs::File::create(&tmp.0).map_err(|e| other(e.to_string()))?;
         let n = resp.copy_to(&mut file).map_err(|e| other(e.to_string()))?;
         file.flush().map_err(|e| other(e.to_string()))?;
         fetch::count_laser_bytes(n);
@@ -496,10 +498,42 @@ fn read_whole(
     }
     let measured = {
         let _turn = DECODES.enter(decodes_at_once());
-        measure_file(&tmp, source, te, tn, url)
+        measure_file(&tmp.0, source, te, tn, url)
     };
-    let _ = std::fs::remove_file(&tmp);
     measured.map_err(other)
+}
+
+/// A download in progress, removed when dropped.
+struct Partial(PathBuf);
+
+impl Drop for Partial {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Removes what runs that were stopped left behind in a source's cache folder:
+/// downloads in progress (`.laz.part`) and caches being written (`.tmp`),
+/// once a day old, so no run still at them loses its file.
+pub fn sweep_leftovers(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let day = std::time::Duration::from_secs(86_400);
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        let leftover = name.contains(".laz.part") || name.contains(".tmp");
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > day);
+        if leftover && old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 /// Turns at something only so many may do at once.
