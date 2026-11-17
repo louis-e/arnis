@@ -76,6 +76,22 @@ impl StallGrid {
         }
     }
 
+    /// The same rows with the stalls along them shifted onto the world's own grid: a stall
+    /// side wherever the distance along `u` from the world's origin is a whole number of
+    /// stalls. Where a lot is laid out from a different share of its outline, as by two pieces
+    /// of a One World each clipping it at its own edge, the stall lines still meet.
+    fn on_world_grid(self) -> Self {
+        let a = self.origin.0 * self.u.0 + self.origin.1 * self.u.1;
+        let shift = a.rem_euclid(f64::from(STALL_WIDTH));
+        Self {
+            origin: (
+                self.origin.0 - shift * self.u.0,
+                self.origin.1 - shift * self.u.1,
+            ),
+            ..self
+        }
+    }
+
     /// Rows along an aisle through `point`: the aisle's middle falls on the mapped line.
     fn from_aisle(u: (f64, f64), point: (f64, f64)) -> Self {
         let grid = Self::along(u, point);
@@ -169,16 +185,19 @@ fn rectangle_grid(nodes: &[ProcessedNode]) -> Option<StallGrid> {
 
 /// The grid a lot's stalls are laid out on.
 fn stall_grid(way: &ProcessedWay) -> Option<StallGrid> {
-    if let Some(aisle) = way.tags.get(AISLE_TAG) {
+    let aisle = way.tags.get(AISLE_TAG).and_then(|aisle| {
         let v: Vec<f64> = aisle
             .split_whitespace()
             .filter_map(|s| s.parse().ok())
             .collect();
-        if let [ux, uz, x, z] = v[..] {
-            return Some(StallGrid::from_aisle((ux, uz), (x, z)));
+        match v[..] {
+            [ux, uz, x, z] => Some(StallGrid::from_aisle((ux, uz), (x, z))),
+            _ => None,
         }
-    }
-    rectangle_grid(&way.nodes)
+    });
+    aisle
+        .or_else(|| rectangle_grid(&way.nodes))
+        .map(StallGrid::on_world_grid)
 }
 
 /// Whether (x, z) lies inside a closed ring, by crossings.
@@ -202,6 +221,8 @@ struct Stretch {
     /// Unit direction.
     u: (f64, f64),
     mid: (f64, f64),
+    /// Both ends are mapped nodes, not points the clipper added.
+    mapped: bool,
 }
 
 /// Side of the cells aisle segments are bucketed by, in blocks.
@@ -259,7 +280,9 @@ impl<'a> AisleIndex<'a> {
     }
 
     /// The direction most of the aisle inside the rings runs in, within 10 degrees, and the
-    /// longest stretch that way to put an aisle on, as `AISLE_TAG` records them.
+    /// longest stretch that way to put an aisle on, as `AISLE_TAG` records them. A stretch
+    /// between two mapped nodes wins over one the area's edge cut, so the aisle's line does not
+    /// tilt with the rounding of a clipped end.
     fn aisle_in(&self, rings: &[&[ProcessedNode]]) -> Option<String> {
         let bounds = rings.iter().flat_map(|r| r.iter()).fold(
             (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
@@ -281,6 +304,7 @@ impl<'a> AisleIndex<'a> {
                     len,
                     u: (d.0 / len, d.1 / len),
                     mid,
+                    mapped: !is_invented_node_id(a.id) && !is_invented_node_id(b.id),
                 });
             }
         }
@@ -294,8 +318,11 @@ impl<'a> AisleIndex<'a> {
         };
         let (_, best) = stretches
             .iter()
-            .map(|s| ((support(s.u), s.len), s))
-            .max_by(|a, b| a.0 .0.total_cmp(&b.0 .0).then(a.0 .1.total_cmp(&b.0 .1)))?;
+            .map(|s| ((support(s.u), s.mapped, s.len), s))
+            .max_by(|a, b| {
+                let ((sa, ma, la), (sb, mb, lb)) = (a.0, b.0);
+                sa.total_cmp(&sb).then(ma.cmp(&mb)).then(la.total_cmp(&lb))
+            })?;
         Some(format!(
             "{:.5} {:.5} {:.1} {:.1}",
             best.u.0,
@@ -588,6 +615,35 @@ mod tests {
         assert!(close((grid.u.0.abs(), grid.u.1.abs()), (1.0, 0.0)));
         // Mapped in a line, it spans no area at all.
         assert!(rectangle_grid(&[node(1, 0, 0), node(2, 9, 0), node(1, 0, 0)]).is_none());
+    }
+
+    #[test]
+    fn stall_lines_keep_to_the_world_grid_however_the_lot_is_cut() {
+        // The same lot, whole and with its west end cut away by an area's edge.
+        let whole = ring(&[(3, 7), (63, 7), (63, 37), (3, 37)]);
+        let cut = vec![
+            node((1 << 62) + 1, 21, 7),
+            node(2, 63, 7),
+            node(3, 63, 37),
+            node((1 << 62) + 2, 21, 37),
+            node((1 << 62) + 1, 21, 7),
+        ];
+        let lot = |nodes: Vec<ProcessedNode>| ProcessedWay {
+            id: 1,
+            nodes,
+            tags: HashMap::new(),
+        };
+        let (a, b) = (
+            stall_grid(&lot(whole)).unwrap(),
+            stall_grid(&lot(cut)).unwrap(),
+        );
+        // Rows run east to west in both, with the stall sides on the same columns.
+        assert!(close(a.u, b.u));
+        let side =
+            |g: &StallGrid, x: i32| (g.local(x, 20).0.floor() as i32).rem_euclid(STALL_WIDTH);
+        for x in 25..60 {
+            assert_eq!(side(&a, x), side(&b, x), "x = {x}");
+        }
     }
 
     #[test]
