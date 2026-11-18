@@ -326,9 +326,6 @@ impl OvertureHints {
             return None;
         }
         let hint = self.hints.get(&OsmRef { kind, id })?;
-        if hides_parts(hint, tags) {
-            return None;
-        }
         Some(crate::element_processing::buildings::HeightHint {
             height_m: hint.height_m,
             levels: hint.num_floors.map(f64::from),
