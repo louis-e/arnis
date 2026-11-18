@@ -13,6 +13,7 @@ pub mod plane;
 pub mod playground;
 pub mod schematic;
 pub mod starship;
+pub mod sydney_opera_house;
 pub mod tombstone;
 pub mod tractor;
 pub mod windturbine;
