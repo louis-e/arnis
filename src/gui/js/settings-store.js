@@ -48,6 +48,7 @@ const SETTINGS = [
   // The version list comes from Mojang after start-up, so the choice keeps a key of its own.
   { id: 'live-version-select', kind: 'select', store: EXTERNAL },
   { id: 'live-view-distance-select', kind: 'select', store: OWN },
+  { id: 'live-lan-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
 
   // Gameplay

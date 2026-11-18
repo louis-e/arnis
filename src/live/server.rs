@@ -81,10 +81,15 @@ pub fn free_port(preferred: Option<u16>) -> u16 {
 
 /// Free on loopback and nothing answering there. Only loopback is probed: listening on
 /// every interface, even for a moment, asks for a firewall exception on Windows.
-fn port_free(port: u16) -> bool {
+pub(super) fn port_free(port: u16) -> bool {
     let addr = std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     TcpListener::bind(addr).is_ok()
         && std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err()
+}
+
+/// What the multiplayer screen shows under the server's name.
+pub fn motd(world_name: &str) -> String {
+    format!("Arnis Live \u{00b7} {world_name}")
 }
 
 fn write_properties(dir: &Path, l: &Launch) -> Result<(), String> {
@@ -93,7 +98,7 @@ fn write_properties(dir: &Path, l: &Launch) -> Result<(), String> {
         ("server-ip", "127.0.0.1".to_string()),
         ("server-port", l.port.to_string()),
         ("level-name", l.world_name.to_string()),
-        ("motd", format!("Arnis Live \u{00b7} {}", l.world_name)),
+        ("motd", motd(l.world_name)),
         ("online-mode", "true".to_string()),
         // 26.x servers default to a whitelist; this one only listens on localhost.
         ("white-list", "false".to_string()),
@@ -155,6 +160,8 @@ impl Server {
         write_properties(dir, l)?;
         // Every world shares this folder; ops come from the world's cheats setting each session.
         fs::write(dir.join("ops.json"), "[]").map_err(|e| e.to_string())?;
+        // Every player comes in over loopback, so an IP ban would shut out everyone, the host too.
+        fs::write(dir.join("banned-ips.json"), "[]").map_err(|e| e.to_string())?;
         let mut cmd = Command::new(l.java);
         cmd.current_dir(dir)
             .arg(format!("-Xmx{}M", heap_mb()))

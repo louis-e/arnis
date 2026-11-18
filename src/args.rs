@@ -1086,6 +1086,11 @@ pub struct LiveArgs {
     #[arg(long = "live-port")]
     pub port: Option<u16>,
 
+    /// Let players on the same network join the live server, which their Multiplayer screen
+    /// then lists under LAN worlds. Only players on this computer get operator rights.
+    #[arg(long = "live-lan", requires = "live")]
+    pub lan: bool,
+
     /// Internal: one tile of a live session.
     #[arg(long = "live-tile", hide = true)]
     pub tile: bool,
@@ -1099,6 +1104,7 @@ impl Default for LiveArgs {
             version: None,
             view_distance: crate::live::DEFAULT_VIEW_DISTANCE,
             port: None,
+            lan: false,
             tile: false,
         }
     }

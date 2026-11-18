@@ -242,6 +242,7 @@ async function applyLocalization(localization) {
   fillLiveVersions();
   // liveStatus stays "stopped" after a session, which must not take over a normal run's line.
   if (liveActive()) renderLiveProgress();
+  renderLiveLan();
   // The map hint lives in the map iframe, which cannot see this assignment.
   document.querySelectorAll('iframe').forEach((frame) => {
     try {
@@ -4278,16 +4279,17 @@ function labelLiveViewDistances() {
   }
 }
 
-// The version and view distance only mean something in Live, and stay put while it runs.
+// The version, view distance and LAN only mean something in Live, and stay put while it runs.
 function refreshLiveRows() {
   const live = isLiveMode();
-  for (const id of ['live-version-row', 'live-view-distance-row']) {
+  for (const id of ['live-version-row', 'live-view-distance-row', 'live-lan-row']) {
     const row = document.getElementById(id);
     if (row) row.style.display = live ? '' : 'none';
   }
   document.getElementById('one-world-stack')?.classList.toggle('is-open', live);
   setSettingsRowAvailable('live-version-select', !liveActive(), 'reason_live_running');
   setSettingsRowAvailable('live-view-distance-select', !liveActive(), 'reason_live_running');
+  setSettingsRowAvailable('live-lan-toggle', !liveActive(), 'reason_live_running');
   // The world the session plays is fixed until it ends.
   setSettingsRowAvailable('save-path-input', !liveActive(), 'reason_live_running');
   refreshWorldNameRow();
@@ -4400,6 +4402,69 @@ function renderLiveProgress() {
   resetEta();
 }
 
+// Open to LAN: where friends on the network join, the address copied with a click.
+function renderLiveLan() {
+  const box = document.getElementById('live-lan-info');
+  if (!box) return;
+  const status = liveStatus;
+  const show = !!status && status.phase === 'running' && !!status.lan;
+  box.hidden = !show;
+  // Reports come twice a second: the line is only rebuilt when it reads differently.
+  const key = show ? JSON.stringify([status.lan_address, status.version, window.localization?.live_lan_join_tip]) : '';
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  if (!show) {
+    box.replaceChildren();
+    return;
+  }
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('class', 'icon');
+  icon.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#i-users');
+  icon.appendChild(use);
+  const address = status.lan_address;
+  box.classList.toggle('is-warn', !address);
+  const line = document.createElement('span');
+  if (!address) {
+    line.textContent = oneWorldText('live_lan_offline', 'No network, so friends cannot join yet.');
+    box.replaceChildren(icon, line);
+    return;
+  }
+  const [before, after = ''] = oneWorldText('live_lan_join', 'Friends join at {address}').split('{address}');
+  line.title = oneWorldText('live_lan_join_tip', 'Players on your network join at this address with Minecraft {version}, or find it under LAN worlds in Multiplayer.',
+    { version: status.version || '' });
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'live-lan-address';
+  copy.dir = 'ltr';
+  copy.title = oneWorldText('live_lan_copy', 'Copy the address');
+  copy.setAttribute('aria-label', `${copy.title}: ${address}`);
+  const value = document.createElement('span');
+  value.textContent = address;
+  const glyph = icon.cloneNode(true);
+  glyph.firstChild.setAttribute('href', '#i-copy');
+  copy.append(value, glyph);
+  copy.addEventListener('click', () => copyLiveLanAddress(copy, value, address));
+  line.append(before, copy, after);
+  box.replaceChildren(icon, line);
+}
+
+async function copyLiveLanAddress(button, value, address) {
+  try {
+    await navigator.clipboard.writeText(address);
+  } catch (_) {
+    return;
+  }
+  value.textContent = oneWorldText('live_lan_copied', 'Copied');
+  button.classList.add('is-copied');
+  clearTimeout(button.copiedTimer);
+  button.copiedTimer = setTimeout(() => {
+    value.textContent = address;
+    button.classList.remove('is-copied');
+  }, 1500);
+}
+
 // Resolves to true once the user accepted Mojang's EULA.
 function confirmLiveEula() {
   return new Promise((resolve) => {
@@ -4490,11 +4555,13 @@ async function startLive() {
     !(world && world.exists && localStorage.getItem(LIVE_START_KEY) === startKey);
   const versionSelect = document.getElementById('live-version-select');
   const viewSelect = document.getElementById('live-view-distance-select');
+  const lanToggle = document.getElementById('live-lan-toggle');
   const options = {
     savePath: savePath,
     worldName: oneWorldFolderName(),
     version: (versionSelect && versionSelect.value) || null,
     viewDistance: parseInt(viewSelect && viewSelect.value, 10) || 12,
+    lan: !!(lanToggle && lanToggle.checked),
     acceptEula: acceptEula,
     bboxText: useSelection ? selectedBBox : null,
     spawnPoint: useSelection ? spawnPoint : null,
@@ -4554,6 +4621,7 @@ async function stopLive() {
 // Everything that shows the session, after each report.
 function onLiveStatus() {
   renderLiveProgress();
+  renderLiveLan();
   refreshStartButton();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   refreshLiveRows();
