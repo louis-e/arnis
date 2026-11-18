@@ -1122,7 +1122,8 @@ impl FloodFillCache {
                     ) || matches!(
                         way.tags.get("waterway").map(String::as_str),
                         Some("dock" | "riverbank")
-                    )) && !below(&way.tags)
+                    ) || is_fountain_basin(&way.tags))
+                        && !below(&way.tags)
                         && self.contains(way.id) =>
                 {
                     Some(way.id)
@@ -1507,6 +1508,14 @@ fn points_bounds(mut points: impl Iterator<Item = (i32, i32)>) -> Option<XZBBox>
     XZBBox::rect_from_min_max(x0, z0, x1, z1).ok()
 }
 
+/// A fountain's basin mapped as an area, which a point fountain inside it does not repeat.
+fn is_fountain_basin(tags: &std::collections::HashMap<String, String>) -> bool {
+    tags.get("amenity").is_some_and(|a| a == "fountain")
+        && !tags
+            .get("fountain")
+            .is_some_and(|f| f.split(';').any(|v| v.trim() == "splash_pad"))
+}
+
 /// What of a mapped feature measured trees keep clear of.
 enum KeptWater {
     /// Water filling the area: a swimming pool, a pond, lake or river mapped as an
@@ -1557,7 +1566,9 @@ pub fn collect_tree_keep_clear(
     scale: f64,
     channel_width_cap: Option<i32>,
     margin: i32,
+    room: Option<&dyn Fn(i32, i32) -> crate::structures::fountain::Room>,
 ) -> Option<CoordinateBitmap> {
+    use crate::structures::fountain;
     let mut keep = CoordinateBitmap::new(xzbbox);
     let mut mark = |x: i32, z: i32, r: i32| {
         for dx in -r..=r {
@@ -1566,14 +1577,26 @@ pub fn collect_tree_keep_clear(
             }
         }
     };
-    let point_fountain = crate::structures::fountain::reach(0) + margin;
+    // As `generate_fountain` picks it where the room is known, else as far as any could reach.
+    let point_fountain = |mark: &mut dyn FnMut(i32, i32, i32),
+                          tags: &std::collections::HashMap<String, String>,
+                          x: i32,
+                          z: i32| match room {
+        Some(room) => {
+            for (cx, cz) in fountain::node_columns(tags, x, z, scale, room) {
+                mark(cx, cz, margin);
+            }
+        }
+        None => mark(x, z, fountain::node_reach_bound(tags, scale) + margin),
+    };
     for element in elements {
         let Some(kind) = kept_water(element.tags(), scale, channel_width_cap) else {
             continue;
         };
-        let fountain = matches!(kind, KeptWater::Fountain);
         match (element, kind) {
-            (ProcessedElement::Node(n), KeptWater::Fountain) => mark(n.x, n.z, point_fountain),
+            (ProcessedElement::Node(n), KeptWater::Fountain) => {
+                point_fountain(&mut mark, &n.tags, n.x, n.z)
+            }
             (ProcessedElement::Node(_), _) => {}
             (ProcessedElement::Way(w), KeptWater::Channel(half)) => {
                 let r = half + margin;
@@ -1592,18 +1615,19 @@ pub fn collect_tree_keep_clear(
                     }
                 }
             }
-            // As `generate_fountain` stamps it: at its first node, as a point.
+            // As `generate_fountain` builds it: at its first node, as a point.
             (ProcessedElement::Way(w), KeptWater::Fountain) if w.nodes.len() < 3 => {
                 if let Some(n) = w.nodes.first() {
-                    mark(n.x, n.z, point_fountain);
+                    point_fountain(&mut mark, &w.tags, n.x, n.z);
                 }
             }
-            (ProcessedElement::Way(w), _) => {
+            (ProcessedElement::Way(w), kind) => {
                 let ring = crate::clipping::clip_way_to_bbox(&w.nodes, xzbbox);
                 let coords: Vec<(i32, i32)> = ring.iter().map(|n| (n.x, n.z)).collect();
-                let cells = flood_fill_area(&coords, None);
-                if fountain {
-                    fountain_reach(&mut mark, &cells, margin);
+                let mut cells = flood_fill_area(&coords, None);
+                // An area fountain stays inside its outline, its ring included.
+                if matches!(kind, KeptWater::Fountain) {
+                    cells = fountain::with_ring(&cells, &coords);
                 }
                 for (x, z) in cells {
                     mark(x, z, margin);
@@ -1631,9 +1655,6 @@ pub fn collect_tree_keep_clear(
                             .into_iter()
                             .filter(|&(x, z)| !island.contains(x, z))
                             .collect();
-                        if fountain {
-                            fountain_reach(&mut mark, &cells, margin);
-                        }
                         for (x, z) in cells {
                             mark(x, z, margin);
                         }
@@ -1643,18 +1664,6 @@ pub fn collect_tree_keep_clear(
         }
     }
     (!keep.is_empty()).then_some(keep)
-}
-
-/// Marks as far as the model stamped for a fountain mapped as these cells reaches
-/// past them, from where it is stamped.
-fn fountain_reach(mark: &mut impl FnMut(i32, i32, i32), cells: &[(i32, i32)], margin: i32) {
-    if let Some((x, z)) = crate::structures::fountain::anchor(cells) {
-        mark(
-            x,
-            z,
-            crate::structures::fountain::reach(cells.len()) + margin,
-        );
-    }
 }
 
 /// A relation's merged, clipped, closed rings of one role.
@@ -2231,7 +2240,7 @@ mod tests {
             }),
             ProcessedElement::Node(fountain),
         ];
-        let keep = collect_tree_keep_clear(&elements, &xzbbox, 1.0, None, 1).unwrap();
+        let keep = collect_tree_keep_clear(&elements, &xzbbox, 1.0, None, 1, None).unwrap();
         assert!(keep.contains(15, 15) && !keep.contains(7, 15), "the pool");
         // A stream is drawn 3 wide and a block either side; one more is the margin.
         assert!(keep.contains(53, 50) && keep.contains(47, 50));
@@ -2242,10 +2251,24 @@ mod tests {
             keep.contains(140, 140) && !keep.contains(160, 160),
             "an island is land"
         );
-        let r = crate::structures::fountain::reach(0);
+        let r = crate::structures::fountain::node_reach_bound(&HashMap::new(), 1.0);
         assert!(r > 0);
         assert!(keep.contains(100 + r + 1, 160) && !keep.contains(100 + r + 2, 160));
-        assert!(collect_tree_keep_clear(&elements[3..4], &xzbbox, 1.0, None, 1).is_none());
+        // Where the room is known, as far as the fountain picked there reaches.
+        let open = |_: i32, _: i32| crate::structures::fountain::Room::Open;
+        let keep = collect_tree_keep_clear(&elements, &xzbbox, 1.0, None, 1, Some(&open)).unwrap();
+        let pick = crate::structures::fountain::pick_node(
+            &elements[5].tags().clone(),
+            100,
+            160,
+            1.0,
+            &open,
+        )
+        .unwrap();
+        assert!(pick.columns().all(|(x, z)| keep.contains(x, z)));
+        let reach = pick.columns().map(|(x, _)| x - 100).max().unwrap();
+        assert!(!keep.contains(100 + reach + 2, 160));
+        assert!(collect_tree_keep_clear(&elements[3..4], &xzbbox, 1.0, None, 1, None).is_none());
     }
 
     #[test]

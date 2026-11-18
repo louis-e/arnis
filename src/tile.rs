@@ -192,10 +192,14 @@ pub fn assign_elements_to_tiles(
     for (elem_idx, element) in elements.iter().enumerate() {
         match element {
             ProcessedElement::Node(node) => {
-                // Helipad node discs must be authoritative in every tile they touch.
-                if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
+                // Helipad discs and sunk fountain basins must be authoritative in every tile they touch.
+                let spread = if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                     let radius_m = crate::element_processing::highways::HELIPAD_NODE_RADIUS_M;
-                    let reach = ((radius_m * scale).round() as i32).max(4) + 12;
+                    Some(((radius_m * scale).round() as i32).max(4) + 12)
+                } else {
+                    crate::structures::fountain::node_spread(&node.tags, scale)
+                };
+                if let Some(reach) = spread {
                     let aabb = (
                         node.x - reach,
                         node.x + reach,
@@ -310,6 +314,27 @@ mod tests {
             x,
             z,
         }
+    }
+
+    #[test]
+    fn a_fountain_by_a_tile_seam_goes_to_both_tiles() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 1023, 511).unwrap();
+        let tiles = create_tiles(&bbox, DEFAULT_TILE_SIZE);
+        let fountain = |id, x| {
+            let mut n = node(id, x, 200);
+            n.tags.insert("amenity".into(), "fountain".into());
+            ProcessedElement::Node(n)
+        };
+        let elements = [
+            fountain(1, 509),
+            fountain(2, 300),
+            ProcessedElement::Node(node(3, 510, 200)),
+        ];
+        let assigned = assign_elements_to_tiles(&elements, &tiles, 1.0);
+        let tiles_with = |e: usize| assigned.iter().filter(|t| t.contains(&e)).count();
+        assert_eq!(tiles_with(0), 2);
+        assert_eq!(tiles_with(1), 1);
+        assert_eq!(tiles_with(2), 1);
     }
 
     fn way(id: u64, nodes: Vec<ProcessedNode>, linear: bool) -> ProcessedWay {

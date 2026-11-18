@@ -290,7 +290,7 @@ pub fn generate_amenities(
                 }
             }
             "fountain" => {
-                generate_fountain(editor, element, args, flood_fill_cache);
+                generate_fountain(editor, element, args, flood_fill_cache, road_mask);
             }
             "drinking_water" => {
                 if let Some(pt) = first_node {
@@ -357,33 +357,32 @@ pub fn generate_amenities(
     }
 }
 
-/// Stamp a bundled fountain at the element; footprint size picks the variant
-/// (node/small way gets a small fountain, a large polygon gets the big one).
+/// Builds a bundled fountain at the element, sized to its outline or to the room around it.
 fn generate_fountain(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap,
 ) {
-    // ── Node fountain (single point) ───────────────────────────────
     let nodes: Vec<_> = element.nodes().collect();
     if nodes.len() < 3 {
         if let Some(node) = nodes.first() {
-            crate::structures::fountain::place(editor, node.x, node.z, 0);
+            crate::structures::fountain::place_node(
+                editor,
+                element.tags(),
+                node.x,
+                node.z,
+                args.scale,
+                road_mask,
+            );
         }
         return;
     }
-
-    // ── Way fountain (polygon) ─────────────────────────────────────
-    let floor_area = flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
-    if floor_area.is_empty() {
-        return;
-    }
-    let Some((cx, cz)) = crate::structures::fountain::anchor(&floor_area) else {
-        return;
-    };
-    // Footprint size decides small (1-3) vs large (fountain 4).
-    crate::structures::fountain::place(editor, cx, cz, floor_area.len());
+    let fill = flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
+    let ring: Vec<(i32, i32)> = nodes.iter().map(|n| (n.x, n.z)).collect();
+    let area = crate::structures::fountain::with_ring(&fill, &ring);
+    crate::structures::fountain::place_area(editor, element.tags(), &area);
 }
 
 #[derive(Clone, Copy)]

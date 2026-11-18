@@ -84,8 +84,14 @@ pub fn merge(
         return;
     }
     // Mapped water and the land cover's: no shed or pool of the laser's stands there.
-    let mapped_water =
-        crate::floodfill_cache::collect_tree_keep_clear(parsed_elements, xzbbox, scale, None, 0);
+    let mapped_water = crate::floodfill_cache::collect_tree_keep_clear(
+        parsed_elements,
+        xzbbox,
+        scale,
+        None,
+        0,
+        None,
+    );
     let water = |x: i32, z: i32| {
         mapped_water.as_ref().is_some_and(|m| m.contains(x, z))
             || ground.cover_class(crate::coordinate_system::cartesian::XZPoint::new(
