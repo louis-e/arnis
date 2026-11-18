@@ -482,6 +482,7 @@ fn run_live_cli(args: Args) {
         version: args.live.version.clone(),
         view_distance: args.live.view_distance,
         port: args.live.port,
+        lan: args.live.lan,
         messages: live::Messages::default(),
     };
     // Downloads are shown in tenths, so the terminal is not flooded.

@@ -388,6 +388,8 @@ struct LiveStartOptions {
     world_name: String,
     version: Option<String>,
     view_distance: u32,
+    #[serde(default)]
+    lan: bool,
     accept_eula: bool,
     bbox_text: Option<String>,
     spawn_point: Option<(f64, f64)>,
@@ -526,6 +528,7 @@ fn gui_live_start(options: LiveStartOptions) -> Result<(), String> {
         version: options.version.filter(|v| !v.trim().is_empty()),
         view_distance: options.view_distance.clamp(4, 32),
         port: None,
+        lan: options.lan,
         messages: options.messages,
     };
     let notify = std::sync::Arc::new(|s: &crate::live::Status| progress::emit_live_status(s));

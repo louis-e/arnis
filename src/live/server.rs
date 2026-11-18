@@ -79,12 +79,23 @@ pub fn free_port(preferred: Option<u16>) -> u16 {
         .unwrap_or(25565)
 }
 
+/// A free port other than `taken`, which is held meanwhile so the system cannot hand it out twice.
+pub fn free_port_besides(taken: u16) -> u16 {
+    let _held = TcpListener::bind((Ipv4Addr::LOCALHOST, taken));
+    free_port(None)
+}
+
 /// Free on loopback and nothing answering there. Only loopback is probed: listening on
 /// every interface, even for a moment, asks for a firewall exception on Windows.
-fn port_free(port: u16) -> bool {
+pub(super) fn port_free(port: u16) -> bool {
     let addr = std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     TcpListener::bind(addr).is_ok()
         && std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err()
+}
+
+/// What the multiplayer screen shows under the server's name.
+pub fn motd(world_name: &str) -> String {
+    format!("Arnis Live \u{00b7} {world_name}")
 }
 
 fn write_properties(dir: &Path, l: &Launch) -> Result<(), String> {
@@ -93,9 +104,9 @@ fn write_properties(dir: &Path, l: &Launch) -> Result<(), String> {
         ("server-ip", "127.0.0.1".to_string()),
         ("server-port", l.port.to_string()),
         ("level-name", l.world_name.to_string()),
-        ("motd", format!("Arnis Live \u{00b7} {}", l.world_name)),
+        ("motd", motd(l.world_name)),
         ("online-mode", "true".to_string()),
-        // 26.x servers default to a whitelist; this one only listens on localhost.
+        // 26.x servers default to a whitelist; Live has none, like the game's own Open to LAN.
         ("white-list", "false".to_string()),
         ("enforce-whitelist", "false".to_string()),
         ("enable-rcon", "true".to_string()),
@@ -155,6 +166,8 @@ impl Server {
         write_properties(dir, l)?;
         // Every world shares this folder; ops come from the world's cheats setting each session.
         fs::write(dir.join("ops.json"), "[]").map_err(|e| e.to_string())?;
+        // Every player comes in over loopback, so an IP ban would shut out everyone, the host too.
+        fs::write(dir.join("banned-ips.json"), "[]").map_err(|e| e.to_string())?;
         let mut cmd = Command::new(l.java);
         cmd.current_dir(dir)
             .arg(format!("-Xmx{}M", heap_mb()))
@@ -347,6 +360,14 @@ pub fn detach(cmd: &mut Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_second_port_differs_from_the_first() {
+        for _ in 0..50 {
+            let game = free_port(None);
+            assert_ne!(free_port_besides(game), game);
+        }
+    }
 
     #[test]
     fn eula_is_read_and_written() {

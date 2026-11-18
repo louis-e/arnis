@@ -228,6 +228,58 @@ a:hover {
   color: #fecc44 !important; /* the listener sets an inline colour */
 }
 
+/* Live open to LAN: where friends join, under the status line. */
+.live-lan-info {
+  margin: -1px 0 7px;
+  font-size: 0.85em;
+  line-height: 1.7em;
+  text-align: center;
+  color: #c9c9c9;
+}
+.live-lan-info > .icon {
+  width: 15px;
+  height: 15px;
+  margin-inline-end: 6px;
+  vertical-align: -3px;
+}
+.live-lan-info.is-warn {
+  color: #fecc44;
+}
+.live-lan-info .live-lan-address {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  margin: 0 2px;
+  padding: 0 6px;
+  border: 1px solid var(--ui-field-border);
+  border-radius: 6px;
+  background: var(--ui-field);
+  box-shadow: none;
+  color: var(--ui-text);
+  font: inherit;
+  font-weight: bold;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5em;
+  cursor: pointer;
+  user-select: text;
+}
+.live-lan-info .live-lan-address .icon {
+  width: 12px;
+  height: 12px;
+  color: var(--ui-faint);
+}
+.live-lan-info .live-lan-address:hover,
+.live-lan-info .live-lan-address:focus-visible {
+  border-color: var(--ui-accent);
+}
+.live-lan-info .live-lan-address:hover .icon,
+.live-lan-info .live-lan-address:focus-visible .icon,
+.live-lan-info .live-lan-address.is-copied,
+.live-lan-info .live-lan-address.is-copied .icon {
+  color: var(--ui-accent);
+}
+
 .progress-eta-overlay {
   position: absolute;
   top: 50%;

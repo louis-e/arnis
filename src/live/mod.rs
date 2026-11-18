@@ -4,6 +4,7 @@
 //! so players are never let near land that is not ready: a world border around the ready
 //! land, a teleport back for the rest. Delivery never touches a file the server has open.
 
+pub mod lan;
 pub mod mojang;
 pub mod plan;
 pub mod rcon;
@@ -48,6 +49,8 @@ pub struct Config {
     pub version: Option<String>,
     pub view_distance: u32,
     pub port: Option<u16>,
+    /// Players on the same network may join too.
+    pub lan: bool,
     pub messages: Messages,
 }
 
@@ -89,6 +92,9 @@ pub struct Status {
     /// A download running beside the start area.
     pub download: Option<Download>,
     pub address: Option<String>,
+    /// Open to players on the network, and where they join while this computer is on one.
+    pub lan: bool,
+    pub lan_address: Option<String>,
     pub version: Option<String>,
     pub world: String,
     pub players: Vec<PlayerSpot>,
@@ -201,6 +207,8 @@ impl Session {
                     s.progress = None;
                     s.download = None;
                     s.players.clear();
+                    s.lan = false;
+                    s.lan_address = None;
                     s.teleport_pending = false;
                     s.teleport_failed = false;
                 }),
@@ -214,6 +222,8 @@ impl Session {
                         s.progress = None;
                         s.download = None;
                         s.players.clear();
+                        s.lan = false;
+                        s.lan_address = None;
                         s.teleport_pending = false;
                         s.teleport_failed = false;
                     })
@@ -1463,8 +1473,12 @@ fn play(
     }
     install_live_pack(&world_dir)?;
     let (rules, cheats) = world_rules(&world_dir);
-    let port = server::free_port(cfg.port.or(Some(25565)));
-    let rcon_port = server::free_port(None);
+    let preferred = cfg.port.or(Some(lan::DEFAULT_PORT));
+    // Open to the network, players join through the relay and the server keeps to loopback.
+    let mut lan = cfg.lan.then(|| lan::Lan::bind(preferred)).transpose()?;
+    let port = server::free_port(if lan.is_some() { None } else { preferred });
+    let join_port = lan.as_ref().map_or(port, lan::Lan::port);
+    let rcon_port = server::free_port_besides(port);
     let password = random_password();
     live.journal.rcon_port = Some(rcon_port);
     live.journal.rcon_password = Some(password.clone());
@@ -1480,11 +1494,7 @@ fn play(
         live.prepare_partial(r)?;
     }
 
-    let address = if port == 25565 {
-        "localhost".to_string()
-    } else {
-        format!("localhost:{port}")
-    };
+    let address = lan::address("localhost", join_port);
     if let Some(game) = mojang::game_dir(&cfg.saves_dir) {
         if let Err(e) = servers_dat::ensure_entry(&game, &address) {
             eprintln!("[live] Could not add the server to the multiplayer list: {e}");
@@ -1539,6 +1549,22 @@ fn play(
             return Err(format!("Could not talk to the server: {e}"));
         }
     };
+    if let Some(lan) = lan.as_mut() {
+        let r = reporter.clone();
+        let opened = lan.open(port, &server::motd(&cfg.world_name), move |at| {
+            match &at {
+                Some(at) => println!("[live] Players on your network can join at {at}."),
+                None => println!("[live] This computer is not on a network right now."),
+            }
+            r.update(|s| s.lan_address = at);
+        });
+        if let Err(e) = opened {
+            server.stop(Some(&mut rcon), Duration::from_secs(120));
+            leave_border(&world_dir);
+            return Err(e);
+        }
+        reporter.update(|s| s.lan = true);
+    }
     let result = session_loop(
         live,
         &mut server,
@@ -1548,6 +1574,7 @@ fn play(
         start_xz,
         positions,
         &address,
+        lan.as_ref(),
     );
     // `/stop` typed in the game ends the session like the Stop button.
     let result = match result {
@@ -1578,6 +1605,8 @@ fn play(
     reporter.update(|s| {
         s.phase = "stopping".to_string();
         s.players.clear();
+        s.lan = false;
+        s.lan_address = None;
     });
     reporter.say("stopping", "Stopping the server and saving the world", None);
     for c in [
@@ -1590,6 +1619,7 @@ fn play(
         let _ = rcon.cmd(&c);
     }
     server.stop(Some(&mut rcon), Duration::from_secs(120));
+    drop(lan);
     // A server that went down on its own saved the border it had.
     leave_border(&world_dir);
     live.journal.border_set = false;
@@ -1659,6 +1689,7 @@ fn session_loop(
     start_xz: Option<(f64, f64)>,
     positions: &[(f64, f64)],
     address: &str,
+    lan: Option<&lan::Lan>,
 ) -> Result<(), String> {
     let fallback = positions.first().copied();
     let reporter = live.reporter;
@@ -1691,6 +1722,7 @@ fn session_loop(
     let mut players: HashMap<String, Player> = HashMap::new();
     let mut names: Vec<String> = Vec::new();
     let mut joined: HashSet<String> = HashSet::new();
+    let mut opped: HashSet<String> = HashSet::new();
     let heads: Arc<Mutex<HashMap<String, Option<String>>>> = Arc::default();
     let mut border: Option<plan::Square> = None;
     let mut border_open = false;
@@ -1738,6 +1770,11 @@ fn session_loop(
             last_list = tick;
             names = rcon::parse_list(&rcon.cmd("list")?);
             for name in &names {
+                // Commands stay with this computer: a player from elsewhere gets them by /op.
+                if cheats && !opped.contains(name) && lan.is_none_or(|l| l.logged_in_here(name)) {
+                    let _ = rcon.cmd(&format!("op {name}"));
+                    opped.insert(name.clone());
+                }
                 if joined.insert(name.clone()) {
                     {
                         let (heads, name) = (heads.clone(), name.clone());
@@ -1748,9 +1785,6 @@ fn session_loop(
                                 .unwrap_or_else(|e| e.into_inner())
                                 .insert(name, head);
                         });
-                    }
-                    if cheats {
-                        let _ = rcon.cmd(&format!("op {name}"));
                     }
                     if let Some((x, z)) = start_xz {
                         land(rcon, name, x, z, live.top_y, &mut landing)?;
