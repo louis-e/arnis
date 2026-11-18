@@ -1477,15 +1477,25 @@ pub fn generate_world_with_options(
         map
     };
 
-    let neighbours = buildings::Neighbours {
-        heights: buildings::tagged_neighbour_heights(&elements, args.scale),
-        steps: buildings::plan_attached_steps(
-            &elements,
-            &flood_fill_cache,
-            &building_footprints,
-            args.scale,
-        ),
-    };
+    let started = std::time::Instant::now();
+    let heights = buildings::tagged_neighbour_heights(&elements, args.scale);
+    let heights_time = started.elapsed();
+    let started = std::time::Instant::now();
+    let steps = buildings::plan_attached_steps(
+        &elements,
+        &flood_fill_cache,
+        &building_footprints,
+        args.scale,
+    );
+    let steps_time = started.elapsed();
+    for (label, time) in [
+        ("neighbour_heights", heights_time),
+        ("attached_steps", steps_time),
+    ] {
+        bench.report(label, time);
+        bench.exclude(time);
+    }
+    let neighbours = buildings::Neighbours { heights, steps };
 
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
