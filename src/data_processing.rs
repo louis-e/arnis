@@ -1437,10 +1437,10 @@ pub fn generate_world_with_options(
     // Amenity processors use this for O(1) nearest-road-block lookups. The carriageways
     // among them come in the same pass: trees keep their trunks out of them, mapped
     // street trees included, and leave more headroom over them than over a footway.
-    // Alongside, on another thread, what the gardens read besides the marks: commercial
-    // land, which is never filled while elements are placed, and the streets and car parks
-    // that keep paving beside them, which read neither the kerb strips nor anything set
-    // from the road masks. And what the kerb strips read besides the masks: the ways they
+    // Alongside, each on a thread of its own, what the gardens read besides the marks:
+    // commercial land, which is never filled while elements are placed, and the streets and
+    // car parks that keep paving beside them, which read neither the kerb strips nor anything
+    // set from the road masks. And what the kerb strips read besides the masks: the ways they
     // lie between, stamped from their tags, and what they must not pave over.
     let (road_coords, (garden_land, kerb_ways, kerb_blockers)) = rayon::join(
         || {
@@ -1454,21 +1454,31 @@ pub fn generate_world_with_options(
             )
         },
         || {
-            let garden_land = crate::world_editor::GardenLand {
-                commercial: crate::element_processing::landuse::commercial_land(&elements, &xzbbox),
-                streets: highways::collect_garden_streets(
-                    &elements,
-                    &editor,
-                    &clip_bbox,
-                    args.scale,
-                    args.water.water_detail,
-                    |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
-                ),
-            };
-            let kerb_ways = crate::element_processing::kerb_strips::KerbWays::stamp(
-                &elements, &editor, &clip_bbox, args.scale,
+            let (garden_land, (kerb_ways, kerb_blockers)) = rayon::join(
+                || crate::world_editor::GardenLand {
+                    commercial: crate::element_processing::landuse::commercial_land(
+                        &elements, &xzbbox,
+                    ),
+                    streets: highways::collect_garden_streets(
+                        &elements,
+                        &editor,
+                        &clip_bbox,
+                        args.scale,
+                        args.water.water_detail,
+                        |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
+                    ),
+                },
+                || {
+                    rayon::join(
+                        || {
+                            crate::element_processing::kerb_strips::KerbWays::stamp(
+                                &elements, &editor, &clip_bbox, args.scale,
+                            )
+                        },
+                        || flood_fill_cache.collect_kerb_blockers(&elements, &clip_bbox),
+                    )
+                },
             );
-            let kerb_blockers = flood_fill_cache.collect_kerb_blockers(&elements, &clip_bbox);
             (garden_land, kerb_ways, kerb_blockers)
         },
     );

@@ -3929,8 +3929,6 @@ pub fn collect_road_and_carriageway_coords(
     water_detail: crate::water_detail::WaterDetail,
     building_footprints: &CoordinateBitmap,
 ) -> RoadCoords {
-    let mut roads = CoordinateBitmap::new(xzbbox);
-    let mut carriageways = CoordinateBitmap::new(xzbbox);
     let editor = Some(editor);
     // The sidewalks first, which the roads beside them then stop at; read only where a road
     // has a strip past its core to stop.
@@ -3966,24 +3964,37 @@ pub fn collect_road_and_carriageway_coords(
             paths = found;
         }
     }
-    let mut cut: Vec<u64> = Vec::new();
-    stamp_highway_surfaces(
-        elements,
-        editor,
-        scale,
-        water_detail,
-        building_footprints,
-        Some(&paths),
-        |_| true,
-        false,
-        |carriageway, x, z| {
-            roads.set(x, z);
-            if carriageway {
-                carriageways.set(x, z);
-            }
-        },
-        |x, z| cut.push(pack_xz(x, z)),
-    );
+    // The ways in two halves, by the parity of their ids, each on a thread of its own with
+    // masks of its own, which then come together as one.
+    let half = |parity: u64| {
+        let mut roads = CoordinateBitmap::new(xzbbox);
+        let mut carriageways = CoordinateBitmap::new(xzbbox);
+        let mut cut: Vec<u64> = Vec::new();
+        stamp_highway_surfaces(
+            elements,
+            editor,
+            scale,
+            water_detail,
+            building_footprints,
+            Some(&paths),
+            |e| matches!(e, ProcessedElement::Way(w) if w.id % 2 == parity),
+            false,
+            |carriageway, x, z| {
+                roads.set(x, z);
+                if carriageway {
+                    carriageways.set(x, z);
+                }
+            },
+            |x, z| cut.push(pack_xz(x, z)),
+        );
+        (roads, carriageways, cut)
+    };
+    let ((mut roads, mut carriageways, mut cut), (odd_roads, odd_carriageways, odd_cut)) =
+        rayon::join(|| half(0), || half(1));
+    roads.union_with(&odd_roads);
+    carriageways.union_with(&odd_carriageways);
+    drop((odd_roads, odd_carriageways));
+    cut.extend(odd_cut);
     cut.sort_unstable();
     cut.dedup();
     cut.retain(|&c| !roads.contains((c >> 32) as u32 as i32, c as u32 as i32));
