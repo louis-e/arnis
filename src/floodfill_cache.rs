@@ -643,7 +643,7 @@ impl FloodFillCache {
 
     /// A registered way's fill for a pre-pass: shared if a reader already made it,
     /// otherwise computed without being kept.
-    fn transient_fill(&self, way_id: u64) -> Option<FloodFillResult> {
+    pub(crate) fn transient_fill(&self, way_id: u64) -> Option<FloodFillResult> {
         let way = self.way_cache.get(&way_id)?;
         if let CachedFill::Ready(fill) = &*way.fill.lock().unwrap_or_else(|p| p.into_inner()) {
             return Some(Arc::clone(fill));

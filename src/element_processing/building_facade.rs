@@ -102,6 +102,8 @@ pub struct BuildingContext<'a> {
     pub housing_relation_parts: &'a crate::osm_parser::HousingRelationParts,
     /// Untagged buildings and the wall height of the tagged ones they share a wall with.
     pub neighbour_heights: &'a crate::element_processing::buildings::NeighbourHeights,
+    /// Which walls of attached buildings step in under the eave.
+    pub inset_plan: &'a crate::element_processing::buildings::InsetPlan,
     /// Tenants and surrounding areas per building, for interiors.
     pub interior_uses: &'a InteriorUseIndex,
 }
@@ -492,6 +494,7 @@ mod tests {
                 group_members: &self.groups,
                 housing_relation_parts: &self.housing,
                 neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+                inset_plan: crate::element_processing::buildings::no_inset_plan(),
                 interior_uses: InteriorUseIndex::empty(),
             }
         }

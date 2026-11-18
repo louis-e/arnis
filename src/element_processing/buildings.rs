@@ -6672,6 +6672,29 @@ fn accessory_storey(building_type: &str, tags: &HashMap<String, String>) -> bool
 /// towards its neighbours: smaller ones are sheds, bins and garages.
 const MIN_RISING_M2: f64 = 40.0;
 
+/// Whether an untagged building may rise towards taller neighbours: one of
+/// the main buildings of a street, a house, block of flats, shop, office or
+/// hotel, standing finished. A bungalow, kiosk, conservatory, garage, toilet
+/// block, boathouse, ruin or building site is as low as it is beside them.
+fn may_rise_to_neighbours(building_type: &str, tags: &HashMap<String, String>) -> bool {
+    matches!(
+        building_type,
+        "yes"
+            | "house"
+            | "detached"
+            | "terrace"
+            | "semidetached_house"
+            | "residential"
+            | "apartments"
+            | "commercial"
+            | "office"
+            | "hotel"
+    ) && !matches!(
+        BuildingCondition::from_tags(tags),
+        BuildingCondition::Construction | BuildingCondition::Ruined
+    )
+}
+
 /// Untagged building way id -> wall heights, in metres, of the tagged
 /// buildings it shares a wall with (two or more nodes).
 pub type NeighbourHeights = FnvHashMap<u64, Vec<f64>>;
@@ -6681,6 +6704,16 @@ pub type NeighbourHeights = FnvHashMap<u64, Vec<f64>>;
 pub(crate) fn no_neighbour_heights() -> &'static NeighbourHeights {
     static EMPTY: std::sync::OnceLock<NeighbourHeights> = std::sync::OnceLock::new();
     EMPTY.get_or_init(NeighbourHeights::default)
+}
+
+/// Whether a building stands raised off the ground on its `min_height` or
+/// `building:min_level`: a bridge between two houses rises with neither.
+fn lifted_off_the_ground(tags: &HashMap<String, String>) -> bool {
+    ["min_height", "building:min_level"].iter().any(|k| {
+        tags.get(*k)
+            .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+            .is_some_and(|v| v > 0.0)
+    })
 }
 
 /// Whether a building carries a height of its own: `height` or storeys.
@@ -6751,7 +6784,11 @@ fn neighbour_walls_m(
     if let Some(rise) = metres("roof:height").filter(|m| *m > 0.0) {
         return Some((height - rise).max(height.min(3.0)));
     }
-    // A low pitch over the shorter half-span, as the generator draws it.
+    // A low pitch over the shorter half-span, as the generator draws it. A
+    // piece of a multipolygon's outer ring has no area to tell it by.
+    if nodes.first().map(|n| n.id) != nodes.last().map(|n| n.id) {
+        return None;
+    }
     let mut diameter: f64 = 1.0;
     for (i, a) in nodes.iter().enumerate() {
         for b in &nodes[i + 1..] {
@@ -6788,7 +6825,11 @@ pub fn tagged_neighbour_heights(
             ProcessedElement::Way(w) if is_building(&w.tags) => {
                 if has_mapped_height(&w.tags) {
                     tagged.push((&w.nodes, &w.tags));
-                } else {
+                } else if may_rise_to_neighbours(
+                    w.tags.get("building").map_or("yes", String::as_str),
+                    &w.tags,
+                ) && !lifted_off_the_ground(&w.tags)
+                {
                     untagged.push(w);
                 }
             }
@@ -6860,6 +6901,215 @@ pub fn tagged_neighbour_heights(
         }
     }
     out
+}
+
+/// The step decisions of buildings that share a wall, made together: way id
+/// to the edges that step in, None for none. Buildings not in it decide alone.
+pub type InsetPlan = FnvHashMap<u64, Option<Vec<bool>>>;
+
+/// What the buildings learn of their neighbours before any is built.
+pub struct Neighbours {
+    /// Untagged buildings and the wall heights of the tagged ones they share a wall with.
+    pub heights: NeighbourHeights,
+    /// Which walls of attached buildings step in under the eave.
+    pub steps: InsetPlan,
+}
+
+/// An empty `InsetPlan`, for contexts without one.
+#[cfg(test)]
+pub(crate) fn no_inset_plan() -> &'static InsetPlan {
+    static EMPTY: std::sync::OnceLock<InsetPlan> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(InsetPlan::default)
+}
+
+/// Whether a building's walls may step in under its eave, as far as its tags
+/// and outline tell before its style is chosen: not a part, a garage or shed
+/// (whose roof is flat), lifted off the ground, turned off the grid, drawn
+/// from a cadastre or a photographed facade, nor under a mapped roof that
+/// hangs no eave.
+fn may_step_walls(way: &ProcessedWay) -> bool {
+    let tags = &way.tags;
+    let kind = tags.get("building").map_or("yes", String::as_str);
+    !tags.contains_key("building:part")
+        && !is_underground_building(tags)
+        && !is_accessory_building(kind)
+        && !lifted_off_the_ground(tags)
+        && !outline_is_turned(&way.nodes)
+        && !outline_traces_walls(tags)
+        && tags
+            .get("roof:shape")
+            .is_none_or(|shape| roof_has_eaves(parse_roof_type(shape)))
+        && !crate::mapillary::facades::has_building(way.id)
+}
+
+/// Edges of two buildings that run on as one wall past a node they share:
+/// (way, edge) of one, (way, edge) of the other, indices into `ways` and
+/// into each ring's edges.
+type WallRun = ((usize, usize), (usize, usize));
+
+/// Fronts and backs that run on past a party wall, found where two
+/// buildings share a node: each one's edge leaving the node that is not the
+/// party wall, the two in line.
+fn walls_running_on(ways: &[&ProcessedWay]) -> Vec<WallRun> {
+    // In line: within about 20 degrees, the two edges leaving opposite ways.
+    const IN_LINE: f64 = -0.94;
+    let mut index: Vec<(u64, u32)> = ways
+        .iter()
+        .enumerate()
+        .flat_map(|(i, w)| {
+            let n = w.nodes.len() - 1;
+            w.nodes[..n].iter().map(move |node| (node.id, i as u32))
+        })
+        .collect();
+    index.sort_unstable();
+    index.dedup();
+    let ids_of = |w: &ProcessedWay| {
+        let mut ids: Vec<u64> = w.nodes.iter().map(|n| n.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    };
+    // The edges at each place a ring passes a node, leaving it: (edge, direction).
+    let edges_at = |w: &ProcessedWay, id: u64| -> Vec<(usize, (f64, f64))> {
+        let n = w.nodes.len() - 1;
+        let mut out = Vec::new();
+        for k in (0..n).filter(|&k| w.nodes[k].id == id) {
+            let here = &w.nodes[k];
+            for (edge, other) in [
+                (k, &w.nodes[k + 1]),
+                ((k + n - 1) % n, &w.nodes[(k + n - 1) % n]),
+            ] {
+                let (dx, dz) = (f64::from(other.x - here.x), f64::from(other.z - here.z));
+                let len = dx.hypot(dz);
+                if len > 0.0 {
+                    out.push((edge, (dx / len, dz / len)));
+                }
+            }
+        }
+        out
+    };
+    let mut runs = Vec::new();
+    for group in index.chunk_by(|a, b| a.0 == b.0).filter(|g| g.len() >= 2) {
+        let id = group[0].0;
+        for (i, &(_, a)) in group.iter().enumerate() {
+            for &(_, b) in &group[i + 1..] {
+                let (wa, wb) = (ways[a as usize], ways[b as usize]);
+                let (ids_a, ids_b) = (ids_of(wa), ids_of(wb));
+                // An edge both ends of which the other ring has: the party wall.
+                let party = |w: &ProcessedWay, edge: usize, other: &[u64]| {
+                    [&w.nodes[edge], &w.nodes[edge + 1]]
+                        .iter()
+                        .all(|n| other.binary_search(&n.id).is_ok())
+                };
+                for (ea, da) in edges_at(wa, id) {
+                    if party(wa, ea, &ids_b) {
+                        continue;
+                    }
+                    for &(eb, db) in &edges_at(wb, id) {
+                        if !party(wb, eb, &ids_a) && da.0 * db.0 + da.1 * db.1 < IN_LINE {
+                            runs.push(((a as usize, ea), (b as usize, eb)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    runs
+}
+
+/// Which walls of attached buildings step in under the eave, decided for a
+/// row or pair at once: a front or back that runs on past a party wall steps
+/// on both sides of it or on neither, so a pair of semis or a house and the
+/// garage mapped flush with it keep one wall line. Alone, the smaller of two
+/// halves could keep its walls while its twin a block wider stepped in,
+/// leaving a one-block jog and the eave ending at the party wall.
+pub fn plan_attached_steps(
+    elements: &[crate::osm_parser::ProcessedElement],
+    cache: &FloodFillCache,
+    footprints: &CoordinateBitmap,
+    scale: f64,
+) -> InsetPlan {
+    use crate::osm_parser::ProcessedElement;
+    use rayon::prelude::*;
+    let mut plan = InsetPlan::default();
+    if scale < building_inset::MIN_INSET_SCALE {
+        return plan;
+    }
+    let ways: Vec<&ProcessedWay> = elements
+        .iter()
+        .filter_map(|e| match e {
+            ProcessedElement::Way(w)
+                if w.tags.contains_key("building")
+                    && w.nodes.len() >= 4
+                    && w.nodes.first().map(|n| n.id) == w.nodes.last().map(|n| n.id) =>
+            {
+                Some(w)
+            }
+            _ => None,
+        })
+        .collect();
+    let runs = walls_running_on(&ways);
+    if runs.is_empty() {
+        return plan;
+    }
+    let mut members: Vec<usize> = runs.iter().flat_map(|&(a, b)| [a.0, b.0]).collect();
+    members.sort_unstable();
+    members.dedup();
+    let slot = |w: usize| members.binary_search(&w).unwrap_or(0);
+    // Each member's fill, if it may step at all; then what it decides alone.
+    let fills: Vec<Option<crate::floodfill_cache::FloodFillResult>> = members
+        .par_iter()
+        .map(|&w| {
+            may_step_walls(ways[w])
+                .then(|| cache.transient_fill(ways[w].id))
+                .flatten()
+                .filter(|f| !f.is_empty())
+        })
+        .collect();
+    let mut off: Vec<Vec<bool>> = members
+        .iter()
+        .map(|&w| vec![false; ways[w].nodes.len() - 1])
+        .collect();
+    let decide = |m: usize, off: &[bool]| -> Option<Vec<bool>> {
+        let fill = fills[m].as_ref()?;
+        building_inset::step_plan(&ways[members[m]].nodes, fill, footprints, off)
+    };
+    let mut steps: Vec<Option<Vec<bool>>> = (0..members.len())
+        .into_par_iter()
+        .map(|m| decide(m, &off[m]))
+        .collect();
+    // An edge that steps against one that stays is kept; flags only ever
+    // turn off, so this settles.
+    loop {
+        let mut changed: Vec<usize> = Vec::new();
+        for &((a, ea), (b, eb)) in &runs {
+            let (ma, mb) = (slot(a), slot(b));
+            let steps_at = |m: usize, e: usize| steps[m].as_ref().is_some_and(|s| s[e]);
+            match (steps_at(ma, ea), steps_at(mb, eb)) {
+                (true, false) => {
+                    off[ma][ea] = true;
+                    changed.push(ma);
+                }
+                (false, true) => {
+                    off[mb][eb] = true;
+                    changed.push(mb);
+                }
+                _ => {}
+            }
+        }
+        if changed.is_empty() {
+            break;
+        }
+        changed.sort_unstable();
+        changed.dedup();
+        for m in changed {
+            steps[m] = decide(m, &off[m]);
+        }
+    }
+    for (m, step) in steps.into_iter().enumerate() {
+        plan.insert(ways[members[m]].id, step);
+    }
+    plan
 }
 
 /// Most storeys an untagged building rises to beside its neighbours: more
@@ -10940,13 +11190,30 @@ fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
 }
 
 /// Whether a building's outline came from a cadastre, which surveys the walls
-/// rather than the roof seen from the air: the German ALKIS and Kataster, the
-/// French cadastre, the Dutch BAG and Kadaster, the Austrian DKM and their
-/// kind. Its walls are on the outline already, and the eave hangs past it.
+/// rather than the roof seen from the air: the German ALKIS, Kataster and
+/// Hausumringe, the French cadastre, the Dutch BAG and Kadaster, the Austrian
+/// DKM, the Czech RUIAN, the Walloon PICC, the Flemish GRB and their kind. Its
+/// walls are on the outline already, and the eave hangs past it.
 fn outline_traces_walls(tags: &HashMap<String, String>) -> bool {
-    const SURVEYS: [&str; 6] = ["cadastr", "kadast", "katast", "catast", "alkis", "lantm"];
+    const SURVEYS: [&str; 10] = [
+        "cadastr",
+        "kadast",
+        "katast",
+        "catast",
+        "alkis",
+        "lantm",
+        "cuzk",
+        "ruian",
+        "hausumring",
+        "picc",
+    ];
     const REGISTERS: [&str; 2] = ["bag", "dkm"];
-    tags.contains_key("ref:bag")
+    ["ref:bag", "ref:ruian:building", "ref:bygningsnr"]
+        .iter()
+        .any(|k| tags.contains_key(*k))
+        || tags
+            .get("source:geometry:ref")
+            .is_some_and(|v| crate::osm_parser::grb_prefix(v).is_some())
         || tags
             .iter()
             .filter(|(k, _)| k.as_str() == "source" || k.starts_with("source:"))
@@ -11027,6 +11294,24 @@ impl TentFrame {
 
     fn v_axis(&self) -> (f64, f64) {
         (-self.angle.sin(), self.angle.cos())
+    }
+}
+
+/// Whether an outline is longer along its frame's u axis (x where it has no
+/// tent) than across it, as `ridge_frame` reads it: ties go along u.
+fn longer_along_u(nodes: &[ProcessedNode]) -> bool {
+    match tent_frame(nodes) {
+        Some(t) => t.u_max - t.u_min >= t.v_max - t.v_min,
+        None => {
+            let span = |f: fn(&ProcessedNode) -> i32| {
+                let (lo, hi) = nodes
+                    .iter()
+                    .map(f)
+                    .fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                hi - lo
+            };
+            span(|n| n.x) >= span(|n| n.z)
+        }
     }
 }
 
@@ -14390,9 +14675,12 @@ pub fn generate_buildings(
         Some(neighbours_m)
             if relation_levels.is_none()
                 && min_level == 0
+                // Nor one lifted off the ground by its `min_height`.
+                && min_level_offset == 0
                 && !has_mapped_height(&element.tags)
-                // Garages, sheds and small boxes beside a house stay low.
-                && !is_accessory_building(building_type)
+                // Garages, kiosks, bungalows, conservatories and small boxes
+                // beside a house stay low.
+                && may_rise_to_neighbours(building_type, &element.tags)
                 && cached_footprint_size as f64 >= MIN_RISING_M2 * scale_factor * scale_factor
                 && matches!(
                     infer_building_height(
@@ -14705,8 +14993,15 @@ pub fn generate_buildings(
         && !outline_traces_walls(&element.tags)
         // A photographed facade is fitted to the mapped wall line.
         && !crate::mapillary::facades::has_building(element.id))
-    .then(|| {
-        building_inset::inset_outline(&element.nodes, &cached_floor_area, ctx.building_footprints)
+    // A building against its neighbours steps as the plan made for them all.
+    .then(|| match ctx.inset_plan.get(&element.id) {
+        Some(Some(step)) => building_inset::inset_planned(&element.nodes, &cached_floor_area, step),
+        Some(None) => None,
+        None => building_inset::inset_outline(
+            &element.nodes,
+            &cached_floor_area,
+            ctx.building_footprints,
+        ),
     })
     .flatten();
     // The stepped ring, the cells inside it, and the strip between it and the
@@ -15661,15 +15956,21 @@ pub fn generate_buildings(
     );
     if style.generate_roof && !skip_roof {
         // Terraced fabric prefers its ridge parallel to the fronting street.
+        // Its front is the outline's: stepped walls choose none of their own.
+        let front_plan = outline_facade.as_ref().unwrap_or(&facade);
         let preferred_ridge_along_x =
             if matches!(building_type, "terrace" | "semidetached_house") || roof_ctx.attached {
-                facade
+                front_plan
                     .front_segment
-                    .and_then(|i| facade.segments[i].as_ref())
+                    .and_then(|i| front_plan.segments[i].as_ref())
                     .map(|seg| seg.normal.0 == 0)
             } else {
                 None
-            };
+            }
+            // Else the ridge runs along the outline's longer side: a half
+            // that kept its width but stepped its front and back must not
+            // turn its ridge across its twin's.
+            .or_else(|| inset_way.is_some().then(|| longer_along_u(&outline.nodes)));
         let covered_by_sibling_part = roof_ctx.enclosed
             || (is_part
                 && cached_floor_area
@@ -21166,6 +21467,57 @@ mod height_tests {
         assert_eq!(h, 17); // 5 levels * 3 + 2
     }
 
+    // Only the main buildings of a street rise towards taller neighbours: a
+    // bungalow beside flats (Munich, Ostermayrstrasse) kept one storey, and a
+    // kiosk, conservatory or garage stays as low as it is.
+    #[test]
+    fn only_main_buildings_rise_to_their_neighbours() {
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        for kind in [
+            "yes",
+            "house",
+            "terrace",
+            "apartments",
+            "commercial",
+            "hotel",
+        ] {
+            assert!(
+                may_rise_to_neighbours(kind, &tags(&[("building", kind)])),
+                "{kind}"
+            );
+        }
+        for kind in [
+            "bungalow",
+            "kiosk",
+            "conservatory",
+            "garage",
+            "carport",
+            "shed",
+            "service",
+            "toilets",
+            "outbuilding",
+            "allotment_house",
+            "boathouse",
+            "ruins",
+            "construction",
+            "bridge",
+        ] {
+            assert!(
+                !may_rise_to_neighbours(kind, &tags(&[("building", kind)])),
+                "{kind}"
+            );
+        }
+        let site = tags(&[("building", "yes"), ("construction:building", "house")]);
+        assert!(!may_rise_to_neighbours("yes", &site));
+        let ruin = tags(&[("building", "house"), ("ruins", "yes")]);
+        assert!(!may_rise_to_neighbours("house", &ruin));
+    }
+
     // A garage, carport or shed of one storey stands three blocks high, as an
     // untagged one does, not a storey and a raised ground floor that put a
     // carport level with the eaves of the house beside it (Erding). Two
@@ -21332,6 +21684,126 @@ mod height_tests {
         assert!(tagged_neighbour_heights(&[raised, infill], 1.0).is_empty());
     }
 
+    // Only a main building of the street, standing on the ground, looks to its
+    // neighbours: a bungalow, a kiosk or a bridge lifted on its `min_height`
+    // between two houses keeps its own height.
+    /// Closed rings through numbered nodes, for buildings sharing some.
+    fn ring_way(
+        id: u64,
+        ring: &[(u64, i32, i32)],
+        tags: &[(&str, &str)],
+    ) -> crate::osm_parser::ProcessedElement {
+        let mut nodes: Vec<ProcessedNode> = ring
+            .iter()
+            .map(|&(id, x, z)| ProcessedNode {
+                id,
+                tags: HashMap::new(),
+                x,
+                z,
+            })
+            .collect();
+        nodes.push(nodes[0].clone());
+        crate::osm_parser::ProcessedElement::Way(ProcessedWay {
+            id,
+            nodes,
+            tags: tags
+                .iter()
+                .map(|&(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        })
+    }
+
+    fn plan_for(elements: &[crate::osm_parser::ProcessedElement]) -> InsetPlan {
+        let bbox = crate::coordinate_system::cartesian::XZBBox::rect_from_xz_lengths(100.0, 100.0)
+            .unwrap();
+        let cache = FloodFillCache::precompute(elements, None);
+        let footprints = cache.collect_building_footprints(elements, &bbox);
+        plan_attached_steps(elements, &cache, &footprints, 1.0)
+    }
+
+    // A pair of semis steps its front on both halves or on neither: a shed two
+    // blocks before the west half keeps its front on the line, and the east
+    // half's front, which runs on from it, stays there too.
+    #[test]
+    fn attached_halves_step_their_fronts_together() {
+        let house = [("building", "house")];
+        let west = ring_way(
+            1,
+            &[(1, 10, 10), (2, 20, 10), (3, 20, 22), (4, 10, 22)],
+            &house,
+        );
+        let east = ring_way(
+            2,
+            &[(2, 20, 10), (5, 30, 10), (6, 30, 22), (3, 20, 22)],
+            &house,
+        );
+        let shed = ring_way(
+            3,
+            &[(7, 12, 24), (8, 16, 24), (9, 16, 28), (10, 12, 28)],
+            &[("building", "shed")],
+        );
+        let plan = plan_for(&[west.clone(), east.clone(), shed]);
+        // Edges: north, east, south, west.
+        assert_eq!(plan[&1], Some(vec![true, false, false, true]));
+        assert_eq!(plan[&2], Some(vec![true, true, false, false]));
+        // Without the shed both fronts step.
+        let plan = plan_for(&[west, east]);
+        assert_eq!(plan[&1], Some(vec![true, false, true, true]));
+        assert_eq!(plan[&2], Some(vec![true, true, true, false]));
+    }
+
+    // A garage mapped flush with its house keeps its walls, and so does the
+    // house front it runs on from: the garage no longer stands a block proud.
+    #[test]
+    fn a_house_front_running_on_into_its_garage_stays_on_the_line() {
+        let house = ring_way(
+            1,
+            &[
+                (1, 10, 10),
+                (2, 20, 10),
+                (3, 20, 14),
+                (4, 20, 22),
+                (5, 10, 22),
+            ],
+            &[("building", "house")],
+        );
+        let garage = ring_way(
+            2,
+            &[(3, 20, 14), (6, 26, 14), (7, 26, 22), (4, 20, 22)],
+            &[("building", "garage")],
+        );
+        let plan = plan_for(&[house, garage]);
+        assert_eq!(plan[&2], None);
+        let house = plan[&1].as_ref().expect("the house steps elsewhere");
+        // North and west step; the front, south, stays with the garage's.
+        assert!(house[0] && house[4], "{house:?}");
+        assert!(!house[3], "{house:?}");
+    }
+
+    #[test]
+    fn low_kinds_and_lifted_buildings_take_no_neighbour_heights() {
+        let flats = square_way(
+            2,
+            0,
+            &[("building", "apartments"), ("building:levels", "5")],
+        );
+        for tags in [
+            &[("building", "bungalow")][..],
+            &[("building", "kiosk")][..],
+            &[("building", "bridge"), ("min_height", "5")][..],
+            &[("building", "yes"), ("min_height", "5")][..],
+            &[("building", "yes"), ("building:min_level", "1")][..],
+        ] {
+            let low = square_way(1, 10, tags);
+            assert!(
+                tagged_neighbour_heights(&[flats.clone(), low], 1.0).is_empty(),
+                "{tags:?}"
+            );
+        }
+        let house = square_way(1, 10, &[("building", "house")]);
+        assert!(tagged_neighbour_heights(&[flats, house], 1.0).contains_key(&1));
+    }
+
     // A building multipolygon's outer ring is a neighbour like a way.
     #[test]
     fn building_multipolygons_count_as_neighbours() {
@@ -21353,8 +21825,26 @@ mod height_tests {
             }],
         });
         let infill = square_way(1, 10, &[("building", "yes")]);
-        let heights = tagged_neighbour_heights(&[relation, infill], 1.0);
+        let heights = tagged_neighbour_heights(&[relation, infill.clone()], 1.0);
         assert_eq!(heights.get(&1).map(Vec::as_slice), Some(&[14.0][..]));
+        // A piece of an outer ring split over several ways has no area to
+        // take a roof's pitch off its `height` by, and is left out.
+        let ProcessedElement::Way(mut piece) = square_way(9, 0, &[]) else {
+            unreachable!()
+        };
+        piece.nodes.truncate(4);
+        let relation = ProcessedElement::Relation(ProcessedRelation {
+            id: 2,
+            tags: [("building", "yes"), ("height", "14")]
+                .iter()
+                .map(|&(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            members: vec![ProcessedMember {
+                role: ProcessedMemberRole::Outer,
+                way: std::sync::Arc::new(piece),
+            }],
+        });
+        assert!(tagged_neighbour_heights(&[relation, infill], 1.0).is_empty());
     }
 
     // Beside lower neighbours an untagged house keeps its storeys; beside
@@ -22782,6 +23272,17 @@ mod style_tests {
         ]));
         assert!(src(&[("source", "3dshapes;BAG")]));
         assert!(src(&[("source:outline", "basemap.at;DKM")]));
+        // Prague, Berlin, Liege and Ghent, as their outlines are tagged.
+        assert!(src(&[("source", "cuzk:ruian")]));
+        assert!(src(&[("source", "cuzk:km")]));
+        assert!(src(&[("building", "yes"), ("ref:ruian:building", "")]));
+        assert!(src(&[("source", "Geoportal Berlin / Hausumringe")]));
+        assert!(src(&[(
+            "source",
+            "20cm-near PICC http://geoportail.wallonie.be "
+        )]));
+        assert!(src(&[("source:geometry:ref", "Gbg/")]));
+        assert!(src(&[("building", "house"), ("ref:bygningsnr", "")]));
         assert!(!src(&[("source", "Bing")]));
         assert!(!src(&[("source", "survey")]));
         assert!(!src(&[("source", "esri/World_Imagery; bagnoli survey")]));
@@ -25925,6 +26426,7 @@ mod facade_integration_tests {
             group_members: &groups,
             housing_relation_parts: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+            inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses:
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
@@ -25978,6 +26480,7 @@ mod facade_integration_tests {
             group_members: &groups,
             housing_relation_parts: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+            inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses:
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
@@ -26203,6 +26706,7 @@ mod facade_integration_tests {
                 group_members: &FnvHashMap::default(),
                 housing_relation_parts: housing,
                 neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+                inset_plan: crate::element_processing::buildings::no_inset_plan(),
                 interior_uses:
                     crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
             };
@@ -26924,6 +27428,7 @@ mod facade_integration_tests {
                 group_members: &groups,
                 housing_relation_parts: &Default::default(),
                 neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+                inset_plan: crate::element_processing::buildings::no_inset_plan(),
                 interior_uses:
                     crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
             };
@@ -28069,6 +28574,7 @@ mod facade_dump {
                     group_members: &groups,
                     housing_relation_parts: &Default::default(),
                     neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+                    inset_plan: crate::element_processing::buildings::no_inset_plan(),
                     interior_uses:
                         crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
                 };
@@ -28246,6 +28752,7 @@ mod doorstep_tests {
             group_members: &groups,
             housing_relation_parts: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+            inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses:
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };

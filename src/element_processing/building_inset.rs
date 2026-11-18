@@ -292,24 +292,121 @@ pub(crate) fn inset_outline(
     fill: &[(i32, i32)],
     footprints: &CoordinateBitmap,
 ) -> Option<OutlineInset> {
+    let (own, outline) = own_and_outline(nodes, fill)?;
+    decide(nodes, &own, &outline, footprints, &[]).map(|(_, inset)| inset)
+}
+
+/// Which edges `inset_outline` steps in, with the edges flagged in `off` kept
+/// on the outline whatever their neighbours: None where it keeps them all.
+/// Buildings sharing a wall decide together, a front that runs on past a
+/// party wall stepping on both sides of it or on neither.
+pub(crate) fn step_plan(
+    nodes: &[ProcessedNode],
+    fill: &[(i32, i32)],
+    footprints: &CoordinateBitmap,
+    off: &[bool],
+) -> Option<Vec<bool>> {
+    let (own, outline) = own_and_outline(nodes, fill)?;
+    decide(nodes, &own, &outline, footprints, off).map(|(step, _)| step)
+}
+
+/// The walls stepped in along the edges a `step_plan` gave.
+pub(crate) fn inset_planned(
+    nodes: &[ProcessedNode],
+    fill: &[(i32, i32)],
+    step: &[bool],
+) -> Option<OutlineInset> {
+    let (own, outline) = own_and_outline(nodes, fill)?;
+    inset_with(nodes, &own, &outline, step)
+}
+
+/// The fill as a set, and the outline's own cells: the fill and the wall
+/// line, which a fill need not cover where it runs off the grid.
+#[allow(clippy::type_complexity)]
+fn own_and_outline(
+    nodes: &[ProcessedNode],
+    fill: &[(i32, i32)],
+) -> Option<(FnvHashSet<(i32, i32)>, FnvHashSet<(i32, i32)>)> {
     if fill.is_empty() {
         return None;
     }
     let own: FnvHashSet<(i32, i32)> = fill.iter().copied().collect();
-    // The outline's own cells: the fill and the wall line, which a fill
-    // need not cover where it runs off the grid.
     let mut outline = own.clone();
     outline.extend(ring_cells(nodes));
+    Some((own, outline))
+}
+
+/// The edges that step and the walls they give, edges in `off` kept.
+fn decide(
+    nodes: &[ProcessedNode],
+    own: &FnvHashSet<(i32, i32)>,
+    outline: &FnvHashSet<(i32, i32)>,
+    footprints: &CoordinateBitmap,
+    off: &[bool],
+) -> Option<(Vec<bool>, OutlineInset)> {
+    let masked = |mut flags: Vec<bool>| {
+        for (f, &o) in flags.iter_mut().zip(off) {
+            *f &= !o;
+        }
+        flags
+    };
     // A building steps in only where it does with its neighbours read from
     // their insides alone, so keeping a wall a cell from a neighbour on the
     // line never lets one that kept all its walls step some of them in.
-    let near = free_edges_by(nodes, &outline, footprints, false);
-    let first = inset_with(nodes, &own, &outline, &near)?;
-    let step = free_edges(nodes, &outline, footprints);
-    if step == near {
-        return Some(first);
-    }
-    inset_with(nodes, &own, &outline, &step)
+    let near_free = free_edges_by(nodes, outline, footprints, false);
+    let near = masked(near_free.clone());
+    let step = masked(free_edges(nodes, outline, footprints));
+    let attempt = |near: &[bool], step: &[bool]| -> Option<(Vec<bool>, OutlineInset)> {
+        let first = inset_with(nodes, own, outline, near)?;
+        if step == near {
+            return Some((near.to_vec(), first));
+        }
+        inset_with(nodes, own, outline, step).map(|inset| (step.to_vec(), inset))
+    };
+    attempt(&near, &step).or_else(|| {
+        // A house against its neighbour that the step would make too
+        // narrow keeps its width, as a terraced one does: only the walls
+        // across the party wall, its front and back, step in. Its twin of a
+        // block more steps there too, and the pair reads as one.
+        let keep = width_kept(nodes, &near_free);
+        if !keep.iter().any(|&k| k) {
+            return None;
+        }
+        let kept = |flags: &[bool]| -> Vec<bool> {
+            flags.iter().zip(&keep).map(|(&f, &k)| f && !k).collect()
+        };
+        attempt(&kept(&near), &kept(&step))
+    })
+}
+
+/// Edges that run alongside a party wall (an edge not free in `free`): the
+/// far gable of a house against its neighbour, which keeps its width when
+/// it stays on the outline.
+fn width_kept(nodes: &[ProcessedNode], free: &[bool]) -> Vec<bool> {
+    let dirs: Vec<Option<(f64, f64)>> = nodes
+        .windows(2)
+        .map(|w| {
+            let (dx, dz) = (f64::from(w[1].x - w[0].x), f64::from(w[1].z - w[0].z));
+            let len = dx.hypot(dz);
+            (len > 0.0).then(|| (dx / len, dz / len))
+        })
+        .collect();
+    let party: Vec<(f64, f64)> = dirs
+        .iter()
+        .zip(free)
+        .filter(|(_, &f)| !f)
+        .filter_map(|(d, _)| *d)
+        .collect();
+    dirs.iter()
+        .zip(free)
+        .map(|(d, &f)| {
+            f && d.is_some_and(|(x, z)| {
+                party
+                    .iter()
+                    .any(|&(px, pz)| (x * pz - z * px).abs() < STRAIGHT_SINE)
+            })
+        })
+        .collect()
 }
 
 /// The walls stepped in along the edges flagged in `step`, or None where the
@@ -402,6 +499,29 @@ mod tests {
         // Inside the walls, as a flood fill gives it.
         assert_eq!(inset.fill.len(), 11 * 9);
         assert_eq!(inset.strip.len(), 15 * 13 - 13 * 11);
+    }
+
+    // Nine blocks wide against its twin, a half stepped on three sides would
+    // be eight, too narrow for a house: it keeps its width and steps its
+    // front and back, as its twin of ten does, so the pair keeps one front.
+    #[test]
+    fn a_half_too_narrow_to_step_all_round_keeps_its_width() {
+        let way = rect_way(1, 10, 10, 18, 22, &[("building", "house")]);
+        let fill = fill_of(&way.nodes);
+        let mut footprints = bitmap_with_rect(&bbox(), 10, 10, 18, 22);
+        for x in 18..=27 {
+            for z in 10..=22 {
+                footprints.set(x, z);
+            }
+        }
+        let inset = inset_outline(&way.nodes, &fill, &footprints).unwrap();
+        assert_eq!(
+            corners(&inset.nodes),
+            vec![(10, 11), (18, 11), (18, 21), (10, 21), (10, 11)]
+        );
+        // Standing free, it is too small to step at all.
+        let alone = bitmap_with_rect(&bbox(), 10, 10, 18, 22);
+        assert!(inset_outline(&way.nodes, &fill, &alone).is_none());
     }
 
     #[test]

@@ -62,6 +62,14 @@ const IGNORED_PREFIXES: &[&str] = &[
     "check_date:",
 ];
 
+/// The prefix of a Flemish GRB building (`Gbg/`) or annex (`Gba/`) in a
+/// `source:geometry:ref`: an outline surveyed at its walls.
+pub(crate) fn grb_prefix(value: &str) -> Option<&'static str> {
+    ["Gbg/", "Gba/"]
+        .into_iter()
+        .find(|p| value.trim_start().starts_with(p))
+}
+
 fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
     // start_date is otherwise filtered, but on buildings the construction year picks the facade style.
     let keep_start_date = tags.contains_key("building") || tags.contains_key("building:part");
@@ -78,6 +86,23 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
             )
         {
             return true;
+        }
+        // So does a Czech RUIAN or Norwegian cadastre building number, of
+        // which only the key is read.
+        if keep_start_date && matches!(k.as_str(), "ref:ruian:building" | "ref:bygningsnr") {
+            v.clear();
+            return true;
+        }
+        // And a Flemish GRB survey object (`Gbg/`, `Gba/`), of which only
+        // that prefix is read.
+        if keep_start_date && k == "source:geometry:ref" {
+            return match grb_prefix(v) {
+                Some(prefix) => {
+                    *v = prefix.to_string();
+                    true
+                }
+                None => false,
+            };
         }
         // The house number feeds the door plate; the rest of addr:* stays out.
         if k == "addr:housenumber" {
@@ -4655,6 +4680,37 @@ mod lifecycle_tests {
         );
         assert!(kept.contains_key("ref:bag"));
         assert!(!kept.contains_key("source:date"));
+        // Cadastre building numbers keep their key alone, a GRB reference its
+        // prefix alone, and neither survives off a building.
+        let prague = filter_tags(tags(&[
+            ("building", "yes"),
+            ("ref:ruian:building", "21642028"),
+            ("ref:ruian:addr", "123"),
+        ]));
+        assert_eq!(
+            prague.get("ref:ruian:building").map(String::as_str),
+            Some("")
+        );
+        assert!(!prague.contains_key("ref:ruian:addr"));
+        let oslo = filter_tags(tags(&[
+            ("building", "house"),
+            ("ref:bygningsnr", "80012345"),
+        ]));
+        assert_eq!(oslo.get("ref:bygningsnr").map(String::as_str), Some(""));
+        let ghent = filter_tags(tags(&[
+            ("building", "house"),
+            ("source:geometry:ref", "Gbg/1234567"),
+            ("source:geometry:date", "2015-10-01"),
+        ]));
+        assert_eq!(
+            ghent.get("source:geometry:ref").map(String::as_str),
+            Some("Gbg/")
+        );
+        assert!(!ghent.contains_key("source:geometry:date"));
+        let other = filter_tags(tags(&[("building", "yes"), ("source:geometry:ref", "abc")]));
+        assert!(!other.contains_key("source:geometry:ref"));
+        let road = filter_tags(tags(&[("highway", "service"), ("ref:bygningsnr", "1")]));
+        assert!(!road.contains_key("ref:bygningsnr"));
         let road = filter_tags(tags(&[("highway", "residential"), ("source", "Bing")]));
         assert!(!road.contains_key("source"));
     }

@@ -507,6 +507,7 @@ mod tests {
             group_members: &groups,
             housing_relation_parts: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+            inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses: &index,
         };
         let args = interior_args();
@@ -1022,6 +1023,7 @@ mod tests {
             group_members: &groups,
             housing_relation_parts: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+            inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses: InteriorUseIndex::empty(),
         };
         generate_buildings(
