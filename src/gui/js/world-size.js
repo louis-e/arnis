@@ -19,7 +19,8 @@ export function sizeRequest({ km2, scale = 1, body = 'earth', format = 'java', m
     dhLod: dh,
     caves: cave,
     fillground: fill || cave || shake,
-    tall: tall && earth,
+    // Only Java builds deeper with the extended height; Bedrock raises its top alone.
+    tall: tall && earth && format === 'java',
     groundLevel: shake ? Math.max(groundLevel, -40) : groundLevel,
   };
 }

@@ -2,7 +2,7 @@
 // control marked meld-only is hidden and generation gets no flags, so it runs as stock.
 
 import { interfaceLocale, languageTag } from './language.js';
-import { rangeText } from './world-size.js';
+import { formatMb, rangeText } from './world-size.js';
 
 const el = (id) => document.getElementById(id);
 const value = (id) => (el(id) ? el(id).value.trim() : '');
@@ -846,8 +846,6 @@ export function selectWithRing(bounds, oneWorld, skipBuilt = false) {
   return changed;
 }
 
-const gb = (mbs) => (mbs >= 1048576 ? `${(mbs / 1048576).toFixed(1)} TB` : mbs >= 1024 ? `${(mbs / 1024).toFixed(1)} GB` : `${Math.round(mbs)} MB`);
-
 // Rounded so a time never claims more than it knows: 5 s
 // steps, then minutes, then 10 minutes.
 const minutes = (m) => {
@@ -869,11 +867,11 @@ export function planHead(e, more) {
   const ram = mid(e.ram_mb) * (e.workers || 1);
   for (const [kind, key, tip, text] of [
     ['time', 'plan_time_tip', 'Time (estimate, warm caches)', `≈ ${longTime(e.time_min[1] >= 600)(mid(e.time_min))}`],
-    ['ram', 'plan_ram_tip', 'Memory per worker', `≈ ${gb(ram)} RAM`],
-    ['disk', 'plan_disk_tip', 'Disk space', `≈ ${gb(mid(e.disk_mb))}`],
+    ['ram', 'plan_ram_tip', 'Memory per worker', `≈ ${formatMb(ram)} RAM`],
+    ['disk', 'plan_disk_tip', 'Disk space', `≈ ${formatMb(mid(e.disk_mb))}`],
   ]) head.append(Object.assign(div(`plan-stat plan-stat-${kind}`, text), { title: t(key, tip) }));
   const tip = Object.assign(div('plan-tip', ''), { id: 'plan-tip', role: 'tooltip' });
-  tip.append(...[`${rangeText(e.time_min, longTime(e.time_min[1] >= 600))} · ${rangeText(e.disk_mb, gb)}`, ...more].map((x) => div('', x)));
+  tip.append(...[`${rangeText(e.time_min, longTime(e.time_min[1] >= 600))} · ${rangeText(e.disk_mb, formatMb)}`, ...more].map((x) => div('', x)));
   // The one "?": hover or focus shows the details; a click holds them open, with the legend card (showPlan).
   const help = Object.assign(document.createElement('button'), { type: 'button', className: 'tooltip-icon plan-help', id: 'legend-help', textContent: '?', title: t('plan_more', 'Details') });
   help.setAttribute('aria-describedby', 'plan-tip');
@@ -889,8 +887,8 @@ export function planHead(e, more) {
   head.help = help;
   const fits = e.free_disk_mb == null ? null : e.disk_mb[1] <= e.free_disk_mb;
   const disk = div(`plan-disk${fits === false ? ' is-low' : ''}`, fits == null ? '' : fits
-    ? t('plan_disk_fits', 'Fits: {free} free', { free: gb(e.free_disk_mb) })
-    : t('plan_disk_short', 'Needs {need}, {free} free on this disk', { need: rangeText(e.disk_mb, gb), free: gb(e.free_disk_mb) }));
+    ? t('plan_disk_fits', 'Fits: {free} free', { free: formatMb(e.free_disk_mb) })
+    : t('plan_disk_short', 'Needs {need}, {free} free on this disk', { need: rangeText(e.disk_mb, formatMb), free: formatMb(e.free_disk_mb) }));
   disk.hidden = fits == null;
   return [head, disk];
 }
@@ -1076,7 +1074,7 @@ async function updatePlan() {
       ...(ring ? [t('plan_ring', 'ring {n}', { n: ring })] : []),
       tn('plan_workers', '{n} workers', '{n} worker', e.workers),
     ].join(' · '),
-    `${t('plan_ram_tip', 'Memory per worker')}: ${rangeText(e.ram_mb, gb)}`,
+    `${t('plan_ram_tip', 'Memory per worker')}: ${rangeText(e.ram_mb, formatMb)}`,
   ]), units.some((u) => u.ring), single);
   if (single && !pieces.size) {
     postToMap({ type: 'pieceOutlines', pieces: [] });
@@ -1762,12 +1760,12 @@ export function groundLevelFor({ advanced, typed, earth, oneWorld, terrain, worl
   return { level: advanced && !why ? typedGroundLevel(typed) : DEFAULT_GROUND_LEVEL, why };
 }
 
-// Lowest / Highest Y snap to whole sections and Ground Level into its range; a greyed field keeps the One World value it shows.
-function snapY(id, lo, hi, off, step = 16) {
+// Lowest / Highest Y snap to whole sections and Ground Level into its range; greyed, Ground Level keeps the One World level it shows.
+function snapY(id, lo, hi, off, step = 16, keepGreyed = false) {
   const el = typeof document !== 'undefined' && document.getElementById && document.getElementById(id);
   if (!el || !el.addEventListener) return;
   el.addEventListener('change', () => {
-    if (el.disabled) return;
+    if (keepGreyed && el.disabled) return;
     const v = parseInt(el.value, 10);
     const s = Number.isFinite(v) ? String(Math.min(hi, Math.max(lo, Math.round((v - off) / step) * step + off))) : '';
     if (s === el.value) return;
@@ -1777,4 +1775,4 @@ function snapY(id, lo, hi, off, step = 16) {
 }
 snapY('meld-min-y-input', -2032, -64, 0);
 snapY('meld-max-y-input', 319, 2031, -1);
-snapY('meld-ground-level-input', DEFAULT_GROUND_LEVEL, GROUND_LEVEL_MAX, 0, 1);
+snapY('meld-ground-level-input', DEFAULT_GROUND_LEVEL, GROUND_LEVEL_MAX, 0, 1, true);

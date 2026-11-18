@@ -26,6 +26,7 @@ assert.deepStrictEqual([moon.caves, moon.interior, moon.fillground, moon.tall, m
 assert.ok(Math.abs(sizeRequest({ km2: 87827, body: 'mars' }).blocksKm2 - 0.3513) < 0.001);
 // Bedrock is asked; Luanti, Hytale and no area are not.
 assert.strictEqual(sizeRequest({ km2: 1, format: 'bedrock' }).worldFormat, 'bedrock');
+assert.strictEqual(sizeRequest({ km2: 1, format: 'bedrock', caves: true }).tall, false, 'Bedrock does not build deeper');
 for (const format of ['luanti_mineclonia', 'hytale']) assert.strictEqual(sizeRequest({ km2: 1, format }), null);
 assert.strictEqual(sizeRequest({ km2: 0 }), null);
 

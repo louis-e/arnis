@@ -12,16 +12,16 @@ const { planHead } = await import('../../src/gui/js/meld-features.js');
 const huge = { disk_mb: [3.8 * 1048576, 4.6 * 1048576], ram_mb: [552, 704], time_min: [47 * 60 + 50, 139 * 60 + 10], workers: 4 };
 const stats = (e) => planHead(e, []).at(0).children.filter((c) => c.className.startsWith('plan-stat')).map((c) => c.textContent);
 assert.deepStrictEqual(stats(huge), ['≈ 94 h', '≈ 2.5 GB RAM', '≈ 4.2 TB'], 'one midpoint each, long jobs in hours');
-assert.deepStrictEqual(stats({ ...huge, time_min: [3, 40], disk_mb: [300, 450] }), ['≈ 22 min', '≈ 2.5 GB RAM', '≈ 375 MB']);
+assert.deepStrictEqual(stats({ ...huge, time_min: [3, 40], disk_mb: [300, 450] }), ['≈ 22 min', '≈ 2.5 GB RAM', '≈ 380 MB']);
 
 // Disk line both ways.
 const disk = (e) => planHead(e, []).at(1);
 const no = disk({ ...huge, free_disk_mb: 48.1 * 1024 });
 assert.ok(no.className.includes('is-low') && !no.hidden, 'does not fit: red line');
-assert.strictEqual(no.textContent, 'Needs 3.8–4.6 TB, 48.1 GB free on this disk');
+assert.strictEqual(no.textContent, 'Needs 3.8–4.6 TB, 48 GB free on this disk');
 const yes = disk({ ...huge, disk_mb: [120 * 1024, 150 * 1024], free_disk_mb: 412 * 1024 });
 assert.ok(!yes.className.includes('is-low') && !yes.hidden);
-assert.strictEqual(yes.textContent, 'Fits: 412.0 GB free');
+assert.strictEqual(yes.textContent, 'Fits: 410 GB free');
 assert.ok(disk(huge).hidden, 'free space unknown: no line');
 
 // Fit model: 11px semibold ~6.5px a character, each stat + 16px (icon and gap), the "?" 16px,

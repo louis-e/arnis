@@ -4,8 +4,10 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 
 // The field, so the snap the module wires up on import can be driven.
-const field = { value: '', disabled: false, listeners: [], addEventListener(type, fn) { if (type === 'change') this.listeners.push(fn); }, dispatchEvent() { this.listeners.forEach((fn) => fn()); } };
-globalThis.document = { querySelector: () => null, addEventListener() {}, getElementById: (id) => (id === 'meld-ground-level-input' ? field : null) };
+const fakeField = () => ({ value: '', disabled: false, listeners: [], addEventListener(type, fn) { if (type === 'change') this.listeners.push(fn); }, dispatchEvent() { this.listeners.forEach((fn) => fn()); } });
+const field = fakeField();
+const lowest = fakeField();
+globalThis.document = { querySelector: () => null, addEventListener() {}, getElementById: (id) => ({ 'meld-ground-level-input': field, 'meld-min-y-input': lowest })[id] || null };
 globalThis.window = { addEventListener() {} };
 const { typedGroundLevel, groundLevelFor, DEFAULT_GROUND_LEVEL } = await import('../../src/gui/js/meld-features.js');
 
@@ -40,6 +42,11 @@ assert.strictEqual(type('63'), '63');
 assert.strictEqual(type('abc'), '');
 field.disabled = true;
 assert.strictEqual(type('-500'), '-500');
+// Lowest Y still snaps to a section line while greyed, as it always did.
+lowest.disabled = true;
+lowest.value = '-100';
+lowest.dispatchEvent();
+assert.strictEqual(lowest.value, '-96');
 
 // In the World group beside Lowest Y, with Advanced features only, no "New!" badge, the label every locale has, and stored like its neighbours.
 const html = fs.readFileSync(new URL('../../src/gui/index.html', import.meta.url), 'utf8');

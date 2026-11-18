@@ -465,13 +465,19 @@ const DH_MIB: f64 = 8.0;
 /// Filled ground and caves on flat land, and per block of rock under the default level's.
 const FILL_FLAT: (f64, f64) = (0.1, 0.03);
 const CAVES_FLAT: (f64, f64) = (1.5, 0.22);
-/// The same in the Alps, at vanilla height and with the extended build height.
+/// The same in the Alps, at vanilla height and with Java's extended build height.
 const FILL_ALPS: (f64, f64) = (8.0, 20.0);
 const CAVES_ALPS: (f64, f64) = (26.0, 48.0);
 /// A finished Bedrock .mcworld against the Java world.
 const BEDROCK_SHARE: f64 = 0.45;
-/// Most the measured worlds came above the table: Bedrock's forest 1.39.
-const LANDSCAPE_SPREAD: f64 = 1.4;
+/// The most a measured world needed beyond the table, which the disk check charges instead:
+/// the Black Forest 21.7, Manhattan's interiors +16.5.
+const BASE_WORST_MIB: f64 = 22.0;
+const INTERIOR_WORST_MIB: f64 = 17.0;
+/// Bedrock holds its staging folder and the .mcworld at once, Luanti its map.sqlite: at the
+/// peak of a run the most measured was 0.77 and 0.75 of the Java world.
+const BEDROCK_PEAK_SHARE: f64 = 0.78;
+const OTHER_PEAK_SHARE: f64 = 0.75;
 
 /// Rock between `level` and the bedrock plane 64 under it, on a section line, never below -64.
 fn rock_under(level: i32) -> f64 {
@@ -479,12 +485,22 @@ fn rock_under(level: i32) -> f64 {
     f64::from(level - floor.max(crate::world_editor::DEFAULT_MIN_Y))
 }
 
-/// MiB per km² of blocks of a finished Java world, on flat land and in the Alps.
-fn java_mib_per_km2(o: WorldSizeOptions) -> (f64, f64) {
+/// MiB per km² of blocks of a finished Java world, on flat land and in the Alps; `worst` takes
+/// the costliest measured landscape and interiors instead of the usual ones.
+fn java_mib_per_km2(
+    o: WorldSizeOptions,
+    format: crate::world_editor::WorldFormat,
+    worst: bool,
+) -> (f64, f64) {
+    let (base, interior) = if worst {
+        (BASE_WORST_MIB, INTERIOR_WORST_MIB)
+    } else {
+        (BASE_MIB, INTERIOR_MIB)
+    };
     let light = o.bake_lighting || o.voxy_lod || o.dh_lod;
     let base: f64 = [
-        (true, BASE_MIB),
-        (o.interior, INTERIOR_MIB),
+        (true, base),
+        (o.interior, interior),
         (light, LIGHT_MIB),
         (o.voxy_lod, VOXY_MIB),
         (o.dh_lod, DH_MIB),
@@ -494,7 +510,9 @@ fn java_mib_per_km2(o: WorldSizeOptions) -> (f64, f64) {
     .map(|(_, mib)| mib)
     .sum();
     let rock = rock_under(o.ground_level) - rock_under(crate::args::DEFAULT_GROUND_LEVEL);
-    let alps = |(vanilla, tall): (f64, f64)| if o.tall { tall } else { vanilla };
+    // Only Java builds deeper with the extended height; Bedrock raises its top alone.
+    let deep = o.tall && format == crate::world_editor::WorldFormat::JavaAnvil;
+    let alps = |(vanilla, tall): (f64, f64)| if deep { tall } else { vanilla };
     let (flat, mountains) = if o.caves {
         (CAVES_FLAT.0 + CAVES_FLAT.1 * rock, alps(CAVES_ALPS))
     } else if o.fillground {
@@ -519,25 +537,26 @@ pub fn typical_world_mib(
         BedrockMcWorld => BEDROCK_SHARE,
         _ => return None,
     };
-    let (flat, mountains) = java_mib_per_km2(o);
+    let (flat, mountains) = java_mib_per_km2(o, format, false);
     let km2 = blocks_km2.max(0.0) * share;
     Some((flat * km2, mountains * km2))
 }
 
 /// Most disk a world of `blocks_km2` (ground times scale², in km² of blocks) takes while it is
-/// written: the mountain end of the table above, with its landscape spread.
+/// written: the mountain end of the table with the costliest measured landscape.
 pub fn estimated_world_bytes(
     blocks_km2: f64,
     format: crate::world_editor::WorldFormat,
     o: WorldSizeOptions,
 ) -> u64 {
+    use crate::world_editor::WorldFormat::{BedrockMcWorld, JavaAnvil};
     const MIB: f64 = 1024.0 * 1024.0;
-    let mut per_km2 = java_mib_per_km2(o).1 * LANDSCAPE_SPREAD;
-    // Bedrock holds its staging folder and the .mcworld at once (0.67-0.77x Java at the
-    // peak); Luanti's map.sqlite came to 0.60-0.75x.
-    if format != crate::world_editor::WorldFormat::JavaAnvil {
-        per_km2 *= 0.8;
-    }
+    let share = match format {
+        JavaAnvil => 1.0,
+        BedrockMcWorld => BEDROCK_PEAK_SHARE,
+        _ => OTHER_PEAK_SHARE,
+    };
+    let per_km2 = java_mib_per_km2(o, format, true).1 * share;
     // Plus level.dat, map items, signage, datapacks and region headers (about 4 MiB).
     ((blocks_km2.max(0.0) * per_km2 + 8.0) * MIB) as u64
 }
@@ -1918,10 +1937,12 @@ mod tests {
 
     #[test]
     fn the_size_table_follows_every_measured_world() {
+        // The window's range: no measured world far under its flat end or far over its
+        // mountain end (Bedrock's forest came to 1.39 times it).
         for (name, km2, format, opts, measured) in measured_worlds() {
             let (flat, mountains) = typical_world_mib(km2, format, opts).unwrap();
             assert!(
-                measured >= 0.75 * flat && measured <= LANDSCAPE_SPREAD * mountains,
+                measured >= 0.75 * flat && measured <= 1.4 * mountains,
                 "{name}: {measured} MiB is not about {flat:.1}-{mountains:.1}"
             );
         }
@@ -1932,8 +1953,8 @@ mod tests {
     }
 
     #[test]
-    fn the_disk_estimate_covers_every_measured_world() {
-        use crate::world_editor::WorldFormat::{BedrockMcWorld, LuantiWorld};
+    fn the_disk_estimate_covers_every_measured_world_and_little_more() {
+        use crate::world_editor::WorldFormat::{BedrockMcWorld, JavaAnvil, LuantiWorld};
         // Bedrock and Luanti at the peak of a 9 km² run, with the staging folder (Oct 2026).
         let o = WorldSizeOptions::default();
         let peaks = [
@@ -1942,23 +1963,57 @@ mod tests {
             ("Munich Luanti peak", 9.0, LuantiWorld, o, 84.5),
             ("Manhattan Luanti peak", 9.0, LuantiWorld, o, 112.5),
         ];
-        for (name, km2, format, opts, measured) in measured_worlds().into_iter().chain(peaks) {
-            let est = estimated_world_bytes(km2, format, opts) as f64 / (1024.0 * 1024.0);
+        let worlds: Vec<_> = measured_worlds().into_iter().chain(peaks).collect();
+        // MiB per km² the check charges, without the few MiB every world has.
+        let rate = |format, opts| {
+            let bytes = estimated_world_bytes(1000.0, format, opts)
+                - estimated_world_bytes(0.0, format, opts);
+            bytes as f64 / 1000.0 / (1024.0 * 1024.0)
+        };
+        // A world takes at least what a measured one with the same switches takes on less rock
+        // and a column no taller; a Bedrock or Luanti run at its peak, at least its measured
+        // share of that Java world.
+        let switches = |w: &WorldSizeOptions| {
+            (
+                w.interior,
+                w.bake_lighting,
+                w.voxy_lod,
+                w.dh_lod,
+                w.caves,
+                w.fillground,
+            )
+        };
+        let below = |w: &WorldSizeOptions, v: &WorldSizeOptions| {
+            switches(v) == switches(w) && v.ground_level <= w.ground_level && (w.tall || !v.tall)
+        };
+        let peak_share = |format| match format {
+            JavaAnvil => 1.0,
+            BedrockMcWorld => BEDROCK_PEAK_SHARE,
+            _ => OTHER_PEAK_SHARE,
+        };
+        for (name, km2, format, opts, measured) in &worlds {
+            let charged = rate(*format, *opts);
             assert!(
-                est >= measured,
-                "{name}: {est:.0} MiB is under the {measured} measured"
+                charged * km2 >= *measured,
+                "{name}: {charged:.1} MiB per km² is under the {measured} measured"
             );
-            // Filled ground on flat land is far under the mountains the check has to allow for,
-            // and a finished .mcworld under the folder it is staged in.
-            let flat_fill = (opts.fillground || opts.caves) && !name.starts_with("Alps");
-            let mcworld = format == BedrockMcWorld && !name.ends_with("peak");
-            if !flat_fill && !mcworld {
-                let over = est - 8.0;
-                assert!(
-                    over <= 2.5 * measured,
-                    "{name}: {est:.0} MiB is far over {measured}"
-                );
-            }
+            let largest = worlds
+                .iter()
+                .filter(|v| below(opts, &v.3))
+                .filter_map(|(_, k, f, _, m)| {
+                    if f == format {
+                        Some(m / k)
+                    } else if *f == JavaAnvil {
+                        Some(m / k * peak_share(*format))
+                    } else {
+                        None
+                    }
+                })
+                .fold(0.0, f64::max);
+            assert!(
+                charged <= 1.3 * largest,
+                "{name}: {charged:.1} MiB per km² is far over the {largest:.1} measured"
+            );
         }
     }
 

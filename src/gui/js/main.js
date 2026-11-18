@@ -72,32 +72,43 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
 // The lines about a selection that is built as it is drawn, which the size estimate follows.
 const SIZE_ESTIMATE_KEYS = new Set(['selection_confirmed', 'custom_selection_confirmed', 'shapes_one_world', 'area_extensive', 'area_too_large', 'area_extreme']);
 
-// The last estimate the backend gave, for the request it answered, and the request still out.
-let sizeAnswer = { key: '', mib: null };
-let sizeAsked = '';
+// The backend's answers by request, the request the line is for now, and the figure it shows while that one's answer is out.
+const sizeAnswers = new Map();
+let sizeWanted = '';
+let sizeShown = null;
+let sizeTimer = 0;
 
-// "Selection confirmed! · about 400 MB", the estimate quieter than the line. Asked of the backend once per request.
+// "Selection confirmed! · about 400 MB", the estimate quieter than the line.
 function showSizeEstimate(element) {
   element.querySelector('.bbox-size-estimate')?.remove();
+  clearTimeout(sizeTimer);
   const request = SIZE_ESTIMATE_KEYS.has(currentBboxSelectionKey) ? sizeEstimateRequest() : null;
-  if (!request) return;
-  const key = JSON.stringify(request);
-  if (sizeAnswer.key !== key && sizeAsked !== key) {
-    sizeAsked = key;
-    const answer = (mib) => {
-      if (sizeAsked !== key) return;
-      sizeAnswer = { key, mib: Array.isArray(mib) ? mib : null };
-      showSizeEstimate(document.getElementById('bbox-selection-info'));
-    };
-    Promise.resolve(invoke('gui_world_size_estimate', { request })).then(answer, () => answer(null));
+  sizeWanted = request ? JSON.stringify(request) : '';
+  if (!request) {
+    sizeShown = null;
+    return;
   }
-  // Until the answer comes the last figure stands, so the line does not flicker while the scale is dragged.
-  if (!sizeAnswer.mib) return;
+  const key = sizeWanted;
+  if (sizeAnswers.has(key)) sizeShown = sizeAnswers.get(key);
+  // Asked once the line rests, so dragging the scale does not ask at every step.
+  else sizeTimer = setTimeout(() => askSizeEstimate(key, request), 150);
+  // Until then the last figure stands, so the line does not flicker.
+  if (!sizeShown) return;
   const note = document.createElement('span');
   note.className = 'bbox-size-estimate';
-  note.textContent = ` · ${oneWorldText('size_estimate', 'about {size}', { size: formatSizeRange(sizeAnswer.mib) })}`;
+  note.textContent = ` · ${oneWorldText('size_estimate', 'about {size}', { size: formatSizeRange(sizeShown) })}`;
   note.title = oneWorldText('size_estimate_tip', 'Estimated size of the world on disk. With Fill Ground or Caves it depends on the terrain: the larger figure is for mountains.');
   element.appendChild(note);
+}
+
+// An answer is kept for its own request and redraws the line only while that is still the line's.
+function askSizeEstimate(key, request) {
+  Promise.resolve(invoke('gui_world_size_estimate', { request })).catch(() => null).then((mib) => {
+    if (sizeAnswers.size > 200) sizeAnswers.clear();
+    sizeAnswers.set(key, Array.isArray(mib) ? mib : null);
+    const line = document.getElementById('bbox-selection-info');
+    if (line && sizeWanted === key) showSizeEstimate(line);
+  });
 }
 
 // What the next run's world is made of; not in Live, which grows as it is played, for an existing One World, or for cells, whose plan says it.
