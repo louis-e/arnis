@@ -26,6 +26,7 @@ pub mod construction_site;
 pub mod doors;
 pub mod emergency;
 pub mod field_texture;
+pub(crate) mod fortifications;
 pub mod fuel_stations;
 pub mod golf;
 pub mod greenhouses;
@@ -173,6 +174,12 @@ pub fn landuse_paints_ground(tags: &HashMap<String, String>) -> bool {
 /// Merges way segments that share endpoints into closed rings.
 /// Used by water_areas.rs and boundaries.rs for assembling relation members.
 pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
+    // Pieces join at their shared nodes first, so a short one is not taken for a near neighbour.
+    merge_segments(rings, true);
+    merge_segments(rings, false);
+}
+
+fn merge_segments(rings: &mut Vec<Vec<ProcessedNode>>, by_id: bool) {
     // Mark merged rings by index.  The previous implementation kept a `Vec<usize>`
     // and called `contains` from the nested matching loop.  For a relation with
     // many segments that adds another O(n) scan to the O(n²) pair search, making
@@ -185,6 +192,9 @@ pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
     let nodes_match = |a: &ProcessedNode, b: &ProcessedNode| -> bool {
         if a.id == b.id {
             return true;
+        }
+        if by_id {
+            return false;
         }
         let dx = (a.x - b.x).abs();
         let dz = (a.z - b.z).abs();
@@ -214,12 +224,12 @@ pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
             let y_first = &y[0];
             let y_last = y.last().unwrap();
 
-            // Skip already-closed rings
-            if nodes_match(x_first, x_last) {
+            // Skip already-closed rings; a piece too short to enclose anything is never one
+            if x.len() >= 4 && nodes_match(x_first, x_last) {
                 continue;
             }
 
-            if nodes_match(y_first, y_last) {
+            if y.len() >= 4 && nodes_match(y_first, y_last) {
                 continue;
             }
 
@@ -271,7 +281,7 @@ pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
     }
 
     if merged_len > 0 {
-        merge_way_segments(rings);
+        merge_segments(rings, by_id);
     }
 }
 
@@ -323,4 +333,36 @@ pub fn get_nearest_non_road_block(
     road_mask: &RoadMaskBitmap,
 ) -> Option<(i32, i32)> {
     get_nearest_block_matching(x, z, max_radius, road_mask, |on_road| !on_road)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_pieces_join_their_ring() {
+        // The Kremlin wall: a ring of two-node pieces, some a block or less long.
+        let corners = [(0, 0), (1, 0), (10, 0), (10, 1), (10, 6), (0, 6)];
+        let node = |i: usize| {
+            let (x, z) = corners[i % corners.len()];
+            ProcessedNode {
+                id: i as u64 % corners.len() as u64,
+                tags: Default::default(),
+                x,
+                z,
+            }
+        };
+        let mut rings: Vec<Vec<ProcessedNode>> = (0..corners.len())
+            .map(|i| vec![node(i), node(i + 1)])
+            .collect();
+        merge_way_segments(&mut rings);
+        assert_eq!(rings.len(), 1);
+        let ring = &rings[0];
+        assert_eq!(ring.len(), corners.len() + 1);
+        assert_eq!(ring[0].id, ring[ring.len() - 1].id);
+        let mut ids: Vec<u64> = ring.iter().map(|n| n.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), corners.len());
+    }
 }
