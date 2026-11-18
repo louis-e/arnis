@@ -241,28 +241,43 @@ pub(crate) fn inset_ring(nodes: &[ProcessedNode], step: &[bool]) -> Option<Vec<P
 }
 
 /// Rings of cells from the edge of a set in to its middle: half its narrowest
-/// width, rounded up, whichever way the outline is turned.
-fn rings(cells: &FnvHashSet<(i32, i32)>) -> i32 {
-    const SIDES: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-    let mut ring: Vec<(i32, i32)> = cells
-        .iter()
-        .copied()
-        .filter(|&(x, z)| {
-            SIDES
-                .iter()
-                .any(|&(dx, dz)| !cells.contains(&(x + dx, z + dz)))
-        })
+/// width, rounded up, whichever way the outline is turned; no more than `cap`,
+/// where peeling stops.
+fn rings(cells: &FnvHashSet<(i32, i32)>, cap: i32) -> i32 {
+    let Some((min_x, min_z, max_x, max_z)) = cells.iter().fold(None, |b, &(x, z)| {
+        Some(
+            b.map_or((x, z, x, z), |(x0, z0, x1, z1): (i32, i32, i32, i32)| {
+                (x0.min(x), z0.min(z), x1.max(x), z1.max(z))
+            }),
+        )
+    }) else {
+        return 0;
+    };
+    // The set on a grid over its bounds, with a free border so every cell has four sides.
+    let w = (max_x - min_x + 3) as usize;
+    let h = (max_z - min_z + 3) as usize;
+    let mut inside = vec![false; w * h];
+    for &(x, z) in cells {
+        inside[(z - min_z + 1) as usize * w + (x - min_x + 1) as usize] = true;
+    }
+    let sides = [1, w, 0usize.wrapping_sub(1), 0usize.wrapping_sub(w)];
+    let near = |i: usize| sides.map(|s| i.wrapping_add(s));
+    let mut ring: Vec<usize> = (0..w * h)
+        .filter(|&i| inside[i] && near(i).iter().any(|&n| !inside[n]))
         .collect();
-    let mut seen: FnvHashSet<(i32, i32)> = ring.iter().copied().collect();
+    let mut seen = vec![false; w * h];
+    for &i in &ring {
+        seen[i] = true;
+    }
     let mut depth = 0;
-    while !ring.is_empty() {
+    while !ring.is_empty() && depth < cap {
         depth += 1;
         let mut inner = Vec::new();
-        for &(x, z) in &ring {
-            for &(dx, dz) in &SIDES {
-                let c = (x + dx, z + dz);
-                if cells.contains(&c) && seen.insert(c) {
-                    inner.push(c);
+        for &i in &ring {
+            for n in near(i) {
+                if inside[n] && !seen[n] {
+                    seen[n] = true;
+                    inner.push(n);
                 }
             }
         }
@@ -449,8 +464,10 @@ fn inset_with(
     stepped.extend(walls);
     let (sx, sz) = spans(&stepped);
     // Made narrower than a house the step suits.
-    let stepped_rings = rings(&stepped);
-    let cramped = stepped_rings < MIN_SHRUNK_RINGS && stepped_rings < rings(outline);
+    // Only how the two compare below `MIN_SHRUNK_RINGS` counts, so neither is peeled past it.
+    let stepped_rings = rings(&stepped, MIN_SHRUNK_RINGS);
+    let cramped =
+        stepped_rings < MIN_SHRUNK_RINGS && stepped_rings < rings(outline, stepped_rings + 1);
     if inner.is_empty()
         || fin
         || cramped
@@ -480,6 +497,26 @@ mod tests {
     fn fill_of(nodes: &[ProcessedNode]) -> Vec<(i32, i32)> {
         let coords: Vec<(i32, i32)> = nodes.iter().map(|n| (n.x, n.z)).collect();
         flood_fill_area(&coords, None)
+    }
+
+    /// Rings peel a set from its edge in, half its narrowest width rounded up, a wing
+    /// as narrow as it is, and stop at the cap.
+    #[test]
+    fn rings_count_from_the_edge_in() {
+        let rect = |x0: i32, z0: i32, x1: i32, z1: i32| -> FnvHashSet<(i32, i32)> {
+            (x0..=x1)
+                .flat_map(|x| (z0..=z1).map(move |z| (x, z)))
+                .collect()
+        };
+        assert_eq!(rings(&rect(0, 0, 8, 4), 99), 3);
+        assert_eq!(rings(&rect(-5, -5, 14, 14), 99), 10);
+        assert_eq!(rings(&rect(-5, -5, 14, 14), 4), 4);
+        // An L whose arm is three wide and whose body is twelve.
+        let mut l = rect(0, 0, 11, 11);
+        l.extend(rect(12, 0, 30, 2));
+        assert_eq!(rings(&l, 99), 6);
+        assert_eq!(rings(&rect(3, 3, 3, 3), 99), 1);
+        assert_eq!(rings(&FnvHashSet::default(), 99), 0);
     }
 
     fn corners(nodes: &[ProcessedNode]) -> Vec<(i32, i32)> {
