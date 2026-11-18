@@ -1139,6 +1139,7 @@ pub fn parse_osm_data(
         &mut housing_parts,
     );
     inherit_facade_tags(&mut data.ways, &data.relations, &part_groups);
+    lower_outlines_under_parts(&mut data.ways, &data.nodes, &outline_suppression);
 
     let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
         FnvHashMap::with_capacity_and_hasher(data.nodes.len(), Default::default());
@@ -2704,6 +2705,192 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
     suppressed
 }
 
+/// Metres a building or part rises to by its `height`, else by its storeys as parts are built.
+fn mapped_top(tags: &HashMap<String, String>) -> Option<f64> {
+    tags.get("height")
+        .and_then(|h| parse_length_m(h))
+        .or_else(|| {
+            tags.get("building:levels")
+                .and_then(|l| l.trim().parse::<f64>().ok())
+                .map(storeys_m)
+        })
+        .filter(|m| m.is_finite() && *m > 0.0)
+}
+
+/// Metres of `storeys` at the storey height parts are built with, on the raised ground floor.
+fn storeys_m(storeys: f64) -> f64 {
+    storeys * 4.0 + 2.0
+}
+
+/// A raised part sets the storeys under it when it covers this share of its outline.
+const PODIUM_PART_SHARE: f64 = 0.25;
+
+/// Parts smaller than this share of their outline do not count for its height.
+const MINOR_PART_SHARE: f64 = 0.05;
+
+/// On an outline kept beside its parts, the top an Overture height for it must stay under.
+pub(crate) const PARTS_TOP_TAG: &str = "arnis:parts_top";
+
+/// Lowers each outline kept beside its parts where it would stand over them and hide them.
+fn lower_outlines_under_parts(
+    ways: &mut [OsmElement],
+    nodes: &[OsmElement],
+    suppressed: &OutlineSuppression,
+) {
+    use crate::element_processing::buildings::is_underground_building;
+    let mut outline_ids: Vec<usize> = Vec::new();
+    let mut part_ids: Vec<usize> = Vec::new();
+    for (i, w) in ways.iter().enumerate() {
+        let (Some(tags), Some(ns)) = (&w.tags, &w.nodes) else {
+            continue;
+        };
+        if ns.len() < 4 || ns.first() != ns.last() || is_underground_building(tags) {
+            continue;
+        }
+        if tags
+            .get("building:part")
+            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+        {
+            part_ids.push(i);
+        } else if tags.get("building").is_some_and(|b| b != "no")
+            && !suppressed.contains(&("way", w.id))
+        {
+            outline_ids.push(i);
+        }
+    }
+    if outline_ids.is_empty() || part_ids.is_empty() {
+        return;
+    }
+    let wanted: HashSet<u64> = outline_ids
+        .iter()
+        .chain(&part_ids)
+        .flat_map(|&i| ways[i].nodes.iter().flatten().copied())
+        .collect();
+    let node_ll: HashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| wanted.contains(&n.id))
+        .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
+        .collect();
+    let ring = |i: usize| -> Vec<(f64, f64)> {
+        ways[i]
+            .nodes
+            .iter()
+            .flatten()
+            .filter_map(|id| node_ll.get(id).copied())
+            .collect()
+    };
+    let cell = |lat: f64, lon: f64| {
+        (
+            (lat / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+            (lon / SUPPRESSION_GRID_CELL_DEG).floor() as i64,
+        )
+    };
+    let mut outlines: HashMap<usize, (Vec<(f64, f64)>, f64)> = HashMap::new();
+    let mut grid: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for &i in &outline_ids {
+        let r = ring(i);
+        let area = ring_area(&r);
+        if area <= 0.0 {
+            continue;
+        }
+        let b = Bounds::of(&r);
+        let (c0a, c0o) = cell(b.south, b.west);
+        let (c1a, c1o) = cell(b.north, b.east);
+        for ca in c0a..=c1a {
+            for co in c0o..=c1o {
+                grid.entry((ca, co)).or_default().push(i);
+            }
+        }
+        outlines.insert(i, (r, area));
+    }
+
+    struct Part {
+        ring: Vec<(f64, f64)>,
+        area: f64,
+        top: Option<f64>,
+        /// Metres above the ground its lowest storey starts.
+        base: f64,
+    }
+    let mut parts_of: HashMap<usize, Vec<Part>> = HashMap::new();
+    for &pi in &part_ids {
+        let r = ring(pi);
+        let area = ring_area(&r);
+        let Some(tags) = ways[pi].tags.as_ref().filter(|_| area > 0.0) else {
+            continue;
+        };
+        let n = r.len() as f64;
+        let lat = r.iter().map(|p| p.0).sum::<f64>() / n;
+        let lon = r.iter().map(|p| p.1).sum::<f64>() / n;
+        // The smallest outline around a part is its building.
+        let Some(oi) = grid.get(&cell(lat, lon)).and_then(|cands| {
+            cands
+                .iter()
+                .copied()
+                .filter(|oi| point_in_ring(lat, lon, &outlines[oi].0))
+                .min_by(|a, b| outlines[a].1.total_cmp(&outlines[b].1))
+        }) else {
+            continue;
+        };
+        let metres = |k: &str| tags.get(k).and_then(|v| parse_length_m(v));
+        let base = metres("min_height")
+            .or_else(|| metres("building:min_level").map(storeys_m))
+            .filter(|b| b.is_finite() && *b > 0.0)
+            .unwrap_or(0.0);
+        parts_of.entry(oi).or_default().push(Part {
+            ring: r,
+            area,
+            top: mapped_top(tags),
+            base,
+        });
+    }
+
+    for (oi, parts) in parts_of {
+        let (outline, area) = &outlines[&oi];
+        let Some(tags) = ways[oi].tags.as_mut() else {
+            continue;
+        };
+        let own_top = mapped_top(tags);
+        let share = |p: &Part| p.area / area;
+        let lowest = |least: f64| {
+            parts
+                .iter()
+                .filter(|p| p.base > 0.0 && share(p) >= least)
+                .map(|p| p.base)
+                .min_by(f64::total_cmp)
+        };
+        let raised: Vec<&[(f64, f64)]> = parts
+            .iter()
+            .filter(|p| p.base > 0.0)
+            .map(|p| p.ring.as_slice())
+            .collect();
+        // Parts covering the outline from some height up leave it the storeys below them.
+        let podium = lowest(PODIUM_PART_SHARE)
+            .filter(|_| parts_cover(std::slice::from_ref(outline), &raised))
+            .filter(|&p| own_top.is_none_or(|t| t > p));
+        if let Some(p) = podium {
+            for k in [
+                "building:levels",
+                "roof:height",
+                "roof:levels",
+                "roof:angle",
+            ] {
+                tags.remove(k);
+            }
+            tags.insert("height".to_string(), format!("{p:.1}"));
+            tags.insert("roof:shape".to_string(), "flat".to_string());
+            continue;
+        }
+        let parts_top = parts
+            .iter()
+            .filter(|p| share(p) >= MINOR_PART_SHARE)
+            .filter_map(|p| p.top)
+            .max_by(f64::total_cmp);
+        if let (None, Some(t)) = (own_top, parts_top) {
+            tags.insert(PARTS_TOP_TAG.to_string(), format!("{t:.1}"));
+        }
+    }
+}
+
 /// Returns true if tags indicate a water element handled by water_areas.rs.
 fn is_water_element(tags: &HashMap<String, String>) -> bool {
     // Check for explicit water tag
@@ -4136,6 +4323,114 @@ mod outline_suppression_tests {
 
         let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
         assert!(!s.contains(&("relation", 1)));
+    }
+
+    // A box from (lat0, lon0) to (lat1, lon1) with the given tags, and its corner nodes.
+    fn boxed(id: u64, corners: [f64; 4], tags: &[(&str, &str)]) -> (OsmElement, Vec<OsmElement>) {
+        let [lat0, lon0, lat1, lon1] = corners;
+        let first = id * 10;
+        let nodes: Vec<OsmElement> = [(lat0, lon0), (lat0, lon1), (lat1, lon1), (lat1, lon0)]
+            .iter()
+            .enumerate()
+            .map(|(i, &(lat, lon))| node(first + i as u64, lat, lon))
+            .collect();
+        let mut ids: Vec<u64> = nodes.iter().map(|n| n.id).collect();
+        ids.push(first);
+        let way = OsmElement {
+            r#type: "way".into(),
+            id,
+            lat: None,
+            lon: None,
+            nodes: Some(ids),
+            tags: Some(
+                tags.iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            ),
+            members: Vec::new(),
+        };
+        (way, nodes)
+    }
+
+    // The outline's tags after the outlines are lowered under the given parts.
+    fn lowered(
+        outline: &[(&str, &str)],
+        parts: &[([f64; 4], &[(&str, &str)])],
+    ) -> HashMap<String, String> {
+        let (way, mut nodes) = boxed(1, [0.0, 0.0, 0.001, 0.001], outline);
+        let mut ways = vec![way];
+        for (i, (corners, tags)) in parts.iter().enumerate() {
+            let (w, n) = boxed(2 + i as u64, *corners, tags);
+            ways.push(w);
+            nodes.extend(n);
+        }
+        lower_outlines_under_parts(&mut ways, &nodes, &OutlineSuppression::new());
+        ways.swap_remove(0).tags.unwrap()
+    }
+
+    const TOWER: [f64; 4] = [0.0004, 0.0004, 0.0006, 0.0006];
+
+    #[test]
+    fn an_outline_under_raised_parts_fills_the_storeys_below_them() {
+        // The Empire State Building: its stack starts on storey five, its mast is mapped from the ground.
+        let tags = lowered(
+            &[
+                ("building", "office"),
+                ("height", "443.2"),
+                ("building:levels", "102"),
+            ],
+            &[
+                (
+                    [0.0, 0.0, 0.001, 0.001],
+                    &[
+                        ("building:part", "yes"),
+                        ("building:min_level", "5"),
+                        ("height", "75"),
+                    ],
+                ),
+                (TOWER, &[("building:part", "yes"), ("height", "443.2")]),
+            ],
+        );
+        assert_eq!(tags.get("height").map(String::as_str), Some("22.0"));
+        assert_eq!(tags.get("roof:shape").map(String::as_str), Some("flat"));
+        assert!(!tags.contains_key("building:levels"));
+    }
+
+    #[test]
+    fn outlines_their_parts_rise_out_of_or_stay_under_keep_their_height() {
+        // A canopy raised over a corner of the ground floor.
+        let canopy = lowered(
+            &[("building", "yes"), ("height", "30")],
+            &[(TOWER, &[("building:part", "yes"), ("min_height", "3")])],
+        );
+        assert_eq!(canopy.get("height").map(String::as_str), Some("30"));
+        // A rooftop bulkhead mapped from the ground pokes out of a New York block.
+        let roof = lowered(
+            &[("building", "yes"), ("height", "47.3")],
+            &[(TOWER, &[("building:part", "yes"), ("height", "50")])],
+        );
+        assert_eq!(roof.get("height").map(String::as_str), Some("47.3"));
+        // A low wing mapped as a part of a taller hall.
+        let wing = lowered(
+            &[("building", "museum"), ("building:levels", "3")],
+            &[(TOWER, &[("building:part", "yes"), ("building:levels", "2")])],
+        );
+        assert_eq!(wing.get("building:levels").map(String::as_str), Some("3"));
+        assert!(!roof.contains_key(PARTS_TOP_TAG) && !wing.contains_key(PARTS_TOP_TAG));
+    }
+
+    #[test]
+    fn an_outline_without_height_marks_how_tall_its_parts_stand() {
+        // The Westin Bonaventure: the outline gives no height, its towers 117 m.
+        let tags = lowered(
+            &[("building", "hotel")],
+            &[(
+                [0.0, 0.0, 0.0006, 0.0007],
+                &[("building:part", "yes"), ("height", "117.4")],
+            )],
+        );
+        assert_eq!(tags.get(PARTS_TOP_TAG).map(String::as_str), Some("117.4"));
+        assert!(!tags.contains_key("height"));
     }
 }
 

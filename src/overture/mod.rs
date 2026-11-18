@@ -326,6 +326,9 @@ impl OvertureHints {
             return None;
         }
         let hint = self.hints.get(&OsmRef { kind, id })?;
+        if hides_parts(hint, tags) {
+            return None;
+        }
         Some(crate::element_processing::buildings::HeightHint {
             height_m: hint.height_m,
             levels: hint.num_floors.map(f64::from),
@@ -342,9 +345,23 @@ fn takes_hint(tags: &HashMap<String, String>) -> bool {
         && !tags.contains_key("building:levels")
 }
 
+/// Whether `hint` would stand an outline kept beside its parts about as tall as them.
+fn hides_parts(hint: &OsmAttributeHint, tags: &HashMap<String, String>) -> bool {
+    let Some(parts) = tags
+        .get(crate::osm_parser::PARTS_TOP_TAG)
+        .and_then(|t| t.parse::<f64>().ok())
+    else {
+        return false;
+    };
+    let top = hint
+        .height_m
+        .or(hint.num_floors.map(|f| f64::from(f) * 3.0));
+    top.is_some_and(|t| t >= 0.9 * parts)
+}
+
 /// Writes `hint` onto a building's tags unless OSM already has a vertical tag.
 fn fill_tags(hint: &OsmAttributeHint, tags: &mut HashMap<String, String>) -> bool {
-    if !takes_hint(tags) {
+    if !takes_hint(tags) || hides_parts(hint, tags) {
         return false;
     }
 
