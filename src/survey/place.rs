@@ -85,8 +85,9 @@ pub fn ground_blocks(cell: Cell, x: i32, z: i32, cover: u8) -> Option<(Block, Bl
             Some((paving_block(closest_of(PAVING, color), x, z), STONE))
         }
         Kind::Pool => None,
-        // In town sunlit concrete reads as warm as earth: main's town ground.
-        Kind::Bare if cover == LC_BUILT_UP => None,
+        // In town sunlit concrete reads as warm as earth: the town's paving
+        // mix, never a guessed garden's lawn.
+        Kind::Bare if cover == LC_BUILT_UP => Some((paving_block(STONE_BRICKS, x, z), STONE)),
         Kind::Bare => Some(open_ground(x, z)),
         // Roof the laser saw past a mapped outline: an eave over the yard, or a
         // building OSM lacks. Either way the ground under it is not lawn.
@@ -311,7 +312,10 @@ mod tests {
     #[test]
     fn open_ground_is_earth_except_in_town() {
         let bare = cell(Kind::Bare, (190, 175, 155));
-        assert_eq!(ground_blocks(bare, 3, 4, LC_BUILT_UP), None);
+        for (x, z) in [(3, 4), (17, 9), (40, 2)] {
+            let (top, _) = ground_blocks(bare, x, z, LC_BUILT_UP).unwrap();
+            assert!(TOWN_PAVING.iter().any(|&(_, b)| b == top), "{top:?}");
+        }
         let earth: Vec<Block> = (0..40)
             .flat_map(|x| (0..40).map(move |z| (x, z)))
             .map(|(x, z)| ground_blocks(bare, x, z, LC_GRASSLAND).unwrap().0)

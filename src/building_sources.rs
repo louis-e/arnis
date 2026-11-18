@@ -37,7 +37,7 @@ pub fn merge(
 
     // A roof at the highest height the survey records waits for Overture's.
     let (mut measured_heights, deferred) =
-        crate::survey::heights::apply(parsed_elements, ground, xzbbox);
+        crate::survey::heights::apply(parsed_elements, ground, xzbbox, scale);
 
     // Before the footprints are merged: Overture's own ways carry their tags.
     let enriched = overture_hints.apply(parsed_elements);

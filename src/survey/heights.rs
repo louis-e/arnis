@@ -5,7 +5,8 @@
 //! nothing mapped is overwritten, like Overture's height hints:
 //!
 //! * a roof whose points span under a metre is flat (`roof:shape=flat`), and its
-//!   top is the wall height;
+//!   top is the wall height; a house's only if its middle stands no higher than
+//!   its edges, since a small or gently pitched roof spans under a metre too;
 //! * otherwise the eaves (the low end of the roof points) are, and the generator
 //!   puts its own roof on top as it does for any untagged building, so shapes
 //!   stay its choice while the walls are measured.
@@ -48,6 +49,7 @@ pub fn apply(
     elements: &mut [ProcessedElement],
     ground: &Ground,
     xzbbox: &XZBBox,
+    scale: f64,
 ) -> (usize, Vec<Deferred>) {
     let mut deferred = Vec::new();
     if !ground.has_laser() || !ground.laser_heights_wanted() {
@@ -66,7 +68,7 @@ pub fn apply(
         {
             continue;
         }
-        if let Some(Measured { height, flat, top }) = measure(way, ground, xzbbox) {
+        if let Some(Measured { height, flat, top }) = measure(way, ground, xzbbox, scale) {
             if top >= SATURATED {
                 deferred.push(Deferred {
                     index,
@@ -128,8 +130,22 @@ struct Measured {
     top: f32,
 }
 
+/// Kinds of building that are houses, whatever their size.
+const HOUSES: &[&str] = &[
+    "house",
+    "detached",
+    "semidetached_house",
+    "terrace",
+    "bungalow",
+    "villa",
+    "farm",
+    "cabin",
+];
+/// Any building up to this footprint is house-sized, in square metres.
+const HOUSE_FOOTPRINT_M2: f64 = 250.0;
+
 /// What the laser saw of one outline's roof, if it saw enough of it.
-fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<Measured> {
+fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox, scale: f64) -> Option<Measured> {
     let pts: Vec<(f64, f64)> = way
         .nodes
         .iter()
@@ -142,9 +158,12 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<Measu
     let (z0, z1) = minmax(pts.iter().map(|p| p.1));
     let mut blocks = 0usize;
     let mut roof: Vec<f32> = Vec::new();
+    // The roof along the outline and inside it.
+    let (mut rim, mut middle): (Vec<f32>, Vec<f32>) = (Vec::new(), Vec::new());
     for z in z0 as i32..=z1 as i32 {
         for x in x0 as i32..=x1 as i32 {
-            if !inside(&pts, f64::from(x) + 0.5, f64::from(z) + 0.5) {
+            let (cx, cz) = (f64::from(x) + 0.5, f64::from(z) + 0.5);
+            if !inside(&pts, cx, cz) {
                 continue;
             }
             blocks += 1;
@@ -152,6 +171,10 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<Measu
             if let Some(c) = ground.laser_cell(coord) {
                 if c.kind == super::Kind::Building && c.height > 1.5 {
                     roof.push(c.height);
+                    let on_rim = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)]
+                        .iter()
+                        .any(|&(dx, dz)| !inside(&pts, cx + dx, cz + dz));
+                    if on_rim { &mut rim } else { &mut middle }.push(c.height);
                 }
             }
         }
@@ -162,7 +185,20 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<Measu
     roof.sort_by(f32::total_cmp);
     let at = |q: f64| roof[((roof.len() - 1) as f64 * q).round() as usize];
     let (eave, top) = (at(0.1), at(0.95));
-    let flat = top - eave < 1.0;
+    // A house's roof spans under a metre when it is small or gently pitched: it
+    // is flat only where its middle stands no higher than its rim, as a flat
+    // roof's does (or lower, inside a parapet), and left to the generator where
+    // too small to have a middle. A pitched roof drawn flat loses its eaves.
+    let house = way
+        .tags
+        .get("building")
+        .is_some_and(|k| HOUSES.contains(&k.as_str()))
+        || blocks as f64 / (scale * scale) <= HOUSE_FOOTPRINT_M2;
+    let level = match (median(&mut middle), median(&mut rim)) {
+        (Some(m), Some(r)) => m - r < 0.1,
+        _ => false,
+    };
+    let flat = top - eave < 1.0 && (!house || level);
     Some(Measured {
         height: if flat { top } else { eave.max(2.0) },
         flat,
@@ -211,6 +247,11 @@ fn storeys(kind: &str, wall_m: f32) -> Option<u32> {
 const HOME_STOREYS: u32 = 7;
 /// Storey an untagged building taller than that is built on, in metres.
 const TALL_STOREY_M: f32 = 4.0;
+
+fn median(v: &mut [f32]) -> Option<f32> {
+    v.sort_by(f32::total_cmp);
+    v.get(v.len() / 2).copied()
+}
 
 fn minmax(v: impl Iterator<Item = f64>) -> (f64, f64) {
     v.fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)))
@@ -301,6 +342,60 @@ mod tests {
         (ground, way, xzbbox)
     }
 
+    /// A roof over (2, 2) .. (12, 12) at `rim` fifths of a metre along its
+    /// outline and `middle` inside it, on a building of `kind` in a run at
+    /// `scale`, after the heights are applied.
+    fn rimmed(kind: &str, rim: u8, middle: u8, scale: f64) -> Vec<ProcessedElement> {
+        let (_, mut way, xzbbox) = roof(0);
+        way.tags.insert("building".into(), kind.into());
+        let (w, h) = (20usize, 20usize);
+        let mut cells = vec![[0u8; 5]; w * h];
+        for z in 2..12 {
+            for x in 2..12 {
+                let edge = x == 2 || x == 11 || z == 2 || z == 11;
+                let q = if edge { rim } else { middle };
+                cells[z * w + x] = [super::super::classify::BUILDING, q, 0, 0, 0];
+            }
+        }
+        let features = super::super::Features {
+            garden: false,
+            trees: false,
+            heights: true,
+        };
+        let mut ground = Ground::new_flat(0);
+        ground.set_world_dims(w, h);
+        ground.set_survey(Some(super::super::SurveyData::from_cells(
+            cells, w, h, features,
+        )));
+        let mut els = vec![ProcessedElement::Way(way)];
+        apply(&mut els, &ground, &xzbbox, scale);
+        els
+    }
+
+    #[test]
+    fn a_house_is_flat_only_where_its_middle_is_no_higher_than_its_rim() {
+        let shape = |els: &[ProcessedElement]| els[0].tags().get("roof:shape").cloned();
+        // A gently pitched house: its points span 0.8 m, its middle higher.
+        assert_eq!(shape(&rimmed("house", 30, 34, 1.0)), None);
+        // So does a small untagged building's.
+        assert_eq!(shape(&rimmed("yes", 30, 34, 1.0)), None);
+        // A flat roof, and one inside a parapet, are flat.
+        assert_eq!(
+            shape(&rimmed("house", 30, 30, 1.0)).as_deref(),
+            Some("flat")
+        );
+        assert_eq!(
+            shape(&rimmed("house", 33, 30, 1.0)).as_deref(),
+            Some("flat")
+        );
+        // A hall's roof under a metre is flat whatever its middle does: here
+        // 100 blocks at half scale, 400 m².
+        let hall = rimmed("industrial", 30, 34, 0.5);
+        assert_eq!(shape(&hall).as_deref(), Some("flat"));
+        // A house is a house at any size.
+        assert_eq!(shape(&rimmed("terrace", 30, 34, 0.5)), None);
+    }
+
     #[test]
     fn a_roof_at_the_highest_height_recorded_waits_for_overture() {
         let tagged = |els: &[ProcessedElement]| els[0].tags().get("height").cloned();
@@ -310,12 +405,12 @@ mod tests {
         };
         let (ground, way, xzbbox) = roof(150);
         let mut els = vec![office(way)];
-        assert_eq!(apply(&mut els, &ground, &xzbbox).0, 1);
+        assert_eq!(apply(&mut els, &ground, &xzbbox, 1.0).0, 1);
         assert_eq!(tagged(&els).as_deref(), Some("30.0"));
 
         let (ground, way, xzbbox) = roof(255);
         let mut els = vec![office(way)];
-        let (filled, deferred) = apply(&mut els, &ground, &xzbbox);
+        let (filled, deferred) = apply(&mut els, &ground, &xzbbox, 1.0);
         assert_eq!((filled, deferred.len()), (0, 1));
         assert_eq!(tagged(&els), None);
         // Overture knew its height: that stays.
@@ -323,11 +418,11 @@ mod tests {
         if let ProcessedElement::Way(w) = &mut known[0] {
             w.tags.insert("height".into(), "112".into());
         }
-        let (_, deferred) = apply(&mut els, &ground, &xzbbox);
+        let (_, deferred) = apply(&mut els, &ground, &xzbbox, 1.0);
         assert_eq!(apply_deferred(&mut known, deferred), 0);
         assert_eq!(tagged(&known).as_deref(), Some("112"));
         // It did not: the 51 m measured.
-        let (_, deferred) = apply(&mut els, &ground, &xzbbox);
+        let (_, deferred) = apply(&mut els, &ground, &xzbbox, 1.0);
         assert_eq!(apply_deferred(&mut els, deferred), 1);
         assert_eq!(tagged(&els).as_deref(), Some("51.0"));
 
@@ -335,7 +430,7 @@ mod tests {
         // lower ring around it) are far below: those would make it 30 m.
         let (ground, way, xzbbox) = roof_with_eaves(255, 150);
         let mut els = vec![office(way)];
-        let (filled, deferred) = apply(&mut els, &ground, &xzbbox);
+        let (filled, deferred) = apply(&mut els, &ground, &xzbbox, 1.0);
         assert_eq!((filled, deferred.len()), (0, 1));
         assert_eq!(apply_deferred(&mut els, deferred), 1);
         assert_eq!(tagged(&els).as_deref(), Some("30.0"));
