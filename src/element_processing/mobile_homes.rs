@@ -158,6 +158,10 @@ pub fn prepare(elements: &mut [ProcessedElement], scale: f64) {
     if parks.is_empty() {
         return;
     }
+    let slices: Vec<Vec<&[ProcessedNode]>> = parks
+        .iter()
+        .map(|(_, rings)| rings.iter().map(Vec::as_slice).collect())
+        .collect();
     let mut grid: FnvHashMap<(i32, i32), Vec<usize>> = FnvHashMap::default();
     for (i, &(b, _)) in parks.iter().enumerate() {
         let (x0, z0) = ((b.0 as i32).div_euclid(CELL), (b.1 as i32).div_euclid(CELL));
@@ -178,11 +182,8 @@ pub fn prepare(elements: &mut [ProcessedElement], scale: f64) {
         let c = centroid(&w.nodes[..w.nodes.len() - 1]);
         let key = ((c.0 as i32).div_euclid(CELL), (c.1 as i32).div_euclid(CELL));
         let in_park = grid.get(&key).is_some_and(|ids| {
-            ids.iter().any(|&i| {
-                let (b, rings) = &parks[i];
-                let rings: Vec<&[ProcessedNode]> = rings.iter().map(Vec::as_slice).collect();
-                inside(*b, c) && point_in_rings(&rings, c)
-            })
+            ids.iter()
+                .any(|&i| inside(parks[i].0, c) && point_in_rings(&slices[i], c))
         });
         if in_park && shaped_like_one(&w.nodes, scale) {
             w.tags.insert(IN_PARK_TAG.to_string(), "yes".to_string());
@@ -273,10 +274,7 @@ impl Look {
                 ((COBBLED_DEEPSLATE, COBBLED_DEEPSLATE_SLAB), 20),
             ],
         );
-        let door = pick(
-            rng,
-            &[(IRON_DOOR, 4), (DARK_OAK_DOOR_LOWER, 4), (BIRCH_DOOR, 2)],
-        );
+        let door = pick(rng, &[(BIRCH_DOOR, 5), (DARK_OAK_DOOR_LOWER, 4)]);
         let glass = pick(rng, &[(GLASS, 4), (LIGHT_GRAY_STAINED_GLASS, 1)]);
         let shutters = rng.random_bool(0.35).then(|| {
             pick(
@@ -435,23 +433,29 @@ pub struct Surroundings<'a> {
     pub footprints: &'a BuildingFootprintBitmap,
 }
 
-/// Window places along the two long sides, the front's kept clear of the door.
+/// Window places along the two long sides, kept clear of the doors.
 #[derive(Clone, Copy)]
 struct Windows {
     period: i32,
     pane: i32,
     phases: [i32; 2],
     door_at: i32,
+    rear_at: Option<i32>,
     length: i32,
 }
 
 impl Windows {
     fn at(&self, front: bool, at: i32) -> bool {
         let phase = self.phases[usize::from(!front)];
+        let door = if front {
+            Some(self.door_at)
+        } else {
+            self.rear_at
+        };
         at > 1
             && at < self.length - 1
             && (at - phase).rem_euclid(self.period) < self.pane
-            && !(front && (at - self.door_at).abs() <= 1)
+            && door.is_none_or(|d| (at - d).abs() > 1)
     }
 }
 
@@ -477,6 +481,8 @@ struct Site<'a, 'b> {
     scale: f64,
     glazed: FnvHashSet<(i32, i32)>,
     doors: Vec<(i32, i32)>,
+    /// Ground beside the unit already holding its steps, deck or yard things.
+    taken: FnvHashSet<(i32, i32)>,
 }
 
 /// Draws a mobile home over `ground`, the height under its highest corner; false if too small.
@@ -535,6 +541,7 @@ pub fn generate(
         pane: if rng.random_bool(0.5) { 1 } else { 2 },
         phases: [rng.random_range(0..period), rng.random_range(0..period)],
         door_at,
+        rear_at: rng.random_bool(0.4).then_some(shell.length - door_at),
         length: shell.length,
     };
 
@@ -549,6 +556,7 @@ pub fn generate(
         scale: s,
         glazed: FnvHashSet::default(),
         doors: Vec::new(),
+        taken: FnvHashSet::default(),
     };
     site.build_shell();
     site.roof();
@@ -579,12 +587,13 @@ impl Site<'_, '_> {
         }
     }
 
-    /// Open ground beside the unit, below its floor: no building, road or water.
+    /// Open ground beside the unit, below its floor: no building, road, water or own yard thing.
     fn free(&self, x: i32, z: i32) -> bool {
         !self.shell.has(x, z)
+            && !self.taken.contains(&(x, z))
             && !self.around.footprints.contains(x, z)
             && !self.around.road_mask.contains(x, z)
-            && !self.editor.is_lc_water(x, z)
+            && !self.editor.is_mapped_water(x, z)
             && self.ground_at(x, z) < self.rows.floor
     }
 
@@ -697,11 +706,12 @@ impl Site<'_, '_> {
         if !(rng.random_bool(0.45) && self.deck(door, front, porch)) {
             self.steps(door, front);
         }
-        if rng.random_bool(0.4) {
-            let rear_at = self.shell.length - door_at;
+        self.taken.insert(step(door, front, 1));
+        if let Some(rear_at) = self.windows.rear_at {
             if let Some(rear) = nearest(&self.shell.side(back), rear_at) {
                 self.door(rear, back);
                 self.steps(rear, back);
+                self.taken.insert(step(rear, back, 1));
             }
         }
         if let Some(shutter) = self.look.shutters {
@@ -720,24 +730,32 @@ impl Site<'_, '_> {
             );
             self.put_props(leaf, x, self.rows.floor + dy, z);
         }
+        // A turned unit can move its door under a window, whose glass would hang over it.
+        for y in self.rows.floor + 3..=self.rows.top {
+            self.put(self.look.siding, x, y, z);
+        }
     }
 
-    /// Stairs down from a door or a deck to the ground, where four steps reach it.
-    fn steps(&mut self, from: (i32, i32), out: (i32, i32)) {
+    /// The stairs from a door or a deck down to the ground, empty on level ground;
+    /// None where four steps on open ground do not reach it.
+    fn stair_run(&self, from: (i32, i32), out: (i32, i32)) -> Option<Vec<((i32, i32), i32)>> {
         let first = step(from, out, 1);
         let drop = self.rows.floor - self.ground_at(first.0, first.1);
-        if !(1..=4).contains(&drop) {
-            return;
+        if drop > 4 {
+            return None;
         }
         let run: Vec<((i32, i32), i32)> = (1..=drop)
             .map(|i| (step(from, out, i), self.rows.floor + 1 - i))
             .collect();
-        if run
-            .iter()
-            .any(|&((x, z), y)| !self.free(x, z) || self.ground_at(x, z) >= y)
-        {
+        run.iter()
+            .all(|&((x, z), y)| self.free(x, z) && self.ground_at(x, z) < y)
+            .then_some(run)
+    }
+
+    fn steps(&mut self, from: (i32, i32), out: (i32, i32)) {
+        let Some(run) = self.stair_run(from, out) else {
             return;
-        }
+        };
         let stair = create_stair_with_properties(
             self.look.stairs,
             stair_facing((-out.0, -out.1)),
@@ -745,6 +763,7 @@ impl Site<'_, '_> {
         );
         for ((x, z), y) in run {
             self.put_props(stair.clone(), x, y, z);
+            self.taken.insert((x, z));
         }
     }
 
@@ -768,8 +787,14 @@ impl Site<'_, '_> {
         {
             return false;
         }
+        // No deck whose gate has no way down.
+        let gate = step(door, out, depth);
+        if self.stair_run(gate, out).is_none() {
+            return false;
+        }
         let (planks, rail, eave) = (self.look.planks, OAK_FENCE, self.eave());
         for &(t, u, (x, z)) in &cells {
+            self.taken.insert((x, z));
             self.put(planks, x, floor, z);
             let corner = t == depth && (u == u0 || u == u1);
             if corner {
@@ -790,7 +815,7 @@ impl Site<'_, '_> {
                 self.put(self.look.roof.1, x, eave, z);
             }
         }
-        self.steps(step(door, out, depth), out);
+        self.steps(gate, out);
         true
     }
 
@@ -859,6 +884,7 @@ impl Site<'_, '_> {
                 if self.free(x, z) {
                     let y = self.ground_at(x, z) + 1;
                     self.put(SMOOTH_STONE, x, y, z);
+                    self.taken.insert((x, z));
                 }
             }
         }
@@ -883,6 +909,7 @@ impl Site<'_, '_> {
                 for (_, (x, z)) in tank {
                     let y = self.ground_at(x, z) + 1;
                     self.put(SMOOTH_QUARTZ, x, y, z);
+                    self.taken.insert((x, z));
                 }
             }
         }
@@ -915,6 +942,7 @@ impl Site<'_, '_> {
         let eave = self.eave();
         let mid = (a0 + a1) / 2;
         for &(a, t, (x, z)) in &cells {
+            self.taken.insert((x, z));
             self.put(roof, x, eave, z);
             if t == depth && (a == a0 || a == a1 || a == mid) {
                 for y in self.ground_at(x, z) + 1..eave {
@@ -976,9 +1004,9 @@ impl Site<'_, '_> {
             }
         }
         let toward = facing_for_normal(front.0, front.1);
-        let middle = by_back.len() / 2 - 2;
+        let kitchen_at = by_back.len() / 2 - 2..by_back.len() / 2 + 2;
         let kitchen = [BARREL, CAULDRON, FURNACE, BARREL];
-        for (&block, &(x, z)) in kitchen.iter().zip(&by_back[middle..middle + 4]) {
+        for (&block, &(x, z)) in kitchen.iter().zip(&by_back[kitchen_at.clone()]) {
             if block == CAULDRON {
                 self.editor.set_block_absolute(block, x, y, z, None, None);
             } else {
@@ -989,7 +1017,15 @@ impl Site<'_, '_> {
         }
         let seat =
             create_stair_with_properties(OAK_STAIRS, stair_facing(back), StairShape::Straight);
-        for &(x, z) in ordered.iter().rev().take(3) {
+        // Up to three seats at the door's end, short of the kitchen on a short unit.
+        let n = by_back.len();
+        let couch: Vec<usize> = if toward_far {
+            (0..3).collect()
+        } else {
+            (n - 3..n).rev().collect()
+        };
+        for i in couch.into_iter().filter(|i| !kitchen_at.contains(i)) {
+            let (x, z) = by_back[i];
             self.editor
                 .set_block_with_properties_absolute(seat.clone(), x, y, z, None, None);
         }
@@ -1163,6 +1199,49 @@ mod tests {
             }
             assert!(doors >= 1, "unit {id} has no door");
             assert!(glass >= 4, "unit {id} has {glass} windows");
+        }
+    }
+
+    #[test]
+    fn every_door_is_wooden_with_no_glass_over_it_and_a_way_down() {
+        let xz = XZBBox::rect_from_xz_lengths(160.0, 160.0).unwrap();
+        let empty = CoordinateBitmap::new(&xz);
+        for s in [1, 2] {
+            let mut args = flat_ground_args();
+            args.scale = f64::from(s);
+            let (x1, z1) = (20 + 20 * s, 20 + 4 * s);
+            let top = 1 + ((2.4 * args.scale).round() as i32).max(2);
+            for id in 0..40u64 {
+                let mut editor = test_editor(&xz);
+                let way = rect_way(id, 20, 20, x1, z1, &[("building", "static_caravan")]);
+                let fill = FloodFillCache::new().get_or_compute(&way, None);
+                let around = Surroundings {
+                    road_mask: &empty,
+                    footprints: &empty,
+                };
+                assert!(generate(&mut editor, &way, &fill, 0, &args, around));
+                let block = |x: i32, y: i32, z: i32| editor.get_block_absolute(x, y, z);
+                for x in 20..=x1 {
+                    for (z, out) in [(20, -1), (z1, 1)] {
+                        let Some(door) = block(x, 2, z).filter(|b| b.name().ends_with("_door"))
+                        else {
+                            continue;
+                        };
+                        assert!(!door.name().contains("iron"), "unit {id} has an iron door");
+                        for y in 4..=top {
+                            let glass = block(x, y, z).is_some_and(|b| b.name().contains("glass"));
+                            assert!(!glass, "unit {id} at scale {s} has glass over its door");
+                        }
+                        let first = block(x, 1, z + out).map(|b| b.name().to_string());
+                        assert!(
+                            first
+                                .as_deref()
+                                .is_some_and(|n| n.ends_with("_stairs") || n.ends_with("_planks")),
+                            "unit {id} at scale {s}: door at {x},{z} steps onto {first:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 }

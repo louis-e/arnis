@@ -14723,6 +14723,15 @@ pub fn generate_buildings(
         floor_cycle,
         scale_factor,
     );
+    // A mobile home is drawn one storey, whatever height Overture guessed for it.
+    let mobile_home = super::mobile_homes::claims(&element.tags)
+        && min_level_offset == 0
+        && hole_points.is_empty();
+    let storeys = if mobile_home {
+        storeys.min(1.0)
+    } else {
+        storeys
+    };
     if storeys >= TALL_STOREYS {
         mark_tall(editor, &cached_floor_area);
     }
@@ -14787,9 +14796,7 @@ pub fn generate_buildings(
         }
     }
 
-    if super::mobile_homes::claims(&element.tags)
-        && min_level_offset == 0
-        && hole_points.is_empty()
+    if mobile_home
         && super::mobile_homes::generate(
             editor,
             element,
