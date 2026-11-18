@@ -2,6 +2,7 @@
 
 pub mod boat;
 pub mod car;
+pub mod colosseum;
 pub mod crane;
 pub mod elizabeth_tower;
 pub mod excavator;

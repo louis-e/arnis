@@ -176,6 +176,28 @@ const LANDMARKS: &[Landmark] = &[
         reach_m: 13,
         height: 96,
     },
+    Landmark {
+        name: "Colosseum",
+        qid: "Q10285",
+        osm_ids: &[("relation", 1_834_818)],
+        model: Source::Built(crate::structures::colosseum::build),
+        // Centre of the 188 by 156 m ellipse fitted to the mapped rings, arena and hypogeum.
+        lat: 41.890_236_8,
+        lon: 12.492_329_1,
+        anchor_x: crate::structures::colosseum::CX,
+        anchor_z: crate::structures::colosseum::CZ,
+        // Arena level; the hypogeum goes down below it.
+        ground_y: crate::structures::colosseum::GROUND,
+        ground_offset: -1,
+        // A tuff course under the cavea; the outer rings and the paving follow the terrain.
+        interior_marker: &[crate::block_definitions::TUFF],
+        ground_overlap: 0,
+        // The ellipse and nothing past it.
+        suppress_half_x: 92.0,
+        suppress_half_z: 80.0,
+        reach_m: 100,
+        height: 49,
+    },
 ];
 
 /// A landmark resolved to a spot in this world.
