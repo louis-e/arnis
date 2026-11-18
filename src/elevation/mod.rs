@@ -14,7 +14,7 @@ use crate::{
 pub use peaks::{PeakSource, TallModel, TerrainHints};
 use postprocess::{
     apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
-    scale_to_minecraft_reserving, top_reserve_for,
+    scale_to_minecraft_in_place, top_reserve_for,
 };
 pub use postprocess::{AffinePolicy, ElevationAffine, SoftTop};
 use provider::{ElevationProvider, RawElevationGrid};
@@ -679,8 +679,8 @@ pub fn fetch_elevation_data(
     // The multiplier stretches only the vertical axis. `slope_correction` below still
     // divides by the horizontal scale, so slopes keep their real incline and a stretched
     // hillside stays grass instead of turning to rock.
-    let (mc_heights, affine) = scale_to_minecraft_reserving(
-        &height_grid,
+    let affine = scale_to_minecraft_in_place(
+        &mut height_grid,
         scale * height_multiplier,
         ground_level,
         min_ground_level,
@@ -689,9 +689,7 @@ pub fn fetch_elevation_data(
         affine,
         top_reserve,
     );
-    // The metre grid is done with; freeing it first keeps the downcast below from holding
-    // three full grids at once.
-    drop(height_grid);
+    let mc_heights = height_grid;
     let ElevationAffine {
         min_height_m,
         blocks_per_meter,

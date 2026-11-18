@@ -1318,6 +1318,8 @@ pub fn parse_osm_data(
             .bold()
         );
     }
+    // Every way holds its own nodes now; relations only read `ways_map`.
+    drop(nodes_map);
 
     // Third pass: process relations and clip member ways
     let mut seen_relations: HashSet<u64> = HashSet::new();
@@ -1501,7 +1503,6 @@ pub fn parse_osm_data(
 
     emit_gui_progress_update(18.5, "");
 
-    drop(nodes_map);
     drop(ways_map);
 
     (

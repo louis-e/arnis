@@ -2055,9 +2055,6 @@ fn smooth_built_up_gaussian(
         return;
     }
 
-    let h = heights.len();
-    let w = heights[0].len();
-
     // Early out: if there are no built-up cells, nothing to do.
     let built_up_count: usize = lc_grid
         .iter()
@@ -2068,52 +2065,143 @@ fn smooth_built_up_gaussian(
         return;
     }
 
-    // Blur the binary built-up mask -> feathered weights with a smooth 0..1 falloff
-    // across the built-up boundary. Without this we'd get a visible seam. The mask is
-    // read straight out of lc_grid and kept as f32: it is only ever a lerp weight.
-    // Mask blur is the first half of this step's progress, heights blur the second.
-    let feathered_mask =
-        gaussian_blur_mask_to_f32_reported(lc_grid, LC_BUILT_UP, w, h, sigma_cells, &|f| {
-            report(0.5 * f)
-        });
-
-    // Blur the heights with *water-surface* cells read as NaN so they don't
-    // contribute. Without this the blur averages water (low) into nearby built-up
-    // cells and produces a visible "rising ramp" from water into the city, the
-    // coastal artifact we already fix with the explicit pull-down pass. Using
-    // is_water_surface (not LC_WATER) means canyon wall cells misclassified as
-    // water still contribute like the terrain they actually are.
-    let blurred_heights =
-        gaussian_blur_heights_masked(heights, is_water_surface, sigma_cells, &|f| {
-            report(0.5 + 0.5 * f)
-        });
-
-    // Blend through the feathered mask. Water-surface cells are skipped so
-    // the leveled water surface from the previous pass survives intact.
-    let mut total_influenced = 0usize;
-    for y in 0..h {
-        for x in 0..w {
-            if is_water_surface[y][x] {
-                continue;
-            }
-            let m = (feathered_mask[y][x] as f64).clamp(0.0, 1.0);
-            if m <= 1.0e-4 {
-                continue;
-            }
-            let orig = heights[y][x];
-            let blur = blurred_heights[y][x];
-            if !orig.is_finite() || !blur.is_finite() {
-                continue;
-            }
-            heights[y][x] = (1.0 - m) * orig + m * blur;
-            total_influenced += 1;
-        }
-    }
+    let total_influenced = blend_built_up_blur(
+        heights,
+        lc_grid,
+        is_water_surface,
+        sigma_cells,
+        SMOOTH_BAND_ROWS,
+        report,
+    );
 
     eprintln!(
         "Land cover repair: built-up Gaussian smoothing σ={:.2} cells applied to {} built-up + feathered cells ({} core built-up cells)",
         sigma_cells, total_influenced, built_up_count
     );
+}
+
+/// Blends the blurred heights into `heights` through the blurred built-up mask and
+/// returns how many cells it moved.
+///
+/// The mask blurred into a 0..1 weight feathers the boundary, so no seam shows. The
+/// heights are blurred with water-surface cells read as NaN: water would otherwise ramp
+/// up into the city. Both blurs are separable and made `band_rows` rows at a time, so
+/// neither is held for the whole grid; the result is the same to the bit.
+fn blend_built_up_blur(
+    heights: &mut [Vec<f64>],
+    lc_grid: &[Vec<u8>],
+    is_water_surface: &[Vec<bool>],
+    sigma_cells: f64,
+    band_rows: usize,
+    report: &dyn Fn(f64),
+) -> usize {
+    let h = heights.len();
+    let w = heights.first().map_or(0, Vec::len);
+    let kernel_size: usize = (sigma_cells * 3.0).ceil() as usize * 2 + 1;
+    let kernel = create_gaussian_kernel(kernel_size, sigma_cells);
+    let half = kernel_size as i32 / 2;
+    let reach = half as usize;
+
+    // Horizontal blurs of rows `first..`, made before any blend touched them.
+    let mut rows_h: VecDeque<Vec<f64>> = VecDeque::new();
+    let mut rows_m: VecDeque<Vec<f64>> = VecDeque::new();
+    let mut first = 0usize;
+    let mut total_influenced = 0usize;
+    let mut y0 = 0usize;
+    while y0 < h {
+        let y1 = (y0 + band_rows.max(1)).min(h);
+        let (lo, hi) = (y0.saturating_sub(reach), (y1 + reach).min(h));
+        while first < lo {
+            rows_h.pop_front();
+            rows_m.pop_front();
+            first += 1;
+        }
+        let made: Vec<(Vec<f64>, Vec<f64>)> = (first + rows_h.len()..hi)
+            .into_par_iter()
+            .map(|y| {
+                let (row, water) = (&heights[y], &is_water_surface[y]);
+                let blurred = blur_line(
+                    w,
+                    &kernel,
+                    half,
+                    |i| if water[i] { f64::NAN } else { row[i] },
+                );
+                let built: Vec<f64> = lc_grid[y][..w]
+                    .iter()
+                    .map(|&c| if c == LC_BUILT_UP { 1.0 } else { 0.0 })
+                    .collect();
+                (blurred, blur_values(&built, &kernel, half, true))
+            })
+            .collect();
+        for (blurred, built) in made {
+            rows_h.push_back(blurred);
+            rows_m.push_back(built);
+        }
+
+        // Each output reads only its own window, so a band's columns give what the
+        // whole grid's would.
+        let band = (y0 - lo)..(y1 - lo);
+        let groups: Vec<(usize, Vec<f64>, Vec<f64>)> = (0..w)
+            .step_by(BLUR_GROUP)
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|gx| {
+                let gw = BLUR_GROUP.min(w - gx);
+                let gather = |rows: &VecDeque<Vec<f64>>, binary: bool| {
+                    let mut cols: Vec<Vec<f64>> = vec![Vec::with_capacity(rows.len()); gw];
+                    for row in rows {
+                        for (c, col) in cols.iter_mut().enumerate() {
+                            col.push(row[gx + c]);
+                        }
+                    }
+                    let cols: Vec<Vec<f64>> = cols
+                        .iter()
+                        .map(|col| blur_values_range(col, &kernel, half, binary, band.clone()))
+                        .collect();
+                    let mut out = Vec::with_capacity(band.len() * gw);
+                    for y in 0..band.len() {
+                        out.extend(cols.iter().map(|col| col[y]));
+                    }
+                    out
+                };
+                (gx, gather(&rows_h, false), gather(&rows_m, true))
+            })
+            .collect();
+
+        // Blend through the feathered mask, kept as f32 as before; the leveled water
+        // surface is left as it is.
+        total_influenced += heights[y0..y1]
+            .par_iter_mut()
+            .enumerate()
+            .map(|(r, row)| {
+                let water = &is_water_surface[y0 + r];
+                let mut n = 0usize;
+                for (gx, blurred, built) in &groups {
+                    let gw = blurred.len() / band.len();
+                    for c in 0..gw {
+                        let x = gx + c;
+                        if water[x] {
+                            continue;
+                        }
+                        let m = f64::from(built[r * gw + c] as f32).clamp(0.0, 1.0);
+                        if m <= 1.0e-4 {
+                            continue;
+                        }
+                        let (orig, blur) = (row[x], blurred[r * gw + c]);
+                        if !orig.is_finite() || !blur.is_finite() {
+                            continue;
+                        }
+                        row[x] = (1.0 - m) * orig + m * blur;
+                        n += 1;
+                    }
+                }
+                n
+            })
+            .sum::<usize>();
+        y0 = y1;
+        report(y0 as f64 / h as f64);
+    }
+    total_influenced
 }
 
 /// 2D Gaussian blur (separable: horizontal then vertical pass).
@@ -2164,7 +2252,8 @@ fn gaussian_blur_grid_reported(
 
 /// `gaussian_blur_grid_reported` over `heights` with every `masked` cell read as NaN,
 /// so it contributes nothing. Identical output to blurring a pre-built masked copy,
-/// without allocating one.
+/// without allocating one. The reference the banded built-up smoothing is tested against.
+#[cfg(test)]
 fn gaussian_blur_heights_masked(
     heights: &[Vec<f64>],
     masked: &[Vec<bool>],
@@ -2215,6 +2304,13 @@ fn gaussian_blur_heights_masked(
 /// rayon barriers cost nothing measurable.
 const BLUR_CHUNKS: usize = 10;
 
+/// Columns gathered per task: one cache line per row instead of one per cell.
+const BLUR_GROUP: usize = 8;
+
+/// Rows the built-up smoothing blends per band. Its blurs are held for one band and the
+/// kernel's reach either side, never for the whole grid.
+const SMOOTH_BAND_ROWS: usize = 512;
+
 /// One separable pass over a line of `len` samples. `get` supplies the source value so
 /// a caller can synthesise masked-out cells without materialising a copy of the grid.
 /// Edges are handled by renormalizing over the valid samples.
@@ -2227,6 +2323,17 @@ fn blur_line(len: usize, kernel: &[f64], half: i32, get: impl Fn(usize) -> f64) 
 /// `blur_line` over `vals`. With `binary`, a window of all 0.0 or all 1.0 takes its exact
 /// answer (see `window_hits`) instead of the full kernel.
 fn blur_values(vals: &[f64], kernel: &[f64], half: i32, binary: bool) -> Vec<f64> {
+    blur_values_range(vals, kernel, half, binary, 0..vals.len())
+}
+
+/// `blur_values` for the outputs in `range` only, each the same as the full call's.
+fn blur_values_range(
+    vals: &[f64],
+    kernel: &[f64],
+    half: i32,
+    binary: bool,
+    range: std::ops::Range<usize>,
+) -> Vec<f64> {
     let len = vals.len();
     let bad = prefix_counts(vals, |v| !v.is_finite());
     let uniform = binary.then(|| {
@@ -2241,9 +2348,9 @@ fn blur_values(vals: &[f64], kernel: &[f64], half: i32, binary: bool) -> Vec<f64
     // Interior cells are summed LANES at a time, each with its own accumulator and tap
     // order, so the output is unchanged but the add chains overlap instead of queueing.
     const LANES: usize = 8;
-    let mut out = Vec::with_capacity(len);
-    let mut i = 0;
-    while i < len {
+    let mut out = Vec::with_capacity(range.len());
+    let mut i = range.start;
+    while i < range.end {
         if let Some((ones, zeros)) = &uniform {
             let (n, window) = window_hits(ones, i, half, len);
             if n == window {
@@ -2258,7 +2365,11 @@ fn blur_values(vals: &[f64], kernel: &[f64], half: i32, binary: bool) -> Vec<f64
                 continue;
             }
         }
-        if i >= h && i + LANES + h <= len && bad[i + LANES + h] == bad[i - h] {
+        if i >= h
+            && i + LANES + h <= len
+            && i + LANES <= range.end
+            && bad[i + LANES + h] == bad[i - h]
+        {
             let window = &vals[i - h..i + LANES + h];
             let mut sums = [0.0f64; LANES];
             for (j, &k) in kernel.iter().enumerate() {
@@ -2308,13 +2419,12 @@ fn blur_column_chunk(
     half: i32,
     binary: bool,
 ) -> Vec<(usize, Vec<f64>)> {
-    const GROUP: usize = 8;
     (x0..x1)
-        .step_by(GROUP)
+        .step_by(BLUR_GROUP)
         .collect::<Vec<_>>()
         .into_par_iter()
         .map(|gx| {
-            let gw = GROUP.min(x1 - gx);
+            let gw = BLUR_GROUP.min(x1 - gx);
             let mut cols: Vec<Vec<f64>> = vec![Vec::with_capacity(src.len()); gw];
             for row in src {
                 for (c, col) in cols.iter_mut().enumerate() {
@@ -2995,44 +3105,27 @@ struct FitRange {
 }
 
 /// Kept in its original arithmetic so default worlds round exactly as before.
-fn apply_fit(
-    blurred_heights: &[Vec<f64>],
-    affine: &ElevationAffine,
-    fit: FitRange,
-    upper_clamp: f64,
-) -> Vec<Vec<f64>> {
+fn apply_fit(heights: &mut [Vec<f64>], affine: &ElevationAffine, fit: FitRange, upper_clamp: f64) {
     let base = affine.ground_level as f64;
-    blurred_heights
-        .par_iter()
-        .map(|row| {
-            row.iter()
-                .map(|&h| {
-                    let relative_height: f64 = if fit.height_range > 0.0 {
-                        (h - affine.min_height_m) / fit.height_range
-                    } else {
-                        0.0
-                    };
-                    (base + relative_height * fit.scaled_range).clamp(base, upper_clamp)
-                })
-                .collect()
-        })
-        .collect()
+    heights.par_iter_mut().for_each(|row| {
+        for h in row {
+            let relative_height: f64 = if fit.height_range > 0.0 {
+                (*h - affine.min_height_m) / fit.height_range
+            } else {
+                0.0
+            };
+            *h = (base + relative_height * fit.scaled_range).clamp(base, upper_clamp);
+        }
+    });
 }
 
-fn apply_affine(
-    blurred_heights: &[Vec<f64>],
-    affine: &ElevationAffine,
-    upper_clamp: f64,
-) -> Vec<Vec<f64>> {
+fn apply_affine(heights: &mut [Vec<f64>], affine: &ElevationAffine, upper_clamp: f64) {
     let base = affine.ground_level as f64;
-    blurred_heights
-        .par_iter()
-        .map(|row| {
-            row.iter()
-                .map(|&h| affine.y_for_metres(h).clamp(base, upper_clamp))
-                .collect()
-        })
-        .collect()
+    heights.par_iter_mut().for_each(|row| {
+        for h in row {
+            *h = affine.y_for_metres(*h).clamp(base, upper_clamp);
+        }
+    });
 }
 
 #[cfg(test)]
@@ -3058,6 +3151,7 @@ pub fn scale_to_minecraft_with(
 }
 
 /// `scale_to_minecraft_with`, fitting the relief `top_reserve` blocks lower.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn scale_to_minecraft_reserving(
     blurred_heights: &[Vec<f64>],
@@ -3069,6 +3163,33 @@ pub fn scale_to_minecraft_reserving(
     policy: AffinePolicy,
     top_reserve: i32,
 ) -> (Vec<Vec<f64>>, ElevationAffine) {
+    let mut mc_heights = blurred_heights.to_vec();
+    let affine = scale_to_minecraft_in_place(
+        &mut mc_heights,
+        scale,
+        ground_level,
+        min_ground_level,
+        disable_height_limit,
+        extended_max_y,
+        policy,
+        top_reserve,
+    );
+    (mc_heights, affine)
+}
+
+/// Turns the metre grid into block heights where it lies, so a second full grid is never held.
+#[allow(clippy::too_many_arguments)]
+pub fn scale_to_minecraft_in_place(
+    heights: &mut [Vec<f64>],
+    scale: f64,
+    ground_level: i32,
+    min_ground_level: i32,
+    disable_height_limit: bool,
+    extended_max_y: i32,
+    policy: AffinePolicy,
+    top_reserve: i32,
+) -> ElevationAffine {
+    let blurred_heights: &[Vec<f64>] = heights;
     let ceiling = terrain_ceiling(disable_height_limit, extended_max_y);
     let upper_clamp = ceiling as f64;
 
@@ -3135,14 +3256,10 @@ pub fn scale_to_minecraft_reserving(
         }
     };
 
-    let mc_heights = match fit {
-        Some(range) => apply_fit(blurred_heights, &affine, range, upper_clamp),
-        None => apply_affine(blurred_heights, &affine, upper_clamp),
-    };
-
-    if let AffinePolicy::Fixed(_) = policy {
+    // Counted on the metre heights, before they turn into block heights.
+    let outside = matches!(policy, AffinePolicy::Fixed(_)).then(|| {
         let base = affine.ground_level as f64;
-        let (clamped, total) = blurred_heights
+        blurred_heights
             .par_iter()
             .map(|row| {
                 let mut c = 0usize;
@@ -3159,7 +3276,15 @@ pub fn scale_to_minecraft_reserving(
                 }
                 (c, n)
             })
-            .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+            .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+    });
+
+    match fit {
+        Some(range) => apply_fit(heights, &affine, range, upper_clamp),
+        None => apply_affine(heights, &affine, upper_clamp),
+    }
+
+    if let Some((clamped, total)) = outside {
         if total > 0 && clamped * 200 > total {
             let pct = clamped as f64 * 100.0 / total as f64;
             eprintln!(
@@ -3182,7 +3307,7 @@ pub fn scale_to_minecraft_reserving(
     // The map preview shades over the band the terrain fills, so publish where it ended up.
     let top = match fit {
         Some(range) => affine.ground_level as f64 + range.scaled_range,
-        None => mc_heights
+        None => heights
             .par_iter()
             .map(|row| row.iter().cloned().fold(f64::MIN, f64::max))
             .reduce(|| f64::MIN, f64::max),
@@ -3194,7 +3319,7 @@ pub fn scale_to_minecraft_reserving(
     };
     crate::world_editor::common::set_terrain_top_y(top.min(upper_clamp).round() as i32);
 
-    (mc_heights, affine)
+    affine
 }
 
 #[cfg(test)]
@@ -3950,6 +4075,77 @@ mod tests {
         let seen = seen.into_inner();
         assert!(seen.windows(2).all(|p| p[0] <= p[1]), "{seen:?}");
         assert_eq!(seen.last().copied(), Some(1.0));
+    }
+
+    /// The whole-grid blend the banded one replaced.
+    fn blend_whole_grid(
+        heights: &mut [Vec<f64>],
+        lc: &[Vec<u8>],
+        water: &[Vec<bool>],
+        sigma: f64,
+    ) -> usize {
+        let (h, w) = (heights.len(), heights[0].len());
+        let mask = gaussian_blur_mask_to_f32(lc, LC_BUILT_UP, w, h, sigma);
+        let blurred = gaussian_blur_heights_masked(heights, water, sigma, &|_| {});
+        let mut n = 0;
+        for y in 0..h {
+            for x in 0..w {
+                if water[y][x] {
+                    continue;
+                }
+                let m = (mask[y][x] as f64).clamp(0.0, 1.0);
+                if m <= 1.0e-4 {
+                    continue;
+                }
+                let (orig, blur) = (heights[y][x], blurred[y][x]);
+                if !orig.is_finite() || !blur.is_finite() {
+                    continue;
+                }
+                heights[y][x] = (1.0 - m) * orig + m * blur;
+                n += 1;
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn the_banded_built_up_blend_matches_the_whole_grid_one() {
+        // Taller and shorter than the kernel, with NaNs, water and uniform built-up runs.
+        for (w, h) in [(53, 61), (70, 9)] {
+            let mut heights = wobbly(w, h);
+            heights[7][9] = f64::NAN;
+            heights[h - 1][3] = f64::NAN;
+            let lc: Vec<Vec<u8>> = (0..h)
+                .map(|y| {
+                    (0..w)
+                        .map(|x| {
+                            if (x / 6 + y / 5) % 3 != 0 || x > 40 {
+                                LC_BUILT_UP
+                            } else {
+                                LC_GRASSLAND
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            let water: Vec<Vec<bool>> = (0..h)
+                .map(|y| {
+                    (0..w)
+                        .map(|x| (x + 2 * y) % 11 == 0 || (y + 4 > h && x < 10))
+                        .collect()
+                })
+                .collect();
+            for sigma in [1.5, 2.0, 4.5] {
+                let mut want = heights.clone();
+                let n_want = blend_whole_grid(&mut want, &lc, &water, sigma);
+                for band in [1, 3, 7, 16, 64, 512] {
+                    let mut got = heights.clone();
+                    let n = blend_built_up_blur(&mut got, &lc, &water, sigma, band, &|_| {});
+                    assert_eq!(n, n_want, "{w}x{h} sigma {sigma} band {band}");
+                    assert_bits_eq(&got, &want);
+                }
+            }
+        }
     }
 
     #[test]
