@@ -2706,20 +2706,29 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
 }
 
 /// Metres a building or part rises to by its `height`, else by its storeys as parts are built.
-fn mapped_top(tags: &HashMap<String, String>) -> Option<f64> {
+fn mapped_top(tags: &HashMap<String, String>, storey: f64) -> Option<f64> {
     tags.get("height")
         .and_then(|h| parse_length_m(h))
         .or_else(|| {
             tags.get("building:levels")
                 .and_then(|l| l.trim().parse::<f64>().ok())
-                .map(storeys_m)
+                .map(|l| storeys_m(l, storey))
         })
         .filter(|m| m.is_finite() && *m > 0.0)
 }
 
-/// Metres of `storeys` at the storey height parts are built with, on the raised ground floor.
-fn storeys_m(storeys: f64) -> f64 {
-    storeys * 4.0 + 2.0
+/// Metres of `storeys` on the raised ground floor, as parts are built and lifted.
+fn storeys_m(storeys: f64, storey: f64) -> f64 {
+    storeys * storey + 2.0
+}
+
+/// Storey height of the parts of a building: a housing block's are lower.
+fn part_storey_m(outline: &HashMap<String, String>) -> f64 {
+    if is_housing_type(outline) {
+        3.0
+    } else {
+        4.0
+    }
 }
 
 /// A raised part sets the storeys under it when it covers this share of its outline.
@@ -2831,15 +2840,16 @@ fn lower_outlines_under_parts(
         }) else {
             continue;
         };
+        let storey = ways[oi].tags.as_ref().map_or(4.0, part_storey_m);
         let metres = |k: &str| tags.get(k).and_then(|v| parse_length_m(v));
         let base = metres("min_height")
-            .or_else(|| metres("building:min_level").map(storeys_m))
+            .or_else(|| metres("building:min_level").map(|l| storeys_m(l, storey)))
             .filter(|b| b.is_finite() && *b > 0.0)
             .unwrap_or(0.0);
         parts_of.entry(oi).or_default().push(Part {
             ring: r,
             area,
-            top: mapped_top(tags),
+            top: mapped_top(tags, storey),
             base,
         });
     }
@@ -2849,7 +2859,7 @@ fn lower_outlines_under_parts(
         let Some(tags) = ways[oi].tags.as_mut() else {
             continue;
         };
-        let own_top = mapped_top(tags);
+        let own_top = mapped_top(tags, part_storey_m(tags));
         let share = |p: &Part| p.area / area;
         let lowest = |least: f64| {
             parts
@@ -4394,6 +4404,23 @@ mod outline_suppression_tests {
         assert_eq!(tags.get("height").map(String::as_str), Some("22.0"));
         assert_eq!(tags.get("roof:shape").map(String::as_str), Some("flat"));
         assert!(!tags.contains_key("building:levels"));
+    }
+
+    #[test]
+    fn a_housing_block_stands_on_housing_storeys_under_its_parts() {
+        // Its parts are lifted three metres a storey, so the podium ends where they start.
+        let tags = lowered(
+            &[("building", "apartments"), ("building:levels", "12")],
+            &[(
+                [0.0, 0.0, 0.001, 0.001],
+                &[
+                    ("building:part", "yes"),
+                    ("building:min_level", "5"),
+                    ("building:levels", "12"),
+                ],
+            )],
+        );
+        assert_eq!(tags.get("height").map(String::as_str), Some("17.0"));
     }
 
     #[test]
