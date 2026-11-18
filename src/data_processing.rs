@@ -1562,12 +1562,14 @@ pub fn generate_world_with_options(
     let tree_keep_clear = ground
         .laser_trees_wanted()
         .then(|| {
+            let room = crate::structures::fountain::room_at(&editor, &road_mask);
             crate::floodfill_cache::collect_tree_keep_clear(
                 &elements,
                 &xzbbox,
                 args.scale,
                 args.water.water_detail.channel_width_cap(args.scale),
                 1,
+                Some(&room),
             )
         })
         .flatten()
