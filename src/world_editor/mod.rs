@@ -237,10 +237,13 @@ pub enum GroundMark {
     Dwelling,
     /// Footprints of buildings over four storeys, near which open ground stays paved.
     Tall,
+    /// Footprints of dwellings mapped as houses, whose gardens reach into school and
+    /// hospital grounds as well: a caretaker's house, a rectory, a farmhouse.
+    House,
 }
 
 impl GroundMark {
-    const COUNT: usize = 4;
+    const COUNT: usize = 5;
 }
 
 /// What the gardens read besides the marks, built once from the element list before

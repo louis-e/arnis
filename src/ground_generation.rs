@@ -1792,6 +1792,7 @@ fn garden_columns(
     use crate::world_editor::GroundMark;
     let dwellings = editor.ground_marks(GroundMark::Dwelling)?;
     let tall = editor.ground_marks(GroundMark::Tall);
+    let houses = editor.ground_marks(GroundMark::House);
     let land = editor.garden_land();
     let margin = reach.street.max(reach.path).max(reach.wall);
     let side = (16 + 2 * margin) as usize;
@@ -1820,9 +1821,11 @@ fn garden_columns(
             let (x, z) = (x0 + cx, z0 + cz);
             let wx = seam_window(CoarseMask::cell_index(x), reach.cells);
             let wz = seam_window(CoarseMask::cell_index(z), reach.cells);
+            // School and hospital grounds stay paved but round a house mapped there.
             if !dwellings.any_in(wx, wz)
                 || tall.is_some_and(|m| m.any_in(wx, wz))
-                || land.is_some_and(|l| l.grounds.contains(x, z))
+                || (land.is_some_and(|l| l.grounds.contains(x, z))
+                    && !houses.is_some_and(|m| m.any_in(wx, wz)))
             {
                 continue;
             }
@@ -2263,6 +2266,49 @@ mod tests {
         }
         let g = garden_columns(&editor, &footprints, reach, 0, 0).expect("a garden");
         assert!(!g[14 * 16 + 4] && g[14 * 16 + 9]);
+    }
+
+    /// School grounds stay paved round a dwelling, but a house mapped there, a
+    /// caretaker's or a rectory, keeps its garden; ground away from it stays paved.
+    #[test]
+    fn a_house_in_school_grounds_keeps_its_garden() {
+        use crate::osm_parser::ProcessedElement;
+        use crate::world_editor::GroundMark;
+        let bbox = XZBBox::rect_from_min_max(0, 0, 127, 127).unwrap();
+        let mut footprints = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
+        let school = [ProcessedElement::Way(landuse_way(
+            1,
+            "education",
+            (0, 0),
+            (127, 127),
+        ))];
+        let reach = GardenReach::at(1.0);
+        let garden = |house: bool, footprints: &crate::floodfill_cache::CoordinateBitmap| {
+            let mut editor = garden_editor(&bbox, &[]);
+            with_garden_land(&mut editor, &bbox, &school, &[]);
+            for x in 4..12 {
+                for z in 6..12 {
+                    editor.mark_ground(GroundMark::Dwelling, x, z);
+                    if house {
+                        editor.mark_ground(GroundMark::House, x, z);
+                    }
+                }
+            }
+            let near = garden_columns(&editor, footprints, reach, 0, 0);
+            let far = garden_columns(&editor, footprints, reach, 4, 4);
+            (near, far)
+        };
+        for x in 4..12 {
+            for z in 6..12 {
+                footprints.set(x, z);
+            }
+        }
+        let (near, _) = garden(false, &footprints);
+        assert!(near.is_none(), "a plain dwelling's grounds stay paved");
+        let (near, far) = garden(true, &footprints);
+        let near = near.expect("the house keeps its garden");
+        assert!(near[14 * 16 + 8], "behind the house");
+        assert!(far.is_none(), "school ground away from it stays paved");
     }
 
     /// The reaches are lengths, so they follow the scale at any scale, and the dwelling

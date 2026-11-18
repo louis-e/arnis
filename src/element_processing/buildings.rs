@@ -14778,8 +14778,12 @@ pub fn generate_buildings(
         },
     };
     if min_level_offset == 0 && has_garden_grounds(category, &element.tags, storeys, home) {
+        let house = mapped_as_house(&element.tags);
         for &(x, z) in &cached_floor_area {
             editor.mark_ground(crate::world_editor::GroundMark::Dwelling, x, z);
+            if house {
+                editor.mark_ground(crate::world_editor::GroundMark::House, x, z);
+            }
         }
     }
 
@@ -17299,6 +17303,19 @@ const NOT_HOMES: &[&str] = &[
     "community_centre",
     "monastery",
 ];
+
+/// Whether a building is mapped as a house: its type a house, bungalow or farmhouse,
+/// or its `building:use` residential. Its garden reaches into school and hospital
+/// grounds, where other buildings' do not.
+fn mapped_as_house(tags: &HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("building").map(String::as_str),
+        Some("house" | "detached" | "semidetached_house" | "terrace" | "bungalow" | "farm")
+    ) || matches!(
+        tags.get("building:use").map(String::as_str),
+        Some("residential" | "apartments" | "house")
+    )
+}
 
 /// Largest a plain building stands, in m², to count as a house off residential land.
 const HOUSE_FOOTPRINT_M2: f64 = 250.0;
