@@ -993,8 +993,10 @@ pub fn generate_ground_region(
                                         WHITE_CONCRETE,
                                         YELLOW_CONCRETE,
                                         DIRT_PATH,
-                                        // A footway's or cycle path's asphalt.
+                                        // A footway's or cycle path's asphalt, and the
+                                        // paving of a sidewalk or paved path.
                                         POLISHED_ANDESITE,
+                                        SMOOTH_STONE,
                                         STONE_BRICKS,
                                         BRICK,
                                         OAK_PLANKS,
@@ -1674,6 +1676,7 @@ pub fn generate_ground_region(
                             YELLOW_CONCRETE,
                             DIRT_PATH,
                             POLISHED_ANDESITE,
+                            SMOOTH_STONE,
                             WATER,
                         ]),
                         None,
