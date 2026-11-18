@@ -29,6 +29,8 @@
   "area_extreme": "Dieses Gebiet ist extrem groß und könnte möglicherweise zu groß sein, um erfolgreich generiert zu werden.",
   "area_extensive": "Diese Gebietsgröße könnte längere Zeit für die Generierung benötigen.",
   "selection_confirmed": "Auswahl bestätigt!",
+  "size_estimate": "etwa {size}",
+  "size_estimate_tip": "Geschätzte Größe der Welt auf der Festplatte. Mit Boden füllen oder Höhlen hängt sie vom Gelände ab: Die größere Zahl gilt für Gebirge.",
   "select_area_prompt": "Wähle einen Bereich auf der Karte aus.",
   "unknown_error": "Unbekannter Fehler",
   "license_and_credits": "Lizenz und Credits",

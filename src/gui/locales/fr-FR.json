@@ -29,6 +29,8 @@
   "area_extreme": "Cette zone est extrêmement grande et risque d'être trop étendue pour être générée avec succès.",
   "area_extensive": "Cette zone est très étendue et pourrait nécessiter beaucoup de ressources et de temps.",
   "selection_confirmed": "Sélection confirmée !",
+  "size_estimate": "environ {size}",
+  "size_estimate_tip": "Taille estimée du monde sur le disque. Avec Remplir le sol ou Grottes, elle dépend du terrain : le chiffre le plus élevé vaut pour les montagnes.",
   "select_area_prompt": "Sélectionnez une zone sur la carte avec les outils.",
   "unknown_error": "Erreur inconnue",
   "license_and_credits": "Licence et crédits",

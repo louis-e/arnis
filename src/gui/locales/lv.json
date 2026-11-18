@@ -29,6 +29,8 @@
   "area_extreme": "Šis apgabals ir ārkārtīgi liels un var būt pārāk liels, lai to veiksmīgi ģenerētu.",
   "area_extensive": "Apgabals ir diezgan plašs un var prasīt ievērojamu laiku un resursus",
   "selection_confirmed": "Izvēle apstiprināta!",
+  "size_estimate": "ap {size}",
+  "size_estimate_tip": "Pasaules aptuvenais izmērs diskā. Ar Aizpildīt zemi vai Alas tas atkarīgs no reljefa: lielākais skaitlis ir kalniem.",
   "select_area_prompt": "Izvēlieties apgabalu kartē, izmantojot rīkus.",
   "unknown_error": "Nezināma kļūda",
   "license_and_credits": "Licence un autori",

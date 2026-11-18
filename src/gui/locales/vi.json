@@ -36,6 +36,8 @@
   "area_extreme": "Khu vực này cực kỳ lớn và có thể quá lớn để tạo thành công.",
   "area_extensive": "Khu vực khá rộng và có thể tốn nhiều thời gian và tài nguyên.",
   "selection_confirmed": "Đã xác nhận vùng chọn!",
+  "size_estimate": "khoảng {size}",
+  "size_estimate_tip": "Dung lượng ước tính của thế giới trên đĩa. Khi bật Lấp đầy lòng đất hoặc Hang động, nó phụ thuộc vào địa hình: con số lớn hơn là cho vùng núi.",
   "select_area_prompt": "Chọn một khu vực trên bản đồ bằng các công cụ.",
   "unknown_error": "Lỗi không xác định",
   "license_and_credits": "Giấy phép và ghi công",

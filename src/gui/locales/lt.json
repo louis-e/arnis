@@ -29,6 +29,8 @@
   "area_extreme": "Šis plotas yra itin didelis ir gali būti per didelis, kad būtų sėkmingai sugeneruotas.",
   "area_extensive": "Šis plotas yra pakankamai didelis kuriam reikėtų daug laiko ir resursų.",
   "selection_confirmed": "Pasirinkimas patvirtintas!",
+  "size_estimate": "apie {size}",
+  "size_estimate_tip": "Numatomas pasaulio dydis diske. Su Užpildyti pagrindą ar Urvai jis priklauso nuo reljefo: didesnis skaičius skirtas kalnams.",
   "select_area_prompt": "Pasirinkite plotą žemėlapyje naudodami įrankius.",
   "unknown_error": "Nežinoma klaida",
   "license_and_credits": "Licencija ir padėkos",

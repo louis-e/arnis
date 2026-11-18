@@ -29,6 +29,8 @@
   "area_extreme": "この範囲は極めて広く、正常に生成できない可能性があります。",
   "area_extensive": "この範囲はかなり広く、生成に長い時間と多くのリソースが必要になる場合があります。",
   "selection_confirmed": "選択を確認しました！",
+  "size_estimate": "約 {size}",
+  "size_estimate_tip": "ディスク上のワールドの推定サイズです。地面を埋めるや洞窟がオンの場合は地形によって変わり、大きい方の数値は山岳地帯の場合です。",
   "select_area_prompt": "ツールを使って地図上で範囲を選択してください。",
   "unknown_error": "不明なエラー",
   "license_and_credits": "ライセンスとクレジット",

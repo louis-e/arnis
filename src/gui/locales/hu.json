@@ -29,6 +29,8 @@
   "area_extreme": "Ez a terület rendkívül nagy, és lehet, hogy túl nagy ahhoz, hogy sikeresen legenerálható legyen.",
   "area_extensive": "A terület meglehetősen kiterjedt, és jelentős időt és erőforrásokat igényelhet.",
   "selection_confirmed": "Kiválasztás megerősítve",
+  "size_estimate": "kb. {size}",
+  "size_estimate_tip": "A világ becsült mérete a lemezen. Talaj feltöltése vagy Barlangok mellett a tereptől függ: a nagyobb szám a hegyekre vonatkozik.",
   "select_area_prompt": "Jelölj ki egy területet a térképen az eszközökkel.",
   "unknown_error": "Ismeretlen hiba",
   "license_and_credits": "Licenc és elismerés.",

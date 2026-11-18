@@ -29,6 +29,8 @@
   "area_extreme": "Tämä alue on äärimmäisen suuri ja saattaa olla liian iso onnistunutta luomista varten.",
   "area_extensive": "Alue on aika laaja ja voi viedä pitkän ajan ja resursseja.",
   "selection_confirmed": "Valinta vahvistettu!",
+  "size_estimate": "noin {size}",
+  "size_estimate_tip": "Maailman arvioitu koko levyllä. Asetuksilla Täytä maa tai Luolat se riippuu maastosta: suurempi luku koskee vuoristoa.",
   "select_area_prompt": "Valitse alue kartalta työkaluilla.",
   "unknown_error": "Tuntematon virhe",
   "license_and_credits": "Lisenssi ja krediitit",

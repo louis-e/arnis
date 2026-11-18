@@ -29,6 +29,8 @@
   "area_extreme": "Det här området är extremt stort och kan vara för stort för att genereras framgångsrikt.",
   "area_extensive": "Området är ganska extensivt och kan ta betydande tid och resurser.",
   "selection_confirmed": "Val bekräftat!",
+  "size_estimate": "omkring {size}",
+  "size_estimate_tip": "Världens uppskattade storlek på disken. Med Fyll mark eller Grottor beror den på terrängen: den större siffran gäller berg.",
   "select_area_prompt": "Välj ett område på kartan med verktygen.",
   "unknown_error": "Okänt fel",
   "license_and_credits": "Licens och tack",

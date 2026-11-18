@@ -29,6 +29,8 @@
   "area_extreme": "此区域极大，可能过大而无法成功生成。",
   "area_extensive": "该区域相当广泛，可能需要大量时间和资源。",
   "selection_confirmed": "选择已确认！",
+  "size_estimate": "约 {size}",
+  "size_estimate_tip": "世界在磁盘上的估计大小。开启“填充地面”或“洞穴”时取决于地形：较大的数字对应山区。",
   "select_area_prompt": "使用工具在地图上选择一个区域。",
   "unknown_error": "未知错误",
   "license_and_credits": "许可证和致谢",

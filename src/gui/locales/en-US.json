@@ -36,6 +36,8 @@
   "area_extreme": "This area is extremely large and may be too big to generate successfully.",
   "area_extensive": "The area is quite extensive and may take significant time and resources.",
   "selection_confirmed": "Selection confirmed!",
+  "size_estimate": "about {size}",
+  "size_estimate_tip": "Estimated size of the world on disk. With Fill Ground or Caves it depends on the terrain: the larger figure is for mountains.",
   "select_area_prompt": "Select an area on the map using the tools.",
   "unknown_error": "Unknown error",
   "license_and_credits": "License and Credits",

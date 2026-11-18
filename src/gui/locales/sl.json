@@ -29,6 +29,8 @@
   "area_extreme": "To območje je izredno veliko in morda preveliko za uspešno generiranje.",
   "area_extensive": "Območje je precej obsežno in lahko zahteva veliko časa ter sistemskih virov.",
   "selection_confirmed": "Izbira potrjena!",
+  "size_estimate": "približno {size}",
+  "size_estimate_tip": "Ocenjena velikost sveta na disku. Z Zapolni tla ali Jame je odvisna od terena: večja številka velja za gore.",
   "select_area_prompt": "Izberite območje na zemljevidu z uporabo orodij.",
   "unknown_error": "Neznana napaka",
   "license_and_credits": "Licenca in zasluge",

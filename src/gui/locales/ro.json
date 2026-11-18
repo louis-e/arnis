@@ -36,6 +36,8 @@
   "area_extreme": "Zona este extrem de mare și este posibil să nu poată fi generată cu succes.",
   "area_extensive": "Zona este destul de întinsă și poate necesita mult timp și resurse.",
   "selection_confirmed": "Selecție confirmată!",
+  "size_estimate": "circa {size}",
+  "size_estimate_tip": "Dimensiunea estimată a lumii pe disc. Cu Umplerea subsolului sau Peșteri depinde de teren: cifra mai mare este pentru munți.",
   "select_area_prompt": "Selectează o zonă pe hartă folosind instrumentele.",
   "unknown_error": "Eroare necunoscută",
   "license_and_credits": "Licență și credite",

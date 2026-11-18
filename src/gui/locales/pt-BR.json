@@ -29,6 +29,8 @@
   "area_extreme": "Esta área é extremamente grande e pode ser grande demais para ser gerada com sucesso.",
   "area_extensive": "A área é bastante extensa e pode exigir bastante tempo e recursos.",
   "selection_confirmed": "Seleção confirmada!",
+  "size_estimate": "cerca de {size}",
+  "size_estimate_tip": "Tamanho estimado do mundo no disco. Com Preencher solo ou Cavernas, depende do terreno: o número maior é para montanhas.",
   "select_area_prompt": "Selecione uma área no mapa usando as ferramentas.",
   "unknown_error": "Erro desconhecido",
   "license_and_credits": "Licença e créditos",

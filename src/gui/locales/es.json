@@ -29,6 +29,8 @@
   "area_extreme": "Esta área es extremadamente grande y es posible que sea demasiado extensa para generarse correctamente.",
   "area_extensive": "El área es bastante extensa y puede requerir mucho tiempo y recursos.",
   "selection_confirmed": "¡Selección confirmada!",
+  "size_estimate": "unos {size}",
+  "size_estimate_tip": "Tamaño estimado del mundo en disco. Con Rellenar Suelo o Cuevas depende del terreno: la cifra mayor es para montañas.",
   "select_area_prompt": "Selecciona un área en el mapa usando las herramientas.",
   "unknown_error": "Error desconocido",
   "license_and_credits": "Licencia y créditos",
