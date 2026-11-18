@@ -36,6 +36,14 @@ pub struct RotationMask {
     pub orig_max_z: i32,
 }
 
+/// Share of its measured height a crown the laser saw is drawn at. A tree model
+/// carries its whole crown up to the height it is given, while a real crown
+/// slopes down to its edges: at full height the drawn canopy stands above the
+/// measured one (its median columns 2 to 5 m up in Erding, Bellevue and Munich).
+/// At this share its tallest tenth stays 3 to 4 m under the measured one, since
+/// trees are better a little short than too tall.
+const MEASURED_TREE_SHARE: f32 = 0.85;
+
 /// Represents terrain data, land cover classification, and elevation settings
 #[derive(Clone)]
 pub struct Ground {
@@ -845,8 +853,8 @@ impl Ground {
     }
 
     /// With measured trees on: the laser's trees replace the canopy map wherever
-    /// the laser measured, at their measured height; bare ground it measured is
-    /// bare. Outside its reach the canopy map stays. Mapped trees read their height
+    /// the laser measured, at [`MEASURED_TREE_SHARE`] of their measured height;
+    /// bare ground it measured is bare. Outside its reach the canopy map stays. Mapped trees read their height
     /// from the same grid, so they get the measured one too.
     pub fn apply_measured_canopy(&mut self) {
         let Some(s) = self.survey.as_ref().filter(|s| s.features.trees) else {
@@ -865,7 +873,7 @@ impl Ground {
                 let Some(c) = s.at_any(gx, gz) else { continue };
                 let v = if c.kind == crate::survey::Kind::Tree {
                     trees += 1;
-                    c.height.round().clamp(3.0, 60.0) as u8
+                    (c.height * MEASURED_TREE_SHARE).round().clamp(3.0, 60.0) as u8
                 } else {
                     0
                 };
@@ -2190,6 +2198,36 @@ mod tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZPoint;
     use crate::elevation_data::ElevationData;
+
+    /// A crown the laser measured 20 m tall is drawn at 17 m, a 3 m one at the
+    /// shortest tree; bare ground stays bare.
+    #[test]
+    fn measured_crowns_are_drawn_a_little_short() {
+        let (w, h) = (4usize, 1usize);
+        let tree = crate::survey::classify::TREE;
+        let cells = vec![
+            [tree, 100, 0, 0, 0],
+            [tree, 15, 0, 0, 0],
+            [1, 0, 0, 0, 0],
+            [tree, 255, 0, 0, 0],
+        ];
+        let features = crate::survey::Features {
+            garden: false,
+            trees: true,
+            heights: false,
+        };
+        let mut ground = Ground::new_flat(0);
+        ground.set_world_dims(w, h);
+        ground.set_survey(Some(crate::survey::SurveyData::from_cells(
+            cells, w, h, features,
+        )));
+        ground.apply_measured_canopy();
+        let at = |x| ground.canopy_height_m(XZPoint::new(x, 0));
+        assert_eq!(
+            [at(0), at(1), at(2), at(3)],
+            [Some(17), Some(3), Some(0), Some(43)]
+        );
+    }
 
     fn ground_with(heights: Vec<Vec<f32>>) -> Ground {
         let h = heights.len();

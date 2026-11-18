@@ -11,6 +11,10 @@
 //!   puts its own roof on top as it does for any untagged building, so shapes
 //!   stay its choice while the walls are measured.
 //!
+//! A building is measured by its main part: a lower wing, extension or garage
+//! under the same outline does not set its walls, and a block's or a hall's
+//! roof flat over most of it is flat whatever its lower parts do.
+//!
 //! Homes get the storeys that wall height holds (`building:levels`), not the
 //! metres: Arnis draws a storey in three or four blocks plus a raised ground
 //! floor, so a two-storey house with its eaves at 5.8 m would otherwise show one
@@ -183,8 +187,12 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox, scale: f64) -> 
         return None;
     }
     roof.sort_by(f32::total_cmp);
-    let at = |q: f64| roof[((roof.len() - 1) as f64 * q).round() as usize];
-    let (eave, top) = (at(0.1), at(0.95));
+    let at = |v: &[f32], q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
+    let top = at(&roof, 0.95);
+    let eave = at(main_roof(&roof), 0.1);
+    // Half the roof within a metre of its top: a block's or a hall's flat roof
+    // over its main part (a house's could be a lean-to, and stays pitched).
+    let flat_main = at(&roof, 0.5) >= top - 1.0;
     // A house's roof spans under a metre when it is small or gently pitched: it
     // is flat only where its middle stands no higher than its rim, as a flat
     // roof's does (or lower, inside a parapet), and left to the generator where
@@ -198,7 +206,11 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox, scale: f64) -> 
         (Some(m), Some(r)) => m - r < 0.1,
         _ => false,
     };
-    let flat = top - eave < 1.0 && (!house || level);
+    let flat = if house {
+        top - eave < 1.0 && level
+    } else {
+        top - eave < 1.0 || flat_main
+    };
     Some(Measured {
         height: if flat { top } else { eave.max(2.0) },
         flat,
@@ -247,6 +259,30 @@ fn storeys(kind: &str, wall_m: f32) -> Option<u32> {
 const HOME_STOREYS: u32 = 7;
 /// Storey an untagged building taller than that is built on, in metres.
 const TALL_STOREY_M: f32 = 4.0;
+
+/// Height step that parts a lower wing from the main roof, in metres.
+const WING_STEP_M: f32 = 1.5;
+
+/// The points of a building's main roof, of all its roof points sorted: those
+/// above the last step of [`WING_STEP_M`] within a twentieth of the points in
+/// their lower half, when at least half stand above it. A wing, an extension
+/// or a garage under the outline makes such a step; a pitched roof, even a
+/// steep one, climbs over many points and makes none.
+fn main_roof(roof: &[f32]) -> &[f32] {
+    let n = roof.len();
+    let k = (n / 20).max(1);
+    let mut from = 0;
+    for i in n / 20..=n / 2 {
+        if i + k < n && roof[i + k] - roof[i] >= WING_STEP_M {
+            from = i + 1;
+        }
+    }
+    if from > 0 && n - from >= n / 2 {
+        &roof[from..]
+    } else {
+        roof
+    }
+}
 
 fn median(v: &mut [f32]) -> Option<f32> {
     v.sort_by(f32::total_cmp);
@@ -373,6 +409,40 @@ mod tests {
     }
 
     #[test]
+    fn a_lower_wing_does_not_set_the_walls() {
+        let sorted = |mut v: Vec<f32>| {
+            v.sort_by(f32::total_cmp);
+            v
+        };
+        let at = |v: &[f32], q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
+        // A two-storey house, eaves at 6 m and ridge at 10 m, with a flat
+        // one-storey extension at 3 m over a quarter of it.
+        let mut house: Vec<f32> = (0..75).map(|i| 6.0 + 4.0 * i as f32 / 74.0).collect();
+        house.extend([3.0; 25]);
+        let house = sorted(house);
+        assert!((at(main_roof(&house), 0.1) - 6.4).abs() < 0.1);
+        // A steep roof, 8 m from eaves to ridge, keeps its eaves.
+        let steep = sorted((0..100).map(|i| 6.0 + 8.0 * i as f32 / 99.0).collect());
+        assert_eq!(main_roof(&steep).len(), 100);
+        // Where the lower part is most of the building, it is the building.
+        let mut hall: Vec<f32> = vec![5.0; 60];
+        hall.extend([12.0; 40]);
+        assert_eq!(main_roof(&sorted(hall)).len(), 100);
+    }
+
+    #[test]
+    fn a_block_flat_over_most_of_it_is_flat() {
+        let shape = |els: &[ProcessedElement]| els[0].tags().get("roof:shape").cloned();
+        let height = |els: &[ProcessedElement]| els[0].tags().get("height").cloned();
+        // An office block flat at 13 m whose rim the laser saw at 8 m: flat, 13 m.
+        let block = rimmed("office", 40, 65, 0.5);
+        assert_eq!(shape(&block).as_deref(), Some("flat"));
+        assert_eq!(height(&block).as_deref(), Some("13.0"));
+        // A shed or extension the same shape at house size keeps its roof.
+        assert_eq!(shape(&rimmed("yes", 40, 65, 1.0)), None);
+    }
+
+    #[test]
     fn a_house_is_flat_only_where_its_middle_is_no_higher_than_its_rim() {
         let shape = |els: &[ProcessedElement]| els[0].tags().get("roof:shape").cloned();
         // A gently pitched house: its points span 0.8 m, its middle higher.
@@ -426,14 +496,15 @@ mod tests {
         assert_eq!(apply_deferred(&mut els, deferred), 1);
         assert_eq!(tagged(&els).as_deref(), Some("51.0"));
 
-        // A tower whose top reached 51 m waits too, though its eaves (here a
-        // lower ring around it) are far below: those would make it 30 m.
+        // A tower whose top reached 51 m waits too, though a lower part of it
+        // (here a ring at 30 m along two sides) is far below.
         let (ground, way, xzbbox) = roof_with_eaves(255, 150);
         let mut els = vec![office(way)];
         let (filled, deferred) = apply(&mut els, &ground, &xzbbox, 1.0);
         assert_eq!((filled, deferred.len()), (0, 1));
         assert_eq!(apply_deferred(&mut els, deferred), 1);
-        assert_eq!(tagged(&els).as_deref(), Some("30.0"));
+        // That lower part is a wing of a fifth of it: the tower is its main part.
+        assert_eq!(tagged(&els).as_deref(), Some("51.0"));
     }
 
     #[test]

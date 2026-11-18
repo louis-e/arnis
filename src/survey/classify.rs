@@ -386,15 +386,14 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
     // hits look like plants to the laser, which counts beside the photo too
     // where the source trusts it.
     let veg = |c: usize| inp.n_obj[c] > 0 && 2 * u32::from(inp.n_veg[c]) >= u32::from(inp.n_obj[c]);
-    let green: Vec<bool> = (0..n)
-        .map(|c| {
-            if inp.has_photo(c) {
-                inp.green_f(c) >= 0.35 || inp.exg(c) > 0.04 || (inp.laser_plants && veg(c))
-            } else {
-                veg(c)
-            }
-        })
-        .collect();
+    let green_at = |c: usize| {
+        if inp.has_photo(c) {
+            inp.green_f(c) >= 0.35 || inp.exg(c) > 0.04 || (inp.laser_plants && veg(c))
+        } else {
+            veg(c)
+        }
+    };
+    let green: Vec<bool> = (0..n).map(green_at).collect();
     // Photo and laser are years apart and the photo leans: a cell counts as green
     // when it or a neighbour is.
     let green_near = dilate(&green, w, h, 1);
@@ -584,9 +583,38 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
         drop(lowveg);
         if k > 0 {
             let sh = shapes(&lab, k, w);
+            // A car parked beside a lawn borrows the lawn's green at its edge
+            // and reads as a hedge or bush: neither green itself nor coloured
+            // (grey, white, black or metal in the photo), knee high or more,
+            // and standing mostly on paving. Beds, and plants in a lawn, are
+            // not cars whatever their colour.
+            let ring = ring_planted_share(&lab, k, w, h, &planted);
+            let k = k as usize;
+            let mut cells = vec![0u32; k + 1];
+            let mut greens = vec![0u32; k + 1];
+            let mut neutral = vec![0u32; k + 1];
+            let mut tall = vec![0u32; k + 1];
+            for (c, &l) in lab.iter().enumerate() {
+                let l = l as usize;
+                if l == 0 {
+                    continue;
+                }
+                cells[l] += 1;
+                greens[l] += u32::from(green_at(c));
+                let [r, g, b] = inp.rgb(c);
+                let spread = r.max(g).max(b) - r.min(g).min(b);
+                neutral[l] += u32::from(inp.has_photo(c) && spread <= 24);
+                tall[l] += u32::from(inp.h_obj(c) >= 1.0);
+            }
+            let parked = |l: usize| {
+                4 * greens[l] < cells[l]
+                    && 5 * neutral[l] >= 3 * cells[l]
+                    && 2 * tall[l] >= cells[l]
+                    && ring[l] < 0.5
+            };
             for c in 0..n {
                 let l = lab[c] as usize;
-                if l == 0 || sh[l].area < 2.0 {
+                if l == 0 || sh[l].area < 2.0 || parked(l) {
                     continue;
                 }
                 let hedge = sh[l].length >= 5.0 && sh[l].width <= 2.2;
@@ -884,6 +912,41 @@ mod tests {
         assert_eq!(out[10 * w + 13].class, PAVED);
         // The drive keeps its opening.
         assert_eq!(out[5 * w + 13].class, PAVED);
+    }
+
+    #[test]
+    fn a_car_parked_beside_a_lawn_is_no_hedge() {
+        let (w, h) = (24, 16);
+        let mut inp = blank(w, h);
+        // A drive at x 10..18 beside the lawn, a silver car on it along the
+        // lawn's edge, 1.6 m high.
+        for z in 0..h {
+            for x in 10..18 {
+                let c = z * w + x;
+                inp.i_gnd_q[c] = 1400;
+                inp.photo[c] = photo(-10, 0, 150, -10, [150, 150, 150]);
+            }
+        }
+        for z in 5..11 {
+            for x in 10..12 {
+                let c = z * w + x;
+                inp.n_obj[c] = 10;
+                inp.h_obj_q[c] = 8;
+                inp.photo[c] = photo(-4, 0, 185, -2, [184, 186, 190]);
+            }
+        }
+        let out = classify(&inp, (1450.0, 1600.0));
+        for z in 5..11 {
+            assert!(!matches!(out[z * w + 10].class, HEDGE | BUSH), "{z}");
+        }
+        // The same row green in the photo is a hedge.
+        for z in 5..11 {
+            for x in 10..12 {
+                inp.photo[z * w + x] = photo(24, 23, 110, -10, [80, 120, 60]);
+            }
+        }
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert_eq!(out[7 * w + 10].class, HEDGE);
     }
 
     #[test]
