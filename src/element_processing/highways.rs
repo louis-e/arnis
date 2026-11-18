@@ -407,14 +407,19 @@ const fn joined<const N: usize>(base: &[Block], extra: &[Block]) -> [Block; N] {
     out
 }
 
-/// What a way no car drives must not overwrite: the road list, a path's asphalt, which
-/// another path meeting it, as an unpaved one, leaves as the road mix it was drawn in did, and
-/// the grey of a pedestrian street, driveway, crossing or access aisle, which wins over a
-/// path's asphalt whichever of the two is built first.
+/// What a way no car drives, drawn in path asphalt, must not overwrite: the road list,
+/// another path's asphalt, and the grey of a pedestrian street, driveway, crossing or access
+/// aisle, which wins over a path's asphalt whichever of the two is built first.
 const CAR_FREE_PROTECTED_SURFACES: &[Block] = &joined::<{ ROAD_PROTECTED_SURFACES.len() + 2 }>(
     ROAD_PROTECTED_SURFACES,
     &[POLISHED_ANDESITE, GRAY_CONCRETE],
 );
+
+/// What any other way no car drives must not overwrite: the road list and a path's asphalt.
+/// Paved, gravel and earth paths otherwise meet the grey of a driveway or crossing as they
+/// do on main.
+const WALKWAY_PROTECTED_SURFACES: &[Block] =
+    &joined::<{ ROAD_PROTECTED_SURFACES.len() + 1 }>(ROAD_PROTECTED_SURFACES, PATH_ASPHALT);
 
 /// What the parking rows of a road, outside its lanes, must not overwrite: the road list and
 /// the paving of a sidewalk or path mapped beside the road.
@@ -2025,7 +2030,11 @@ fn generate_highways_internal(
                 if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
                     OVER_ASPHALT_PROTECTED_SURFACES
                 } else if is_walkway(highway_type) && !paves_like_road(highway_type, &way.tags) {
-                    CAR_FREE_PROTECTED_SURFACES
+                    if block_types == PATH_ASPHALT {
+                        CAR_FREE_PROTECTED_SURFACES
+                    } else {
+                        WALKWAY_PROTECTED_SURFACES
+                    }
                 } else {
                     ROAD_PROTECTED_SURFACES
                 };
@@ -3162,8 +3171,7 @@ pub fn generate_siding(
     element: &ProcessedWay,
     bridge_surface: &BridgeSurfaceMap,
 ) {
-    const KEEP_OFF: &[Block] =
-        &joined::<{ ROAD_PROTECTED_SURFACES.len() + 1 }>(ROAD_PROTECTED_SURFACES, PATH_ASPHALT);
+    const KEEP_OFF: &[Block] = WALKWAY_PROTECTED_SURFACES;
     let mut previous_node: Option<XZPoint> = None;
     let siding_block: Block = STONE_BRICK_SLAB;
 
