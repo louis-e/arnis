@@ -664,7 +664,7 @@ impl SignalIndex {
             drives_on_left,
             road_mask,
             paths,
-            walkways: walkways(elements),
+            walkways: walkways(elements, nodes.values().map(|n| (n.x, n.z))),
         };
         for id in &ids {
             plan.node(*id, &nodes[id]);
@@ -814,12 +814,23 @@ impl Walkways {
     }
 }
 
-fn walkways(elements: &[ProcessedElement]) -> Walkways {
+/// How far from a signalised node, in blocks along either axis, the walkways a pole keeps
+/// clear of are gathered. A pole stands back behind the widest crossing road, a few blocks
+/// along the kerb and at most a sidewalk past it, under 30 blocks from its node; this
+/// leaves room to spare.
+const WALKWAY_REACH: i32 = 64;
+
+/// The walkways within `WALKWAY_REACH` of a signalised node at `signals`, the only ones a
+/// pole is checked against.
+fn walkways(elements: &[ProcessedElement], signals: impl Iterator<Item = (i32, i32)>) -> Walkways {
     let mut found = Walkways {
         lines: FnvHashSet::default(),
         nodes: FnvHashSet::default(),
         crossings: FnvHashSet::default(),
     };
+    // The cells of a grid as coarse as the reach that hold a signal.
+    let cell = |v: i32| v.div_euclid(WALKWAY_REACH);
+    let signal_cells: FnvHashSet<(i32, i32)> = signals.map(|(x, z)| (cell(x), cell(z))).collect();
     for element in elements {
         let ProcessedElement::Way(way) = element else {
             continue;
@@ -831,6 +842,23 @@ fn walkways(elements: &[ProcessedElement]) -> Walkways {
             )
         });
         if !walkway {
+            continue;
+        }
+        // Every cell of the way lies in its nodes' bounds, so a signal within reach of one
+        // lies in the grid cells those bounds, grown by the reach, touch.
+        let Some((x0, z0, x1, z1)) = way.nodes.iter().fold(None, |b, n| {
+            Some(b.map_or(
+                (n.x, n.z, n.x, n.z),
+                |(x0, z0, x1, z1): (i32, i32, i32, i32)| {
+                    (x0.min(n.x), z0.min(n.z), x1.max(n.x), z1.max(n.z))
+                },
+            ))
+        }) else {
+            continue;
+        };
+        let (cx0, cz0) = (cell(x0 - WALKWAY_REACH), cell(z0 - WALKWAY_REACH));
+        let (cx1, cz1) = (cell(x1 + WALKWAY_REACH), cell(z1 + WALKWAY_REACH));
+        if !(cz0..=cz1).any(|cz| (cx0..=cx1).any(|cx| signal_cells.contains(&(cx, cz)))) {
             continue;
         }
         let crossing = ["footway", "cycleway", "path"]
