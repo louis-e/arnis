@@ -812,6 +812,7 @@
   "projects_expand": "拡張",
   "projects_upkeep": "ライト＆LOD",
   "projects_upkeep_tip": "ライティングなしで作成したエリアにライティングをベイクし、VoxyとDistant HorizonsのLODキャッシュを全エリアで作成します。「ライティングをベイク」とLOD設定に従います。何も生成しません。",
+  "projects_upkeep_none": "まだ何もすることがありません。先に次のいずれかをオンにしてください：",
   "projects_empty": "ワールドはまだありません。One World をオンにして作成してください。",
   "projects_view": "表示",
   "projects_view_list": "リスト",

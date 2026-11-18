@@ -2715,8 +2715,6 @@ fn gui_one_world_upkeep(
     if crate::one_world::Manifest::load(&world)?.is_none() {
         return Err("Not a One World.".to_string());
     }
-    // A Stop left from an earlier job would end this at once; no job runs now.
-    crate::scale::STOP.store(false, std::sync::atomic::Ordering::Release);
     let upkeep = crate::one_world::Upkeep { light, voxy, dh };
     let lines = crate::one_world::upkeep(&world, upkeep, false);
     let failed = lines.iter().any(Result::is_err);

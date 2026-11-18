@@ -812,6 +812,8 @@
   "projects_expand": "Expand",
   "projects_upkeep": "Light & LODs",
   "projects_upkeep_tip": "Bakes light into the areas built without it and builds the Voxy and Distant Horizons LOD caches over every area, as Bake lighting and the Pre-generate LOD settings ask. Nothing is generated.",
+  "projects_upkeep_none": "Nothing to do yet. Turn on one of these first:",
+  "projects_upkeep_none": "Nothing to do yet. Turn on one of these first:",
   "projects_empty": "No worlds yet. Build one with One World on.",
   "projects_view": "View",
   "projects_view_list": "List",

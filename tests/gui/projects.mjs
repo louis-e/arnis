@@ -185,7 +185,8 @@ assert.ok(btn(document.getElementById('projects-list').children[1], 'Light & LOD
 await btn(upRow(), 'Light & LODs').listeners.click();
 await settle();
 assert.strictEqual(upCalls.length, 0);
-assert.ok(upRow().children.some((c) => c.className === 'projects-error'), 'it says what to turn on');
+const none = upRow().children.find((c) => c.className === 'projects-error');
+assert.ok(none && none.textContent.startsWith('Nothing to do yet') && none.textContent.includes('Pre-generate Voxy LOD'), 'it says what to turn on');
 want = { light: true, voxy: true, dh: false };
 await btn(upRow(), 'Light & LODs').listeners.click();
 await settle();

@@ -812,6 +812,7 @@
   "projects_expand": "Расширить",
   "projects_upkeep": "Свет и LOD",
   "projects_upkeep_tip": "Рассчитывает освещение для областей, построенных без него, и строит кэши LOD для Voxy и Distant Horizons по всем областям согласно настройкам освещения и LOD. Ничего не генерируется.",
+  "projects_upkeep_none": "Пока делать нечего. Сначала включите одну из этих настроек:",
   "projects_empty": "Миров пока нет. Постройте один с включённым One World.",
   "projects_view": "Вид",
   "projects_view_list": "Список",

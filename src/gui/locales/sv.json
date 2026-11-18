@@ -812,6 +812,7 @@
   "projects_expand": "Utöka",
   "projects_upkeep": "Ljus och LOD",
   "projects_upkeep_tip": "Förberäknar ljuset för områden som byggts utan det och bygger LOD-cacharna för Voxy och Distant Horizons över alla områden, enligt inställningarna för ljussättning och LOD. Inget genereras.",
+  "projects_upkeep_none": "Inget att göra än. Slå först på något av dessa:",
   "projects_empty": "Inga världar än. Bygg en med One World på.",
   "projects_view": "Vy",
   "projects_view_list": "Lista",

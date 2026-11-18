@@ -812,6 +812,7 @@
   "projects_expand": "Expandir",
   "projects_upkeep": "Luz e LOD",
   "projects_upkeep_tip": "Pré-calcula a iluminação das áreas criadas sem ela e cria os caches LOD do Voxy e do Distant Horizons para todas as áreas, conforme Pré-calcular iluminação e as opções de LOD. Nada é gerado.",
+  "projects_upkeep_none": "Nada a fazer ainda. Ative primeiro uma destas opções:",
   "projects_empty": "Nenhum mundo ainda. Crie um com One World ativado.",
   "projects_view": "Visualização",
   "projects_view_list": "Lista",

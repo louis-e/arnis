@@ -812,6 +812,7 @@
   "projects_expand": "Razširi",
   "projects_upkeep": "Svetloba in LOD",
   "projects_upkeep_tip": "Vnaprej izračuna osvetlitev za območja, zgrajena brez nje, in zgradi predpomnilnika LOD za Voxy in Distant Horizons za vsa območja, kot določajo nastavitve osvetlitve in LOD. Nič se ne ustvari.",
+  "projects_upkeep_none": "Zaenkrat ni kaj narediti. Najprej vklopite eno od teh možnosti:",
   "projects_empty": "Svetov še ni. Zgradite enega z vklopljenim One World.",
   "projects_view": "Pogled",
   "projects_view_list": "Seznam",

@@ -812,6 +812,7 @@
   "projects_expand": "Extinde",
   "projects_upkeep": "Lumină și LOD",
   "projects_upkeep_tip": "Precalculează iluminarea zonelor construite fără ea și construiește cache-urile LOD Voxy și Distant Horizons pentru toate zonele, după setările de iluminare și LOD. Nu se generează nimic.",
+  "projects_upkeep_none": "Nimic de făcut încă. Activează mai întâi una dintre acestea:",
   "projects_empty": "Nu există încă lumi. Construiește una cu One World activat.",
   "projects_view": "Afișare",
   "projects_view_list": "Listă",

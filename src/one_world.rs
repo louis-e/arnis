@@ -1375,9 +1375,11 @@ pub fn upkeep(world_dir: &Path, upkeep: Upkeep, in_run: bool) -> Vec<Result<Stri
             crate::progress::emit_gui_progress_update(crate::progress::MESSAGE_ONLY, message);
         }
     };
-    // Stop ends a job at once; what is still to build here keeps its old state.
-    let stop = || crate::scale::STOP.load(std::sync::atomic::Ordering::Acquire);
-    let stopped = |what: &str| Err(format!("Stopped: {what} was left as it was."));
+    // Stop ends a run or job at once; what is still to build keeps its old state. Outside a run
+    // nothing can press it, and a Stop left from a job must not cut a Remove's redraw short.
+    let stop = || in_run && crate::scale::STOP.load(std::sync::atomic::Ordering::Acquire);
+    // Not a failure, so no warning.
+    let stopped = |what: &str| Ok(format!("Stopped: {what} was left as it was."));
     if upkeep.light {
         say("Baking light into the older areas...");
         match crate::saved_chunks::bake_unlit(world_dir, &stop) {

@@ -812,6 +812,7 @@
   "projects_expand": "Ampliar",
   "projects_upkeep": "Luz y LOD",
   "projects_upkeep_tip": "Precalcula la iluminación de las zonas creadas sin ella y genera las cachés LOD de Voxy y Distant Horizons para todas las zonas, según Precalcular iluminación y los ajustes de LOD. No se genera nada.",
+  "projects_upkeep_none": "Aún no hay nada que hacer. Activa primero una de estas opciones:",
   "projects_empty": "Aún no hay mundos. Crea uno con One World activado.",
   "projects_view": "Vista",
   "projects_view_list": "Lista",

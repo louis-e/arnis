@@ -812,6 +812,7 @@
   "projects_expand": "확장",
   "projects_upkeep": "조명 및 LOD",
   "projects_upkeep_tip": "조명 없이 만든 영역에 조명을 베이크하고 모든 영역에 대해 Voxy와 Distant Horizons LOD 캐시를 만듭니다. 조명 베이크와 LOD 설정을 따릅니다. 아무것도 생성하지 않습니다.",
+  "projects_upkeep_none": "아직 할 일이 없습니다. 먼저 다음 중 하나를 켜세요:",
   "projects_empty": "아직 월드가 없습니다. One World를 켜고 만들어 보세요.",
   "projects_view": "보기",
   "projects_view_list": "목록",

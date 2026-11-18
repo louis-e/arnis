@@ -812,6 +812,7 @@
   "projects_expand": "扩展",
   "projects_upkeep": "光照与 LOD",
   "projects_upkeep_tip": "为未烘焙光照的区域烘焙光照，并按“烘焙光照”和 LOD 设置为所有区域构建 Voxy 和 Distant Horizons 的 LOD 缓存。不会生成任何内容。",
+  "projects_upkeep_none": "暂时没有可做的事。请先开启以下任一项：",
   "projects_empty": "还没有世界。开启 One World 后创建一个。",
   "projects_view": "视图",
   "projects_view_list": "列表",

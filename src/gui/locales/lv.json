@@ -812,6 +812,7 @@
   "projects_expand": "Paplašināt",
   "projects_upkeep": "Apgaismojums un LOD",
   "projects_upkeep_tip": "Iepriekš aprēķina apgaismojumu apgabaliem, kas izveidoti bez tā, un izveido Voxy un Distant Horizons LOD kešatmiņas visiem apgabaliem atbilstoši apgaismojuma un LOD iestatījumiem. Nekas netiek ģenerēts.",
+  "projects_upkeep_none": "Pagaidām nav ko darīt. Vispirms ieslēdziet kādu no šīm:",
   "projects_empty": "Pasauļu vēl nav. Izveidojiet vienu ar ieslēgtu One World.",
   "projects_view": "Skats",
   "projects_view_list": "Saraksts",

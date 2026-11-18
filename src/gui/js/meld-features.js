@@ -1689,7 +1689,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
         const up = button('projects_upkeep', 'Light & LODs', held, async () => {
           const want = upkeep();
           if (!(want.light || want.voxy || want.dh)) {
-            upkeepNotes.set(worldPath, { error: true, text: up.title });
+            const names = [t('bake_lighting', 'Bake lighting'), t('voxy_lod', 'Pre-generate Voxy LOD'), t('dh_lod', 'Pre-generate Distant Horizons LOD')];
+            const text = `${t('projects_upkeep_none', 'Nothing to do yet. Turn on one of these first:')} ${names.join(', ')}`;
+            upkeepNotes.set(worldPath, { error: true, text });
             return refresh();
           }
           upkeeping.add(worldPath);
