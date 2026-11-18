@@ -1550,6 +1550,8 @@ function initSettings() {
     available: () => isOneWorldAvailable() && !liveActive(),
     busy: () => !generationButtonEnabled || bakeRunning,
     canRun: () => !isLiveMode(),
+    // Light & LODs: what the settings ask of a world that already exists.
+    upkeep: () => ({ light: lodOn('bake-lighting-toggle'), voxy: lodOn('voxy-lod-toggle'), dh: lodOn('dh-lod-toggle') }),
     renamed: (from, to) => worldRenamed(from, to),
     trashed: (name) => worldTrashed(name),
     // A new One World is picked by its name alone: the first Start makes it.
@@ -4000,14 +4002,24 @@ function pinControl(id, value) {
 // Settings the backend builds into Java worlds only.
 function refreshJavaOnlyRows(format) {
   const java = (format || selectedWorldFormat) === 'java';
-  if (!oneWorldPinned) {
-    setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
-    setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
-  }
+  refreshLodRows(format);
   setSettingsRowAvailable('bake-lighting-toggle', java, 'reason_java');
   const signWhy = why([java, 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth']);
   setSegmentedRowAvailable('signage-group', !signWhy, signWhy);
   refreshWorldNameRow(format);
+}
+
+// The LOD caches: Java only. A One World rebuilds them over every area after each run; Live tiles
+// leave them out.
+function lodOn(id) {
+  const el = document.getElementById(id);
+  return !!(el && el.checked && !el.disabled);
+}
+
+function refreshLodRows(format) {
+  const reason = why([(format || selectedWorldFormat) === 'java', 'reason_java'], [!isLiveMode(), 'reason_live']);
+  setSettingsRowAvailable('voxy-lod-toggle', !reason, reason);
+  setSettingsRowAvailable('dh-lod-toggle', !reason, reason);
 }
 
 function refreshWorldNameRow(format) {
@@ -4020,22 +4032,18 @@ function restoreNaturalRows() {
   setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth', 'reason_earth');
   setSettingsRowAvailable('height-multiplier-slider', true);
   setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth', 'reason_earth');
-  setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
-  setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
+  refreshLodRows();
   setSettingsRowAvailable('disable-height-limit-toggle', true);
   refreshHeightLimitRow();
 }
 
-// Rotation stays 0, the LOD caches off and the build height extended while
-// the mode is on; scale, build height and elevation source follow the world
-// once it exists.
+// Rotation stays 0 and the build height extended while the mode is on; scale, build height
+// and elevation source follow the world once it exists.
 function applyOneWorldPins(info) {
   oneWorldPinned = true;
   const rotationInput = document.getElementById('rotation-angle-input');
   if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
   setSettingsRowAvailable('rotation-angle-input', false, 'reason_not_one_world');
-  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
-  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
   postToMap({ type: 'setRotationLocked', locked: true });
   syncShapesRect();
 
@@ -4046,8 +4054,6 @@ function applyOneWorldPins(info) {
   pinControl('disable-height-limit-toggle',
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
   restoreNaturalRows();
-  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
-  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
   setSettingsRowAvailable('disable-height-limit-toggle', false, 'reason_not_one_world');
   if (exists) {
     setSettingsRowAvailable('scale-value-slider', false, 'reason_world_set');

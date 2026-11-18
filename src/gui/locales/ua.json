@@ -810,6 +810,8 @@
   "projects_in_use": "Використовується",
   "projects_open": "Відкрити",
   "projects_expand": "Розширити",
+  "projects_upkeep": "Світло і LOD",
+  "projects_upkeep_tip": "Розраховує освітлення для областей, побудованих без нього, і будує кеші LOD для Voxy та Distant Horizons для всіх областей відповідно до налаштувань освітлення та LOD. Нічого не генерується.",
   "projects_empty": "Світів ще немає. Побудуйте один із увімкненим One World.",
   "projects_view": "Вигляд",
   "projects_view_list": "Список",

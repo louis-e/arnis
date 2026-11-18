@@ -810,6 +810,8 @@
   "projects_in_use": "Naudojamas",
   "projects_open": "Atidaryti",
   "projects_expand": "Išplėsti",
+  "projects_upkeep": "Apšvietimas ir LOD",
+  "projects_upkeep_tip": "Iš anksto apskaičiuoja apšvietimą sritims, sukurtoms be jo, ir sukuria Voxy bei Distant Horizons LOD talpyklas visoms sritims pagal apšvietimo ir LOD nustatymus. Nieko negeneruoja.",
   "projects_empty": "Pasaulių dar nėra. Sukurkite įjungę One World.",
   "projects_view": "Rodinys",
   "projects_view_list": "Sąrašas",

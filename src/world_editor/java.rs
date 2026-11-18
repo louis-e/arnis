@@ -2370,7 +2370,7 @@ mod merge_tests {
             std::fs::metadata(&mca).unwrap().modified().unwrap(),
         );
 
-        let summary = crate::distant_horizons::from_existing(dir.path()).unwrap();
+        let summary = crate::distant_horizons::from_existing(dir.path(), (-64, 319)).unwrap();
         assert!(summary.sections > 0, "LOD rows written");
         assert!(dir
             .path()
@@ -2382,9 +2382,11 @@ mod merge_tests {
             std::fs::metadata(&mca).unwrap().modified().unwrap(),
         );
         assert!(before == after, "region file untouched");
-        assert!(
-            crate::distant_horizons::from_existing(tempfile::tempdir().unwrap().path()).is_err()
-        );
+        assert!(crate::distant_horizons::from_existing(
+            tempfile::tempdir().unwrap().path(),
+            (-64, 319)
+        )
+        .is_err());
     }
 
     /// The same region through both containers carries the same chunk NBT.
@@ -3046,6 +3048,140 @@ mod merge_tests {
         assert_eq!(light_opacity("minecraft:light"), 0);
         // Names merely containing "light" keep their own behaviour.
         assert_eq!(light_opacity("minecraft:light_gray_concrete"), 15);
+    }
+
+    /// Stone, glass and leaves over a few chunks and sections, so palettes, light and voxy's
+    /// leaf opacity all take part.
+    fn mixed_region() -> RegionToModify {
+        use crate::block_definitions::{GLASS, OAK_LEAVES};
+        let mut region = region_with(&[(5, 5), (6, 5), (20, 30)], STONE);
+        let chunk = region.get_or_create_chunk(6, 5);
+        chunk.sections.get_or_default(1).storage.set(17, GLASS);
+        chunk
+            .sections
+            .get_or_default(3)
+            .storage
+            .set(300, OAK_LEAVES);
+        region
+            .get_or_create_chunk(31, 31)
+            .sections
+            .get_or_default(-2)
+            .storage
+            .set(4095, GLASS);
+        region
+    }
+
+    fn written(
+        dir: &std::path::Path,
+        region: &RegionToModify,
+        bake: bool,
+        voxy: Option<&crate::voxy::VoxyWriter>,
+    ) {
+        write_region_to_disk(
+            dir,
+            &llbbox(),
+            None,
+            bake,
+            false,
+            None,
+            voxy,
+            None,
+            0,
+            0,
+            region,
+            &RegionWriteMode::Fresh,
+            (0, 0),
+            None,
+        )
+        .unwrap();
+    }
+
+    /// Every chunk of region (0, 0) under `dir`, as NBT values.
+    fn chunk_values(dir: &std::path::Path) -> Vec<Value> {
+        let file = File::open(dir.join("region").join("r.0.0.mca")).unwrap();
+        let mut region = fastanvil::Region::from_stream(file).unwrap();
+        let mut out = Vec::new();
+        for z in 0..32 {
+            for x in 0..32 {
+                if let Some(raw) = region.read_chunk(x, z).unwrap() {
+                    out.push(fastnbt::from_bytes(&raw).unwrap());
+                }
+            }
+        }
+        out
+    }
+
+    /// Light baked into a region written without it is the light a baked write gives it.
+    #[test]
+    fn baking_later_matches_baking_on_write() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let (plain, baked) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let region = mixed_region();
+        written(plain.path(), &region, false, None);
+        written(baked.path(), &region, true, None);
+        assert_ne!(chunk_values(plain.path()), chunk_values(baked.path()));
+
+        let done = crate::saved_chunks::bake_unlit(plain.path()).unwrap();
+        assert_eq!((done.chunks, done.regions, done.skipped), (1024, 1, 0));
+        assert!(chunk_values(plain.path()) == chunk_values(baked.path()));
+        let again = crate::saved_chunks::bake_unlit(plain.path()).unwrap();
+        assert_eq!(again.chunks, 0, "a lit chunk is left alone");
+    }
+
+    /// Voxy's cache rebuilt from the regions on disk is the one written with them.
+    #[test]
+    fn voxy_rebuild_matches_the_written_cache() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        crate::voxy::write_test_level_dat(dir.path(), -1743857021154781143);
+        let writer = crate::voxy::VoxyWriter::create(dir.path())
+            .unwrap()
+            .unwrap();
+        written(dir.path(), &mixed_region(), true, Some(&writer));
+        writer.finish().unwrap();
+        let on_write = crate::voxy::logged_puts(dir.path());
+        assert!(on_write.len() > 10);
+
+        let summary = crate::voxy::from_existing(dir.path()).unwrap();
+        assert_eq!((summary.skipped_regions, summary.skipped_chunks), (0, 0));
+        let rebuilt = crate::voxy::logged_puts(dir.path());
+        assert!(rebuilt == on_write);
+        let ids = dir
+            .path()
+            .join("voxy")
+            .join(crate::voxy::world_id(-1743857021154781143));
+        let mut left: Vec<_> = std::fs::read_dir(&ids)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["storage"], "no staging or old copy is left");
+    }
+
+    /// A rebuild that reads nothing keeps the cache there was.
+    #[test]
+    fn a_failed_voxy_rebuild_keeps_the_old_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::voxy::write_test_level_dat(dir.path(), 7);
+        let storage = dir
+            .path()
+            .join("voxy")
+            .join(crate::voxy::world_id(7))
+            .join("storage");
+        std::fs::create_dir_all(&storage).unwrap();
+        std::fs::write(storage.join("CURRENT"), b"old").unwrap();
+        let regions = dir.path().join("region");
+        std::fs::create_dir_all(&regions).unwrap();
+        std::fs::write(regions.join("r.0.0.mca"), b"garbage").unwrap();
+
+        assert!(crate::voxy::from_existing(dir.path()).is_err());
+        assert_eq!(std::fs::read(storage.join("CURRENT")).unwrap(), b"old");
+        assert!(!storage.with_file_name("storage.arnis-tmp").exists());
+        assert!(crate::voxy::has_cache(dir.path()));
     }
 }
 

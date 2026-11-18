@@ -305,13 +305,15 @@ pub struct Args {
 
     /// Pre-generate the Voxy mod's LOD cache so the world renders to the horizon
     /// on first join, instead of needing `/voxy import current`. Java only;
-    /// implies --bake-lighting, since unlit LOD terrain renders black.
+    /// implies --bake-lighting, since unlit LOD terrain renders black. A One World
+    /// rebuilds it over every area after each run.
     #[arg(long, default_value_t = false)]
     pub voxy_lod: bool,
 
     /// Pre-generate the Distant Horizons mod's LOD database so the world renders
     /// to the horizon on first join, instead of DH building it chunk by chunk.
-    /// Java only; implies --bake-lighting.
+    /// Java only; implies --bake-lighting. A One World rebuilds it over every area
+    /// after each run.
     #[arg(long, default_value_t = false)]
     pub dh_lod: bool,
 
@@ -544,6 +546,14 @@ pub struct Args {
     /// Write the Distant Horizons LODs of the One World at --output-dir and --world-name from its region files and exit.
     #[arg(long, default_value_t = false)]
     pub dh_lod_only: bool,
+
+    /// Write the Voxy LOD cache of the One World at --output-dir and --world-name from its region files and exit.
+    #[arg(long, default_value_t = false)]
+    pub voxy_lod_only: bool,
+
+    /// Bake light into the chunks of the One World at --output-dir and --world-name saved without it and exit.
+    #[arg(long, default_value_t = false)]
+    pub bake_lighting_only: bool,
     #[command(flatten)]
     pub water: WaterArgs,
 
@@ -976,6 +986,11 @@ impl Args {
     pub fn java(&self) -> bool {
         !self.bedrock && !self.sandbox()
     }
+
+    /// A run that only redraws the map item or LOD caches of a One World.
+    pub fn redraws_only(&self) -> bool {
+        self.map_item_only || self.dh_lod_only || self.voxy_lod_only || self.bake_lighting_only
+    }
 }
 
 /// Live tiles build with the stock settings only, so `--live` refuses every flag that would
@@ -1015,6 +1030,10 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.world_border, "--world-border"),
         (args.map_item_only, "--map-item-only"),
         (args.dh_lod_only, "--dh-lod-only"),
+        (args.voxy_lod_only, "--voxy-lod-only"),
+        (args.bake_lighting_only, "--bake-lighting-only"),
+        (args.voxy_lod, "--voxy-lod"),
+        (args.dh_lod, "--dh-lod"),
         (w.river_bed != Default::default(), "--river-bed"),
         (w.water_detail != Default::default(), "--water-detail"),
         (args.climate_mode != Default::default(), "--climate-mode"),
@@ -3409,6 +3428,33 @@ mod tests {
         assert_eq!(retry.units.only_pieces, Some(vec![2, 5]));
         assert!(Args::try_parse_from(["arnis", "--one-world-workers", "0"]).is_err());
         assert!(Args::try_parse_from(["arnis", "--only-pieces", "0"]).is_err());
+    }
+
+    #[test]
+    fn lod_flags_are_refused_in_live_and_redraws_need_one_world() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        for flag in ["--voxy-lod", "--dh-lod"] {
+            let live = Args::parse_from([
+                "arnis",
+                "--output-dir",
+                tmp_path,
+                "--one-world",
+                "--live",
+                flag,
+            ]);
+            assert!(
+                refuse_live_extras(&live).unwrap_err().contains(flag),
+                "{flag}"
+            );
+        }
+        for flag in ["--voxy-lod-only", "--bake-lighting-only", "--dh-lod-only"] {
+            let alone = Args::parse_from(["arnis", "--output-dir", tmp_path, flag]);
+            assert!(alone.redraws_only());
+            assert!(crate::output_args::validate(&alone).is_err(), "{flag}");
+            let world = Args::parse_from(["arnis", "--output-dir", tmp_path, "--one-world", flag]);
+            assert!(crate::output_args::validate(&world).is_ok(), "{flag}");
+        }
     }
 
     #[test]

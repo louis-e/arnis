@@ -1344,6 +1344,10 @@ pub fn run_with(
             Err(e) => eprintln!("Warning: Failed to redraw the map item over every piece: {e}"),
         }
     }
+    let upkeep = one_world::Upkeep::of(args);
+    if upkeep.any() {
+        one_world::refresh(world_dir, upkeep, true);
+    }
     if let Err(e) = crate::world_utils::touch_last_played(world_dir) {
         eprintln!("Warning: Failed to update LastPlayed: {e}");
     }
@@ -2052,7 +2056,7 @@ second
             (vec![1], vec![7], vec![1, 0])
         );
         // No cells come out of a world a job is building.
-        let err = one_world::remove_cells(tmp.path(), "J", &[0]).unwrap_err();
+        let err = one_world::remove_cells(tmp.path(), "J", &[0], false).unwrap_err();
         assert!(err.contains("job is building"), "{err}");
         // Once no worker takes a cell, an action would be lost: refused.
         lock(&queue).pending.clear();
@@ -2268,7 +2272,7 @@ second
         std::fs::remove_dir_all(&job.dir).unwrap();
         // One cell removed from the finished job: only that one is to build.
         one_world::record_job(&w, "j", None, None, of, of, true).unwrap();
-        one_world::remove_cells(&w, "j", &[1]).unwrap();
+        one_world::remove_cells(&w, "j", &[1], false).unwrap();
         let job = Job::open(&w, "j".into(), &units, &[], true).unwrap();
         let built: Vec<u32> = units
             .iter()

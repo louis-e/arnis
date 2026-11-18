@@ -810,6 +810,8 @@
   "projects_in_use": "W użyciu",
   "projects_open": "Otwórz",
   "projects_expand": "Rozszerz",
+  "projects_upkeep": "Światło i LOD",
+  "projects_upkeep_tip": "Wstępnie oblicza oświetlenie obszarów zbudowanych bez niego i buduje pamięci LOD Voxy i Distant Horizons dla wszystkich obszarów, zgodnie z ustawieniami oświetlenia i LOD. Nic nie jest generowane.",
   "projects_empty": "Brak światów. Zbuduj jeden z włączonym One World.",
   "projects_view": "Widok",
   "projects_view_list": "Lista",

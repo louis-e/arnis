@@ -810,6 +810,8 @@
   "projects_in_use": "In Benutzung",
   "projects_open": "Öffnen",
   "projects_expand": "Erweitern",
+  "projects_upkeep": "Licht & LODs",
+  "projects_upkeep_tip": "Berechnet das Licht für die Bereiche vor, die ohne gebaut wurden, und baut die LOD-Caches von Voxy und Distant Horizons über alle Bereiche, wie es Licht vorberechnen und die LOD-Einstellungen vorgeben. Es wird nichts generiert.",
   "projects_empty": "Noch keine Welten. Schalte One World an und baue eine.",
   "projects_view": "Ansicht",
   "projects_view_list": "Liste",

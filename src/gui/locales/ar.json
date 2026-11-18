@@ -810,6 +810,8 @@
   "projects_in_use": "قيد الاستخدام",
   "projects_open": "فتح",
   "projects_expand": "توسيع",
+  "projects_upkeep": "الإضاءة وLOD",
+  "projects_upkeep_tip": "يحسب الإضاءة مسبقًا للمناطق التي بُنيت بدونها ويبني ذاكرتي LOD الخاصتين بـ Voxy وDistant Horizons لكل المناطق، حسب إعدادي حساب الإضاءة مسبقًا وإنشاء LOD مسبقًا. لا يُولَّد أي شيء.",
   "projects_empty": "لا توجد عوالم بعد. ابنِ واحدًا مع تفعيل One World.",
   "projects_view": "العرض",
   "projects_view_list": "قائمة",

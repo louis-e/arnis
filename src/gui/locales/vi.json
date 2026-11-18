@@ -810,6 +810,8 @@
   "projects_in_use": "Đang dùng",
   "projects_open": "Mở",
   "projects_expand": "Mở rộng",
+  "projects_upkeep": "Ánh sáng & LOD",
+  "projects_upkeep_tip": "Tính trước ánh sáng cho các vùng đã dựng mà chưa có, và tạo bộ nhớ đệm LOD của Voxy và Distant Horizons cho mọi vùng theo cài đặt ánh sáng và LOD. Không tạo thêm gì.",
   "projects_empty": "Chưa có thế giới nào. Hãy dựng một thế giới khi bật One World.",
   "projects_view": "Xem",
   "projects_view_list": "Danh sách",

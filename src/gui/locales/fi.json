@@ -810,6 +810,8 @@
   "projects_in_use": "Käytössä",
   "projects_open": "Avaa",
   "projects_expand": "Laajenna",
+  "projects_upkeep": "Valo ja LOD",
+  "projects_upkeep_tip": "Esilaskee valaistuksen alueille, jotka rakennettiin ilman sitä, ja rakentaa Voxyn ja Distant Horizonsin LOD-välimuistit kaikille alueille Esilaske valaistus- ja LOD-asetusten mukaan. Mitään ei generoida.",
   "projects_empty": "Ei vielä maailmoja. Rakenna yksi One World päällä.",
   "projects_view": "Näkymä",
   "projects_view_list": "Luettelo",

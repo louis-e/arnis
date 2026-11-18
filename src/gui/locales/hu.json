@@ -810,6 +810,8 @@
   "projects_in_use": "Használatban",
   "projects_open": "Megnyitás",
   "projects_expand": "Bővítés",
+  "projects_upkeep": "Fény és LOD",
+  "projects_upkeep_tip": "Előszámítja a megvilágítást a nélküle épített területeken, és felépíti a Voxy és a Distant Horizons LOD-gyorsítótárát minden területre a Megvilágítás előszámítása és a LOD-beállítások szerint. Nem generál semmit.",
   "projects_empty": "Még nincs világ. Építs egyet bekapcsolt One World mellett.",
   "projects_view": "Nézet",
   "projects_view_list": "Lista",

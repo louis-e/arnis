@@ -621,7 +621,8 @@ export async function cellAction(action, cells, deps = {}) {
       // Rebuild removes the land first: only when the run after it builds these cells again.
       if (action === 'rebuild' && !runs()) return say(t('cell_ignored', '{n} could not be changed.', { n: list.length }));
       const [command, args] = globalThis.arnisCells.calls('remove', list, worldPath(), job())[0];
-      const report = await invoke(command, args);
+      // Remove redraws the world's LOD caches without the land; Rebuild leaves that to its run.
+      const report = await invoke(command, { ...args, redrawLods: action === 'remove' });
       say(removedLine(report), false);
       after(list, action === 'rebuild');
     }
@@ -1376,7 +1377,7 @@ export async function resumeJob(job, rebuild, { select = selectBounds, current, 
 // job data from the engine) only Open and Expand are offered.
 // `busy()`: a run is under way, so no world is picked, renamed or run. `canRun()`: Resume and
 // Rebuild can start a run here (not in Live).
-export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null }) {
+export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null, upkeep = null }) {
   const list = el('projects-list');
   let view = readView();
   const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
@@ -1679,6 +1680,28 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       acts.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
       acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
       if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position.'); });
+      if (upkeep) {
+        const want = upkeep();
+        const label = t('projects_upkeep', 'Light & LODs');
+        let note = null;
+        const up = button('projects_upkeep', 'Light & LODs', held || !(want.light || want.voxy || want.dh), async () => {
+          up.disabled = true;
+          up.textContent = t('run_state_running', 'Running');
+          note?.remove();
+          row.querySelector('.projects-error')?.remove();
+          try {
+            const lines = await invoke('gui_one_world_upkeep', { worldPath: w.world_path || `${savePath()}/${w.name}`, ...upkeep() });
+            note = text('projects-meta', (lines || []).join(' '));
+            row.append(note);
+          } catch (e) {
+            row.append(errorLine(String((e && e.message) || e)));
+          }
+          up.textContent = label;
+          up.disabled = false;
+        });
+        up.title = t('projects_upkeep_tip', 'Bakes light into the areas built without it and builds the Voxy and Distant Horizons LOD caches over every area, as Bake lighting and the Pre-generate LOD settings ask. Nothing is generated.');
+        acts.push(up);
+      }
       // Held like Rebuild; the world goes to the system trash, where it can still be restored.
       const del = button('projects_delete', 'Delete', Boolean(w.locked || busy()), () => {});
       del.classList.add('projects-hold', 'projects-delete');
