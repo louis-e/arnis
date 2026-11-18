@@ -18,9 +18,9 @@ use crate::block_definitions::{
     Block, AIR, BEDROCK, BLACK_CONCRETE, BRICK, CARROTS, COARSE_DIRT, COBBLESTONE,
     CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, FERN, GRASS,
     GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE,
-    MOSS_BLOCK, MUD, OAK_PLANKS, PACKED_ICE, PODZOL, POTATOES, RED_SAND, SAND, SANDSTONE,
-    SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
-    WHITE_CONCRETE, YELLOW_CONCRETE,
+    MOSS_BLOCK, MUD, OAK_PLANKS, PACKED_ICE, PODZOL, POLISHED_ANDESITE, POTATOES, RED_SAND, SAND,
+    SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    WATER, WHEAT, WHITE_CONCRETE, YELLOW_CONCRETE,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridges::BridgeSurfaceMap;
@@ -993,6 +993,8 @@ pub fn generate_ground_region(
                                         WHITE_CONCRETE,
                                         YELLOW_CONCRETE,
                                         DIRT_PATH,
+                                        // A footway's or cycle path's asphalt.
+                                        POLISHED_ANDESITE,
                                         STONE_BRICKS,
                                         BRICK,
                                         OAK_PLANKS,
@@ -1671,6 +1673,7 @@ pub fn generate_ground_region(
                             WHITE_CONCRETE,
                             YELLOW_CONCRETE,
                             DIRT_PATH,
+                            POLISHED_ANDESITE,
                             WATER,
                         ]),
                         None,
