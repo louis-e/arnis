@@ -22,7 +22,8 @@ use crate::element_processing::surfaces::{
 };
 use crate::element_processing::traffic_lights::is_signal;
 use crate::element_processing::tunnel_grade::{
-    chains, grade_line, planning_order, portal_cuttings, Beside, Bore,
+    chains, grade_line, lowest_floor, pin_area_edges, planning_order, portal_cuttings, walkable,
+    Beside, Bore,
 };
 use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
@@ -147,15 +148,9 @@ pub(crate) fn road_profile(
         }
     }
     // Each area clips the way at its own padding, so both take the edge's level from one cell.
-    if let Some(area) = &connectivity.area {
-        let inside = |i: usize| area.contains(&XZPoint::new(cells[i].0, cells[i].1));
-        for i in (1..n).filter(|&i| inside(i - 1) != inside(i)) {
-            let lower = if cells[i - 1] < cells[i] { i - 1 } else { i };
-            let y = smooth[lower].round() as i32;
-            pins[i - 1].get_or_insert(y);
-            pins[i].get_or_insert(y);
-        }
-    }
+    pin_area_edges(&mut pins, &cells, connectivity.area.as_ref(), |i| {
+        smooth[i].round() as i32
+    });
     level_profile(&smooth, &pins)
 }
 
@@ -840,7 +835,7 @@ fn tunnel_layer_extra(tags: &HashMap<String, String>) -> i32 {
 
 /// Lowest Y a tunnel road may sit at, leaving room for its foundation course.
 fn tunnel_min_road_y() -> i32 {
-    crate::world_editor::terrain_floor_y() + 2
+    (crate::world_editor::terrain_floor_y() + 2).max(lowest_floor() + 1)
 }
 
 /// Lowest terrain over the whole shell footprint; a true minimum, since `covered` licenses the roof course.
@@ -1294,20 +1289,29 @@ fn plan_road_tunnels(
             highway_block_range(highway, &w.tags, scale) + 1
         })
         .collect();
-    // Ends another road meets, unlike an emergency exit's.
-    let bored: HashSet<u64> = ways.iter().map(|w| w.id).collect();
-    let met: HashSet<(i32, i32)> = elements
+    // The ways meeting each tunnel way's end node: a platform, a path, an area's outline.
+    let end_ids: HashSet<u64> = ways
         .iter()
-        .filter_map(|e| match e {
-            ProcessedElement::Way(w)
-                if w.tags.contains_key("highway") && !bored.contains(&w.id) =>
-            {
-                Some(w)
-            }
-            _ => None,
-        })
-        .flat_map(|w| w.nodes.iter().map(|n| (n.x, n.z)))
+        .flat_map(|w| [w.nodes[0].id, w.nodes[w.nodes.len() - 1].id])
         .collect();
+    let mut meeting: HashMap<u64, HashSet<u64>> = HashMap::new();
+    let mut meet = |way: &ProcessedWay| {
+        for node in way.nodes.iter().filter(|n| end_ids.contains(&n.id)) {
+            meeting.entry(node.id).or_default().insert(way.id);
+        }
+    };
+    for element in elements {
+        match element {
+            ProcessedElement::Way(w) => meet(w),
+            ProcessedElement::Relation(r) => r.members.iter().for_each(|m| meet(&m.way)),
+            ProcessedElement::Node(_) => {}
+        }
+    }
+    // Only a true dead end, like an emergency exit's door, leads nowhere.
+    let leads_on = |node: &ProcessedNode| {
+        meeting.get(&node.id).is_some_and(|w| w.len() > 1)
+            || node.tags.get("entrance").is_some_and(|e| e != "emergency")
+    };
 
     let floor = tunnel_min_road_y();
     let mut solved: HashMap<u64, i32> = HashMap::new();
@@ -1392,10 +1396,23 @@ fn plan_road_tunnels(
                 }
             }
         }
-        // A branch no road comes out of, like an emergency exit, too short to ramp up to its
+        // A branch that leads nowhere, like an emergency exit, too short to ramp up to its
         // portal from there ends in the rock.
-        for (i, open) in [(0, portal[0]), (n - 1, portal[1])] {
-            if !open || met.contains(&path[i]) || held.iter().any(|&(j, _)| j == i) {
+        let end_node = |e: usize| {
+            let &(w, _, back) = if e == 0 {
+                &pieces[0]
+            } else {
+                &pieces[pieces.len() - 1]
+            };
+            let nodes = &ways[w].nodes;
+            if (e == 0) == back {
+                &nodes[nodes.len() - 1]
+            } else {
+                &nodes[0]
+            }
+        };
+        for (e, i) in [(0, 0), (1, n - 1)] {
+            if !portal[e] || leads_on(end_node(e)) || held.iter().any(|&(j, _)| j == i) {
                 continue;
             }
             let ramp = held
@@ -1407,15 +1424,9 @@ fn plan_road_tunnels(
             }
         }
         // In One World both areas take the edge's level from one cell's terrain.
-        if let Some(area) = area {
-            let inside = |i: usize| area.contains(&XZPoint::new(path[i].0, path[i].1));
-            for i in (1..n).filter(|&i| inside(i - 1) != inside(i)) {
-                let lower = if path[i - 1] < path[i] { i - 1 } else { i };
-                let y = (cover[lower] - cover_drop[lower]).max(floor);
-                pins[i - 1].get_or_insert(y);
-                pins[i].get_or_insert(y);
-            }
-        }
+        pin_area_edges(&mut pins, &path, area, |i| {
+            (cover[i] - cover_drop[i]).max(floor)
+        });
 
         let depth = cover_drop
             .iter()
@@ -1452,12 +1463,7 @@ fn plan_road_tunnels(
             .map(|i| (target[i].round() as i32).min(terrain[i]).max(floor))
             .collect();
         // Where pins sit too close for the grade, the carriageway still steps a block a cell.
-        for i in 1..n {
-            road_y[i] = road_y[i].min(road_y[i - 1] + TUNNEL_RAMP_STEP);
-        }
-        for i in (1..n).rev() {
-            road_y[i - 1] = road_y[i - 1].min(road_y[i] + TUNNEL_RAMP_STEP);
-        }
+        walkable(&mut road_y, &pins, TUNNEL_RAMP_STEP);
         let bare: Vec<bool> = (0..n)
             .map(|i| cover[i] - road_y[i] < TUNNEL_ROOF_COVER)
             .collect();
@@ -1556,16 +1562,11 @@ pub fn generate_highway_tunnel_shell(
     let palette = surface_palette(highway_type, &way.tags);
     let faces = tunnel_portal_faces(&pts, internal_endpoints);
 
-    // Only cells near an end: a tunnel turning back on itself passes the face's plane further in.
-    let face_reach = 2 * wall_off as usize + 2;
     for i in 0..n {
         let (bx, bz) = pts[i];
         let ry = road_y[i];
         let ceil_y = ry + TUNNEL_CEIL_OFFSET;
-        let faces = [
-            faces[0].filter(|_| i <= face_reach),
-            faces[1].filter(|_| last - i <= face_reach),
-        ];
+        let faces = faces_near(faces, i, last, wall_off);
 
         // Roof and placeholder are both stone brick, so clamp instead of whitelisting.
         let carve_top = if covered[i] {
@@ -1628,20 +1629,35 @@ pub fn generate_highway_tunnel_shell(
 }
 
 /// Unit step pointing from `inner` away from `from`, i.e. out of the bore.
-fn step_towards(from: (i32, i32), inner: (i32, i32)) -> (i32, i32) {
+pub(crate) fn step_towards(from: (i32, i32), inner: (i32, i32)) -> (i32, i32) {
     ((from.0 - inner.0).signum(), (from.1 - inner.1).signum())
 }
 
 /// Where an open end cuts the structure off, else the roof overhangs the approach.
 #[derive(Clone, Copy)]
-struct PortalFace {
-    at: (i32, i32),
-    /// Unit step out of the bore.
-    out: (i32, i32),
+pub(crate) struct PortalFace {
+    pub(crate) at: (i32, i32),
+    /// Step out of the bore.
+    pub(crate) out: (i32, i32),
+}
+
+/// The faces that clip cell `i` of a way ending at `last`, `wall` wide: only those near it, as
+/// a tunnel turning back on itself passes a face's plane further in.
+pub(crate) fn faces_near(
+    faces: [Option<PortalFace>; 2],
+    i: usize,
+    last: usize,
+    wall: i32,
+) -> [Option<PortalFace>; 2] {
+    let reach = 2 * wall as usize + 2;
+    [
+        faces[0].filter(|_| i <= reach),
+        faces[1].filter(|_| last - i <= reach),
+    ]
 }
 
 #[inline]
-fn beyond_portal(faces: &[Option<PortalFace>; 2], cx: i32, cz: i32) -> bool {
+pub(crate) fn beyond_portal(faces: &[Option<PortalFace>; 2], cx: i32, cz: i32) -> bool {
     faces
         .iter()
         .flatten()
@@ -1834,7 +1850,9 @@ pub fn collect_tunnel_footprint(
         }
         // Clipped as the shell is, else the ground pass skips a band with no roof.
         let faces = tunnel_portal_faces(&pts, internal);
-        for &(bx, bz) in &pts {
+        let last = pts.len() - 1;
+        for (i, &(bx, bz)) in pts.iter().enumerate() {
+            let faces = faces_near(faces, i, last, wall);
             for dx in -wall..=wall {
                 for dz in -wall..=wall {
                     if beyond_portal(&faces, bx + dx, bz + dz) {
@@ -6982,6 +7000,67 @@ mod tests {
             "road {} exit {ys:?}",
             road.road_y
         );
+    }
+
+    #[test]
+    fn a_short_road_tunnel_under_flat_ground_is_roofed_in_the_middle() {
+        for n in [42, 60, 80] {
+            let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+            let mut editor = tunnel_editor(&xzbbox, ground_along_x(|_| 0.0));
+            let ways = [road_between(11, (40, 1), (40 + n - 1, 2), true)];
+            let cells = build_tunnel(&mut editor, &xzbbox, &ways);
+            let mid = cells.iter().find(|c| c.x == 40 + (n - 1) / 2).unwrap();
+            assert!(mid.covered, "n={n}: open to the sky in the middle");
+            assert!(
+                mid.road_y <= -TUNNEL_ROOF_COVER,
+                "n={n}: road at {}",
+                mid.road_y
+            );
+        }
+    }
+
+    #[test]
+    fn a_branch_to_a_platform_comes_up_to_it() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let hill = ground_along_x(|x| (40.0 - (x as f32 - 100.0).abs() * 0.6).max(0.0));
+        let mut editor = tunnel_editor(&xzbbox, hill);
+        let mut main = road_between(11, (20, 1), (180, 2), true);
+        main.nodes.insert(
+            1,
+            ProcessedNode {
+                id: 3,
+                tags: StdMap::new(),
+                x: 100,
+                z: 50,
+            },
+        );
+        let mut stairs = tunnel_span(12, 100, 100, &[("highway", "footway"), ("tunnel", "yes")]);
+        stairs.nodes[0].id = 3;
+        stairs.nodes[1].id = 4;
+        stairs.nodes[1].z = 56;
+        let mut platform = tunnel_span(13, 95, 105, &[("railway", "platform")]);
+        platform.tags.remove("tunnel");
+        for node in &mut platform.nodes {
+            node.z = 56;
+        }
+        platform.nodes.insert(
+            1,
+            ProcessedNode {
+                id: 4,
+                tags: StdMap::new(),
+                x: 100,
+                z: 56,
+            },
+        );
+        let cells = build_tunnel(&mut editor, &xzbbox, &[main, stairs, platform]);
+        let road = cells.iter().find(|c| (c.x, c.z) == (100, 50)).unwrap();
+        let top = cells
+            .iter()
+            .filter(|c| c.x == 100 && c.z > 50)
+            .map(|c| c.road_y)
+            .max()
+            .unwrap();
+        assert!(top > road.road_y + 2, "the stairs end in the rock at {top}");
     }
 
     #[test]

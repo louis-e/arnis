@@ -1,7 +1,16 @@
 //! The levels a tunnel keeps from portal to portal: a steady grade, bent only where the ground
 //! over it falls away and the bore has to stay under its cover, as a real one is driven.
 
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use fnv::{FnvHashMap, FnvHashSet};
+
+/// Blocks of rock a bore's lowest block keeps over the world's floor.
+pub(crate) const FLOOR_GUARD: i32 = 3;
+
+/// The lowest a tunnel's floor, or a station hall's, may lie.
+pub(crate) fn lowest_floor() -> i32 {
+    crate::world_editor::min_y() + FLOOR_GUARD
+}
 
 /// How a bore keeps to its grade and its cover.
 pub(crate) struct Bore {
@@ -68,6 +77,11 @@ pub(crate) fn grade_line(
     // and no further than the grade takes it under its depth.
     let full = (bore.depth / bore.grade - 1e-9).ceil().max(1.0) as usize;
     let mut reach = portal.map(|p| if p { full } else { 0 });
+    // Too short for both cuttings, each takes half, so the middle still goes under its cover.
+    if reach[0] + reach[1] + 2 > n && portal == [true; 2] {
+        let room = n.saturating_sub(2);
+        reach = [room.div_ceil(2), room / 2];
+    }
     let cell = |e: usize, d: usize| if e == 0 { d } else { n - 1 - d };
     let mut line = Vec::new();
     for _ in 0..8 {
@@ -116,6 +130,9 @@ fn fit(cap: &[f64], top: &[f64], pins: &[Option<f64>], grade: f64) -> Vec<f64> {
         anchors.push((n - 1, l1.min(cap[n - 1]).min(top[n - 1])));
     }
     let mut line = vec![0.0; n];
+    for &(a, la) in &anchors {
+        line[a] = la;
+    }
     for w in anchors.windows(2) {
         let ((a, la), (b, lb)) = (w[0], w[1]);
         line[a] = la;
@@ -403,6 +420,62 @@ pub(crate) fn portal_cuttings(bare: &[bool], portal: [bool; 2], gap: usize) -> V
     open
 }
 
+/// Holds both cells across One World's area edge at the level of the lower one, which the
+/// area on the other side reads alike, so the two meet there.
+pub(crate) fn pin_area_edges(
+    pins: &mut [Option<i32>],
+    cells: &[(i32, i32)],
+    area: Option<&XZBBox>,
+    level: impl Fn(usize) -> i32,
+) {
+    let Some(area) = area else {
+        return;
+    };
+    let inside = |i: usize| area.contains(&XZPoint::new(cells[i].0, cells[i].1));
+    for i in (1..cells.len()).filter(|&i| inside(i - 1) != inside(i)) {
+        let y = level(if cells[i - 1] < cells[i] { i - 1 } else { i });
+        pins[i - 1].get_or_insert(y);
+        pins[i].get_or_insert(y);
+    }
+}
+
+/// Lowers `levels` so they step at most `step` a cell, leaving the pinned cells where they
+/// are and keeping the rest within reach of them.
+pub(crate) fn walkable(levels: &mut [i32], pins: &[Option<i32>], step: i32) {
+    let n = levels.len();
+    let free = |i: usize| pins[i].is_none();
+    let mut lo = vec![i32::MIN / 2; n];
+    let mut hi = vec![i32::MAX / 2; n];
+    let (mut l, mut h) = (i32::MIN / 2, i32::MAX / 2);
+    for i in 0..n {
+        (l, h) = if free(i) {
+            (l - step, h + step)
+        } else {
+            (levels[i], levels[i])
+        };
+        (lo[i], hi[i]) = (l, h);
+    }
+    (l, h) = (i32::MIN / 2, i32::MAX / 2);
+    for i in (0..n).rev() {
+        (l, h) = if free(i) {
+            (l - step, h + step)
+        } else {
+            (levels[i], levels[i])
+        };
+        lo[i] = lo[i].max(l);
+        hi[i] = hi[i].min(h);
+    }
+    for i in (0..n).filter(|&i| free(i)) {
+        levels[i] = levels[i].min(hi[i]).max(lo[i]);
+    }
+    for i in (1..n).filter(|&i| free(i)) {
+        levels[i] = levels[i].min(levels[i - 1] + step);
+    }
+    for i in (0..n.saturating_sub(1)).rev().filter(|&i| free(i)) {
+        levels[i] = levels[i].min(levels[i + 1] + step);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -643,5 +716,61 @@ mod tests {
             [true, false, true, false, false, true, true, false]
         );
         assert_eq!(portal_cuttings(&bare, [false, false], 3), [false; 8]);
+    }
+
+    #[test]
+    fn a_short_tunnel_under_flat_ground_ramps_down_from_both_portals() {
+        // Rail holds two cells at each portal, a road one.
+        for (depth, most, held) in [(8, 0.25, 2), (7, 1.0 / 3.0, 1)] {
+            for n in (40..=80).step_by(4).chain([63, 64, 65]) {
+                let mut pins = vec![None; n];
+                for i in (0..held).chain(n - held..n) {
+                    pins[i] = Some(0.0);
+                }
+                let bore = Bore::new(n, depth, 0.04, most, -60);
+                let ceiling = vec![-f64::from(depth); n];
+                let line = grade_line(&ceiling, &vec![0.0; n], &pins, [true; 2], &bore);
+                let deepest = line.iter().copied().fold(f64::INFINITY, f64::min);
+                let room = ((n - 1) / 2 + 1 - held) as f64;
+                let want = (most * room).min(f64::from(depth));
+                assert!(deepest <= -want + 1e-9, "n={n}: {deepest} not under {want}");
+                assert!(steps(&line).iter().all(|s| s.abs() <= most + 1e-9), "n={n}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_single_pinned_cell_keeps_its_pin() {
+        let line = grade_line(&[-8.0], &[0.0], &[Some(-3.0)], [false; 2], &rail(1));
+        assert_eq!(line, [-3.0]);
+    }
+
+    #[test]
+    fn a_walkable_line_keeps_its_pins_and_steps_a_block() {
+        let pins = [Some(3), None, None, Some(1), None, Some(3)];
+        let mut levels = [3, 9, -4, 1, 7, 3];
+        walkable(&mut levels, &pins, 1);
+        assert_eq!(levels, [3, 2, 1, 1, 2, 3]);
+        // A junction and a seam next to each other keep their exact levels.
+        let pins = [None, Some(-4), Some(-4), None, None, Some(-6), None];
+        let mut levels = [0, -4, -4, -9, -9, -6, 2];
+        walkable(&mut levels, &pins, 1);
+        assert_eq!((levels[1], levels[2], levels[5]), (-4, -4, -6));
+        assert!(
+            levels.windows(2).all(|w| (w[1] - w[0]).abs() <= 1),
+            "{levels:?}"
+        );
+    }
+
+    #[test]
+    fn both_sides_of_an_area_edge_take_the_lower_cells_level() {
+        let area = XZBBox::rect_from_xz_lengths(10.0, 10.0).unwrap();
+        let cells: Vec<(i32, i32)> = (8..13).map(|x| (x, 5)).collect();
+        let mut pins = vec![None; cells.len()];
+        pin_area_edges(&mut pins, &cells, Some(&area), |i| i as i32 * 10);
+        assert_eq!(pins, [None, None, Some(20), Some(20), None]);
+        let mut none = vec![None; cells.len()];
+        pin_area_edges(&mut none, &cells, None, |_| 0);
+        assert!(none.iter().all(Option::is_none));
     }
 }

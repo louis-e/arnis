@@ -6,7 +6,7 @@ use crate::block_definitions::Block;
 #[cfg(test)]
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::railways::{determine_rail_with_slope, smooth_diagonal_rails};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use fnv::FnvHashMap;
@@ -61,6 +61,8 @@ pub struct TunnelBore {
     pub floors: Vec<i32>,
     /// Cells in the cutting at a portal, whose roof opens to the sky.
     pub open: Vec<bool>,
+    /// Cells further in where the ground dips over the bore, which keep their walls and roof.
+    pub shut: Vec<bool>,
     /// The floor of the cell past either end, where the run goes on in another way.
     pub beyond: [Option<i32>; 2],
 }
@@ -225,19 +227,9 @@ impl RailJoins {
         self.tunnels.get(&way)
     }
 
-    /// Where a run of cells crosses the area's edge, as the cell inside and the one outside.
-    pub fn edge_crossings(&self, cells: &[(i32, i32)]) -> Vec<[usize; 2]> {
-        let Some(area) = &self.area else {
-            return Vec::new();
-        };
-        let inside = |&(x, z): &(i32, i32)| area.contains(&XZPoint::new(x, z));
-        (1..cells.len())
-            .filter_map(|i| match (inside(&cells[i - 1]), inside(&cells[i])) {
-                (true, false) => Some([i - 1, i]),
-                (false, true) => Some([i, i - 1]),
-                _ => None,
-            })
-            .collect()
+    /// In One World, the area being built.
+    pub fn area(&self) -> Option<&XZBBox> {
+        self.area.as_ref()
     }
 }
 

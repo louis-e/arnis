@@ -905,7 +905,7 @@ impl StationIndex {
             return;
         }
         let editor = inputs.editor;
-        let lowest = crate::world_editor::min_y() + 1;
+        let lowest = crate::element_processing::tunnel_grade::lowest_floor();
         let mut ways: Vec<u64> = self.floors.keys().map(|k| k.0).collect();
         ways.sort_unstable();
         ways.dedup();
@@ -1311,7 +1311,7 @@ impl StationIndex {
             })
             .collect();
 
-        let lowest = crate::world_editor::min_y() + 1;
+        let lowest = crate::element_processing::tunnel_grade::lowest_floor();
         let surface_at = |x: i32, z: i32| {
             let g = editor
                 .terrain_level(x, z)

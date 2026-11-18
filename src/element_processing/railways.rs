@@ -11,13 +11,15 @@ use crate::element_processing::bridges::{
 use crate::element_processing::connected_blocks::{
     cross_cells, four_connected_line, place_connected, stair_steps,
 };
-use crate::element_processing::highways::TunnelLight;
+use crate::element_processing::highways::{
+    beyond_portal, faces_near, step_towards, PortalFace, TunnelLight,
+};
 pub use crate::element_processing::rail_track::RailJoins;
 use crate::element_processing::rail_track::{
     rail_profile, rail_shapes, straight_cells, track_cells, TrackEnd, TrackLevel, TunnelBore,
 };
 use crate::element_processing::tunnel_grade::{
-    chains, grade_line, planning_order, portal_cuttings, Beside, Bore,
+    chains, grade_line, lowest_floor, pin_area_edges, planning_order, portal_cuttings, Beside, Bore,
 };
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
@@ -435,16 +437,7 @@ fn pin_area_edge(
     cells: &[(i32, i32)],
     level: impl Fn(usize) -> i32,
 ) {
-    for [inside, outside] in rail_joins.edge_crossings(cells) {
-        let y = level(if cells[inside] < cells[outside] {
-            inside
-        } else {
-            outside
-        });
-        for i in [inside, outside] {
-            pins[i].get_or_insert(y);
-        }
-    }
+    pin_area_edges(pins, cells, rail_joins.area(), level);
 }
 
 /// The first cell past an end and its height: a bridge's deck there, or level with the end.
@@ -1735,8 +1728,6 @@ pub fn plan_rail_tunnels(
 const RAIL_TUNNEL_GRADE: f64 = 0.04;
 /// Covered cells a portal's cutting carries on past, about the bore's width.
 const CUTTING_GAP: usize = 2 * WALL_RADIUS as usize + 1;
-/// Cells from a portal whose shell can reach past its face.
-const FACE_REACH: usize = 2 * WALL_RADIUS as usize + 2;
 
 /// A way's track cells and the cell each of its nodes falls on.
 type WayCells = (Vec<(i32, i32)>, Vec<usize>);
@@ -1801,7 +1792,7 @@ impl<'a> RailRun<'a> {
             &ends[last.0][usize::from(!last.2)],
         ];
         let depth = RAIL_TUNNEL_FLOOR_DEPTH;
-        let lowest = crate::world_editor::min_y() + 1;
+        let lowest = lowest_floor();
         let ground: Vec<i32> = path
             .iter()
             .map(|&(x, z)| editor.get_ground_level(x, z))
@@ -1962,6 +1953,9 @@ impl<'a> RailRun<'a> {
                 TunnelBore {
                     floors: (0..len).map(|j| floors[self.at(piece, j)]).collect(),
                     open: (0..len).map(|j| open[self.at(piece, j)]).collect(),
+                    shut: (0..len)
+                        .map(|j| bare[self.at(piece, j)] && !open[self.at(piece, j)])
+                        .collect(),
                     beyond: [past(0), past(1)],
                 },
             );
@@ -2027,22 +2021,20 @@ fn generate_rail_tunnel_shell(
             .first()
             .map(|&c| (c, bore.beyond[1].unwrap_or(floors[n - 1]))),
     );
-    // The shell stops at a portal's face, or it fills the open track's first cell outside.
+    // The shell stops at a portal's face, or it fills the open track's first cell outside. The
+    // face is square to the track a few cells in, so a diagonal one does not notch its walls.
+    let k = (2 * WALL_RADIUS as usize).min(n - 1);
     let faces = [0, 1].map(|e| {
         let (at, inner) = if e == 0 {
-            (cells[0], cells[1.min(n - 1)])
+            (cells[0], cells[k])
         } else {
-            (cells[n - 1], cells[n.saturating_sub(2)])
+            (cells[n - 1], cells[n - 1 - k])
         };
-        (ends[e].meets_surface && at != inner).then_some((at, (at.0 - inner.0, at.1 - inner.1)))
-    });
-    // Only cells near the end: a tunnel turning back on itself passes the face's plane further in.
-    let outside = |i: usize, x: i32, z: i32| {
-        faces.iter().enumerate().any(|(e, face)| {
-            let near = if e == 0 { i } else { n - 1 - i } <= FACE_REACH;
-            face.is_some_and(|(at, out)| near && (x - at.0) * out.0 + (z - at.1) * out.1 > 0)
+        (ends[e].meets_surface && at != inner).then(|| PortalFace {
+            at,
+            out: step_towards(at, inner),
         })
-    };
+    });
 
     for (i, &(bx, bz)) in cells.iter().enumerate() {
         let floor_y = floors[i];
@@ -2065,18 +2057,21 @@ fn generate_rail_tunnel_shell(
         // Interior positions deliberately get non-AIR blocks too so that
         // the ground fill (skip_existing: true) leaves them alone.
         // Wall/ceiling blocks get random cracked/mossy variants for variety.
+        let near = faces_near(faces, i, n - 1, WALL_RADIUS);
         for dx in -WALL_RADIUS..=WALL_RADIUS {
             for dz in -WALL_RADIUS..=WALL_RADIUS {
-                if outside(i, bx + dx, bz + dz) {
+                if beyond_portal(&near, bx + dx, bz + dz) {
                     continue;
                 }
                 let top = editor.get_ground_level(bx + dx, bz + dz);
+                // In a portal's cutting the ground is its roof, or the sky, as it is wherever a
+                // road or platform here lies lower than planned. Where the ground dips over the
+                // bore further in, it stays shut.
+                let cutting = bore.open[i] || (!bore.shut[i] && ceil_y >= top);
                 for y in floor_y..=ceil_y {
                     let is_wall_or_ceiling =
                         dx.abs() == WALL_RADIUS || dz.abs() == WALL_RADIUS || y == ceil_y;
-                    // In a portal's cutting the ground is its roof, or the sky. Further in, the
-                    // bore stays shut where the ground dips over it.
-                    if bore.open[i] && is_wall_or_ceiling && y > floor_y && y >= top {
+                    if cutting && is_wall_or_ceiling && y > floor_y && y >= top {
                         continue;
                     }
 
@@ -3058,6 +3053,34 @@ mod tests {
     }
 
     #[test]
+    fn a_short_tunnel_under_flat_ground_is_roofed_in_the_middle() {
+        for n in [56, 64, 80] {
+            let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+            let mut editor = hill_editor(&xzbbox, |_| 0);
+            let end = 20 + n - 1;
+            let ways = [
+                rail_between(1, (0, 1), (20, 2), OPEN),
+                rail_between(2, (20, 2), (end, 3), TUNNEL),
+                rail_between(3, (end, 3), (199, 4), OPEN),
+            ];
+            lay_planned(&mut editor, &ways, None);
+            let mid = 20 + (n - 1) / 2;
+            let floor = rail_ys_at(&editor, mid..=mid, 50)[0] - 1;
+            let roof = floor + INTERIOR_HEIGHT + 1;
+            assert!(roof < 0, "n={n}: roof at {roof} is not under the ground");
+            assert!(
+                editor.check_for_block_absolute(mid, roof, 50, Some(SHELL), None),
+                "n={n}: no roof at x={mid}"
+            );
+            assert_eq!(
+                rail_ys_at(&editor, 20..=20, 50)[0],
+                1,
+                "n={n}: the portal stays level"
+            );
+        }
+    }
+
+    #[test]
     fn a_tunnel_turning_back_past_its_portal_keeps_its_shell() {
         let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
         let mut editor = test_editor(&xzbbox);
@@ -3271,17 +3294,13 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
-        let level = crate::world_editor::min_y() + 10;
+        let level = lowest_floor() + 9;
         let (mut editor, ground, field) = river_editor(&xzbbox, level as f32);
         let points = subway_under_river(&mut editor, &ground, &field, &xzbbox);
 
         assert_bore_whole_and_dry(&editor, &points);
         let mid = points.iter().find(|p| p.0 == 100).unwrap();
-        assert_eq!(
-            mid.2,
-            crate::world_editor::min_y() + 1,
-            "as deep as it goes"
-        );
+        assert_eq!(mid.2, lowest_floor(), "as deep as it goes");
         // The river is carved down to the roof, with the bed on top of it.
         let roof = mid.2 + INTERIOR_HEIGHT + 1;
         assert!(editor.check_for_block_absolute(100, level, 50, Some(&[WATER]), None));
