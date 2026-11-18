@@ -1085,8 +1085,14 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     osm_parser::sort_by_priority(&mut parsed_elements);
     bench.mark("sort_priority");
 
+    // Where line waterways are piped under roads; the masks below skip it as the drawing does.
+    ground.pipe_channels_under_roads(&parsed_elements, &xzbbox, &args);
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
-    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    ground.apply_osm_water_override(
+        &parsed_elements,
+        &xzbbox,
+        args.water.water_detail.channel_width_cap(args.scale),
+    );
     // Before the land override, which would give them land to stand on.
     let wet =
         overture::drop_footprints_in_water(&mut parsed_elements, &ground, &xzbbox, args.scale);
@@ -1096,7 +1102,12 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             wet.to_string().bright_white().bold()
         );
     }
-    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
+    ground.apply_osm_land_override(
+        &parsed_elements,
+        &xzbbox,
+        args.scale,
+        args.water.water_detail.channel_width_cap(args.scale),
+    );
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
     }

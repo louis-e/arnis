@@ -225,6 +225,10 @@ fn natural_area(
                 let plants_here = piece_plants_at(args);
                 let woods_by_cell = woods_by_cell(args);
                 let mut shrubbery_species: Option<Block> = None;
+                let wild = matches!(
+                    natural_type.as_str(),
+                    "wood" | "scrub" | "grassland" | "heath" | "wetland"
+                );
                 for &(x, z) in filled_area.iter() {
                     if in_hole(holes, x, z) {
                         continue;
@@ -234,6 +238,9 @@ fn natural_area(
                     // Owned cells, such as One World's clip margin, still take their draws.
                     if !editor.in_bounds(x, z) && !editor.owns(x, z) {
                         continue;
+                    }
+                    if wild {
+                        editor.mark_ground(crate::world_editor::GroundMark::Wild, x, z);
                     }
                     let climate = editor.local_climate(x, z).unwrap_or(area_climate);
                     let arid = is_sand

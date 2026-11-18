@@ -62,6 +62,12 @@ pub const LC_GRASSLAND: u8 = 30;
 pub const LC_CROPLAND: u8 = 40;
 /// Built-up areas (urban, roads, buildings)
 pub const LC_BUILT_UP: u8 = 50;
+
+/// Whether a park or green on this land cover is mown: open land, not the woods and
+/// scrub a park keeps wild without mapping them. No land cover mows all of it.
+pub fn mown_cover(class: Option<u8>) -> bool {
+    matches!(class, None | Some(LC_GRASSLAND | LC_BUILT_UP | LC_CROPLAND))
+}
 /// Bare / sparse vegetation (desert, rock, barren)
 pub const LC_BARE: u8 = 60;
 /// Snow and ice (glaciers, permanent snow)

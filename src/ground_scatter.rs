@@ -332,7 +332,7 @@ pub fn scatter_region(
             if cover != LC_CROPLAND && cover != LC_GRASSLAND && !(is_rock && woods) {
                 continue;
             }
-            if near_town(ground, xzbbox, ax, az) {
+            if near_town(ground, xzbbox, ax, az) || editor.is_lawn(ax, az) {
                 continue;
             }
             let offsets = rotated_offsets(schem, rot);

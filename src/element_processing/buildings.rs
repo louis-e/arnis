@@ -13391,6 +13391,10 @@ pub fn generate_buildings(
 
     // Tank-style structures route to their own cylindrical renderer.
     if crate::element_processing::man_made::is_tank_structure(element) {
+        if storeys_of_m(tank_height_m(&element.tags)) >= TALL_STOREYS {
+            let cells = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+            mark_tall(editor, &cells);
+        }
         let processed_element = crate::osm_parser::ProcessedElement::Way(element.clone());
         crate::element_processing::man_made::generate_tank_structure(
             editor,
@@ -13597,6 +13601,18 @@ pub fn generate_buildings(
                     cached_footprint_size,
                     group_seed,
                 );
+                let storeys = wall_storeys(
+                    element,
+                    building_type,
+                    relation_levels,
+                    cached_footprint_size,
+                    scale_factor,
+                    group_seed,
+                    (min_level_offset, height),
+                );
+                if storeys >= TALL_STOREYS {
+                    mark_tall(editor, &cached_floor_area);
+                }
                 crate::element_processing::parking_garage::generate_parking_garage(
                     editor,
                     &cached_floor_area,
@@ -13645,6 +13661,18 @@ pub fn generate_buildings(
                 cached_footprint_size,
                 group_seed,
             );
+            let storeys = wall_storeys(
+                element,
+                building_type,
+                relation_levels,
+                cached_footprint_size,
+                scale_factor,
+                group_seed,
+                (min_level_offset, height),
+            );
+            if storeys >= TALL_STOREYS {
+                mark_tall(editor, &cached_floor_area);
+            }
             crate::element_processing::parking_garage::generate_parking_garage(
                 editor,
                 &cached_floor_area,
@@ -13696,6 +13724,19 @@ pub fn generate_buildings(
             )
         };
 
+    let storeys = wall_storeys(
+        element,
+        building_type,
+        relation_levels,
+        cached_footprint_size,
+        scale_factor,
+        group_seed,
+        (min_level_offset, building_height),
+    );
+    if storeys >= TALL_STOREYS {
+        mark_tall(editor, &cached_floor_area);
+    }
+
     // A building going up is a frame of slabs and columns, not a finished shell.
     if BuildingCondition::from_tags(&element.tags) == BuildingCondition::Construction
         && min_level_offset == 0
@@ -13735,6 +13776,18 @@ pub fn generate_buildings(
         region,
     );
     let preset = BuildingStylePreset::for_category(category);
+    if has_garden_grounds(
+        category,
+        &element.tags,
+        storeys,
+        cached_footprint_size,
+        scale_factor,
+    ) && min_level_offset == 0
+    {
+        for &(x, z) in &cached_floor_area {
+            editor.mark_ground(crate::world_editor::GroundMark::Dwelling, x, z);
+        }
+    }
 
     // Street/neighbor classification: party walls, fronting streets, corner.
     // Sibling part cells: exempt from party-wall detection and kept clear of
@@ -15959,6 +16012,189 @@ fn generate_setback_crown(
     }
 
     true
+}
+
+/// Storeys from which a building counts as tall: five and more. Near one open ground stays
+/// paved, and none is a house with a garden.
+const TALL_STOREYS: f64 = 4.5;
+
+/// Storeys of wall `m` metres make: three-metre storeys over the ground floor's extra two.
+fn storeys_of_m(m: f64) -> f64 {
+    ((m - f64::from(GROUND_FLOOR_BONUS)) / 3.0).max(0.0)
+}
+
+/// Storeys of wall a building stands, from its tags as the generator reads them rather
+/// than its height in blocks, which the scale rounds: a mapped `height` less the roof over
+/// it, else `building:levels` or its relation's, else the storeys the generator infers.
+/// A part raised off the ground counts up to its top, from `raised` (its lift and wall
+/// height in blocks).
+fn wall_storeys(
+    element: &ProcessedWay,
+    building_type: &str,
+    relation_levels: Option<i32>,
+    footprint_cells: usize,
+    scale_factor: f64,
+    group_seed: u64,
+    raised: (i32, i32),
+) -> f64 {
+    if raised.0 > 0 {
+        return storeys_of_m(f64::from(raised.0 + raised.1) / scale_factor);
+    }
+    if let Some(height) = parse_building_height_tag(&element.tags) {
+        return storeys_of_m(height - mapped_roof_rise_m(element, height, scale_factor));
+    }
+    let levels = element
+        .tags
+        .get("building:levels")
+        .and_then(|l| l.trim().parse::<f64>().ok())
+        .filter(|l| l.is_finite() && *l >= 1.0)
+        .or(relation_levels.map(f64::from));
+    if let Some(levels) = levels {
+        return levels;
+    }
+    match infer_building_height(
+        building_type,
+        &element.tags,
+        footprint_cells,
+        scale_factor,
+        group_seed,
+    ) {
+        InferredHeight::Levels(levels) => levels,
+        InferredHeight::HallBlocks(blocks) => storeys_of_m(f64::from(blocks)),
+    }
+}
+
+/// The roof under a mapped `height`, in metres: none on a flat roof, a mapped
+/// `roof:height`, else the low pitch over the shorter half-span the generator draws.
+fn mapped_roof_rise_m(element: &ProcessedWay, height: f64, scale_factor: f64) -> f64 {
+    let tags = &element.tags;
+    if tags.get("roof:shape").map(|s| s.trim()) == Some("flat") {
+        return 0.0;
+    }
+    let tagged = tags
+        .get("roof:height")
+        .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+        .filter(|m| m.is_finite() && *m > 0.0);
+    if let Some(rise) = tagged {
+        return rise.min(height - height.min(3.0));
+    }
+    let nodes = &element.nodes;
+    let mut diameter: f64 = 1.0;
+    for (i, a) in nodes.iter().enumerate() {
+        for b in &nodes[i + 1..] {
+            diameter = diameter.max(f64::from(a.x - b.x).hypot(f64::from(a.z - b.z)));
+        }
+    }
+    let area = nodes
+        .windows(2)
+        .map(|w| f64::from(w[0].x) * f64::from(w[1].z) - f64::from(w[1].x) * f64::from(w[0].z))
+        .sum::<f64>()
+        .abs()
+        / 2.0;
+    let short_half_m = area / diameter / 2.0 / scale_factor;
+    (short_half_m * 0.85).min(9.0).min(height * 0.375)
+}
+
+/// A tank's height in metres: its tag, else what its renderer stands it at untagged. A
+/// storage tank is sized by its footprint and counts as low.
+fn tank_height_m(tags: &HashMap<String, String>) -> f64 {
+    if let Some(h) = parse_building_height_tag(tags) {
+        return h;
+    }
+    let kind = |k: &str| tags.get(k).map(String::as_str);
+    match kind("man_made").or(kind("building")) {
+        Some("water_tower") => 20.0,
+        Some("silo") => 25.0,
+        _ => 0.0,
+    }
+}
+
+/// Marks a footprint as a tall building's, near which open ground stays paved.
+fn mark_tall(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
+    for &(x, z) in cells {
+        editor.mark_ground(crate::world_editor::GroundMark::Tall, x, z);
+    }
+}
+
+/// `building` values that are no home whatever their size: stations, sheds of trades,
+/// halls, and the structures of utilities.
+const NOT_HOMES: &[&str] = &[
+    "train_station",
+    "transportation",
+    "service",
+    "sports_hall",
+    "sports_centre",
+    "stadium",
+    "grandstand",
+    "pavilion",
+    "riding_hall",
+    "toilets",
+    "parking",
+    "power",
+    "substation",
+    "fire_station",
+    "police",
+    "military",
+    "boathouse",
+    "gatehouse",
+    "roof",
+    "container",
+    "construction",
+    "bridge",
+    "water_tower",
+    "silo",
+    "storage_tank",
+];
+
+/// Whether a building is someone's home, whose grounds are a garden: a house or block of
+/// flats, a farmhouse (not its barns), a listed house, or a plain building with no other
+/// use mapped on it.
+fn is_home(category: BuildingCategory, tags: &HashMap<String, String>) -> bool {
+    let building = tags
+        .get("building")
+        .or_else(|| tags.get("building:part"))
+        .map_or("yes", String::as_str);
+    let other_use = [
+        "shop",
+        "office",
+        "craft",
+        "amenity",
+        "leisure",
+        "industrial",
+        "railway",
+    ]
+    .iter()
+    .any(|k| tags.contains_key(*k))
+        || tags
+            .get("tourism")
+            .is_some_and(|t| !matches!(t.as_str(), "guest_house" | "chalet" | "apartment"));
+    match category {
+        BuildingCategory::House | BuildingCategory::Residential => true,
+        BuildingCategory::Farm => building == "farm",
+        BuildingCategory::Historic => {
+            !other_use
+                && (building == "farm"
+                    || matches!(
+                        BuildingCategory::from_building_type(building),
+                        BuildingCategory::House | BuildingCategory::Residential
+                    ))
+        }
+        BuildingCategory::Default => !NOT_HOMES.contains(&building) && !other_use,
+        _ => false,
+    }
+}
+
+/// A home of at most four storeys and about 800 m², whose grounds are a garden.
+fn has_garden_grounds(
+    category: BuildingCategory,
+    tags: &HashMap<String, String>,
+    storeys: f64,
+    footprint_cells: usize,
+    scale_factor: f64,
+) -> bool {
+    is_home(category, tags)
+        && storeys < TALL_STOREYS
+        && (footprint_cells as f64) <= 800.0 * scale_factor * scale_factor
 }
 
 fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
@@ -20383,6 +20619,128 @@ mod height_tests {
 #[cfg(test)]
 mod style_tests {
     use super::*;
+
+    #[test]
+    fn only_low_small_homes_have_garden_grounds() {
+        use BuildingCategory::*;
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let home = |category, pairs: &[(&str, &str)]| {
+            has_garden_grounds(category, &tags(pairs), 3.0, 300, 1.0)
+        };
+        for (category, building) in [
+            (House, "house"),
+            (Residential, "apartments"),
+            (Farm, "farm"),
+            (Default, "yes"),
+            (Default, "static_caravan"),
+            (Historic, "house"),
+            (Historic, "farm"),
+        ] {
+            assert!(home(category, &[("building", building)]), "{building}");
+        }
+        // Barns, garages, shops and halls mark no garden, nor does a plain building
+        // with a shop or a station in it.
+        for (category, building) in [
+            (Farm, "barn"),
+            (Commercial, "retail"),
+            (Office, "office"),
+            (Industrial, "industrial"),
+            (School, "school"),
+            (Religious, "church"),
+            (Garage, "garage"),
+            (Shed, "shed"),
+            (Default, "train_station"),
+            (Default, "service"),
+            (Default, "sports_hall"),
+            (Historic, "castle"),
+            (Historic, "yes"),
+        ] {
+            assert!(!home(category, &[("building", building)]), "{building}");
+        }
+        assert!(!home(Default, &[("building", "yes"), ("shop", "bakery")]));
+        assert!(!home(Default, &[("building", "yes"), ("amenity", "pub")]));
+        assert!(home(
+            Default,
+            &[("building", "yes"), ("tourism", "guest_house")]
+        ));
+        // Five storeys or a block of flats' footprint is no house with a garden.
+        let house = tags(&[("building", "house")]);
+        assert!(!has_garden_grounds(Residential, &house, 5.0, 300, 1.0));
+        assert!(!has_garden_grounds(Residential, &house, 4.0, 2000, 1.0));
+        // At half scale the footprint limit shrinks with the world, the storeys do not.
+        assert!(has_garden_grounds(House, &house, 4.0, 190, 0.5));
+        assert!(!has_garden_grounds(House, &house, 5.0, 190, 0.5));
+        assert!(!has_garden_grounds(House, &house, 4.0, 210, 0.5));
+    }
+
+    /// Storeys come from the tags at any scale, so a five-storey block is tall at half
+    /// scale too, and a mapped height has its roof taken off before it is counted.
+    #[test]
+    fn storeys_are_counted_from_the_tags() {
+        let way = |pairs: &[(&str, &str)], side: i32| {
+            let node = |id: u64, x: i32, z: i32| crate::osm_parser::ProcessedNode {
+                id,
+                tags: HashMap::new(),
+                x,
+                z,
+            };
+            ProcessedWay {
+                id: 1,
+                nodes: vec![
+                    node(1, 0, 0),
+                    node(2, side, 0),
+                    node(3, side, side),
+                    node(4, 0, side),
+                    node(1, 0, 0),
+                ],
+                tags: pairs
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            }
+        };
+        let storeys = |w: &ProcessedWay, scale: f64| {
+            wall_storeys(w, "apartments", None, 400, scale, 7, (0, 3))
+        };
+        let five = way(&[("building", "apartments"), ("building:levels", "5")], 20);
+        let four = way(&[("building", "apartments"), ("building:levels", "4")], 20);
+        for scale in [0.3, 0.5, 1.0, 2.0] {
+            assert!(storeys(&five, scale) >= TALL_STOREYS, "{scale}");
+            assert!(storeys(&four, scale) < TALL_STOREYS, "{scale}");
+        }
+        // 15 m to the ridge of a gabled house 10 m across is about 12 m of wall.
+        let gabled = way(&[("building", "house"), ("height", "15")], 10);
+        assert!(storeys(&gabled, 1.0) < TALL_STOREYS);
+        let flat = way(
+            &[
+                ("building", "house"),
+                ("height", "17"),
+                ("roof:shape", "flat"),
+            ],
+            10,
+        );
+        assert!(storeys(&flat, 1.0) >= TALL_STOREYS);
+        let tagged_roof = way(
+            &[
+                ("building", "house"),
+                ("height", "17"),
+                ("roof:shape", "gabled"),
+                ("roof:height", "5"),
+            ],
+            30,
+        );
+        assert!(storeys(&tagged_roof, 1.0) < TALL_STOREYS);
+        // A water tower or silo is tall, a storage tank only when its height says so.
+        let tank = |pairs: &[(&str, &str)]| storeys_of_m(tank_height_m(&way(pairs, 6).tags));
+        assert!(tank(&[("man_made", "water_tower")]) >= TALL_STOREYS);
+        assert!(tank(&[("man_made", "storage_tank")]) < TALL_STOREYS);
+        assert!(tank(&[("man_made", "storage_tank"), ("height", "20")]) >= TALL_STOREYS);
+    }
 
     #[test]
     fn archetype_truth_table() {
