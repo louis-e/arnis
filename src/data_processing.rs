@@ -1425,6 +1425,17 @@ pub fn generate_world_with_options(
     if let Some(keep) = &tree_keep_clear {
         editor.set_tree_keep_clear(Arc::clone(keep));
     }
+    // The laser reads a track's ballast as paving or open ground; it is ballast.
+    let rail_bed = ground.has_survey().then(|| {
+        Arc::new(railways::collect_rail_bed(
+            &elements,
+            &xzbbox,
+            railways::BALLAST_REACH,
+        ))
+    });
+    if let Some(bed) = &rail_bed {
+        editor.set_rail_bed(Arc::clone(bed));
+    }
     let fuel_index = Arc::new(fuel_stations::FuelIndex::build(&elements, args.scale));
     editor.set_fuel_index(Arc::clone(&fuel_index));
 
@@ -2050,6 +2061,9 @@ pub fn generate_world_with_options(
             tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));
             if let Some(keep) = &tree_keep_clear {
                 tile_editor.set_tree_keep_clear(Arc::clone(keep));
+            }
+            if let Some(bed) = &rail_bed {
+                tile_editor.set_rail_bed(Arc::clone(bed));
             }
             tile_editor.set_fuel_index(Arc::clone(&fuel_index));
             if let Some(ctx) = &signage_ctx {

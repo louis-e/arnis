@@ -506,6 +506,10 @@ fn is_water_area_relation(rel: &ProcessedRelation) -> bool {
 }
 
 fn is_building(tags: &HashMap<String, String>) -> bool {
+    // The laser's sheds give no land: where one stands on water it is a boat.
+    if tags.get("source").map(String::as_str) == Some("garden_detail") {
+        return false;
+    }
     tags.get("building")
         .is_some_and(|v| !matches!(v.as_str(), "no" | "0" | "false"))
         || tags.contains_key("building:part")

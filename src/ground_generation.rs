@@ -874,10 +874,14 @@ pub fn generate_ground_region(
                             };
 
                             // Garden detail takes only the columns no mapped feature
-                            // claimed: no surface placed, nothing sealed, no footprint.
+                            // claimed: no surface placed, nothing sealed, no footprint;
+                            // and only in towns, gardens, parks and woods, where its
+                            // lawn and paving are what the laser tells apart.
                             let survey_owned = if has_survey {
                                 ground.survey_cell(coord).filter(|_| {
-                                    !steep_override
+                                    (!has_land_cover
+                                        || crate::survey::place::claims_cover(cover_here))
+                                        && !steep_override
                                         && talus_block.is_none()
                                         && !blend_is_water
                                         && !building_footprints.contains(x, z)
@@ -887,14 +891,25 @@ pub fn generate_ground_region(
                             } else {
                                 None
                             };
-                            let (surface_block, under_block) =
-                                match survey_owned.and_then(crate::survey::place::ground_blocks) {
-                                    Some(blocks) => {
-                                        cropland_plot = None;
-                                        blocks
-                                    }
-                                    None => (surface_block, under_block),
-                                };
+                            // On a track's bed the laser's open or paved ground is the
+                            // ballast, as under the rails themselves.
+                            let survey_ground = survey_owned.and_then(|c| {
+                                if matches!(
+                                    c.kind,
+                                    crate::survey::Kind::Paved | crate::survey::Kind::Bare
+                                ) && editor.on_rail_bed(x, z)
+                                {
+                                    return Some((GRAVEL, STONE));
+                                }
+                                crate::survey::place::ground_blocks(c, x, z, cover_here)
+                            });
+                            let (surface_block, under_block) = match survey_ground {
+                                Some(blocks) => {
+                                    cropland_plot = None;
+                                    blocks
+                                }
+                                None => (surface_block, under_block),
+                            };
 
                             // Banks keep their land cover. Beaches come from LC_BEACH
                             // and mapped sand, not from a sand ring around all water.
@@ -1137,8 +1152,8 @@ pub fn generate_ground_region(
                                 (false, false)
                             };
                             // Measured hedges, bushes, beds and fences, before the trees.
-                            // A mapped hedge or fence next to the column is the same
-                            // one, already drawn.
+                            // A mapped hedge, fence or wall next to the column is the
+                            // same one, already drawn.
                             if let Some(cell) = survey_owned {
                                 let linear = matches!(
                                     cell.kind,
@@ -1146,7 +1161,7 @@ pub fn generate_ground_region(
                                 );
                                 let mapped_beside = linear
                                     && (-1..=1).any(|dx| {
-                                        (-1..=1).any(|dz| editor.is_hedge(x + dx, z + dz))
+                                        (-1..=1).any(|dz| editor.is_barrier(x + dx, z + dz))
                                     });
                                 if !mapped_beside {
                                     crate::survey::place::place_objects(
@@ -1868,7 +1883,7 @@ fn salted_noise_with(x: i32, z: i32, scale: i32, salt: u32, hash: impl Fn(i32, i
 
 /// Built-up paving for `--surface-patches`: stone bricks with worn patches of
 /// cracked bricks, stone and cobblestone, in about the shares of the speckle.
-fn built_up_patch(x: i32, z: i32) -> (Block, Block) {
+pub(crate) fn built_up_patch(x: i32, z: i32) -> (Block, Block) {
     if ground_noise(x, z, 5, SALT_PAVING_WEAR) >= 0.28 {
         return (STONE_BRICKS, STONE);
     }

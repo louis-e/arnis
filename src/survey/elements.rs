@@ -138,8 +138,15 @@ struct Paved {
     lines: Vec<Line>,
     /// Whether each of `lines` is a driveway's.
     driveway: Vec<bool>,
-    /// Outlines of the squares, car parks, bus stations and railway yards.
+    /// Outlines of the squares, car parks, bus stations and railway yards, and of
+    /// marinas, harbours and piers.
     areas: Vec<Vec<(f64, f64)>>,
+    /// Outlines of mapped ground no garden shed or pool stands on: playgrounds,
+    /// parks, pitches, woods, meadows, building sites, school grounds.
+    not_gardens: Vec<Vec<(f64, f64)>>,
+    /// Outlines of retail, commercial and industrial land: a glass roof or a
+    /// blue tarp there is no garden's pool.
+    no_pools: Vec<Vec<(f64, f64)>>,
     /// Indices into `lines` by `PAVED_CELL` cell.
     buckets: FnvHashMap<(i32, i32), Vec<usize>>,
 }
@@ -179,12 +186,54 @@ impl Paved {
             lines: Vec::new(),
             driveway: Vec::new(),
             areas: Vec::new(),
+            not_gardens: Vec::new(),
+            no_pools: Vec::new(),
             buckets: FnvHashMap::default(),
+        };
+        let outers = |el: &ProcessedElement| -> Vec<Vec<(f64, f64)>> {
+            match el {
+                ProcessedElement::Way(w) if closed(w) => vec![w.nodes.iter().map(xz).collect()],
+                ProcessedElement::Relation(r) => r
+                    .members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer && closed(&m.way))
+                    .map(|m| m.way.nodes.iter().map(xz).collect())
+                    .collect(),
+                _ => Vec::new(),
+            }
         };
         for el in existing {
             let t = el.tags();
+            // Weirs, dams, lock gates, piers and bridges stand over water or over a
+            // road, on any layer: what the laser sees there is no shed.
+            let tag = |k: &str| t.get(k).map(String::as_str);
+            let over_water = matches!(tag("waterway"), Some("weir" | "dam" | "lock_gate"))
+                || tag("man_made") == Some("pier")
+                || t.get("bridge").is_some_and(|v| v != "no");
+            if over_water {
+                if let ProcessedElement::Way(w) = el {
+                    let reach = t.get("highway").map_or(OVER_WATER_REACH, |kind| {
+                        f64::from(highway_block_range(kind, t, scale)) + 0.5
+                    });
+                    for pair in w.nodes.windows(2) {
+                        paved.lines.push((xz(&pair[0]), xz(&pair[1]), reach));
+                        paved.driveway.push(false);
+                    }
+                }
+                paved.areas.extend(outers(el));
+                continue;
+            }
+            if matches!(tag("leisure"), Some("marina")) || tag("landuse") == Some("harbour") {
+                paved.areas.extend(outers(el));
+                continue;
+            }
             if !on_ground(t) {
                 continue;
+            }
+            if not_a_garden(t) {
+                paved.not_gardens.extend(outers(el));
+            } else if matches!(tag("landuse"), Some("retail" | "commercial" | "industrial")) {
+                paved.no_pools.extend(outers(el));
             }
             match el {
                 ProcessedElement::Way(w) if is_area(t) && closed(w) => {
@@ -272,6 +321,15 @@ impl Paved {
             || self.areas.iter().any(|ring| ring_contains(ring, x, z))
     }
 
+    /// Whether the point (x, z) lies in mapped ground that is no garden, or for a
+    /// pool, on land with no gardens' pools.
+    fn off_gardens(&self, x: f64, z: f64, pool: bool) -> bool {
+        self.not_gardens
+            .iter()
+            .any(|ring| ring_contains(ring, x, z))
+            || (pool && self.no_pools.iter().any(|ring| ring_contains(ring, x, z)))
+    }
+
     /// Whether the cell centre (x, z) lies on a driveway.
     fn on_driveway(&self, x: f64, z: f64) -> bool {
         self.lines_at(x, z).any(|i| self.driveway[i])
@@ -310,6 +368,46 @@ impl Paved {
     }
 }
 
+/// How far from a weir, dam, lock gate, pier or bridge without a road's width no
+/// candidate stands, in blocks.
+const OVER_WATER_REACH: f64 = 2.5;
+
+/// Mapped ground no garden's shed or pool stands on: what fills the ground
+/// itself (a playground, park, pitch, wood, meadow, building site), school
+/// grounds, waste sites and squares. Homes, gardens, allotments, farmyards,
+/// garage yards and the land of shops, offices, works, schools and churches
+/// keep theirs.
+fn not_a_garden(t: &HashMap<String, String>) -> bool {
+    let tag = |k: &str| t.get(k).map(String::as_str);
+    if t.contains_key("building") || t.contains_key("highway") {
+        return false;
+    }
+    if let Some(leisure) = tag("leisure") {
+        return !matches!(leisure, "garden" | "swimming_pool" | "resort");
+    }
+    if let Some(natural) = tag("natural") {
+        return !matches!(natural, "tree" | "tree_row");
+    }
+    if let Some(landuse) = tag("landuse") {
+        return !matches!(
+            landuse,
+            "residential"
+                | "commercial"
+                | "retail"
+                | "industrial"
+                | "education"
+                | "religious"
+                | "allotments"
+                | "farmyard"
+                | "garages"
+        );
+    }
+    matches!(
+        tag("amenity"),
+        Some("school" | "kindergarten" | "waste_disposal" | "recycling")
+    ) || tag("place") == Some("square")
+}
+
 /// Whether (x, z) lies inside or on a convex ring, wound either way.
 fn in_convex(ring: &[(f64, f64)], x: f64, z: f64) -> bool {
     let (mut pos, mut neg) = (false, false);
@@ -339,11 +437,13 @@ fn ring_contains(ring: &[(f64, f64)], x: f64, z: f64) -> bool {
 /// Keep the candidates that meet nothing mapped: sheds clear of every building,
 /// pools clear of every building and every mapped pool, and both off the mapped roads,
 /// tracks, squares and car parks (see [`Paved`]), at the roads' drawn width for the
-/// world's `scale`. Also returns how many were left out for standing on those.
+/// world's `scale`, off water (`water` at a block) and out of mapped ground that is
+/// no garden. Also returns how many were left out for standing on roads and squares.
 pub fn merge(
     candidates: Vec<ProcessedElement>,
     existing: &[ProcessedElement],
     scale: f64,
+    water: &dyn Fn(i32, i32) -> bool,
 ) -> (Vec<ProcessedElement>, usize) {
     let paved = Paved::of(existing, scale);
     let bbox_of = |w: &ProcessedWay| {
@@ -409,7 +509,10 @@ pub fn merge(
                 overlaps && (building || is_pool)
             });
             on_paved += usize::from(on_paving && !mapped);
-            !on_paving && !mapped
+            // A boat, a pontoon or a weir is no shed, a patch of sea no pool.
+            let wet = points().any(|(x, z)| water(x.floor() as i32, z.floor() as i32));
+            let off_gardens = paved.off_gardens(centre.0, centre.1, is_pool);
+            !on_paving && !mapped && !wet && !off_gardens
         })
         .collect();
     (kept, on_paved)
@@ -512,7 +615,7 @@ mod tests {
             ), // free
             way(ID_BASE + 1024, &[("building", "shed")], 32, 31, 34, 33), // on a mapped pool
         ];
-        let kept: Vec<u64> = merge(cands, &existing, 1.0)
+        let kept: Vec<u64> = merge(cands, &existing, 1.0, &|_, _| false)
             .0
             .into_iter()
             .map(|e| match e {
@@ -521,6 +624,68 @@ mod tests {
             })
             .collect();
         assert_eq!(kept, vec![ID_BASE + 256, ID_BASE + 768, ID_BASE + 1024]);
+    }
+
+    // A boat in a harbour, a weir in a river and anything on the land cover's water
+    // are no sheds; the climbing frame of a playground is none either, and a glass
+    // roof over a shop's yard no pool. A garden's shed and pool, and a works' shed,
+    // are kept.
+    #[test]
+    fn nothing_stands_on_water_or_on_mapped_ground_that_is_no_garden() {
+        let weir = ProcessedElement::Way(ProcessedWay {
+            id: 5,
+            nodes: [(1, 100), (2, 110)]
+                .iter()
+                .map(|&(id, x)| ProcessedNode {
+                    id,
+                    tags: HashMap::new(),
+                    x,
+                    z: 10,
+                })
+                .collect(),
+            tags: [("waterway".to_string(), "weir".to_string())].into(),
+        });
+        let existing = vec![
+            weir,
+            way(1, &[("leisure", "marina")], 0, 0, 30, 30),
+            way(2, &[("leisure", "playground")], 40, 0, 60, 20),
+            way(3, &[("landuse", "retail")], 0, 40, 30, 70),
+            way(4, &[("leisure", "garden")], 40, 40, 70, 70),
+        ];
+        let cands = vec![
+            way(ID_BASE, &[("building", "shed")], 10, 10, 14, 13), // a boat in the marina
+            way(ID_BASE + 256, &[("building", "garage")], 102, 9, 108, 12), // the weir
+            way(ID_BASE + 512, &[("building", "shed")], 48, 8, 51, 11), // a climbing frame
+            way(
+                ID_BASE + 768,
+                &[("leisure", "swimming_pool")],
+                10,
+                50,
+                15,
+                54,
+            ), // a glass roof at the shop
+            way(ID_BASE + 1024, &[("building", "shed")], 20, 50, 23, 53), // the shop's shed
+            way(ID_BASE + 1280, &[("building", "shed")], 45, 45, 48, 48), // the garden's
+            way(
+                ID_BASE + 1536,
+                &[("leisure", "swimming_pool")],
+                55,
+                55,
+                60,
+                59,
+            ), // the garden's pool
+            way(ID_BASE + 1792, &[("building", "shed")], 120, 120, 123, 123), // on the sea
+        ];
+        let sea = |x: i32, z: i32| x >= 115 && z >= 115;
+        let kept: Vec<u64> = merge(cands, &existing, 1.0, &sea)
+            .0
+            .into_iter()
+            .map(|e| match e {
+                ProcessedElement::Way(w) => w.id,
+                _ => 0,
+            })
+            .collect();
+        assert_eq!(kept, vec![ID_BASE + 1024, ID_BASE + 1280, ID_BASE + 1536]);
     }
 
     // The laser saw a van parked in the street and a market's awnings on a square; a
@@ -576,7 +741,7 @@ mod tests {
                 84,
             ), // in a garden
         ];
-        let kept: Vec<u64> = merge(cands, &existing, 1.0)
+        let kept: Vec<u64> = merge(cands, &existing, 1.0, &|_, _| false)
             .0
             .into_iter()
             .map(|e| match e {
@@ -630,7 +795,7 @@ mod tests {
             way(ID_BASE + 512, &[("building", "garage")], 65, 5, 70, 10), // a box
             way(ID_BASE + 768, &[("building", "garage")], 12, 5, 16, 10), // beside
         ];
-        let (kept, on_paved) = merge(cands, &existing, 1.0);
+        let (kept, on_paved) = merge(cands, &existing, 1.0, &|_, _| false);
         let kept: Vec<u64> = kept
             .into_iter()
             .map(|e| match e {
@@ -668,7 +833,7 @@ mod tests {
             way(ID_BASE + 256, &[("building", "garage")], 10, 50, 22, 53), // the bus
             way(ID_BASE + 512, &[("building", "shed")], 40, 50, 43, 53), // behind
         ];
-        let (kept, on_paved) = merge(cands, &existing, 1.0);
+        let (kept, on_paved) = merge(cands, &existing, 1.0, &|_, _| false);
         let kept: Vec<u64> = kept
             .into_iter()
             .map(|e| match e {

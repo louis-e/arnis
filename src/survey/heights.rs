@@ -173,9 +173,13 @@ fn measure(way: &ProcessedWay, ground: &Ground, xzbbox: &XZBBox) -> Option<Measu
 /// Storeys a home with walls this tall holds: floors of 2.8 m over a raised
 /// ground floor. `None` for buildings that are not homes or are lower than a
 /// storey and a half, which keep their height in metres.
+///
+/// An untagged building of more than [`HOME_STOREYS`] is built on 4 m storeys,
+/// not a home's: it gets as many of those as its walls hold, and where that
+/// would make it a low building again (built on a home's storeys after all),
+/// its height in metres.
 fn storeys(kind: &str, wall_m: f32) -> Option<u32> {
     const HOMES: &[&str] = &[
-        "yes",
         "house",
         "detached",
         "semidetached_house",
@@ -186,11 +190,27 @@ fn storeys(kind: &str, wall_m: f32) -> Option<u32> {
         "apartments",
         "dormitory",
     ];
-    if !HOMES.contains(&kind) || wall_m < 3.5 {
+    if wall_m < 3.5 {
         return None;
     }
-    Some((((wall_m - 0.4) / 2.8).round() as u32).max(1))
+    let levels = (((wall_m - 0.4) / 2.8).round() as u32).max(1);
+    if HOMES.contains(&kind) {
+        return Some(levels);
+    }
+    if kind != "yes" {
+        return None;
+    }
+    if levels <= HOME_STOREYS {
+        return Some(levels);
+    }
+    let tall = ((wall_m - 1.0) / TALL_STOREY_M).round() as u32;
+    (tall > HOME_STOREYS).then_some(tall)
 }
+
+/// Most storeys an untagged building is built on a home's storeys at.
+const HOME_STOREYS: u32 = 7;
+/// Storey an untagged building taller than that is built on, in metres.
+const TALL_STOREY_M: f32 = 4.0;
 
 fn minmax(v: impl Iterator<Item = f64>) -> (f64, f64) {
     v.fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)))
@@ -224,6 +244,12 @@ mod tests {
         assert_eq!(storeys("house", 2.9), None);
         assert_eq!(storeys("industrial", 9.0), None);
         assert_eq!(storeys("garage", 4.0), None);
+        // An untagged tower is built on 4 m storeys, so it gets that many; where
+        // those would be a home's few again, its height.
+        assert_eq!(storeys("yes", 32.4), Some(8));
+        assert_eq!(storeys("yes", 45.0), Some(11));
+        assert_eq!(storeys("yes", 24.0), None);
+        assert_eq!(storeys("yes", 20.0), Some(7));
     }
 
     /// A 20 x 20 block world whose laser saw a roof `byte` fifths of a metre up

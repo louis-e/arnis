@@ -23,6 +23,9 @@ pub const POOL: u8 = 7;
 pub const BUILDING: u8 = 8;
 pub const BED: u8 = 9;
 pub const FENCE: u8 = 10;
+/// Open ground neither planted nor sealed: bare earth, sand, gravel, a dry or
+/// shaded patch. Left to the land cover.
+pub const BARE: u8 = 11;
 
 /// Measurements over a rectangle of cells, row-major, row 0 north, kept as the
 /// tile caches quantise them (17 bytes a cell). The accessors give the values
@@ -259,6 +262,15 @@ pub fn calibrate(inp: &Inputs, defaults: (f32, f32)) -> ((f32, f32), Calibration
     }
 }
 
+/// Share of the ring around a shed or a pool that must have returned ground.
+const MIN_GROUND_AROUND: f64 = 0.4;
+
+/// Whether a photo colour is earth's or sand's: warm, but not a brick's red.
+fn earthy([r, g, b]: [u8; 3]) -> bool {
+    let (r, g, b) = (i32::from(r), i32::from(g), i32::from(b));
+    r - b >= 12 && r - g <= 25
+}
+
 /// What a turned-over intensity is subtracted from.
 const TURN: f32 = 65_535.0;
 
@@ -405,12 +417,37 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
             }
         })
         .collect();
+    // Between the two bands the photo decides, and not green there is not yet
+    // sealed: bare earth, sand and dry ground read so too, while paving mostly
+    // reads plainly below the band. Earth-coloured ground there is open ground
+    // where it outnumbers the sealed cells around it; grey stays paving.
+    let unsure: Vec<bool> = (0..n)
+        .map(|c| {
+            let i = inp.i_gnd(c);
+            inp.n_gnd[c] >= need.few
+                && inp.has_photo(c)
+                && (i_lo..i_hi).contains(&i)
+                && !green[c]
+                && earthy(inp.rgb(c))
+        })
+        .collect();
     drop(green);
+    // The planted share in fortieths, kept for the open ground below.
+    let mut planted_share = vec![0u8; n];
     box_share(&planted, w, h, 2, |c, share| {
+        planted_share[c] = (share * 40.0).round() as u8;
         if inp.n_all[c] > 0 {
             cls[c] = if share >= 0.5 { LAWN } else { PAVED };
         }
     });
+    box_share(&unsure, w, h, 2, |c, share| {
+        let sealed = 1.0 - f32::from(planted_share[c]) / 40.0 - share;
+        if cls[c] == PAVED && share > sealed {
+            cls[c] = BARE;
+        }
+    });
+    drop(unsure);
+    drop(planted_share);
     // Where paving reads brighter than lawn, bare ground and trodden meadow
     // read as bright: paving is kept only within reach of a building, where
     // yards and drives are, and open ground farther out stays lawn. Streets
@@ -422,6 +459,9 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
             }
         });
     }
+
+    // Cells with ground returns: what a shed or a pool stands among.
+    let ground_hit: Vec<bool> = inp.n_gnd.iter().map(|&v| v >= need.few).collect();
 
     // Pools: clearly blue in the photo, and water swallows the laser, so a pool
     // also has far fewer returns than the ground around it. A blue car has neither.
@@ -448,6 +488,9 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
         drop(blue);
         if k > 0 {
             let sh = shapes(&lab, k, w);
+            // A pool stands in a garden the laser reached: blue on open water, or
+            // where a laser tile is missing, has no ground around it.
+            let grounded = ring_planted_share(&lab, k, w, h, &ground_hit);
             let mut wet = vec![0.0f64; k as usize + 1];
             for c in 0..n {
                 if lab[c] != 0 && f32::from(inp.n_all[c]) <= dry_from {
@@ -456,7 +499,11 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
             }
             for c in 0..n {
                 let l = lab[c] as usize;
-                if l != 0 && (6.0..=120.0).contains(&sh[l].area) && wet[l] >= 0.4 * sh[l].area {
+                if l != 0
+                    && (6.0..=120.0).contains(&sh[l].area)
+                    && wet[l] >= 0.4 * sh[l].area
+                    && grounded[l] >= MIN_GROUND_AROUND
+                {
                     cls[c] = POOL;
                 }
             }
@@ -503,9 +550,16 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
         let mut shed = vec![false; n];
         if k > 0 {
             let sh = shapes(&lab, k, w);
+            // A shed stands on ground: a boat, a weir or a pontoon has water
+            // around it, which returns the laser nothing.
+            let grounded = ring_planted_share(&lab, k, w, h, &ground_hit);
             for c in 0..n {
                 let l = lab[c] as usize;
-                if l != 0 && (5.0..=70.0).contains(&sh[l].area) && sh[l].width >= 1.8 {
+                if l != 0
+                    && (5.0..=70.0).contains(&sh[l].area)
+                    && sh[l].width >= 1.8
+                    && grounded[l] >= MIN_GROUND_AROUND
+                {
                     shed[c] = true;
                     cls[c] = SHED;
                     hdm[c] = if building[c] {
@@ -518,6 +572,7 @@ pub fn classify(inp: &Inputs, (i_lo, i_hi): (f32, f32)) -> Vec<Out> {
         }
         shed
     };
+    drop(ground_hit);
 
     // Low vegetation: long thin components are hedges, the rest bushes, and the
     // knee-high ones beds of flowers and perennials.
@@ -853,6 +908,75 @@ mod tests {
         }
         let out = classify(&inp, (1450.0, 1600.0));
         assert_eq!(out[9 * w + 9].class, POOL);
+    }
+
+    #[test]
+    fn earth_between_the_bands_is_open_ground_and_grey_paving() {
+        let (w, h) = (30, 20);
+        let mut inp = blank(w, h);
+        // Neither band's intensity, not green: a building site's earth on the
+        // left, light grey paving on the right.
+        for z in 0..h {
+            for x in 0..w {
+                let c = z * w + x;
+                inp.i_gnd_q[c] = 1520;
+                inp.photo[c] = if x < 15 {
+                    photo(0, 0, 175, -4, [190, 175, 157])
+                } else {
+                    photo(-4, 0, 170, -2, [172, 170, 168])
+                };
+            }
+        }
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert_eq!(out[10 * w + 5].class, BARE);
+        assert_eq!(out[10 * w + 25].class, PAVED);
+        // Red brick paving is no earth.
+        inp.photo.fill(photo(-6, 0, 120, -8, [160, 95, 80]));
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert_eq!(out[10 * w + 5].class, PAVED);
+    }
+
+    #[test]
+    fn blue_on_open_water_is_no_pool_and_a_boat_no_shed() {
+        let (w, h) = (24, 24);
+        let mut inp = blank(w, h);
+        // Water all round, or a tile the laser is missing: no returns at all.
+        for c in 0..w * h {
+            inp.n_all[c] = 0;
+            inp.n_gnd[c] = 0;
+            inp.photo[c] = photo(-10, 0, 60, 0, [55, 60, 65]);
+        }
+        // A blue tarp or a dinghy, pool-sized.
+        for z in 14..18 {
+            for x in 14..18 {
+                inp.photo[z * w + x] = photo(-10, 0, 120, 14, [60, 110, 170]);
+            }
+        }
+        // A boat: a hull 3 m over the water, 6 x 3 blocks.
+        for z in 4..7 {
+            for x in 4..10 {
+                let c = z * w + x;
+                inp.n_all[c] = 12;
+                inp.n_bld[c] = 6;
+                inp.h_bld_q[c] = 15;
+                inp.photo[c] = photo(-6, 0, 200, -4, [220, 220, 215]);
+            }
+        }
+        let out = classify(&inp, (1450.0, 1600.0));
+        assert!(out.iter().all(|o| o.class != POOL), "no pool on the sea");
+        assert!(out.iter().all(|o| o.class != SHED), "no shed on the sea");
+        // The same shed in a garden stands.
+        let mut garden = blank(w, h);
+        for z in 4..7 {
+            for x in 4..10 {
+                let c = z * w + x;
+                garden.n_bld[c] = 6;
+                garden.h_bld_q[c] = 15;
+                garden.photo[c] = photo(-6, 0, 150, -4, [150, 140, 130]);
+            }
+        }
+        let out = classify(&garden, (1450.0, 1600.0));
+        assert_eq!(out[5 * w + 6].class, SHED);
     }
 
     #[test]

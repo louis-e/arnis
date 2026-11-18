@@ -198,6 +198,7 @@ pub fn generate_barriers(
             if hedge {
                 editor.register_hedge(bx, bz);
             }
+            editor.register_barrier(bx, bz);
             for y in (lift + 1)..=(lift + wall_height) {
                 if joined {
                     place_connected(editor, material, bx, base + y, bz);
@@ -1342,6 +1343,9 @@ mod tests {
     fn hedges_mark_their_columns_so_plant_cleanups_spare_them() {
         assert!(draw(&[("barrier", "hedge")], |editor| editor.is_hedge(15, 5)));
         assert!(!draw(&[("barrier", "wall")], |editor| editor.is_hedge(15, 5)));
+        // Every mapped barrier marks its columns, hedge or not.
+        assert!(draw(&[("barrier", "wall")], |editor| editor.is_barrier(15, 5)));
+        assert!(draw(&[("barrier", "hedge")], |editor| editor.is_barrier(15, 5)));
     }
 
     #[test]

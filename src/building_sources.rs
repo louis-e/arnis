@@ -68,10 +68,21 @@ pub fn merge(
         println!("  No additional buildings from Overture Maps for this area");
     }
 
+    // Mapped water and the land cover's: no shed or pool of the laser's stands there.
+    let mapped_water =
+        crate::floodfill_cache::collect_tree_keep_clear(parsed_elements, xzbbox, None, 0);
+    let water = |x: i32, z: i32| {
+        mapped_water.as_ref().is_some_and(|m| m.contains(x, z))
+            || ground.cover_class(crate::coordinate_system::cartesian::XZPoint::new(
+                x - xzbbox.min_x(),
+                z - xzbbox.min_z(),
+            )) == crate::land_cover::LC_WATER
+    };
     let (measured, on_paved) = crate::survey::elements::merge(
         crate::survey::elements::candidates(ground, xzbbox),
         parsed_elements,
         scale,
+        &water,
     );
     if !measured.is_empty() {
         println!(

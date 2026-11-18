@@ -129,10 +129,10 @@ impl SurveyData {
     }
 
     /// Cells of each class, for the log line.
-    fn counts(&self) -> [usize; 11] {
-        let mut n = [0usize; 11];
+    fn counts(&self) -> [usize; 12] {
+        let mut n = [0usize; 12];
         for c in &self.cells {
-            n[(c[0] as usize).min(10)] += 1;
+            n[(c[0] as usize).min(11)] += 1;
         }
         n
     }
@@ -608,8 +608,8 @@ pub fn fetch_survey_data(
     };
     let n = data.counts();
     println!(
-        "Laser data: {} lawn, {} paving, {} hedge, {} bush, {} bed, {} shed, {} pool, {} fence, {} tree blocks",
-        n[1], n[2], n[3], n[4], n[9], n[6], n[7], n[10], n[5]
+        "Laser data: {} lawn, {} paving, {} open ground, {} hedge, {} bush, {} bed, {} shed, {} pool, {} fence, {} tree blocks",
+        n[1], n[2], n[11], n[3], n[4], n[9], n[6], n[7], n[10], n[5]
     );
     Some(data)
 }
