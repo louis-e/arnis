@@ -906,6 +906,7 @@ impl Ground {
         &mut self,
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
+        scale: f64,
         channel_width_cap: Option<i32>,
     ) {
         use crate::land_cover::osm_water_override::{apply_osm_water_override, mark_inland_water};
@@ -920,6 +921,7 @@ impl Ground {
             return;
         };
         let channels = crate::element_processing::waterways::ChannelShape {
+            scale,
             width_cap: channel_width_cap,
             roads_at_grade: roads_at_grade.as_ref(),
         };
@@ -953,6 +955,7 @@ impl Ground {
             return;
         };
         let channels = crate::element_processing::waterways::ChannelShape {
+            scale,
             width_cap: channel_width_cap,
             roads_at_grade: self.roads_at_grade.as_ref(),
         };

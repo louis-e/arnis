@@ -512,6 +512,7 @@ fn process_element(
                         editor,
                         way,
                         waterways::ChannelShape {
+                            scale: args.scale,
                             width_cap: args.water.water_detail.channel_width_cap(args.scale),
                             roads_at_grade: big_water_field.roads_at_grade(),
                         },
@@ -1294,6 +1295,7 @@ pub fn generate_world_with_options(
         &clip_bbox,
         args.scale,
         waterways::ChannelShape {
+            scale: args.scale,
             width_cap: args.water.water_detail.channel_width_cap(args.scale),
             roads_at_grade: big_water_field.roads_at_grade(),
         },
