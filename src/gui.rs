@@ -410,6 +410,7 @@ struct LiveStartOptions {
     garden_detail_enabled: bool,
     measured_trees_enabled: bool,
     measured_heights_enabled: bool,
+    measured_roofs_enabled: bool,
     lidar_max_mb: u32,
     overture_enabled: bool,
     use_3d_enabled: bool,
@@ -504,6 +505,7 @@ fn gui_live_start(options: LiveStartOptions) -> Result<(), String> {
     args.garden_detail = options.garden_detail_enabled;
     args.measured_trees = options.measured_trees_enabled;
     args.measured_heights = options.measured_heights_enabled;
+    args.measured_roofs = options.measured_roofs_enabled;
     args.lidar_max_mb = options.lidar_max_mb;
     args.overture = options.overture_enabled;
     args.use_3d = options.use_3d_enabled;
@@ -2457,6 +2459,7 @@ fn gui_data_plan(
     garden_detail_enabled: bool,
     measured_trees_enabled: bool,
     measured_heights_enabled: bool,
+    measured_roofs_enabled: bool,
     lidar_max_mb: u32,
     overture_enabled: bool,
     aws_only_elevation: bool,
@@ -2477,6 +2480,7 @@ fn gui_data_plan(
     args.garden_detail = garden_detail_enabled;
     args.measured_trees = measured_trees_enabled;
     args.measured_heights = measured_heights_enabled;
+    args.measured_roofs = measured_roofs_enabled;
     args.lidar_max_mb = lidar_max_mb;
     args.overture = overture_enabled;
     args.aws_only_elevation = aws_only_elevation;
@@ -2757,6 +2761,7 @@ fn gui_start_generation(
     garden_detail_enabled: bool,
     measured_trees_enabled: bool,
     measured_heights_enabled: bool,
+    measured_roofs_enabled: bool,
     lidar_max_mb: u32,
     overture_enabled: bool,
     use_3d_enabled: bool,
@@ -3148,6 +3153,7 @@ fn gui_start_generation(
                 garden_detail: garden_detail_enabled,
                 measured_trees: measured_trees_enabled,
                 measured_heights: measured_heights_enabled,
+                measured_roofs: measured_roofs_enabled,
                 lidar_max_mb,
                 overture: overture_enabled,
                 // Auto picks whichever transport is cheaper for the area. The

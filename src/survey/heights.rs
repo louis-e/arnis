@@ -351,6 +351,7 @@ mod tests {
             garden: false,
             trees: false,
             heights: true,
+            roofs: false,
         };
         let mut ground = Ground::new_flat(0);
         ground.set_world_dims(w, h);
@@ -397,6 +398,7 @@ mod tests {
             garden: false,
             trees: false,
             heights: true,
+            roofs: false,
         };
         let mut ground = Ground::new_flat(0);
         ground.set_world_dims(w, h);

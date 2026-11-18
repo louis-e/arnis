@@ -1602,6 +1602,7 @@ function initSettings() {
         gardenDetailEnabled: liveLaser("garden-detail-toggle"),
         measuredTreesEnabled: liveLaser("measured-trees-toggle"),
         measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+        measuredRoofsEnabled: liveLaser("measured-roofs-toggle"),
         lidarMaxMb: lidarLimitMb(),
         overtureEnabled: document.getElementById("overture-toggle").checked,
         awsOnlyElevation: document.getElementById("aws-only-elevation-toggle").checked,
@@ -3851,7 +3852,7 @@ function setSettingsRowAvailable(inputId, available, reason = null) {
 // Laser data is Earth-only, never used for One World, and needs a World Scale of 0.75 or more
 // (mirrors LASER_MIN_SCALE in src/args.rs). Its features and limit sit in the same block and show
 // only while the master switch is on, as the Live rows under One World do.
-const LASER_ROWS = ['garden-detail-row', 'measured-trees-row', 'measured-heights-row', 'lidar-limit-row'];
+const LASER_ROWS = ['garden-detail-row', 'measured-trees-row', 'measured-heights-row', 'measured-roofs-row', 'lidar-limit-row'];
 const LASER_MIN_SCALE = 0.75;
 function refreshLidarRows() {
   const master = document.getElementById('lidar-toggle');
@@ -3870,7 +3871,7 @@ function refreshLidarRows() {
     const row = document.getElementById(id);
     if (row) row.style.display = open ? '' : 'none';
   });
-  ['garden-detail-toggle', 'measured-trees-toggle', 'measured-heights-toggle'].forEach((id) => {
+  ['garden-detail-toggle', 'measured-trees-toggle', 'measured-heights-toggle', 'measured-roofs-toggle'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.disabled = !open;
   });
@@ -4647,6 +4648,7 @@ async function startLive() {
     gardenDetailEnabled: settings.gardenDetailEnabled,
     measuredTreesEnabled: settings.measuredTreesEnabled,
     measuredHeightsEnabled: settings.measuredHeightsEnabled,
+    measuredRoofsEnabled: settings.measuredRoofsEnabled,
     lidarMaxMb: settings.lidarMaxMb,
     overtureEnabled: settings.overtureEnabled,
     use3dEnabled: settings.use3dEnabled,
@@ -4890,6 +4892,7 @@ function readGenerationSettings(oneWorld) {
     gardenDetailEnabled: liveLaser("garden-detail-toggle"),
     measuredTreesEnabled: liveLaser("measured-trees-toggle"),
     measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+    measuredRoofsEnabled: liveLaser("measured-roofs-toggle"),
     lidarMaxMb: lidarLimitMb(),
     overtureEnabled: checked("overture-toggle"),
     use3dEnabled: checked("use-3d-toggle"),

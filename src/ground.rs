@@ -847,6 +847,11 @@ impl Ground {
         self.survey.as_ref().is_some_and(|s| s.features.heights)
     }
 
+    /// Whether the run wants the roof shapes the laser saw.
+    pub fn laser_roofs_wanted(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.roofs)
+    }
+
     /// Whether the laser's trees replace the canopy map (see [`Self::apply_measured_canopy`]).
     pub fn laser_trees_wanted(&self) -> bool {
         self.survey.as_ref().is_some_and(|s| s.features.trees)
@@ -2218,6 +2223,7 @@ mod tests {
             garden: false,
             trees: true,
             heights: false,
+            roofs: false,
         };
         let mut ground = Ground::new_flat(0);
         ground.set_world_dims(w, h);

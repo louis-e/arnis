@@ -16,7 +16,8 @@ use colored::Colorize;
 ///    beats Overture's estimate);
 /// 2. Overture's heights for the buildings still without;
 /// 3. Overture's own buildings where OSM has none;
-/// 4. the sheds, garages and pools garden detail measured where nothing mapped
+/// 4. the roof shapes the laser saw, for outlines of either without one;
+/// 5. the sheds, garages and pools garden detail measured where nothing mapped
 ///    stands.
 ///
 /// `overture_wanted` says whether the run asked Overture for buildings, for the
@@ -66,6 +67,15 @@ pub fn merge(
         );
     } else if overture_wanted && enriched == 0 {
         println!("  No additional buildings from Overture Maps for this area");
+    }
+
+    // Overture's footprints too: any outline the laser saw a roof over.
+    let measured_roofs = crate::survey::roofs::apply(parsed_elements, ground, xzbbox, scale);
+    if measured_roofs > 0 {
+        println!(
+            "  Measured roof shapes for {} buildings from laser scans",
+            measured_roofs.to_string().bright_white().bold()
+        );
     }
 
     // Mapped water and the land cover's: no shed or pool of the laser's stands there.
@@ -155,6 +165,7 @@ mod tests {
             garden: true,
             trees: false,
             heights: true,
+            roofs: false,
         };
         let mut ground = Ground::new_flat(0);
         ground.set_world_dims(w, h);

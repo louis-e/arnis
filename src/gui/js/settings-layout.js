@@ -181,6 +181,7 @@ const SEARCH_WORDS = {
   'garden-detail-toggle': 'lidar laser hedges lawn yard backyard pool shed fence',
   'measured-trees-toggle': 'lidar laser canopy tree height',
   'measured-heights-toggle': 'lidar laser building height roof flat',
+  'measured-roofs-toggle': 'lidar laser roof shape gabled hipped ridge',
   'lidar-limit-group': 'download size megabytes data',
   'winter-toggle': 'snow ice christmas',
   'voxy-lod-toggle': 'render distance far view',
