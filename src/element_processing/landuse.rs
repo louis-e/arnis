@@ -208,6 +208,7 @@ fn landuse_area(
     let woods_by_cell = crate::element_processing::natural::woods_by_cell(args);
     // Commercial land and the like are marked from the element list (`garden_areas`).
     let wild = matches!(landuse_tag.as_str(), "forest" | "meadow");
+    let mown = mows(landuse_tag, floor_area.len(), args.scale);
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
             continue;
@@ -285,8 +286,7 @@ fn landuse_area(
         } else if !is_protected {
             editor.set_block(actual_block, x, 0, z, None, None);
         }
-        // Not `landuse=grass`, which is also mapped on rural meadows.
-        if matches!(landuse_tag.as_str(), "village_green" | "recreation_ground")
+        if mown
             && !editor.surface_is_sealed(x, z)
             && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
             && crate::land_cover::mown_cover(editor.land_cover_class(x, z))
@@ -663,6 +663,21 @@ pub fn generate_place(
     }
 }
 
+/// Largest recreation ground mown as a lawn, in m²: a sports field or a park lawn. A larger
+/// one, an airfield's meadow or a common, keeps its tall grass.
+const MOWN_RECREATION_M2: f64 = 50_000.0;
+
+/// Whether a landuse area of `cells` blocks is mown: a village green, or a recreation
+/// ground up to `MOWN_RECREATION_M2`. Not `landuse=grass`, which is also mapped on rural
+/// meadows.
+fn mows(landuse: &str, cells: usize, scale: f64) -> bool {
+    match landuse {
+        "village_green" => true,
+        "recreation_ground" => (cells as f64) <= MOWN_RECREATION_M2 * scale * scale,
+        _ => false,
+    }
+}
+
 /// Calls `span(x0, x1, z)` for the filled row spans inside `bbox` of every closed way and
 /// multipolygon whose tags `pick` takes, holes left out. `pick` is told whether it is
 /// looking at a relation.
@@ -969,6 +984,20 @@ mod garden_areas_tests {
         assert!(!streets.contains(70, 10), "an underground car park");
         assert!(!streets.contains(160, 10), "a footway's ring is a line");
         assert!(!streets.contains(10, 60), "a lawn");
+    }
+
+    /// Greens and small recreation grounds are mown, a recreation ground of more than 5 ha
+    /// keeps its tall grass, at any scale, and plain grass is never a lawn.
+    #[test]
+    fn only_greens_and_small_recreation_grounds_are_mown() {
+        assert!(mows("village_green", 400_000, 1.0));
+        assert!(mows("recreation_ground", 30_000, 1.0));
+        assert!(!mows("recreation_ground", 60_000, 1.0));
+        assert!(mows("recreation_ground", 12_000, 0.5));
+        assert!(!mows("recreation_ground", 15_000, 0.5));
+        assert!(mows("recreation_ground", 150_000, 2.0));
+        assert!(!mows("recreation_ground", 250_000, 2.0));
+        assert!(!mows("grass", 100, 1.0));
     }
 }
 
