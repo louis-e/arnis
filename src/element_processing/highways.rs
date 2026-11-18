@@ -1985,18 +1985,25 @@ fn generate_highways_internal(
                 wall_footprints.as_deref().unwrap_or(building_footprints);
             // How far its kerb reaches either side, parked cars widening their own side only.
             let sides = road_width::kerb_sides(highway_type, &way.tags, scale_factor);
+            // Whether a cell beside the core stops the road is the cell's own, and the lines
+            // out from every stamp within reach of it ask: the first one's answer is kept for
+            // the rest.
+            let cut_memo = std::cell::RefCell::new(CutMemo::default());
             let cut_here = |editor: &WorldEditor, dx: i32, dz: i32, x: i32, z: i32| {
                 kept_by_walls.is_some_and(|core| {
                     cut_outward(core, dx, dz, |cx, cz| {
-                        cut_beside(
-                            |sx, sz| near_centreline(way, core, sx, sz),
-                            walls,
-                            Some(editor),
-                            |px, pz| editor.on_mapped_path(px, pz),
-                            verges,
-                            x - dx + cx,
-                            z - dz + cz,
-                        )
+                        let (ax, az) = (x - dx + cx, z - dz + cz);
+                        cut_memo.borrow_mut().get_or(ax, az, || {
+                            cut_beside(
+                                |sx, sz| near_centreline(way, core, sx, sz),
+                                walls,
+                                Some(editor),
+                                |px, pz| editor.on_mapped_path(px, pz),
+                                verges,
+                                ax,
+                                az,
+                            )
+                        })
                     })
                 })
             };
@@ -4036,6 +4043,40 @@ pub(crate) fn cut_beside(
                     e.keeps_a_pit(x, z, paved)
                 }
         })
+}
+
+/// What `cut_beside` answered for the cells of one way lately: a small cache with a slot per
+/// cell of a square `SIDE` across, laid over the world like tiles, so the cells round the
+/// stamp being laid never share one. A cell it lost is only worked out again.
+struct CellMemo<T> {
+    slots: Vec<(i32, i32, T)>,
+}
+
+impl<T> Default for CellMemo<T> {
+    fn default() -> Self {
+        Self { slots: Vec::new() }
+    }
+}
+
+type CutMemo = CellMemo<bool>;
+
+impl<T: Copy + Default> CellMemo<T> {
+    /// Wider than most roads' stamps and the stall lines beside them.
+    const SIDE: i32 = 32;
+
+    /// The answer for (x, z), from `find` where none is kept.
+    fn get_or(&mut self, x: i32, z: i32, find: impl FnOnce() -> T) -> T {
+        if self.slots.is_empty() {
+            self.slots =
+                vec![(i32::MIN, i32::MIN, T::default()); (Self::SIDE * Self::SIDE) as usize];
+        }
+        let at = z.rem_euclid(Self::SIDE) * Self::SIDE + x.rem_euclid(Self::SIDE);
+        let slot = &mut self.slots[at as usize];
+        if (slot.0, slot.1) != (x, z) {
+            *slot = (x, z, find());
+        }
+        slot.2
+    }
 }
 
 /// The cell one step nearer the centreline cell on the line out to `(dx, dz)`.
