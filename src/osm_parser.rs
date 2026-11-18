@@ -1229,10 +1229,13 @@ pub fn parse_osm_data(
         if closed && crate::element_processing::parking_lots::is_surface_lot(&tags) {
             lot_ways.insert(element.id, nodes.clone());
         }
-        // A field's plots come from the way as mapped, not the part the area kept, so every
-        // piece of a One World agrees on them.
+        // A field's plots and a 3D model's place come from the way as mapped, not the part
+        // the area kept, so every piece of a One World agrees on them.
         let field_frame = (closed && crate::element_processing::field_texture::is_field(&tags))
             .then(|| crate::element_processing::field_texture::frame_tag(&nodes))
+            .flatten();
+        let model_footprint = crate::models_3d::may_replace(&tags)
+            .then(|| crate::models_3d::footprint_tag(nodes.iter()))
             .flatten();
         if tags.get("service").map(String::as_str) == Some("parking_aisle")
             && tags.contains_key("highway")
@@ -1279,6 +1282,7 @@ pub fn parse_osm_data(
             nodes: clipped_nodes,
         };
         processed.tags.extend(field_frame);
+        processed.tags.extend(model_footprint);
 
         processed_elements.push(ProcessedElement::Way(processed));
     }
@@ -1366,10 +1370,17 @@ pub fn parse_osm_data(
                     &members,
                     &ways_map,
                 ));
+                let mut tags = tags.clone();
+                if crate::models_3d::may_replace(&tags) {
+                    let whole = whole_area_rings(element.id, &element.members, &roles, &ways_map);
+                    tags.extend(crate::models_3d::footprint_tag(
+                        whole.iter().flat_map(|m| m.way.nodes.iter()),
+                    ));
+                }
                 processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                     id: element.id,
                     members,
-                    tags: tags.clone(),
+                    tags,
                 }));
             }
             continue;
@@ -1434,10 +1445,21 @@ pub fn parse_osm_data(
                 &members,
                 &ways_map,
             ));
+            let mut tags = tags.clone();
+            if crate::models_3d::may_replace(&tags) {
+                let whole = element
+                    .members
+                    .iter()
+                    .zip(&roles)
+                    .filter(|(m, role)| m.r#type == "way" && role.is_some())
+                    .filter_map(|(m, _)| ways_map.get(&m.r#ref))
+                    .flat_map(|w| w.nodes.iter());
+                tags.extend(crate::models_3d::footprint_tag(whole));
+            }
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
-                tags: tags.clone(),
+                tags,
             }));
         }
     }
@@ -3021,6 +3043,37 @@ fn assemble_area_rings(
     assembled
 }
 
+/// The rings `assemble_area_rings` joins, as mapped: nothing clipped and none left out.
+fn whole_area_rings(
+    relation_id: u64,
+    members: &[OsmMember],
+    roles: &[Option<ProcessedMemberRole>],
+    ways_map: &HashMap<u64, Arc<ProcessedWay>>,
+) -> Vec<ProcessedMember> {
+    let (x0, z0, x1, z1) = members
+        .iter()
+        .zip(roles)
+        .filter(|(_, role)| role.is_some())
+        .filter_map(|(m, _)| ways_map.get(&m.r#ref))
+        .flat_map(|w| w.nodes.iter())
+        .fold(
+            (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
+            |(a, b, c, d), n| (a.min(n.x), b.min(n.z), c.max(n.x), d.max(n.z)),
+        );
+    match XZBBox::rect_from_min_max(x0, z0, x1, z1) {
+        Ok(bounds) => assemble_area_rings(
+            relation_id,
+            members,
+            roles,
+            ways_map,
+            &bounds,
+            |_| true,
+            false,
+        ),
+        Err(_) => Vec::new(),
+    }
+}
+
 const PRIORITY_ORDER: [&str; 6] = [
     "entrance", "building", "highway", "waterway", "water", "barrier",
 ];
@@ -4448,15 +4501,21 @@ mod osm_xml_tests {
         );
     }
 
-    // Across x = 0: a tilted field 900 m long, and two fields mapped as multipolygons, one
-    // ring closed and one in two ways.
+    // Across x = 0: a tilted field 900 m long, a Parthenon 280 m long, two fields mapped as
+    // multipolygons, one ring closed and one in two ways, and an Acropolis mapped as one.
     const ACROSS_THE_SEAM: &str = r#"<osm version="0.6">
   <node id="1" lat="47.9975" lon="10.9940"/>
   <node id="2" lat="47.9990" lon="11.0060"/>
   <node id="3" lat="48.0025" lon="11.0058"/>
   <node id="4" lat="48.0010" lon="10.9938"/>
+  <node id="5" lat="47.9995" lon="10.9970"/>
+  <node id="6" lat="47.9995" lon="11.0008"/>
+  <node id="7" lat="48.0003" lon="11.0008"/>
+  <node id="8" lat="48.0003" lon="10.9970"/>
   <way id="40"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>
     <tag k="landuse" v="farmland"/></way>
+  <way id="41"><nd ref="5"/><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="5"/>
+    <tag k="building" v="yes"/><tag k="wikidata" v="Q10288"/></way>
   <node id="11" lat="48.0030" lon="10.9950"/>
   <node id="12" lat="48.0030" lon="11.0050"/>
   <node id="13" lat="48.0045" lon="11.0052"/>
@@ -4477,10 +4536,20 @@ mod osm_xml_tests {
     <member type="way" ref="44" role="outer"/>
     <tag k="type" v="multipolygon"/><tag k="landuse" v="farmland"/>
   </relation>
+  <node id="31" lat="48.0012" lon="10.9960"/>
+  <node id="32" lat="48.0012" lon="11.0005"/>
+  <node id="33" lat="48.0018" lon="11.0005"/>
+  <node id="34" lat="48.0018" lon="10.9960"/>
+  <way id="45"><nd ref="31"/><nd ref="32"/><nd ref="33"/><nd ref="34"/><nd ref="31"/></way>
+  <relation id="52">
+    <member type="way" ref="45" role="outer"/>
+    <tag k="type" v="multipolygon"/><tag k="historic" v="castle"/>
+    <tag k="wikidata" v="Q131013"/>
+  </relation>
 </osm>"#;
 
     #[test]
-    fn two_one_world_areas_lay_out_a_field_alike() {
+    fn two_one_world_areas_lay_out_a_field_and_place_a_model_alike() {
         use crate::element_processing::field_texture::{FieldLayout, FieldPreset, FRAME_TAG};
         let spec = crate::projection::ProjectionSpec {
             kind: crate::projection::ProjectionKind::WebMercator,
@@ -4517,6 +4586,12 @@ mod osm_xml_tests {
             }
         }
 
+        let (a, b) = (way(&west, 41), way(&east, 41));
+        assert_ne!(a.nodes, b.nodes, "the east area cuts the building");
+        let whole = crate::models_3d::whole_footprint(&a.tags);
+        assert!(whole.is_some());
+        assert_eq!(whole, crate::models_3d::whole_footprint(&b.tags));
+
         let relation = |elements: &[ProcessedElement], id: u64| {
             elements
                 .iter()
@@ -4535,6 +4610,11 @@ mod osm_xml_tests {
             assert!(frame(&west).is_some(), "{id}");
             assert_eq!(frame(&west), frame(&east), "{id}");
         }
+        let (a, b) = (relation(&west, 52), relation(&east, 52));
+        assert_ne!(a.members[0].way.nodes, b.members[0].way.nodes);
+        let whole = crate::models_3d::whole_footprint(&a.tags);
+        assert!(whole.is_some());
+        assert_eq!(whole, crate::models_3d::whole_footprint(&b.tags));
     }
 
     #[test]
