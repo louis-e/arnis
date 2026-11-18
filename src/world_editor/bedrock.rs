@@ -546,11 +546,11 @@ impl BedrockWriter {
         let staging = self.stage_world(world, xzbbox, llbbox)?;
 
         emit_gui_progress_update(98.0, "Saving Bedrock world...");
-        self.package_mcworld(&staging.dir)?;
+        let archive = self.package_mcworld(&staging.dir)?;
 
         emit_gui_progress_update(99.0, "Saving Bedrock world...");
         drop(staging);
-        Ok(self.mcworld_path.clone())
+        Ok(archive)
     }
 
     /// Assembles the world in the private staging folder, or beside the archive if that fails
@@ -1293,42 +1293,18 @@ impl BedrockWriter {
     }
 
     /// Packages the staging folder beside the archive and renames it into place, so a
-    /// failure leaves the previous archive of the same name as it was.
-    fn package_mcworld(&mut self, dir: &Path) -> Result<(), BedrockSaveError> {
+    /// failure leaves the previous archive of the same name as it was. Returns where it went.
+    fn package_mcworld(&self, dir: &Path) -> Result<PathBuf, BedrockSaveError> {
         let mut part = self.mcworld_path.clone().into_os_string();
         part.push(".part");
         let part = PathBuf::from(part);
         let result = self
             .write_mcworld_archive(dir, &part)
-            .and_then(|()| self.place_archive(&part));
+            .and_then(|()| place_archive(&part, &self.mcworld_path));
         if result.is_err() {
             let _ = fs::remove_file(&part);
         }
         result
-    }
-
-    /// Renames the finished archive over an earlier one of the same name. One that cannot be
-    /// replaced, being open elsewhere or read-only on Windows, is kept, and the world takes
-    /// the first free "<name> (n).mcworld" instead.
-    fn place_archive(&mut self, part: &Path) -> Result<(), BedrockSaveError> {
-        let Err(e) = retry_transient(|| fs::rename(part, &self.mcworld_path)) else {
-            return Ok(());
-        };
-        // With nothing in the way the folder itself is the trouble, and another name won't help.
-        if fs::symlink_metadata(&self.mcworld_path).is_err() {
-            return Err(e.into());
-        }
-        let Some(free) = free_numbered_path(&self.mcworld_path) else {
-            return Err(e.into());
-        };
-        retry_transient(|| fs::rename(part, &free)).map_err(|_| e)?;
-        eprintln!(
-            "Warning: '{}' could not be replaced, so the world was saved as '{}'.",
-            self.mcworld_path.display(),
-            free.display()
-        );
-        self.mcworld_path = free;
-        Ok(())
     }
 
     fn write_mcworld_archive(&self, dir: &Path, archive: &Path) -> Result<(), BedrockSaveError> {
@@ -1438,12 +1414,79 @@ impl BedrockWriter {
     }
 }
 
-/// The first free "<name> (n).mcworld" beside `archive`, from 2.
-fn free_numbered_path(archive: &Path) -> Option<PathBuf> {
-    let stem = archive.file_stem()?.to_str()?;
-    (2..1000)
-        .map(|n| archive.with_file_name(format!("{stem} ({n}).mcworld")))
-        .find(|path| fs::symlink_metadata(path).is_err())
+/// Renames the finished archive `part` to `archive`, replacing an earlier one. When that one
+/// is what stops it, it is kept and the world goes to the first free "<name> (n).mcworld";
+/// any other failure, such as `part` itself being held, fails the save as before.
+fn place_archive(part: &Path, archive: &Path) -> Result<PathBuf, BedrockSaveError> {
+    // A lasting obstruction is not worth the retries.
+    if !archive_in_the_way(archive) {
+        match retry_transient(|| fs::rename(part, archive)) {
+            Ok(()) => return Ok(archive.to_path_buf()),
+            Err(e) if !archive_in_the_way(archive) => return Err(e.into()),
+            Err(_) => {}
+        }
+    }
+    Ok(move_to_free_name(part, archive)?)
+}
+
+/// Whether the earlier archive at `path` is what a rename over it fails on: a folder, or on
+/// Windows a read-only file or one another program holds without sharing its deletion.
+fn archive_in_the_way(path: &Path) -> bool {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => meta.is_dir() || held_or_read_only(path, &meta),
+        Err(_) => false,
+    }
+}
+
+#[cfg(windows)]
+fn held_or_read_only(path: &Path, meta: &fs::Metadata) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    const DELETE: u32 = 0x0001_0000;
+    // Shares everything itself, so it fails only on another handle that shares no deletion.
+    const SHARE_ALL: u32 = 0x1 | 0x2 | 0x4;
+    meta.permissions().readonly()
+        || fs::OpenOptions::new()
+            .access_mode(DELETE)
+            .share_mode(SHARE_ALL)
+            .open(path)
+            .is_err()
+}
+
+/// Elsewhere a rename replaces a held or read-only file.
+#[cfg(not(windows))]
+fn held_or_read_only(_path: &Path, _meta: &fs::Metadata) -> bool {
+    false
+}
+
+/// Moves `part` to the first "<name> (n).mcworld" beside `archive`, from 2. Each name is
+/// claimed by creating it first, so two runs never take the same one.
+fn move_to_free_name(part: &Path, archive: &Path) -> std::io::Result<PathBuf> {
+    let stem = archive.file_stem().unwrap_or(archive.as_os_str());
+    for n in 2..1000 {
+        let mut name = stem.to_os_string();
+        name.push(format!(" ({n}).mcworld"));
+        let free = archive.with_file_name(name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&free)
+        {
+            Ok(claim) => drop(claim),
+            Err(_) if fs::symlink_metadata(&free).is_ok() => continue,
+            Err(e) => return Err(e),
+        }
+        return match retry_transient(|| fs::rename(part, &free)) {
+            Ok(()) => Ok(free),
+            Err(e) => {
+                let _ = fs::remove_file(&free);
+                Err(e)
+            }
+        };
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no free archive name beside it",
+    ))
 }
 
 /// Appends the extension rather than replacing it, level names can contain dots.
@@ -2376,6 +2419,103 @@ mod tests {
         #[allow(clippy::permissions_set_readonly_false)]
         permissions.set_readonly(false);
         fs::set_permissions(&read_only, permissions).unwrap();
+    }
+
+    /// Only the earlier archive being in the way moves the world: a held new one fails as before.
+    #[cfg(windows)]
+    #[test]
+    fn a_held_new_archive_fails_the_save_and_moves_nothing() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("Arnis Test.mcworld");
+        let part = tmp.path().join("Arnis Test.mcworld.part");
+        fs::write(&archive, b"earlier").unwrap();
+        fs::write(&part, b"new").unwrap();
+        // Shared for reading and writing, not for deleting, as a scanner may hold it.
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(&part)
+            .unwrap();
+        assert!(place_archive(&part, &archive).is_err());
+        drop(handle);
+        assert_eq!(fs::read(&archive).unwrap(), b"earlier");
+        assert!(!tmp.path().join("Arnis Test (2).mcworld").exists());
+    }
+
+    #[test]
+    fn a_numbered_name_already_taken_is_never_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("Arnis Test.mcworld");
+        let part = tmp.path().join("Arnis Test.mcworld.part");
+        fs::create_dir(&archive).unwrap();
+        fs::write(&part, b"new").unwrap();
+        // Taken by another run after this one looked, or before.
+        let taken = tmp.path().join("Arnis Test (2).mcworld");
+        fs::write(&taken, b"other run").unwrap();
+        fs::create_dir(tmp.path().join("Arnis Test (3).mcworld")).unwrap();
+        let placed = place_archive(&part, &archive).unwrap();
+        assert_eq!(placed, tmp.path().join("Arnis Test (4).mcworld"));
+        assert_eq!(fs::read(&placed).unwrap(), b"new");
+        assert_eq!(fs::read(&taken).unwrap(), b"other run");
+        assert!(!part.exists());
+    }
+
+    #[test]
+    fn a_failed_move_to_a_new_name_leaves_no_claim_behind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("Arnis Test.mcworld");
+        fs::create_dir(&archive).unwrap();
+        // The new archive is gone, so both renames fail.
+        let part = tmp.path().join("Arnis Test.mcworld.part");
+        assert!(place_archive(&part, &archive).is_err());
+        let left: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left, vec![std::ffi::OsString::from("Arnis Test.mcworld")]);
+    }
+
+    #[test]
+    fn a_failed_package_removes_its_part_and_keeps_the_earlier_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let archive = tmp.path().join("Arnis Test.mcworld");
+        fs::write(&archive, b"earlier").unwrap();
+        let staging = tmp.path().join("staging");
+        // A folder where a file is read makes packaging fail after the part is created.
+        fs::create_dir_all(staging.join("levelname.txt")).unwrap();
+        assert!(test_writer(archive.clone())
+            .package_mcworld(&staging)
+            .is_err());
+        assert_eq!(fs::read(&archive).unwrap(), b"earlier");
+        let mut left: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["Arnis Test.mcworld", "staging"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_name_that_is_not_utf8_still_gets_a_numbered_one() {
+        use std::os::unix::ffi::OsStrExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let stem = std::ffi::OsStr::from_bytes(b"Arnis \xff");
+        let mut file = stem.to_os_string();
+        file.push(".mcworld");
+        let archive = tmp.path().join(&file);
+        fs::create_dir(&archive).unwrap();
+        let part = tmp.path().join("part");
+        fs::write(&part, b"new").unwrap();
+        let mut expected = stem.to_os_string();
+        expected.push(" (2).mcworld");
+        assert_eq!(
+            place_archive(&part, &archive).unwrap(),
+            tmp.path().join(expected)
+        );
     }
 
     #[test]
