@@ -71,6 +71,8 @@ rusty-leveldb = { git = "https://github.com/louis-e/leveldb-rs", rev = "6cd88082
 rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
 quick-xml = "0.41.0"
+laz = { version = "0.14.0", features = ["parallel"] }
+weezl = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.0", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_ProcessStatus", "Win32_System_Threading"] }

@@ -289,6 +289,7 @@ pub fn generate_ground_region(
     let tree_spacing = editor.tree_slot_spacing();
     let tree_pack = editor.tree_pack();
     let terrain_enabled = ground.elevation_enabled;
+    let has_survey = ground.has_survey();
     let garden_reach = GardenReach::at(args.scale);
 
     let total_blocks: u64 =
@@ -903,6 +904,47 @@ pub fn generate_ground_region(
                                 (GRASS_BLOCK, DIRT)
                             };
 
+                            // Garden detail takes only the columns no mapped feature
+                            // claimed: no surface placed, nothing sealed, no footprint;
+                            // and only in towns, gardens, parks and woods, where its
+                            // lawn and paving are what the laser tells apart.
+                            let survey_owned = if has_survey {
+                                ground.survey_cell(coord).filter(|_| {
+                                    (!has_land_cover
+                                        || crate::survey::place::claims_cover(cover_here))
+                                        && !steep_override
+                                        && talus_block.is_none()
+                                        && !blend_is_water
+                                        && !building_footprints.contains(x, z)
+                                        && !editor.surface_is_sealed(x, z)
+                                        && !editor.block_exists_absolute(x, ground_y, z)
+                                })
+                            } else {
+                                None
+                            };
+                            // On a track's bed the laser's open or paved ground is the
+                            // ballast, as under the rails themselves.
+                            let survey_ground = survey_owned.and_then(|c| {
+                                if matches!(
+                                    c.kind,
+                                    crate::survey::Kind::Paved | crate::survey::Kind::Bare
+                                ) && editor.on_rail_bed(x, z)
+                                {
+                                    return Some((GRAVEL, STONE));
+                                }
+                                crate::survey::place::ground_blocks(c, x, z, cover_here)
+                            });
+                            // Measured ground wins over a guessed garden: no garden's
+                            // plants or trees on it.
+                            let (surface_block, under_block) = match survey_ground {
+                                Some(blocks) => {
+                                    cropland_plot = None;
+                                    gardened = false;
+                                    blocks
+                                }
+                                None => (surface_block, under_block),
+                            };
+
                             // Banks keep their land cover. Beaches come from LC_BEACH
                             // and mapped sand, not from a sand ring around all water.
 
@@ -1152,9 +1194,45 @@ pub fn generate_ground_region(
                             } else {
                                 (false, false)
                             };
+                            // Measured hedges, bushes, beds and fences, before the trees.
+                            // A mapped hedge, fence or wall next to the column is the
+                            // same one, already drawn.
+                            if let Some(cell) = survey_owned {
+                                let linear = matches!(
+                                    cell.kind,
+                                    crate::survey::Kind::Hedge | crate::survey::Kind::Fence
+                                );
+                                let mapped_beside = linear
+                                    && (-1..=1).any(|dx| {
+                                        (-1..=1).any(|dz| editor.is_barrier(x + dx, z + dz))
+                                    });
+                                if !mapped_beside {
+                                    crate::survey::place::place_objects(
+                                        editor, cell, x, ground_y, z,
+                                    );
+                                }
+                            }
+                            // Over measured ground a canopy tree grows only where the
+                            // laser saw one, never on a lawn or a terrace it saw bare.
+                            let survey_allows_tree = survey_owned.is_none_or(|c| {
+                                c.kind == crate::survey::Kind::Tree
+                                    || (-1..=1).any(|dx| {
+                                        (-1..=1).any(|dz| {
+                                            ground
+                                                .survey_cell(XZPoint::new(
+                                                    coord.x + dx,
+                                                    coord.z + dz,
+                                                ))
+                                                .is_some_and(|n| {
+                                                    n.kind == crate::survey::Kind::Tree
+                                                })
+                                        })
+                                    })
+                            });
                             // Placed before the vegetation pass, whose own guard then sees
                             // the trunk and leaves the column alone.
                             if canopy_tree
+                                && survey_allows_tree
                                 && slope <= 4
                                 && ground_allows_trees
                                 && !tunnel_footprint.contains(x, z)
@@ -1168,7 +1246,15 @@ pub fn generate_ground_region(
                                     Some(bridge_surface),
                                 );
                             }
-                            if has_land_cover
+                            if survey_owned.is_some_and(|c| c.kind == crate::survey::Kind::Lawn)
+                                && ground_is_natural
+                                && !editor.block_exists_absolute(x, ground_y + 1, z)
+                                && crate::survey::place::lawn_tuft(x, z)
+                            {
+                                // A mown lawn: a tuft here and there, flowers from the decoration pass.
+                                editor.set_block_absolute(GRASS, x, ground_y + 1, z, None, None);
+                            } else if has_land_cover
+                                && survey_owned.is_none()
                                 && !sealed
                                 && !editor.block_exists_absolute(x, ground_y + 1, z)
                             {
@@ -2042,7 +2128,7 @@ fn salted_noise_with(x: i32, z: i32, scale: i32, salt: u32, hash: impl Fn(i32, i
 
 /// Built-up paving for `--surface-patches`: stone bricks with worn patches of
 /// cracked bricks, stone and cobblestone, in about the shares of the speckle.
-fn built_up_patch(x: i32, z: i32) -> (Block, Block) {
+pub(crate) fn built_up_patch(x: i32, z: i32) -> (Block, Block) {
     if ground_noise(x, z, 5, SALT_PAVING_WEAR) >= 0.28 {
         return (STONE_BRICKS, STONE);
     }

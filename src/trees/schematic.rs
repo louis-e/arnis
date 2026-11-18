@@ -431,6 +431,29 @@ pub fn low_wood_clear(
     })
 }
 
+/// Whether any block of the model, stamped at (`anchor_x`, `anchor_z`) turned by
+/// `rot` as [`place_schematic_tree`] stamps it, stands over a column `kept`
+/// holds. Its footprint is checked first, so a model nowhere near costs little.
+pub fn covers_any(
+    schem: &Schematic,
+    rot: u8,
+    anchor_x: i32,
+    anchor_z: i32,
+    kept: &crate::floodfill_cache::CoordinateBitmap,
+) -> bool {
+    let (fw, fl) = if rot & 1 == 0 {
+        (schem.width, schem.length)
+    } else {
+        (schem.length, schem.width)
+    };
+    let (x0, z0) = (anchor_x - (fw - 1) / 2, anchor_z - (fl - 1) / 2);
+    kept.any_in(x0, z0, x0 + fw - 1, z0 + fl - 1)
+        && schem.voxels.iter().any(|&(vx, _, vz, _)| {
+            let (rx, rz) = rotate_xz(i32::from(vx), i32::from(vz), schem.width, schem.length, rot);
+            kept.contains(x0 + rx, z0 + rz)
+        })
+}
+
 /// Max blocks above the schem floor for a log column to count as a ground-rooted trunk base.
 const ROOT_BASE_VY: i32 = 2;
 /// Safety bound on how far a real trunk root may reach down (only bites tile-seam deltas).

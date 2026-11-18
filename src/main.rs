@@ -10,6 +10,7 @@ mod block_definitions;
 mod block_palette;
 mod bresenham;
 mod building_facades;
+mod building_sources;
 mod canopy;
 mod caves;
 mod celestial;
@@ -70,6 +71,7 @@ mod retrieve_data;
 mod river_bed;
 mod scale;
 mod structures;
+mod survey;
 #[cfg(feature = "gui")]
 mod telemetry;
 mod terrain_surface;
@@ -1051,36 +1053,15 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         );
     bench.mark("parse_osm");
 
-    // Merge the Overture buildings now that the OSM elements are parsed.
-    let overture::OvertureData {
-        elements: overture_elements,
-        hints: overture_hints,
-        ..
-    } = overture_data;
-
-    // Fill height/levels on OSM buildings that have neither, before the
-    // footprints are merged (Overture's own ways carry their tags already).
-    let enriched = overture_hints.apply(&mut parsed_elements);
-    if enriched > 0 {
-        println!(
-            "  Filled heights on {} OSM buildings from Overture Maps",
-            enriched.to_string().bright_white().bold()
-        );
-    }
-
-    if !overture_elements.is_empty() {
-        let before_count = parsed_elements.len();
-        let unique_overture =
-            overture::deduplicate_against_osm(overture_elements, &parsed_elements);
-        parsed_elements.extend(unique_overture);
-        let added = parsed_elements.len() - before_count;
-        println!(
-            "  Added {} buildings from Overture Maps",
-            added.to_string().bright_white().bold()
-        );
-    } else if args.overture && !skip_objects && enriched == 0 {
-        println!("  No additional buildings from Overture Maps for this area");
-    }
+    // OSM's buildings with what the laser and Overture add, the same as the window.
+    building_sources::merge(
+        &mut parsed_elements,
+        overture_data,
+        &ground,
+        &xzbbox,
+        args.overture && !skip_objects,
+        args.scale,
+    );
 
     osm_parser::sort_by_priority(&mut parsed_elements);
     bench.mark("sort_priority");

@@ -84,6 +84,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initMobSpawningLockout();
   initAdvancedRows();
   refreshHeightLimitRow();
+  refreshLidarRows();
   refreshGameplayRows();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
@@ -825,6 +826,7 @@ function setCelestialBody(body) {
   refreshWorldTypeRow();
   refreshJavaOnlyRows();
   refreshFacadeRows();
+  refreshLidarRows();
   refreshOneWorldState();
 
   // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
@@ -1415,6 +1417,7 @@ function initSettings() {
 
   slider.addEventListener("input", refreshScaleDisplay);
   slider.addEventListener("input", refreshBboxSelectionInfo);
+  slider.addEventListener("input", refreshLidarRows);
   // Double-click to reset world scale to default (1.00).
   // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
@@ -1592,6 +1595,11 @@ function initSettings() {
         terrainEnabled: mode === "geo-terrain" || mode === "terrain-only",
         skipOsmObjects: mode === "terrain-only",
         canopyHeightEnabled: document.getElementById("canopy-height-toggle").checked,
+        lidarEnabled: liveLaser("lidar-toggle"),
+        gardenDetailEnabled: liveLaser("garden-detail-toggle"),
+        measuredTreesEnabled: liveLaser("measured-trees-toggle"),
+        measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+        lidarMaxMb: lidarLimitMb(),
         overtureEnabled: document.getElementById("overture-toggle").checked,
         awsOnlyElevation: document.getElementById("aws-only-elevation-toggle").checked,
         // A plan's flags: the next run's pending retry and skipped cells stay.
@@ -1606,6 +1614,16 @@ function initSettings() {
   // A reloaded map comes back on Earth; restore whatever was picked.
   const bodyMapFrame = getMapFrame();
   if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
+
+  // Laser data: the master switch greys its features, the limit is a segmented control.
+  document.getElementById("lidar-toggle")?.addEventListener("change", refreshLidarRows);
+  const lidarLimitGroup = document.getElementById("lidar-limit-group");
+  lidarLimitGroup?.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      lidarLimitGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
 
   // Max tree size segmented control
   const maxTreeSizeGroup = document.getElementById("max-tree-size-group");
@@ -3751,6 +3769,7 @@ const ROW_REASONS = {
   reason_token: ['Enter a Mapillary Token.', 'mapillary-token'],
   reason_outbreak: ['Turn off Zombie Outbreak.', 'zombie-outbreak-toggle'],
   reason_disasters: ['Turn off Disasters.', 'disasters-toggle'],
+  reason_scale_laser: ['Set World Scale to 0.75 or more.', 'scale-value-slider'],
 };
 
 // The key of the first check that fails, as [ok, key] pairs; null when all pass.
@@ -3824,6 +3843,46 @@ function setSettingsRowAvailable(inputId, available, reason = null) {
     row.toggleAttribute('inert', !available && !reason);
     setRowReason(row, available ? null : reason);
   }
+}
+
+// Laser data is Earth-only, never used for One World, and needs a World Scale of 0.75 or more
+// (mirrors LASER_MIN_SCALE in src/args.rs). Its features and limit sit in the same block and show
+// only while the master switch is on, as the Live rows under One World do.
+const LASER_ROWS = ['garden-detail-row', 'measured-trees-row', 'measured-heights-row', 'lidar-limit-row'];
+const LASER_MIN_SCALE = 0.75;
+function refreshLidarRows() {
+  const master = document.getElementById('lidar-toggle');
+  if (!master) return;
+  const scale = parseFloat(document.getElementById('scale-value-slider')?.value ?? '1');
+  const reason = why(
+    [selectedCelestialBody === 'earth', 'reason_earth'],
+    [!isOneWorldEnabled(), 'reason_not_one_world'],
+    [!(scale < LASER_MIN_SCALE), 'reason_scale_laser'],
+  );
+  setSettingsRowAvailable('lidar-toggle', !reason, reason);
+  const open = !reason && master.checked;
+  // Squares the card's lower corners while its rows hang under it, as One World does.
+  document.getElementById('lidar-stack')?.classList.toggle('is-open', open);
+  LASER_ROWS.forEach((id) => {
+    const row = document.getElementById(id);
+    if (row) row.style.display = open ? '' : 'none';
+  });
+  ['garden-detail-toggle', 'measured-trees-toggle', 'measured-heights-toggle'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !open;
+  });
+  document.querySelectorAll('#lidar-limit-group .segment').forEach((b) => { b.disabled = !open; });
+}
+
+// A laser switch counts only while it can be used; a greyed one is never sent as on.
+function liveLaser(id) {
+  const el = document.getElementById(id);
+  return !!(el && el.checked && !el.disabled);
+}
+
+function lidarLimitMb() {
+  const btn = document.querySelector('#lidar-limit-group .segment.active');
+  return parseInt(btn?.dataset.lidarLimit || '1000', 10);
 }
 
 // Advanced settings that only work with another one grey out while it is off, as the gameplay rows do,
@@ -4057,6 +4116,7 @@ async function refreshOneWorldState() {
   refreshOneWorldRow();
   redrawProjects();
   refreshLiveRows();
+  refreshLidarRows();
   refreshStartButton();
   if (!isOneWorldEnabled()) {
     const wasOn = oneWorldInfo !== null;
@@ -4510,6 +4570,11 @@ async function startLive() {
     maxTreeSize: settings.maxTreeSize,
     fieldPreset: settings.fieldPreset,
     canopyHeightEnabled: settings.canopyHeightEnabled,
+    lidarEnabled: settings.lidarEnabled,
+    gardenDetailEnabled: settings.gardenDetailEnabled,
+    measuredTreesEnabled: settings.measuredTreesEnabled,
+    measuredHeightsEnabled: settings.measuredHeightsEnabled,
+    lidarMaxMb: settings.lidarMaxMb,
     overtureEnabled: settings.overtureEnabled,
     use3dEnabled: settings.use3dEnabled,
     awsOnlyElevation: settings.awsOnlyElevation,
@@ -4747,6 +4812,11 @@ function readGenerationSettings(oneWorld) {
     maxTreeSize: segment("max-tree-size-group", "maxTreeSize", "giant"),
     fieldPreset: segment("field-preset-group", "fieldPreset", "patchwork"),
     canopyHeightEnabled: checked("canopy-height-toggle"),
+    lidarEnabled: liveLaser("lidar-toggle"),
+    gardenDetailEnabled: liveLaser("garden-detail-toggle"),
+    measuredTreesEnabled: liveLaser("measured-trees-toggle"),
+    measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+    lidarMaxMb: lidarLimitMb(),
     overtureEnabled: checked("overture-toggle"),
     use3dEnabled: checked("use-3d-toggle"),
     disableHeightLimit: disableHeightLimit,

@@ -620,6 +620,36 @@ fn generate_catenary(
     }
 }
 
+/// How far the ballast of track laid at grade reaches either side of its
+/// centreline, in blocks: a sleeper's length and the shoulder beyond.
+pub const BALLAST_REACH: i32 = 3;
+
+/// The bed of every track laid at grade: its centreline and `reach` blocks
+/// either side, so parallel tracks share one bed.
+pub fn collect_rail_bed(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    reach: i32,
+) -> CoordinateBitmap {
+    let mut bed = CoordinateBitmap::new(xzbbox);
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        if !is_at_grade_track(way) {
+            continue;
+        }
+        for (x, z) in build_smoothed_centerline(way) {
+            for dx in -reach..=reach {
+                for dz in -reach..=reach {
+                    bed.set(x + dx, z + dz);
+                }
+            }
+        }
+    }
+    bed
+}
+
 // At-grade rail centerlines, used only to keep catenary masts off other tracks.
 pub fn collect_at_grade_rail_mask(
     elements: &[ProcessedElement],
@@ -2279,6 +2309,22 @@ mod tests {
 
     fn run(editor: &mut WorldEditor, way: &ProcessedWay, rail_mask: &CoordinateBitmap) {
         let _ = run_collecting_tunnel_points(editor, way, rail_mask);
+    }
+
+    #[test]
+    fn a_tracks_bed_reaches_its_ballast_and_no_further() {
+        let bbox = rail_mask_bbox();
+        let el = |tags: &[(&str, &str)]| ProcessedElement::Way(straight_rail(tags));
+        let bed = collect_rail_bed(&[el(&[("railway", "rail")])], bbox, BALLAST_REACH);
+        assert!(bed.contains(40, 50) && bed.contains(40, 50 + BALLAST_REACH));
+        assert!(!bed.contains(40, 50 + BALLAST_REACH + 1));
+        // Track in a tunnel or on a bridge lays no ballast on the ground.
+        for tags in [
+            &[("railway", "rail"), ("tunnel", "yes")][..],
+            &[("railway", "rail"), ("bridge", "yes")][..],
+        ] {
+            assert!(collect_rail_bed(&[el(tags)], bbox, BALLAST_REACH).is_empty());
+        }
     }
 
     fn rail_mask_bbox() -> &'static XZBBox {

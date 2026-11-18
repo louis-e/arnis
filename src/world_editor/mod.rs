@@ -277,6 +277,10 @@ pub struct WorldEditor<'a> {
     mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
     /// Lift lines and terminals, kept free of trees.
     clear_corridors: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// Mapped water the measured trees keep clear of (see `tree_keep_clear`).
+    tree_keep_clear: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// The bed of track laid at grade, ballast on either side of the rails.
+    rail_bed: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Stations laid out for the whole area, shared with the tile editors.
     stations: Option<Arc<crate::element_processing::stations::StationIndex>>,
     /// Every rail block laid here, halo included, for the clearing of the track's gauge.
@@ -299,6 +303,8 @@ pub struct WorldEditor<'a> {
     support_columns: FnvHashMap<(i32, i32), Block>,
     /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
     hedge_columns: FnvHashSet<(i32, i32)>,
+    /// Columns a mapped barrier stands on: hedges, fences, walls.
+    barrier_columns: FnvHashSet<(i32, i32)>,
     /// Coarse marks the ground pass reads, one mask per `GroundMark`.
     ground_marks: [Option<crate::floodfill_cache::CoarseMask>; GroundMark::COUNT],
     /// Commercial land and streets for the gardens, shared via Arc with the tile editors.
@@ -406,6 +412,8 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
+            rail_bed: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -414,6 +422,7 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            barrier_columns: FnvHashSet::default(),
             ground_marks: Default::default(),
             garden_land: None,
             lamp_columns: Vec::new(),
@@ -484,6 +493,8 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
+            rail_bed: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -492,6 +503,7 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            barrier_columns: FnvHashSet::default(),
             ground_marks: Default::default(),
             garden_land: None,
             lamp_columns: Vec::new(),
@@ -562,6 +574,8 @@ impl<'a> WorldEditor<'a> {
             mapped_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
+            rail_bed: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -570,6 +584,7 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            barrier_columns: FnvHashSet::default(),
             ground_marks: Default::default(),
             garden_land: None,
             lamp_columns: Vec::new(),
@@ -807,6 +822,30 @@ impl<'a> WorldEditor<'a> {
     /// Sets the lift corridors (shared across the main and tile editors).
     pub fn set_clear_corridors(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
         self.clear_corridors = Some(map);
+    }
+
+    /// Sets the mapped water measured trees keep clear of (shared across the main
+    /// and tile editors); only a run with measured trees sets it.
+    pub fn set_tree_keep_clear(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.tree_keep_clear = Some(map);
+    }
+
+    /// Sets the bed of track laid at grade (shared across the main and tile
+    /// editors); only a run with laser data sets it.
+    pub fn set_rail_bed(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.rail_bed = Some(map);
+    }
+
+    /// True on the ballast of track laid at grade, rails included.
+    #[inline]
+    pub fn on_rail_bed(&self, x: i32, z: i32) -> bool {
+        self.rail_bed.as_ref().is_some_and(|m| m.contains(x, z))
+    }
+
+    /// Mapped water and the block around it, where a measured tree may neither
+    /// stand nor reach with its crown; `None` in a run without measured trees.
+    pub fn tree_keep_clear(&self) -> Option<&crate::floodfill_cache::CoordinateBitmap> {
+        self.tree_keep_clear.as_deref()
     }
 
     /// True where a lift line or terminal, a track or a platform keeps trees off.
@@ -1750,6 +1789,18 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_hedge(&mut self, x: i32, z: i32) {
         self.hedge_columns.insert((x, z));
+    }
+
+    /// Record a mapped barrier (a hedge, fence or wall) standing at (x, z).
+    #[inline]
+    pub fn register_barrier(&mut self, x: i32, z: i32) {
+        self.barrier_columns.insert((x, z));
+    }
+
+    /// Whether a mapped barrier stands at (x, z).
+    #[inline]
+    pub fn is_barrier(&self, x: i32, z: i32) -> bool {
+        !self.barrier_columns.is_empty() && self.barrier_columns.contains(&(x, z))
     }
 
     /// Mark column (x, z) as `kind`, to the nearest few blocks.

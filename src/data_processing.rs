@@ -1427,6 +1427,36 @@ pub fn generate_world_with_options(
     editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
     let clear_corridors = Arc::new(aerialways::clear_corridors(&elements, &xzbbox));
     editor.set_clear_corridors(Arc::clone(&clear_corridors));
+    // The laser's trees stand where it saw them, crowns over a pool or a stream
+    // included, which would hide what OSM maps there. With measured trees, trees
+    // keep a block clear of mapped water (see `tree::Tree::build`); a run without
+    // them is as before.
+    let tree_keep_clear = ground
+        .laser_trees_wanted()
+        .then(|| {
+            crate::floodfill_cache::collect_tree_keep_clear(
+                &elements,
+                &xzbbox,
+                args.water.water_detail.channel_width_cap(args.scale),
+                1,
+            )
+        })
+        .flatten()
+        .map(Arc::new);
+    if let Some(keep) = &tree_keep_clear {
+        editor.set_tree_keep_clear(Arc::clone(keep));
+    }
+    // The laser reads a track's ballast as paving or open ground; it is ballast.
+    let rail_bed = ground.has_survey().then(|| {
+        Arc::new(railways::collect_rail_bed(
+            &elements,
+            &xzbbox,
+            railways::BALLAST_REACH,
+        ))
+    });
+    if let Some(bed) = &rail_bed {
+        editor.set_rail_bed(Arc::clone(bed));
+    }
     let fuel_index = Arc::new(fuel_stations::FuelIndex::build(&elements, args.scale));
     editor.set_fuel_index(Arc::clone(&fuel_index));
 
@@ -2051,6 +2081,12 @@ pub fn generate_world_with_options(
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));
+            if let Some(keep) = &tree_keep_clear {
+                tile_editor.set_tree_keep_clear(Arc::clone(keep));
+            }
+            if let Some(bed) = &rail_bed {
+                tile_editor.set_rail_bed(Arc::clone(bed));
+            }
             tile_editor.set_fuel_index(Arc::clone(&fuel_index));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));

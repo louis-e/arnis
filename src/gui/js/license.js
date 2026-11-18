@@ -71,6 +71,46 @@ export const licenseText = `
 <p>The "Real Tree Cover" setting places trees from the <a href="https://registry.opendata.aws/dataforgood-fb-forests/" target="_blank" rel="noopener noreferrer">High Resolution Canopy Height Maps</a> (1m resolution), &copy; Meta and the <a href="https://www.wri.org/" target="_blank" rel="noopener noreferrer">World Resources Institute</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
 </div>
 <div class="credit">
+<h4>Bavarian Laser Scans and Aerial Photos</h4>
+<p>The Laser Data settings (Garden Detail, Measured Trees, Measured Heights) measure gardens, trees and building heights in Bavaria from the state's <a href="https://geodaten.bayern.de/opengeodata/" target="_blank" rel="noopener noreferrer">open laser point clouds and DOP20 aerial photos</a>, &copy; Bayerische Vermessungsverwaltung &ndash; <a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener noreferrer">www.geodaten.bayern.de</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>. Here and below, Arnis derives block classes from the data and does not redistribute it; the outlines used to tell which areas each source covers are simplified from OpenStreetMap.</p>
+</div>
+<div class="credit">
+<h4>French Laser Scans and Aerial Photos</h4>
+<p>In France the Laser Data settings read IGN's <a href="https://geoservices.ign.fr/lidarhd" target="_blank" rel="noopener noreferrer">LiDAR HD</a> point clouds and <a href="https://geoservices.ign.fr/bdortho" target="_blank" rel="noopener noreferrer">BD ORTHO</a> aerial photos through the G&eacute;oplateforme, &copy; IGN. Licensed under the <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" target="_blank" rel="noopener noreferrer">Licence Ouverte / Open Licence 2.0</a> (Etalab).</p>
+</div>
+<div class="credit">
+<h4>Dutch Laser Scans and Aerial Photos</h4>
+<p>In the Netherlands they read the <a href="https://www.ahn.nl/" target="_blank" rel="noopener noreferrer">Actueel Hoogtebestand Nederland</a> (AHN4 under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>, AHN5 under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>) and the national aerial photo of Beeldmateriaal Nederland through <a href="https://www.pdok.nl/" target="_blank" rel="noopener noreferrer">PDOK</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+</div>
+<div class="credit">
+<h4>Swiss Laser Scans and Aerial Photos</h4>
+<p>In Switzerland they read <a href="https://www.swisstopo.admin.ch/en/height-model-swisssurface3d" target="_blank" rel="noopener noreferrer">swissSURFACE3D</a> and <a href="https://www.swisstopo.admin.ch/en/orthoimage-swissimage-10" target="_blank" rel="noopener noreferrer">SWISSIMAGE</a>, free geodata of the Federal Office of Topography &copy; swisstopo, under the <a href="https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices" target="_blank" rel="noopener noreferrer">swisstopo terms for free geodata</a>.</p>
+</div>
+<div class="credit">
+<h4>North Rhine-Westphalian Laser Scans and Aerial Photos</h4>
+<p>In North Rhine-Westphalia they read the <a href="https://www.opengeodata.nrw.de/produkte/geobasis/hm/3dm_l_las/" target="_blank" rel="noopener noreferrer">3D-Messdaten</a> laser point clouds and the DOP aerial photos of Geobasis NRW, &copy; Land NRW, under the <a href="https://www.govdata.de/dl-de/zero-2-0" target="_blank" rel="noopener noreferrer">Datenlizenz Deutschland &ndash; Zero &ndash; 2.0</a>.</p>
+</div>
+<div class="credit">
+<h4>Estonian Laser Scans and Aerial Photos</h4>
+<p>In Estonia they read the laser scans and orthophotos of the <a href="https://geoportaal.maaruum.ee/" target="_blank" rel="noopener noreferrer">Estonian Land and Spatial Development Board</a> (Maa- ja Ruumiamet), under its open data licence.</p>
+</div>
+<div class="credit">
+<h4>Luxembourgish Laser Scans and Aerial Photos</h4>
+<p>In Luxembourg they read the <a href="https://data.public.lu/en/datasets/lidar-2024-releve-3d-du-territoire-luxembourgeois/" target="_blank" rel="noopener noreferrer">LiDAR 2024</a> point clouds and the orthophoto of the Administration du cadastre et de la topographie through <a href="https://data.public.lu/" target="_blank" rel="noopener noreferrer">data.public.lu</a> and <a href="https://www.geoportail.lu/" target="_blank" rel="noopener noreferrer">geoportail.lu</a>, released under <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener noreferrer">CC0</a>.</p>
+</div>
+<div class="credit">
+<h4>Latvian Laser Scans and Aerial Photos</h4>
+<p>In Latvia they read the <a href="https://www.lgia.gov.lv/lv/Digit%C4%81lais%20virsmas%20modelis" target="_blank" rel="noopener noreferrer">elevation model base data</a> (laser point clouds) and the <a href="https://www.lgia.gov.lv/en/color-orthophoto-map-2016-2018-cycle-6" target="_blank" rel="noopener noreferrer">2016&ndash;2018 orthophoto</a> of the Latvian Geospatial Information Agency (Latvijas &#290;eotelpisk&#257;s inform&#257;cijas a&#291;ent&#363;ra), under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+</div>
+<div class="credit">
+<h4>US Laser Scans and Aerial Photos</h4>
+<p>In the United States they read the U.S. Geological Survey's <a href="https://www.usgs.gov/3d-elevation-program" target="_blank" rel="noopener noreferrer">3D Elevation Program</a> point clouds, as published on the <a href="https://registry.opendata.aws/usgs-lidar/" target="_blank" rel="noopener noreferrer">USGS 3DEP open bucket</a>, and USDA <a href="https://naip-usdaonline.hub.arcgis.com/" target="_blank" rel="noopener noreferrer">NAIP</a> aerial photos through the USGS National Map. Both are in the public domain; courtesy of the U.S. Geological Survey and the USDA Farm Production and Conservation Business Center. The outlines of the United States and Canada are simplified from <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener noreferrer">Natural Earth</a> (public domain).</p>
+</div>
+<div class="credit">
+<h4>Canadian Laser Scans</h4>
+<p>In Canada they read Natural Resources Canada's <a href="https://open.canada.ca/data/en/dataset/7069387e-9986-4297-9f55-0288e9676947" target="_blank" rel="noopener noreferrer">CanElevation point clouds</a>. Contains information licensed under the <a href="https://open.canada.ca/en/open-government-licence-canada" target="_blank" rel="noopener noreferrer">Open Government Licence &ndash; Canada</a>.</p>
+</div>
+<div class="credit">
 <h4>Koppen-Geiger Climate Data</h4>
 <p>Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" target="_blank" rel="noopener noreferrer">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
 </div>
