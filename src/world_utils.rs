@@ -2567,7 +2567,7 @@ mod tests {
         assert!(dim["attributes"].is_object());
 
         // 26.1 drives `/time` through `default_clock` and requires `has_ender_dragon_fight`.
-        for (format, label) in [(101, "26.1"), (107, "26.2")] {
+        for (format, label) in [(101, "26.1"), (107, "26.2"), (121, "26.3")] {
             let dim = resolve_overworld(&dp_root, format);
             assert_eq!(dim["default_clock"], "minecraft:overworld", "{label}");
             assert_eq!(dim["timelines"], "#minecraft:in_overworld", "{label}");
@@ -2578,7 +2578,7 @@ mod tests {
         }
 
         // Every era still needs the extended build height.
-        for format in [61, 88, 94, 101, 107, 999] {
+        for format in [61, 88, 94, 101, 107, 121, 999] {
             let dim = resolve_overworld(&dp_root, format);
             assert_eq!(dim["min_y"], -2032, "format {format}");
             assert_eq!(dim["height"], 4064, "format {format}");
