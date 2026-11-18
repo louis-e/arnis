@@ -515,6 +515,7 @@ fn process_element(
                         editor,
                         way,
                         waterways::ChannelShape {
+                            scale: args.scale,
                             width_cap: args.water.water_detail.channel_width_cap(args.scale),
                             roads_at_grade: big_water_field.roads_at_grade(),
                         },
@@ -1299,6 +1300,7 @@ pub fn generate_world_with_options(
         &clip_bbox,
         args.scale,
         waterways::ChannelShape {
+            scale: args.scale,
             width_cap: args.water.water_detail.channel_width_cap(args.scale),
             roads_at_grade: big_water_field.roads_at_grade(),
         },
@@ -1407,18 +1409,24 @@ pub fn generate_world_with_options(
 
     editor.set_carriageway(Arc::clone(&carriageway));
 
-    // What the gardens read besides the marks: commercial land, which is never filled
-    // while elements are placed, and the streets and car parks that keep paving beside them.
+    // What the gardens read besides the marks: the grounds that stay paved and residential
+    // land, which are never filled while elements are placed, and the streets, squares and
+    // car parks that keep paving beside them.
+    let (grounds, residential) =
+        crate::element_processing::landuse::garden_areas(&elements, &xzbbox);
+    let mut streets = highways::collect_garden_streets(
+        &elements,
+        &editor,
+        &clip_bbox,
+        args.scale,
+        args.water.water_detail,
+        |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
+    );
+    crate::element_processing::landuse::mark_paved_areas(&elements, &clip_bbox, &mut streets);
     let garden_land = Arc::new(crate::world_editor::GardenLand {
-        commercial: crate::element_processing::landuse::commercial_land(&elements, &xzbbox),
-        streets: highways::collect_garden_streets(
-            &elements,
-            &editor,
-            &clip_bbox,
-            args.scale,
-            args.water.water_detail,
-            |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
-        ),
+        grounds,
+        residential,
+        streets,
     });
     editor.set_garden_land(Arc::clone(&garden_land));
 

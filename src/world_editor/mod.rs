@@ -246,10 +246,14 @@ impl GroundMark {
 /// What the gardens read besides the marks, built once from the element list before
 /// anything is placed and shared with the tile editors.
 pub struct GardenLand {
-    /// Commercial and retail land, whose open ground stays paved.
-    pub commercial: crate::floodfill_cache::CoarseMask,
-    /// Streets and car parks, which keep a few metres of paving beside them; footways,
-    /// paths and driveways keep only a step's width (the sealed-surface mask).
+    /// Land whose open ground stays paved whatever stands near it: commercial and retail
+    /// land, and the grounds of schools, hospitals and town halls.
+    pub grounds: crate::floodfill_cache::CoarseMask,
+    /// Residential land, where a plain building of any size counts as a home.
+    pub residential: crate::floodfill_cache::CoarseMask,
+    /// Streets, pedestrian streets, squares and car parks, which keep a few metres of
+    /// paving beside them; footways, paths and driveways keep only a step's width (the
+    /// sealed-surface mask).
     pub streets: crate::floodfill_cache::CoordinateBitmap,
 }
 

@@ -56,7 +56,7 @@ fn build_capped(
             scale,
             channels: ChannelShape {
                 width_cap: cap,
-                roads_at_grade: None,
+                ..Default::default()
             },
         },
     )

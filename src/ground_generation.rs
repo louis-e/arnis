@@ -1822,7 +1822,7 @@ fn garden_columns(
             let wz = seam_window(CoarseMask::cell_index(z), reach.cells);
             if !dwellings.any_in(wx, wz)
                 || tall.is_some_and(|m| m.any_in(wx, wz))
-                || land.is_some_and(|l| l.commercial.contains(x, z))
+                || land.is_some_and(|l| l.grounds.contains(x, z))
             {
                 continue;
             }
@@ -2164,8 +2164,11 @@ mod tests {
         for &(x, z) in streets {
             street_mask.set(x, z);
         }
+        let (grounds, residential) =
+            crate::element_processing::landuse::garden_areas(elements, bbox);
         editor.set_garden_land(std::sync::Arc::new(crate::world_editor::GardenLand {
-            commercial: crate::element_processing::landuse::commercial_land(elements, bbox),
+            grounds,
+            residential,
             streets: street_mask,
         }));
     }
