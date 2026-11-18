@@ -54,6 +54,17 @@ impl Default for TrackEnd {
     }
 }
 
+/// Where a tunnel way's track lies, planned with the rest of its run.
+#[derive(Clone, Debug, Default)]
+pub struct TunnelBore {
+    /// The floor under the rail, per cell.
+    pub floors: Vec<i32>,
+    /// Cells in the cutting at a portal, whose roof opens to the sky.
+    pub open: Vec<bool>,
+    /// The floor of the cell past either end, where the run goes on in another way.
+    pub beyond: [Option<i32>; 2],
+}
+
 /// The ends of every track way, worked out once for the whole network so every tile
 /// joins the same ways the same way.
 #[derive(Default)]
@@ -61,6 +72,8 @@ pub struct RailJoins {
     ends: FnvHashMap<u64, [TrackEnd; 2]>,
     /// In One World, the area being built, whose track the next area's meets at the edge.
     area: Option<XZBBox>,
+    /// The tunnels, once planned.
+    tunnels: FnvHashMap<u64, TunnelBore>,
 }
 
 struct Track<'a> {
@@ -186,7 +199,11 @@ impl RailJoins {
             }
             ends.insert(track.way.id, pair);
         }
-        Self { ends, area: None }
+        Self {
+            ends,
+            area: None,
+            tunnels: FnvHashMap::default(),
+        }
     }
 
     /// What lies past the start and the end of a way.
@@ -197,6 +214,15 @@ impl RailJoins {
     /// Meets the track of the areas built next to `area` at its edge.
     pub fn meet_at_edge_of(&mut self, area: XZBBox) {
         self.area = Some(area);
+    }
+
+    pub fn set_tunnels(&mut self, tunnels: FnvHashMap<u64, TunnelBore>) {
+        self.tunnels = tunnels;
+    }
+
+    /// Where a tunnel way lies, if its run was planned.
+    pub fn tunnel(&self, way: u64) -> Option<&TunnelBore> {
+        self.tunnels.get(&way)
     }
 
     /// Where a run of cells crosses the area's edge, as the cell inside and the one outside.

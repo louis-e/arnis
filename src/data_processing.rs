@@ -1680,12 +1680,19 @@ pub fn generate_world_with_options(
         args.scale,
     );
     railways::add_tunnel_footprint(&elements, &xzbbox, &mut tunnel_footprint);
-    let tunnel_portals = highways::collect_tunnel_portals(
+    let mut tunnel_portals = highways::collect_tunnel_portals(
         &elements,
         &editor,
         &bridge_structures,
         &tunnel_internal_endpoints,
         args.scale,
+    );
+    tunnel_portals.plan_bores(
+        &elements,
+        &editor,
+        &tunnel_internal_endpoints,
+        args.scale,
+        one_world.is_some().then_some(&own_rect),
     );
 
     // Platforms and halls, laid out before any track so the tracks can keep level with them.
@@ -1705,6 +1712,9 @@ pub fn generate_world_with_options(
         },
     ));
     editor.set_stations(Arc::clone(&stations));
+    // Each rail tunnel is planned whole, after the halls it runs through, so every tile lays one grade.
+    let rail_tunnels = railways::plan_rail_tunnels(&elements, &editor, &rail_joins);
+    rail_joins.set_tunnels(rail_tunnels);
     let mut station_voids: Vec<stations::StationVoid> = Vec::new();
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.

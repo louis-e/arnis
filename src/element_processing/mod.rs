@@ -68,6 +68,7 @@ pub mod traffic_lights;
 pub mod train_bodies;
 pub mod trains;
 pub mod tree;
+pub(crate) mod tunnel_grade;
 pub mod water_areas;
 pub mod waterfront;
 pub mod waterways;
