@@ -720,13 +720,21 @@ pub struct WaterArgs {
     pub river_bed: crate::river_bed::RiverBed,
 
     /// Water detail. `scaled` rounds bed depths instead of flooring them and, on small
-    /// maps, gives narrow water a bowl-shaped bed, draws streams narrower and lets water
-    /// run over a road where it crosses a short stretch of water without a bridge.
+    /// maps, gives narrow water a bowl-shaped bed, draws rivers at most 5 blocks wide and
+    /// streams tagged wider than 3 at 3, and lets water run over a road where it crosses a
+    /// short stretch of water without a bridge.
     #[arg(long, value_enum, default_value_t = crate::water_detail::WaterDetail::Default)]
     pub water_detail: crate::water_detail::WaterDetail,
 }
 
 impl WaterArgs {
+    /// Whether a line waterway is piped under the roads at grade on its centreline, so a
+    /// path along a stream leaves no strip of water on either side. Any water option.
+    pub fn pipes_channels_under_roads(&self) -> bool {
+        self.river_bed != crate::river_bed::RiverBed::Off
+            || self.water_detail != crate::water_detail::WaterDetail::Default
+    }
+
     /// How far these options can carve beyond the land-cover estimate.
     pub fn carve_depth(&self, scale: f64) -> crate::water_detail::CarveDepth {
         crate::water_detail::CarveDepth {

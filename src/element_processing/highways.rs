@@ -3687,6 +3687,7 @@ pub fn collect_road_and_carriageway_coords(
         editor,
         scale,
         water_detail,
+        |_| true,
         |carriageway, x, z| {
             roads.set(x, z);
             if carriageway {
@@ -3697,12 +3698,97 @@ pub fn collect_road_and_carriageway_coords(
     (roads, carriageways)
 }
 
-/// Hands `stamp` every road and path surface cell, with whether its way carries vehicles.
+/// Where a garden keeps a few metres of paving: the carriageways as the renderer stamps
+/// them, less driveways, which a garden comes up to like a path, and the surface car parks.
+pub fn collect_garden_streets(
+    elements: &[ProcessedElement],
+    editor: &WorldEditor,
+    xzbbox: &XZBBox,
+    scale: f64,
+    water_detail: crate::water_detail::WaterDetail,
+    car_park_cells: impl Fn(&ProcessedWay) -> Option<std::sync::Arc<Vec<(i32, i32)>>>,
+) -> CoordinateBitmap {
+    let mut streets = CoordinateBitmap::new(xzbbox);
+    stamp_highway_surfaces(
+        elements,
+        Some(editor),
+        scale,
+        water_detail,
+        |element| {
+            !matches!(element, ProcessedElement::Way(w)
+                if w.tags.get("service").map(String::as_str) == Some("driveway"))
+        },
+        |carriageway, x, z| {
+            if carriageway {
+                streets.set(x, z);
+            }
+        },
+    );
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        if is_surface_car_park(&way.tags) {
+            for &(x, z) in car_park_cells(way).iter().flat_map(|cells| cells.iter()) {
+                streets.set(x, z);
+            }
+        }
+    }
+    streets
+}
+
+/// A car park on the ground: `amenity=parking`, not in a building, under or on one.
+pub(crate) fn is_surface_car_park(tags: &HashMap<String, String>) -> bool {
+    tags.get("amenity").map(String::as_str) == Some("parking")
+        && !tags.contains_key("building")
+        && !matches!(
+            tags.get("parking").map(String::as_str),
+            Some("multi-storey" | "underground" | "rooftop")
+        )
+}
+
+/// The road and path surfaces at grade: what `collect_road_and_carriageway_coords` stamps
+/// of the ways `keep` lets through, less every bridge deck, the ends where an approach
+/// meets one included. From the tags alone, before the ground is final, so a tunnel counts
+/// as bored and no crossing is drowned. Line waterways are piped under these cells with a
+/// water option on (`Ground::pipe_channels_under_roads`); under a deck they stay open, so
+/// the bridge still finds its water.
+pub fn collect_roads_at_grade(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+    keep: impl Fn(&ProcessedElement) -> bool,
+) -> CoordinateBitmap {
+    let deck = |element: &ProcessedElement| matches!(element, ProcessedElement::Way(w) if is_bridge_way(w) && lays_deck(w));
+    let mut roads = CoordinateBitmap::new(xzbbox);
+    let water = crate::water_detail::WaterDetail::Default;
+    stamp_highway_surfaces(
+        elements,
+        None,
+        scale,
+        water,
+        |element| keep(element) && !matches!(element, ProcessedElement::Way(w) if is_bridge_way(w)),
+        |_, x, z| roads.set(x, z),
+    );
+    stamp_highway_surfaces(
+        elements,
+        None,
+        scale,
+        water,
+        |element| keep(element) && deck(element),
+        |_, x, z| roads.clear(x, z),
+    );
+    roads
+}
+
+/// Hands `stamp` every road and path surface cell of the elements `keep` lets through, with
+/// whether its way carries vehicles.
 fn stamp_highway_surfaces(
     elements: &[ProcessedElement],
     editor: Option<&WorldEditor>,
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
+    keep: impl Fn(&ProcessedElement) -> bool,
     mut stamp: impl FnMut(bool, i32, i32),
 ) {
     // A way that meets a bridge is its ramp or its approach, and keeps its surface.
@@ -3724,7 +3810,7 @@ fn stamp_highway_surfaces(
         None => HashSet::new(),
     };
 
-    for element in elements {
+    for element in elements.iter().filter(|e| keep(e)) {
         let ProcessedElement::Way(way) = element else {
             continue;
         };
@@ -3837,6 +3923,52 @@ pub fn collect_building_passage_coords(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A footway at grade is a road at grade, a bridge is not, and neither is the end of
+    /// an approach that runs onto the deck; a way the caller drops is left out.
+    #[test]
+    fn roads_at_grade_leave_the_decks_open() {
+        let way = |id: u64, tags: &[(&str, &str)], from: (i32, i32), to: (i32, i32)| {
+            let node = |id: u64, (x, z): (i32, i32)| ProcessedNode {
+                id,
+                tags: HashMap::new(),
+                x,
+                z,
+            };
+            ProcessedElement::Way(ProcessedWay {
+                id,
+                nodes: vec![node(id * 10, from), node(id * 10 + 1, to)],
+                tags: tags
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            })
+        };
+        let elements = [
+            way(1, &[("highway", "footway")], (0, 10), (20, 10)),
+            way(
+                2,
+                &[("highway", "footway"), ("bridge", "yes")],
+                (20, 10),
+                (30, 10),
+            ),
+            way(3, &[("highway", "footway")], (30, 10), (50, 10)),
+            way(4, &[("highway", "service")], (10, 30), (40, 30)),
+        ];
+        let bbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let service =
+            |e: &ProcessedElement| e.tags().get("highway").map(String::as_str) == Some("service");
+        let roads = collect_roads_at_grade(&elements, &bbox, 1.0, |e| !service(e));
+        assert!(
+            roads.contains(5, 10) && roads.contains(45, 10),
+            "the footway"
+        );
+        assert!(roads.contains(5, 11), "its whole surface");
+        for x in 20..=30 {
+            assert!(!roads.contains(x, 10), "on the deck at x={x}");
+        }
+        assert!(!roads.contains(25, 30), "the dropped service road");
+    }
 
     #[test]
     fn highway_block_range_scales_with_lanes() {

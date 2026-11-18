@@ -3657,15 +3657,26 @@ fn gui_start_generation(
 
                     let mut ground = ground;
 
+                    // Where line waterways are piped under roads; the masks skip it too.
+                    ground.pipe_channels_under_roads(&parsed_elements, &xzbbox, &args);
                     // OSM water override first, then bridge repair.
-                    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    ground.apply_osm_water_override(
+                        &parsed_elements,
+                        &xzbbox,
+                        args.water.water_detail.channel_width_cap(args.scale),
+                    );
                     overture::drop_footprints_in_water(
                         &mut parsed_elements,
                         &ground,
                         &xzbbox,
                         args.scale,
                     );
-                    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
+                    ground.apply_osm_land_override(
+                        &parsed_elements,
+                        &xzbbox,
+                        args.scale,
+                        args.water.water_detail.channel_width_cap(args.scale),
+                    );
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
                     ground.finish_land_cover(args.mode);
 
