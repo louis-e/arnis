@@ -1,14 +1,14 @@
 //! The Sydney Opera House at one block per metre, every shell cut from one sphere of 75.2 m.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::schematic::PalettizedSchematic;
 use crate::block_definitions::*;
 
 const RADIUS: f64 = 75.2;
 /// Model block of the plan origin at 33.8568 S, 151.2153 E; plan x runs east, z south.
-const ORIGIN_X: f64 = 100.0;
-const ORIGIN_Z: f64 = 80.0;
+const ORIGIN_X: i32 = 100;
+const ORIGIN_Z: i32 = 80;
 /// Foot of the seawall under the broadwalk.
 const SEAWALL: i32 = -3;
 /// Model layer of the broadwalk.
@@ -456,7 +456,7 @@ fn split(s: &Shell) -> [Half; 2] {
 
 #[derive(Default)]
 struct Model {
-    cells: HashMap<(i32, i32, i32), (Layer, Part)>,
+    cells: BTreeMap<(i32, i32, i32), (Layer, Part)>,
     /// Lowest roof cell over each column, per hall, for the walls under its edge.
     roofs: [HashMap<(i32, i32), i32>; 3],
 }
@@ -469,11 +469,6 @@ impl Model {
         }
     }
 
-    fn put_at(&mut self, q: V, layer: Layer, block: Block) {
-        let (x, y, z) = (q.0.floor() as i32, q.1.floor() as i32, q.2.floor() as i32);
-        self.put(x, y, z, layer, Part::Block(block));
-    }
-
     fn roof(&mut self, hall: usize, x: i32, y: i32, z: i32) {
         let low = self.roofs[hall].entry((x, z)).or_insert(y);
         *low = (*low).min(y);
@@ -481,6 +476,10 @@ impl Model {
 }
 
 pub fn build() -> PalettizedSchematic {
+    finish(model())
+}
+
+fn model() -> Model {
     let mut m = Model::default();
     ground(&mut m);
     let halves: Vec<[Half; 2]> = SHELLS.iter().map(split).collect();
@@ -521,7 +520,7 @@ pub fn build() -> PalettizedSchematic {
         }
     }
     hall_walls(&mut m);
-    finish(m)
+    m
 }
 
 /// Even-odd point in polygon.
@@ -570,12 +569,16 @@ fn ground(m: &mut Model) {
         let around =
             [(1, 0), (-1, 0), (0, 1), (0, -1)].map(|(dx, dz)| levels.get(&(x + dx, z + dz)));
         let shore = around.iter().any(Option::is_none);
-        let low = around.iter().flatten().map(|&&l| l).min().unwrap_or(y);
-        // Granite steps, the riser where the next step down meets this one.
-        let top = if y == 0 || y == DECK {
-            Part::Block(WHITE_TERRACOTTA)
-        } else if around.iter().flatten().any(|&&l| l == y - 1) {
+        let low = if shore {
+            SEAWALL
+        } else {
+            around.iter().flatten().map(|&&l| l).min().unwrap_or(y)
+        };
+        // Granite steps, a stair where the next step down lies to the south.
+        let top = if y > 0 && levels.get(&(x, z + 1)) == Some(&(y - 1)) {
             Part::Step(POLISHED_GRANITE_STAIRS)
+        } else if y == 0 || y == DECK {
+            Part::Block(WHITE_TERRACOTTA)
         } else {
             Part::Block(POLISHED_GRANITE)
         };
@@ -599,7 +602,7 @@ fn ground(m: &mut Model) {
     }
 }
 
-/// Bars under the west side, foyer bands round the north end, window slots along the east.
+/// Foyer bands round the north end, bars along the south-west, window slots along the east.
 fn podium_glass(x: i32, z: i32, y: i32) -> bool {
     if z < -45 && x < -10 {
         y % 3 != 0
@@ -749,16 +752,9 @@ fn infill(m: &mut Model, hall: usize, a: impl Fn(f64) -> V, b: impl Fn(f64) -> V
         } else {
             WHITE_CONCRETE
         };
-        let steps = ((q.minus(p).norm() * 2.5) as usize).max(2);
-        for j in 0..=steps {
-            let c = p.plus(q.minus(p).scale(j as f64 / steps as f64));
-            m.put_at(c, Layer::Infill, block);
-            m.roof(
-                hall,
-                c.0.floor() as i32,
-                c.1.floor() as i32,
-                c.2.floor() as i32,
-            );
+        for (x, y, z) in line(p, q) {
+            m.put(x, y, z, Layer::Infill, Part::Block(block));
+            m.roof(hall, x, y, z);
         }
     }
 }
@@ -775,35 +771,46 @@ fn glazing(m: &mut Model, h: &Half, mouth: Mouth) {
         let top = h.inset(h.mouth(s));
         let foot = V(top.0, foot_y, top.2);
         if mouth == Mouth::Glazed {
-            (top, foot.plus(fwd.scale(0.12 * (top.1 - foot_y))))
+            // Leaning out at the foot, but not past the podium's edge.
+            let mut lean = 0.12 * (top.1 - foot_y);
+            while lean > 0.0 && !inside(PODIUM, foot.0 + fwd.0 * lean, foot.2 + fwd.2 * lean) {
+                lean -= 0.25;
+            }
+            (top, foot.plus(fwd.scale(lean.max(0.0))))
         } else {
             let back = fwd.scale(-4.0);
             (top.plus(back).minus(V(0.0, 1.0, 0.0)), foot.plus(back))
         }
     };
+    // Where a shell's edge overhangs the podium, the glass stops at the podium's edge.
+    let over_deck =
+        |&(x, _, z): &(i32, i32, i32)| inside(PODIUM, f64::from(x) + 0.5, f64::from(z) + 0.5);
     for i in 0..=N {
         let (from, to) = pane(i as f64 / N as f64);
-        line(m, from, to, Layer::Infill, BROWN_STAINED_GLASS);
+        for (x, y, z) in line(from, to).filter(over_deck) {
+            m.put(x, y, z, Layer::Infill, Part::Block(BROWN_STAINED_GLASS));
+        }
     }
     // Bronze mullions every 4 m across the hung walls.
     if mouth == Mouth::Glazed {
         let span = h.foot.minus(h.tip).norm();
         for k in 1..(span / 4.0).ceil() as i32 {
             let (from, to) = pane(f64::from(k) * 4.0 / span);
-            line(m, from, to, Layer::Mullion, BROWN_TERRACOTTA);
+            for (x, y, z) in line(from, to).filter(over_deck) {
+                m.put(x, y, z, Layer::Mullion, Part::Block(BROWN_TERRACOTTA));
+            }
         }
     }
 }
 
-fn line(m: &mut Model, from: V, to: V, layer: Layer, block: Block) {
+/// Cells along a segment, above the deck.
+fn line(from: V, to: V) -> impl Iterator<Item = (i32, i32, i32)> {
     let steps = ((to.minus(from).norm() * 2.5) as usize).max(2);
-    for j in 0..=steps {
-        m.put_at(
-            from.plus(to.minus(from).scale(j as f64 / steps as f64)),
-            layer,
-            block,
-        );
-    }
+    (0..=steps).filter_map(move |j| {
+        let q = from.plus(to.minus(from).scale(j as f64 / steps as f64));
+        let (x, y, z) = (q.0.floor() as i32, q.1.floor() as i32, q.2.floor() as i32);
+        (y > DECK).then_some((x, y, z))
+    })
 }
 
 /// Glass under the edge of each hall's roof, and a timber auditorium well inside it.
@@ -856,23 +863,21 @@ fn resolve(part: Part) -> BlockWithProperties {
 }
 
 fn finish(m: Model) -> PalettizedSchematic {
-    let mut cells: Vec<((i32, i32, i32), Part)> = m
-        .cells
-        .into_iter()
-        .map(|(k, (_, part))| (k, part))
-        .collect();
-    cells.sort_unstable_by_key(|&(k, part)| (k, part));
     let mut palette: Vec<BlockWithProperties> = Vec::new();
     let mut slots: HashMap<Part, u8> = HashMap::new();
-    let mut voxels = Vec::with_capacity(cells.len());
-    for ((x, y, z), part) in cells {
+    let mut voxels = Vec::with_capacity(m.cells.len());
+    let cell = |v: i32| i16::try_from(v).expect("the opera house fits its grid");
+    for ((x, y, z), (_, part)) in m.cells {
         let slot = *slots.entry(part).or_insert_with(|| {
             palette.push(resolve(part));
             u8::try_from(palette.len() - 1).expect("the opera house uses few block states")
         });
-        let mx = (f64::from(x) + ORIGIN_X) as i16;
-        let mz = (f64::from(z) + ORIGIN_Z) as i16;
-        voxels.push((mx, (y + GROUND) as i16, mz, slot));
+        voxels.push((
+            cell(x + ORIGIN_X),
+            cell(y + GROUND),
+            cell(z + ORIGIN_Z),
+            slot,
+        ));
     }
     PalettizedSchematic {
         width: MAX_X - MIN_X,
@@ -904,11 +909,32 @@ mod tests {
         let top = model.voxels.iter().max_by_key(|v| v.1).unwrap();
         // The broadwalk stands about 3 m above the harbour.
         assert_eq!(i32::from(top.1) + 1 - GROUND + 3, 67);
-        let (x, z) = (f64::from(top.0) - ORIGIN_X, f64::from(top.2) - ORIGIN_Z);
+        let x = f64::from(i32::from(top.0) - ORIGIN_X);
+        let z = f64::from(i32::from(top.2) - ORIGIN_Z);
         assert!((x - SHELLS[A2].tip[0]).abs() < 3.0 && (z - SHELLS[A2].tip[2]).abs() < 3.0);
         assert!(model
             .voxels
             .iter()
             .all(|v| v.0 >= 0 && v.1 >= 0 && v.2 >= 0));
+    }
+
+    #[test]
+    fn glass_and_infill_stand_on_the_deck() {
+        let m = model();
+        let stray: Vec<_> = m
+            .cells
+            .iter()
+            .filter(|&(_, &(layer, _))| matches!(layer, Layer::Infill | Layer::Mullion))
+            .filter(|&(&(x, y, z), _)| {
+                y <= DECK || !inside(PODIUM, f64::from(x) + 0.5, f64::from(z) + 0.5)
+            })
+            .map(|(k, _)| *k)
+            .collect();
+        assert!(
+            stray.is_empty(),
+            "{} cells off the deck: {:?}",
+            stray.len(),
+            &stray[..stray.len().min(12)]
+        );
     }
 }
