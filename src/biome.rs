@@ -62,13 +62,7 @@ pub fn cell_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
     if c.lc == LC_WATER {
         return water_biome(c, climate, lat_deg);
     }
-    // Moist forest stays green through the dry season the climate grid gives it.
-    let climate = match c.eco {
-        Some(e) if climate == Climate::TropicalSavanna && e.biome == EcoBiome::MoistTropical => {
-            Climate::Temperate
-        }
-        _ => climate,
-    };
+    let climate = climate.for_plants(c.eco);
     if let Some(name) = mountain_biome(c, climate) {
         return name;
     }
