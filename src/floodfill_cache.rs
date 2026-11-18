@@ -1059,6 +1059,9 @@ impl FloodFillCache {
         xzbbox: &XZBBox,
     ) -> CoordinateBitmap {
         let mut bits = CoordinateBitmap::new(xzbbox);
+        // The areas' fills are made a batch at a time on every thread, as the other
+        // pre-passes make theirs.
+        let mut areas: Vec<u64> = Vec::new();
         for element in elements {
             let ProcessedElement::Way(w) = element else {
                 continue;
@@ -1074,9 +1077,16 @@ impl FloodFillCache {
                     }
                 }
             } else if self.contains(w.id) && (is_sealed_surface_way(w) || is_planted_way(w)) {
-                for &(x, z) in self.transient_fill(w.id).iter().flat_map(|f| f.iter()) {
-                    bits.set(x, z);
-                }
+                areas.push(w.id);
+            }
+        }
+        for batch in areas.chunks(PREPASS_BATCH) {
+            let fills: Vec<Option<FloodFillResult>> = batch
+                .par_iter()
+                .map(|&id| self.transient_fill(id))
+                .collect();
+            for &(x, z) in fills.iter().flatten().flat_map(|f| f.iter()) {
+                bits.set(x, z);
             }
         }
         bits
