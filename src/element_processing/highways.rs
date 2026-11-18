@@ -817,6 +817,7 @@ const TUNNEL_CEIL_OFFSET: i32 = 5; // roof height above the road
 const TUNNEL_COVER_DROP: i32 = 7; // cover the bore aims for
 /// Cover at which a roof is still kept; one under the target, so a DEM wiggle cannot punch a skylight.
 const TUNNEL_ROOF_COVER: i32 = TUNNEL_CEIL_OFFSET + 1;
+const TUNNEL_RAMP_STEP: i32 = 1; // max descent per cell
 const TUNNEL_RAMP_RUN: i32 = 3; // portal ramp run per 1 block drop
 const TUNNEL_LAYER_DROP: i32 = 7; // extra depth per layer below -1
 const TUNNEL_LIGHT_INTERVAL: usize = 8;
@@ -1286,6 +1287,28 @@ fn plan_road_tunnels(
         })
         .collect();
 
+    let wall_off: Vec<i32> = ways
+        .iter()
+        .map(|w| {
+            let highway = w.tags.get("highway").map_or("", String::as_str);
+            highway_block_range(highway, &w.tags, scale) + 1
+        })
+        .collect();
+    // Ends another road meets, unlike an emergency exit's.
+    let bored: HashSet<u64> = ways.iter().map(|w| w.id).collect();
+    let met: HashSet<(i32, i32)> = elements
+        .iter()
+        .filter_map(|e| match e {
+            ProcessedElement::Way(w)
+                if w.tags.contains_key("highway") && !bored.contains(&w.id) =>
+            {
+                Some(w)
+            }
+            _ => None,
+        })
+        .flat_map(|w| w.nodes.iter().map(|n| (n.x, n.z)))
+        .collect();
+
     let floor = tunnel_min_road_y();
     let mut solved: HashMap<u64, i32> = HashMap::new();
     let mut beside = Beside::default();
@@ -1314,13 +1337,6 @@ fn plan_road_tunnels(
                 start + j
             }
         };
-        let wall_off: Vec<i32> = ways
-            .iter()
-            .map(|w| {
-                let highway = w.tags.get("highway").map_or("", String::as_str);
-                highway_block_range(highway, &w.tags, scale) + 1
-            })
-            .collect();
         let cover_drop: Vec<i32> = (0..n)
             .map(|i| TUNNEL_COVER_DROP.saturating_add(tunnel_layer_extra(&ways[owner[i]].tags)))
             .collect();
@@ -1376,10 +1392,10 @@ fn plan_road_tunnels(
                 }
             }
         }
-        // A branch too short to ramp up to its portal from there, like an emergency exit,
-        // ends in the rock.
+        // A branch no road comes out of, like an emergency exit, too short to ramp up to its
+        // portal from there ends in the rock.
         for (i, open) in [(0, portal[0]), (n - 1, portal[1])] {
-            if !open || held.iter().any(|&(j, _)| j == i) {
+            if !open || met.contains(&path[i]) || held.iter().any(|&(j, _)| j == i) {
                 continue;
             }
             let ramp = held
@@ -1432,13 +1448,21 @@ fn plan_road_tunnels(
         } else {
             target
         };
-        let road_y: Vec<i32> = (0..n)
+        let mut road_y: Vec<i32> = (0..n)
             .map(|i| (target[i].round() as i32).min(terrain[i]).max(floor))
             .collect();
+        // Where pins sit too close for the grade, the carriageway still steps a block a cell.
+        for i in 1..n {
+            road_y[i] = road_y[i].min(road_y[i - 1] + TUNNEL_RAMP_STEP);
+        }
+        for i in (1..n).rev() {
+            road_y[i - 1] = road_y[i - 1].min(road_y[i] + TUNNEL_RAMP_STEP);
+        }
         let bare: Vec<bool> = (0..n)
             .map(|i| cover[i] - road_y[i] < TUNNEL_ROOF_COVER)
             .collect();
-        let open = portal_cuttings(&bare, portal);
+        let widest = run.iter().map(|&(w, _)| wall_off[w]).max().unwrap_or(1);
+        let open = portal_cuttings(&bare, portal, 2 * widest as usize + 1);
         let levels: Vec<f64> = road_y.iter().map(|&y| f64::from(y)).collect();
         beside.add(&path, &levels);
 
@@ -1532,10 +1556,16 @@ pub fn generate_highway_tunnel_shell(
     let palette = surface_palette(highway_type, &way.tags);
     let faces = tunnel_portal_faces(&pts, internal_endpoints);
 
+    // Only cells near an end: a tunnel turning back on itself passes the face's plane further in.
+    let face_reach = 2 * wall_off as usize + 2;
     for i in 0..n {
         let (bx, bz) = pts[i];
         let ry = road_y[i];
         let ceil_y = ry + TUNNEL_CEIL_OFFSET;
+        let faces = [
+            faces[0].filter(|_| i <= face_reach),
+            faces[1].filter(|_| last - i <= face_reach),
+        ];
 
         // Roof and placeholder are both stone brick, so clamp instead of whitelisting.
         let carve_top = if covered[i] {
@@ -6955,6 +6985,58 @@ mod tests {
     }
 
     #[test]
+    fn a_road_tunnel_turning_back_past_its_portal_keeps_its_walls() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let heights = (0..120)
+            .map(|z| {
+                (0..200)
+                    .map(|x| {
+                        let cut = (x <= 20 && (44..=56).contains(&z))
+                            || (x <= 10 && (74..=86).contains(&z));
+                        if cut {
+                            0.0
+                        } else {
+                            40.0
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let ground = crate::ground::Ground::new_elevation_test(heights, 200, 120);
+        let mut editor = tunnel_editor(&xzbbox, ground);
+        let mut bend = road_between(11, (20, 1), (100, 2), true);
+        for (id, x, z) in [(3, 100, 80), (4, 5, 80)] {
+            bend.nodes.push(ProcessedNode {
+                id,
+                tags: StdMap::new(),
+                x,
+                z,
+            });
+        }
+        let cells = build_tunnel(&mut editor, &xzbbox, &[bend]);
+        // Back past the first portal's plane, x < 20, the return leg is still walled in.
+        for c in cells
+            .iter()
+            .filter(|c| c.z == 80 && (12..=18).contains(&c.x))
+        {
+            for z in [80 - c.half_width - 1, 80 + c.half_width + 1] {
+                assert!(
+                    editor.check_for_block_absolute(c.x, c.road_y + 2, z, Some(TUNNEL_BRICK), None),
+                    "no wall at ({}, {z})",
+                    c.x
+                );
+            }
+        }
+        assert_eq!(
+            cells
+                .iter()
+                .filter(|c| c.z == 80 && (12..=18).contains(&c.x))
+                .count(),
+            7
+        );
+    }
+
+    #[test]
     fn a_road_tunnel_keeps_its_roof_where_the_ground_dips_over_it() {
         let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
         let ground = ground_along_x(|x| match x {
@@ -8032,7 +8114,7 @@ mod tests {
         for x in 46..=105 {
             let y = top_road(x).unwrap_or_else(|| panic!("no carriageway at all at x={x}"));
             assert!(
-                (y - prev).abs() <= 1,
+                (y - prev).abs() <= TUNNEL_RAMP_STEP,
                 "carriageway steps {} blocks between x={} and x={x}",
                 (y - prev).abs(),
                 x - 1

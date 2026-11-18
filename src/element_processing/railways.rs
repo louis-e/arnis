@@ -1733,11 +1733,15 @@ pub fn plan_rail_tunnels(
 
 /// What a long rail tunnel's grade is held to, in blocks per cell.
 const RAIL_TUNNEL_GRADE: f64 = 0.04;
+/// Covered cells a portal's cutting carries on past, about the bore's width.
+const CUTTING_GAP: usize = 2 * WALL_RADIUS as usize + 1;
+/// Cells from a portal whose shell can reach past its face.
+const FACE_REACH: usize = 2 * WALL_RADIUS as usize + 2;
 
-/// Tunnel ways joined end to end, as one line of cells.
 /// A way's track cells and the cell each of its nodes falls on.
 type WayCells = (Vec<(i32, i32)>, Vec<usize>);
 
+/// Tunnel ways joined end to end, as one line of cells.
 struct RailRun<'a> {
     path: Vec<(i32, i32)>,
     /// Each way: its index, where it starts in `path`, and whether it runs backwards.
@@ -1823,7 +1827,7 @@ impl<'a> RailRun<'a> {
                     .filter(|&b| b < g)
             })
             .collect();
-        let mut ceiling: Vec<f64> = (0..n)
+        let ceiling: Vec<f64> = (0..n)
             .map(|i| f64::from(bed[i].map_or(low_ground[i], |b| b.min(low_ground[i])) - depth))
             .collect();
         let stations = editor.stations();
@@ -1835,14 +1839,16 @@ impl<'a> RailRun<'a> {
                 n.saturating_sub(2)
             }
         };
-        // At a portal the floor comes up to the track outside.
+        // At a portal the floor comes up to the track outside, or to its bed along a platform.
         let portal = outer.map(|end| end.meets_surface);
-        for (i, open) in [(0, portal[0]), (n - 1, portal[1])] {
-            if open {
-                for k in [i, next_in(i)] {
-                    pins[k].get_or_insert(ground[i].max(lowest));
-                }
-            }
+        for (e, end) in outer.iter().enumerate().filter(|(e, _)| portal[*e]) {
+            let i = end_cell(n, e);
+            let bed = end.into.and_then(|(way, ..)| {
+                stations
+                    .as_ref()
+                    .and_then(|s| s.track_bed(way, path[i].0, path[i].1))
+            });
+            pin_end(&mut pins, e, end, bed.unwrap_or(ground[i]).max(lowest));
         }
         for piece in &self.pieces {
             let w = piece.0;
@@ -1855,7 +1861,9 @@ impl<'a> RailRun<'a> {
                         .as_ref()
                         .and_then(|s| s.joint_floor(path[i].0, path[i].1))
                     {
-                        ceiling[i] = ceiling[i].min(f64::from(j));
+                        for k in [i.saturating_sub(1), i, (i + 1).min(n - 1)] {
+                            pins[k].get_or_insert(j.max(lowest));
+                        }
                     }
                 }
             }
@@ -1872,16 +1880,7 @@ impl<'a> RailRun<'a> {
         }
         // Not the bed: each area carves its own water, so only the terrain reads alike from
         // both sides.
-        for [inside, outside] in joins.edge_crossings(path) {
-            let lower = if path[inside] < path[outside] {
-                inside
-            } else {
-                outside
-            };
-            for i in [inside, outside] {
-                pins[i].get_or_insert((ground[lower] - depth).max(lowest));
-            }
-        }
+        pin_area_edge(&mut pins, joins, path, |i| (ground[i] - depth).max(lowest));
         // Through a station hall the track keeps the hall's floor, and goes under another's.
         for piece in &self.pieces {
             let way = self.ways[piece.0].id;
@@ -1938,7 +1937,7 @@ impl<'a> RailRun<'a> {
         let bare: Vec<bool> = (0..n)
             .map(|i| floors[i] + INTERIOR_HEIGHT + 1 >= low_ground[i])
             .collect();
-        let open = portal_cuttings(&bare, portal);
+        let open = portal_cuttings(&bare, portal, CUTTING_GAP);
         let levels: Vec<f64> = floors.iter().map(|&f| f64::from(f)).collect();
         beside.add(path, &levels);
 
@@ -2037,11 +2036,12 @@ fn generate_rail_tunnel_shell(
         };
         (ends[e].meets_surface && at != inner).then_some((at, (at.0 - inner.0, at.1 - inner.1)))
     });
-    let outside = |x: i32, z: i32| {
-        faces
-            .iter()
-            .flatten()
-            .any(|&(at, out)| (x - at.0) * out.0 + (z - at.1) * out.1 > 0)
+    // Only cells near the end: a tunnel turning back on itself passes the face's plane further in.
+    let outside = |i: usize, x: i32, z: i32| {
+        faces.iter().enumerate().any(|(e, face)| {
+            let near = if e == 0 { i } else { n - 1 - i } <= FACE_REACH;
+            face.is_some_and(|(at, out)| near && (x - at.0) * out.0 + (z - at.1) * out.1 > 0)
+        })
     };
 
     for (i, &(bx, bz)) in cells.iter().enumerate() {
@@ -2067,7 +2067,7 @@ fn generate_rail_tunnel_shell(
         // Wall/ceiling blocks get random cracked/mossy variants for variety.
         for dx in -WALL_RADIUS..=WALL_RADIUS {
             for dz in -WALL_RADIUS..=WALL_RADIUS {
-                if outside(bx + dx, bz + dz) {
+                if outside(i, bx + dx, bz + dz) {
                     continue;
                 }
                 let top = editor.get_ground_level(bx + dx, bz + dz);
@@ -3054,6 +3054,39 @@ mod tests {
                 !editor.block_exists_absolute(x, floor + 2, 50),
                 "bore filled at x={x}"
             );
+        }
+    }
+
+    #[test]
+    fn a_tunnel_turning_back_past_its_portal_keeps_its_shell() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        for x in -10..210 {
+            for z in 30..=100 {
+                let cut = x <= 20 && (45..=55).contains(&z);
+                editor.register_road_surface_y(x, z, if cut { 0 } else { 40 });
+            }
+        }
+        let node = |id: u64, x: i32, z: i32| ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        let open = rail_between(1, (0, 1), (20, 2), OPEN);
+        let mut bend = rail_between(2, (20, 2), (100, 3), TUNNEL);
+        bend.nodes.push(node(4, 100, 80));
+        bend.nodes.push(node(5, 5, 80));
+        lay_planned(&mut editor, &[open, bend], None);
+        // Back past the portal's plane, x < 20, the return leg is still walled in.
+        for x in 8..=18 {
+            let floor = rail_ys_at(&editor, x..=x, 80)[0] - 1;
+            for z in [80 - WALL_RADIUS, 80 + WALL_RADIUS] {
+                assert!(
+                    editor.check_for_block_absolute(x, floor + 2, z, Some(SHELL), None),
+                    "no wall at ({x}, {z})"
+                );
+            }
         }
     }
 

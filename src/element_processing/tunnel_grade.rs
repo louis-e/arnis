@@ -1,7 +1,7 @@
 //! The levels a tunnel keeps from portal to portal: a steady grade, bent only where the ground
 //! over it falls away and the bore has to stay under its cover, as a real one is driven.
 
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 
 /// How a bore keeps to its grade and its cover.
 pub(crate) struct Bore {
@@ -204,13 +204,30 @@ const BESIDE_SPREAD: f64 = 6.0;
 #[derive(Default)]
 pub(crate) struct Beside {
     cells: FnvHashMap<(i32, i32), (f64, (i32, i32))>,
+    /// The `BESIDE_BLOCK` squares holding any cell, to skip the search far from them.
+    blocks: FnvHashSet<(i32, i32)>,
+}
+
+/// Side of the squares `Beside` looks for its cells in first.
+const BESIDE_BLOCK: i32 = 16;
+
+fn block_of(x: i32, z: i32) -> (i32, i32) {
+    (x.div_euclid(BESIDE_BLOCK), z.div_euclid(BESIDE_BLOCK))
 }
 
 impl Beside {
     pub(crate) fn add(&mut self, path: &[(i32, i32)], levels: &[f64]) {
         for (i, &c) in path.iter().enumerate() {
             self.cells.entry(c).or_insert((levels[i], heading(path, i)));
+            self.blocks.insert(block_of(c.0, c.1));
         }
+    }
+
+    /// Whether any cell lies within `reach` of (x, z), judged by the squares around it.
+    fn near(&self, x: i32, z: i32, reach: i32) -> bool {
+        let (x0, z0) = block_of(x - reach, z - reach);
+        let (x1, z1) = block_of(x + reach, z + reach);
+        (x0..=x1).any(|bx| (z0..=z1).any(|bz| self.blocks.contains(&(bx, bz))))
     }
 
     /// Pins for a run along `path` from the runs beside it within `reach`, running the same way
@@ -223,9 +240,15 @@ impl Beside {
         portal: [bool; 2],
     ) -> Vec<Option<f64>> {
         let n = path.len();
+        if self.cells.is_empty() {
+            return vec![None; n];
+        }
         let mut out: Vec<Option<f64>> = (0..n)
             .map(|i| {
                 let (x, z) = path[i];
+                if !self.near(x, z, reach) {
+                    return None;
+                }
                 let own = heading(path, i);
                 let mut best: Option<(i32, f64)> = None;
                 for dx in -reach..=reach {
@@ -357,17 +380,24 @@ pub(crate) fn planning_order(size: &[(usize, u64)], nodes: &[Vec<u64>]) -> Vec<u
     order
 }
 
-/// Cells in the cutting at a portal: the run from each portal end over which `bare` holds.
-pub(crate) fn portal_cuttings(bare: &[bool], portal: [bool; 2]) -> Vec<bool> {
-    let mut open = vec![false; bare.len()];
-    if portal[0] {
-        for (o, _) in open.iter_mut().zip(bare).take_while(|(_, &b)| b) {
-            *o = true;
-        }
-    }
-    if portal[1] {
-        for (o, _) in open.iter_mut().zip(bare).rev().take_while(|(_, &b)| b) {
-            *o = true;
+/// Cells in the cutting at a portal: those `bare` from each portal end in, past any hump of
+/// covered cells shorter than `gap`, so a bump in the ground does not end the cutting.
+pub(crate) fn portal_cuttings(bare: &[bool], portal: [bool; 2], gap: usize) -> Vec<bool> {
+    let n = bare.len();
+    let mut open = vec![false; n];
+    for e in (0..2).filter(|&e| portal[e]) {
+        let mut covered = 0;
+        for d in 0..n {
+            let i = if e == 0 { d } else { n - 1 - d };
+            if bare[i] {
+                open[i] = true;
+                covered = 0;
+            } else {
+                covered += 1;
+                if covered >= gap {
+                    break;
+                }
+            }
         }
     }
     open
@@ -599,14 +629,19 @@ mod tests {
 
     #[test]
     fn only_the_cells_open_from_a_portal_are_its_cutting() {
-        let bare = [true, true, false, true, false, true];
+        let bare = [true, false, true, false, false, true, true, false];
         assert_eq!(
-            portal_cuttings(&bare, [true, false]),
-            [true, true, false, false, false, false]
+            portal_cuttings(&bare, [true, false], 2),
+            [true, false, true, false, false, false, false, false]
         );
         assert_eq!(
-            portal_cuttings(&bare, [true, true]),
-            [true, true, false, false, false, true]
+            portal_cuttings(&bare, [false, true], 2),
+            [false, false, false, false, false, true, true, false]
         );
+        assert_eq!(
+            portal_cuttings(&bare, [true, false], 3),
+            [true, false, true, false, false, true, true, false]
+        );
+        assert_eq!(portal_cuttings(&bare, [false, false], 3), [false; 8]);
     }
 }
