@@ -780,11 +780,6 @@ impl<'a> WorldEditor<'a> {
         self.water_areas = Some(water);
     }
 
-    /// The water OSM maps as areas, where it is known.
-    pub fn water_areas(&self) -> Option<Arc<crate::floodfill_cache::CoordinateBitmap>> {
-        self.water_areas.clone()
-    }
-
     /// Whether water is at (x, z): the land cover's, or an area OSM maps, block for block.
     pub fn water_at(&self, x: i32, z: i32) -> bool {
         self.water_areas.as_ref().is_some_and(|w| w.contains(x, z)) || self.is_mapped_water(x, z)

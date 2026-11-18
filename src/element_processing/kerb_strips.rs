@@ -46,10 +46,6 @@ impl KerbStrips {
     pub fn cells(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
         self.0.values().flatten().map(|c| c.cell)
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
 }
 
 /// A way that may run beside a road as its sidewalk: a footway other than a crossing, a
@@ -107,6 +103,10 @@ fn stamp(bits: &mut CoordinateBitmap, way: &ProcessedWay, highway_type: &str, sc
         }
     }
 }
+
+/// What a sidewalk finds to one side of a point on it, with its direction there and the
+/// way out to that side.
+type Found = (Reach, (f32, f32), (f32, f32));
 
 /// What a sidewalk finds out to one side of a point on it: how far out its own edge and the
 /// road are, how many blocks lie between, and the last of its own cells on the way out.
@@ -232,7 +232,7 @@ pub fn collect(
             let mut cells: Vec<StripCell> = Vec::new();
             for side in [1.0f32, -1.0] {
                 // Its direction over a few blocks either way, and what it finds to this side.
-                let found: Vec<Option<(Reach, (f32, f32), (f32, f32))>> = (0..points.len())
+                let found: Vec<Option<Found>> = (0..points.len())
                     .map(|i| {
                         let (a, b) = (
                             points[i.saturating_sub(3)],
@@ -439,6 +439,6 @@ mod tests {
             ),
         ];
         let found = strips(&elements, &xzbbox, &CoordinateBitmap::new_empty());
-        assert!(found.is_empty());
+        assert_eq!(found.cells().count(), 0);
     }
 }
