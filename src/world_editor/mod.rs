@@ -48,7 +48,7 @@ use fastnbt::{IntArray, Value};
 use fnv::{FnvHashMap, FnvHashSet};
 use serde::Serialize;
 use std::collections::{hash_map::Entry, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "gui")]
@@ -1884,6 +1884,11 @@ impl<'a> WorldEditor<'a> {
         self.format
     }
 
+    /// Where the world was written: for Bedrock, the archive the save settled on.
+    pub fn world_dir(&self) -> &Path {
+        &self.world_dir
+    }
+
     /// Consume the WorldEditor and return the underlying WorldToModify.
     /// Used for tile-based parallel processing where tile results need to be merged.
     pub(crate) fn into_world(self) -> WorldToModify {
@@ -3567,18 +3572,22 @@ impl<'a> WorldEditor<'a> {
         println!("{} Saving Bedrock world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving Bedrock world...");
 
-        if let Err(error) = self.save_bedrock_internal() {
-            // The GUI shows this again and cuts it at 35 characters, so the cause leads.
-            let user_msg = format!("Bedrock save: {} ({error})", error.reason());
-            eprintln!("{user_msg}");
-            #[cfg(feature = "gui")]
-            emit_gui_error(&user_msg);
-            return Err(user_msg.into());
+        match self.save_bedrock_internal() {
+            // The archive can end up under another name than the one asked for.
+            Ok(archive) => self.world_dir = archive,
+            Err(error) => {
+                // The GUI shows this again and cuts it at 35 characters, so the cause leads.
+                let user_msg = format!("Bedrock save: {} ({error})", error.reason());
+                eprintln!("{user_msg}");
+                #[cfg(feature = "gui")]
+                emit_gui_error(&user_msg);
+                return Err(user_msg.into());
+            }
         }
         Ok(())
     }
 
-    fn save_bedrock_internal(&mut self) -> Result<(), BedrockSaveError> {
+    fn save_bedrock_internal(&mut self) -> Result<PathBuf, BedrockSaveError> {
         // Use the stored level name if available, otherwise extract from path
         let level_name = self.bedrock_level_name.clone().unwrap_or_else(|| {
             self.world_dir

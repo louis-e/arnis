@@ -3046,6 +3046,11 @@ pub fn generate_world_with_options(
         return Err(e.to_string());
     }
     bench.mark("save");
+    // A Bedrock archive that could not be replaced leaves the world under another name.
+    let output_path = match world_format {
+        WorldFormat::BedrockMcWorld => editor.world_dir().to_path_buf(),
+        _ => output_path,
+    };
 
     if args.benchmark {
         let (built, slow) = crate::world_editor::section_counters();

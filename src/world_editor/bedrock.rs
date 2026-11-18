@@ -532,13 +532,13 @@ impl BedrockWriter {
         self
     }
 
-    /// Writes the world to disk
+    /// Writes the world to disk and returns the archive it went to.
     pub fn write_world(
         &mut self,
         world: &WorldToModify,
         xzbbox: &XZBBox,
         llbbox: &LLBBox,
-    ) -> Result<(), BedrockSaveError> {
+    ) -> Result<PathBuf, BedrockSaveError> {
         self.ground_origin
             .get_or_insert((xzbbox.min_x(), xzbbox.min_z()));
         self.center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
@@ -550,7 +550,7 @@ impl BedrockWriter {
 
         emit_gui_progress_update(99.0, "Saving Bedrock world...");
         drop(staging);
-        Ok(())
+        Ok(self.mcworld_path.clone())
     }
 
     /// Assembles the world in the private staging folder, or beside the archive if that fails
@@ -1294,17 +1294,41 @@ impl BedrockWriter {
 
     /// Packages the staging folder beside the archive and renames it into place, so a
     /// failure leaves the previous archive of the same name as it was.
-    fn package_mcworld(&self, dir: &Path) -> Result<(), BedrockSaveError> {
+    fn package_mcworld(&mut self, dir: &Path) -> Result<(), BedrockSaveError> {
         let mut part = self.mcworld_path.clone().into_os_string();
         part.push(".part");
         let part = PathBuf::from(part);
         let result = self
             .write_mcworld_archive(dir, &part)
-            .and_then(|()| Ok(retry_transient(|| fs::rename(&part, &self.mcworld_path))?));
+            .and_then(|()| self.place_archive(&part));
         if result.is_err() {
             let _ = fs::remove_file(&part);
         }
         result
+    }
+
+    /// Renames the finished archive over an earlier one of the same name. One that cannot be
+    /// replaced, being open elsewhere or read-only on Windows, is kept, and the world takes
+    /// the first free "<name> (n).mcworld" instead.
+    fn place_archive(&mut self, part: &Path) -> Result<(), BedrockSaveError> {
+        let Err(e) = retry_transient(|| fs::rename(part, &self.mcworld_path)) else {
+            return Ok(());
+        };
+        // With nothing in the way the folder itself is the trouble, and another name won't help.
+        if fs::symlink_metadata(&self.mcworld_path).is_err() {
+            return Err(e.into());
+        }
+        let Some(free) = free_numbered_path(&self.mcworld_path) else {
+            return Err(e.into());
+        };
+        retry_transient(|| fs::rename(part, &free)).map_err(|_| e)?;
+        eprintln!(
+            "Warning: '{}' could not be replaced, so the world was saved as '{}'.",
+            self.mcworld_path.display(),
+            free.display()
+        );
+        self.mcworld_path = free;
+        Ok(())
     }
 
     fn write_mcworld_archive(&self, dir: &Path, archive: &Path) -> Result<(), BedrockSaveError> {
@@ -1412,6 +1436,14 @@ impl BedrockWriter {
         writer.finish()?.sync_all()?;
         Ok(())
     }
+}
+
+/// The first free "<name> (n).mcworld" beside `archive`, from 2.
+fn free_numbered_path(archive: &Path) -> Option<PathBuf> {
+    let stem = archive.file_stem()?.to_str()?;
+    (2..1000)
+        .map(|n| archive.with_file_name(format!("{stem} ({n}).mcworld")))
+        .find(|path| fs::symlink_metadata(path).is_err())
 }
 
 /// Appends the extension rather than replacing it, level names can contain dots.
@@ -2260,27 +2292,90 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_save_keeps_what_was_at_the_archive_path() {
+    fn what_is_at_the_archive_path_and_cannot_be_replaced_is_kept() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut writer = test_writer(tmp.path().join("Arnis Test.mcworld"));
+        let asked = tmp.path().join("Arnis Test.mcworld");
+        let mut writer = test_writer(asked.clone());
         // A folder where the archive goes cannot be replaced by a file.
-        fs::create_dir_all(writer.mcworld_path.join("keep")).unwrap();
+        fs::create_dir_all(asked.join("keep")).unwrap();
+        fs::write(tmp.path().join("Arnis Test (2).mcworld"), b"earlier").unwrap();
 
         let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
         let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
-        assert!(writer
+        let saved = writer
             .write_world(&WorldToModify::default(), &xzbbox, &llbbox)
-            .is_err());
-        assert!(writer.mcworld_path.join("keep").is_dir());
-        let leftovers: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap();
+        assert_eq!(saved, tmp.path().join("Arnis Test (3).mcworld"));
+        assert!(ZipArchive::new(File::open(&saved).unwrap()).is_ok());
+        assert!(asked.join("keep").is_dir());
+        let mut left: Vec<_> = fs::read_dir(tmp.path())
             .unwrap()
             .flatten()
-            .map(|e| e.file_name())
+            .map(|e| e.file_name().into_string().unwrap())
             .collect();
+        left.sort();
         assert_eq!(
-            leftovers,
-            vec![std::ffi::OsString::from("Arnis Test.mcworld")]
+            left,
+            [
+                "Arnis Test (2).mcworld",
+                "Arnis Test (3).mcworld",
+                "Arnis Test.mcworld"
+            ]
         );
+    }
+
+    #[test]
+    fn an_archive_that_can_be_replaced_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let asked = tmp.path().join("Arnis Test.mcworld");
+        fs::write(&asked, b"earlier").unwrap();
+        let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let saved = test_writer(asked.clone())
+            .write_world(&WorldToModify::default(), &xzbbox, &llbbox)
+            .unwrap();
+        assert_eq!(saved, asked);
+        assert!(ZipArchive::new(File::open(&asked).unwrap()).is_ok());
+    }
+
+    /// Windows refuses to rename over an archive another program holds, or a read-only one.
+    #[cfg(windows)]
+    #[test]
+    fn an_archive_held_elsewhere_or_read_only_is_kept() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+
+        let held = tmp.path().join("Arnis Held.mcworld");
+        fs::write(&held, b"earlier").unwrap();
+        // Shared for reading and writing but not deleting, as C's fopen opens a file.
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0x1 | 0x2)
+            .open(&held)
+            .unwrap();
+        let saved = test_writer(held.clone())
+            .write_world(&WorldToModify::default(), &xzbbox, &llbbox)
+            .unwrap();
+        assert_eq!(saved, tmp.path().join("Arnis Held (2).mcworld"));
+        drop(handle);
+        assert_eq!(fs::read(&held).unwrap(), b"earlier");
+
+        let read_only = tmp.path().join("Arnis Locked.mcworld");
+        fs::write(&read_only, b"earlier").unwrap();
+        let mut permissions = fs::metadata(&read_only).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&read_only, permissions.clone()).unwrap();
+        let saved = test_writer(read_only.clone())
+            .write_world(&WorldToModify::default(), &xzbbox, &llbbox)
+            .unwrap();
+        assert_eq!(saved, tmp.path().join("Arnis Locked (2).mcworld"));
+        assert_eq!(fs::read(&read_only).unwrap(), b"earlier");
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&read_only, permissions).unwrap();
     }
 
     #[test]

@@ -247,28 +247,9 @@ pub fn build_bedrock_output(
         body.display_name().to_string()
     };
     let safe_name = sanitize_for_filename(&area_name);
+    let filename = format!("Arnis {safe_name}.mcworld");
     let lvl_name = format!("Arnis World: {safe_name}");
-    (free_mcworld_path(&output_dir, &safe_name), lvl_name)
-}
-
-/// `Arnis {name}.mcworld` in `dir`, or `Arnis {name} (n).mcworld` when an earlier archive
-/// of that name cannot be replaced, so the save does not fail at its last step.
-fn free_mcworld_path(dir: &Path, name: &str) -> PathBuf {
-    // Windows will not replace a file another program has open, or a read-only one.
-    let in_the_way =
-        |path: &Path| path.exists() && fs::OpenOptions::new().write(true).open(path).is_err();
-    let mut n = 1;
-    loop {
-        let file = match n {
-            1 => format!("Arnis {name}.mcworld"),
-            _ => format!("Arnis {name} ({n}).mcworld"),
-        };
-        let path = dir.join(file);
-        if !in_the_way(&path) {
-            return path;
-        }
-        n += 1;
-    }
+    (output_dir.join(&filename), lvl_name)
 }
 
 /// Creates a new Java Edition world in the given base directory.
@@ -2086,58 +2067,6 @@ mod tests {
         let (path, level) = build_bedrock_output(&bbox, PathBuf::from("out"), CelestialBody::Moon);
         assert_eq!(path, PathBuf::from("out").join("Arnis Moon.mcworld"));
         assert_eq!(level, "Arnis World: Moon");
-    }
-
-    #[test]
-    fn a_bedrock_archive_that_cannot_be_replaced_gets_a_new_name() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        let first = dir.join("Arnis Here.mcworld");
-        assert_eq!(free_mcworld_path(dir, "Here"), first);
-        // An earlier archive of the same name is replaced as before.
-        fs::write(&first, b"earlier").unwrap();
-        assert_eq!(free_mcworld_path(dir, "Here"), first);
-        fs::create_dir(dir.join("Arnis There.mcworld")).unwrap();
-        assert_eq!(
-            free_mcworld_path(dir, "There"),
-            dir.join("Arnis There (2).mcworld")
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn a_bedrock_archive_open_elsewhere_or_read_only_is_left_alone() {
-        use std::os::windows::fs::OpenOptionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        // The rename the save ends with fails on both, which the new name avoids.
-        let part = dir.join("part");
-        fs::write(&part, b"new").unwrap();
-        let held = dir.join("Arnis Held.mcworld");
-        fs::write(&held, b"earlier").unwrap();
-        // Opened without sharing, as a program reading it may.
-        let handle = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(&held)
-            .unwrap();
-        assert!(fs::rename(&part, &held).is_err());
-        let next = free_mcworld_path(dir, "Held");
-        assert_eq!(next, dir.join("Arnis Held (2).mcworld"));
-        drop(handle);
-        let read_only = dir.join("Arnis Locked.mcworld");
-        fs::write(&read_only, b"earlier").unwrap();
-        let mut permissions = fs::metadata(&read_only).unwrap().permissions();
-        permissions.set_readonly(true);
-        fs::set_permissions(&read_only, permissions.clone()).unwrap();
-        assert!(fs::rename(&part, &read_only).is_err());
-        assert_eq!(
-            free_mcworld_path(dir, "Locked"),
-            dir.join("Arnis Locked (2).mcworld")
-        );
-        #[allow(clippy::permissions_set_readonly_false)]
-        permissions.set_readonly(false);
-        fs::set_permissions(&read_only, permissions).unwrap();
     }
 
     #[test]
