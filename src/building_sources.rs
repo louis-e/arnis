@@ -78,6 +78,11 @@ pub fn merge(
         );
     }
 
+    // No sheds or pools to place: skip the world-wide water and road scans.
+    let candidates = crate::survey::elements::candidates(ground, xzbbox);
+    if candidates.is_empty() {
+        return;
+    }
     // Mapped water and the land cover's: no shed or pool of the laser's stands there.
     let mapped_water =
         crate::floodfill_cache::collect_tree_keep_clear(parsed_elements, xzbbox, scale, None, 0);
@@ -88,12 +93,8 @@ pub fn merge(
                 z - xzbbox.min_z(),
             )) == crate::land_cover::LC_WATER
     };
-    let (measured, on_paved) = crate::survey::elements::merge(
-        crate::survey::elements::candidates(ground, xzbbox),
-        parsed_elements,
-        scale,
-        &water,
-    );
+    let (measured, on_paved) =
+        crate::survey::elements::merge(candidates, parsed_elements, scale, &water);
     if !measured.is_empty() {
         println!(
             "  Added {} sheds, garages and pools from garden detail",
