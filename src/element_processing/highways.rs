@@ -4335,6 +4335,10 @@ pub fn collect_roads_at_grade(
 /// ways; with them, every way, a road's parking rows and second lane stopping at those
 /// sidewalks. With `lanes_only`, only the carriageway lanes, for a caller that reads nothing
 /// else: the rest of each stamp is neither stamped nor looked into for a cut.
+///
+/// The cells come as a union: one may be handed over more than once, and where the stamps
+/// along a way overlap, a cell the core of one already handed over, lanes and all, is not
+/// handed over again for the next.
 #[allow(clippy::too_many_arguments)]
 fn stamp_highway_surfaces(
     elements: &[ProcessedElement],
@@ -4451,10 +4455,12 @@ fn stamp_highway_surfaces(
         }
         let mut segment = 0;
         // Whether a cell past the core is cut is the cell's own, and the stamps along a way
-        // overlap: what one point found, by offset in its stamp, the next reads back.
-        let side = (2 * block_range + 1) as usize;
-        let at =
-            |dx: i32, dz: i32| (dz + block_range) as usize * side + (dx + block_range) as usize;
+        // overlap: what one point found, by offset in its stamp, the next reads back. The
+        // tables by offset reach a block past the stamp's square, so the offset a cell lay at
+        // in the stamp a step back is its own index shifted.
+        let reach = block_range + 1;
+        let side = (2 * reach + 1) as usize;
+        let at = |dx: i32, dz: i32| (dz + reach) as usize * side + (dx + reach) as usize;
         let (mut found, mut last_found) = match kept_by_walls {
             Some(_) => (
                 vec![Verdict::Unknown; side * side],
@@ -4462,6 +4468,56 @@ fn stamp_highway_surfaces(
             ),
             None => (Vec::new(), Vec::new()),
         };
+        // The walk `cut_outward` takes in from each offset of the stamp's square: the next
+        // offset in, `IN_CORE` at the core and `END` where it stops short of it. Worked out
+        // once a way.
+        const IN_CORE: usize = usize::MAX;
+        const END: usize = usize::MAX - 1;
+        let offset = |k: usize| ((k % side) as i32 - reach, (k / side) as i32 - reach);
+        let walk_in: Vec<usize> = kept_by_walls.map_or_else(Vec::new, |core| {
+            (0..side * side)
+                .map(|k| {
+                    let (dx, dz) = offset(k);
+                    if in_road_stamp(dx, dz, core) {
+                        return IN_CORE;
+                    }
+                    let (nx, nz) = inward(dx, dz);
+                    if (nx, nz) == (dx, dz) {
+                        END
+                    } else {
+                        at(nx, nz)
+                    }
+                })
+                .collect()
+        });
+        let offsets: Vec<(i32, i32)> = (0..walk_in.len()).map(offset).collect();
+        // What each offset of the stamp's square is known to have handed over, as of the last
+        // point and of this one: 0 nothing, 1 the cell, 2 the cell as a lane. The core's cells
+        // always are, the sweep handing them over; a cell past the core is where its walk in
+        // finds no cut, or where the stamp a step back had handed it over already, which then
+        // is not looked into again, the cells coming as a union. A drowned crossing, which
+        // gives up cells to the water point by point, looks into every one.
+        let levels_of = |cells: &[(i32, i32, bool, bool)], base: &mut Vec<u8>| {
+            base.clear();
+            base.resize(walk_in.len(), 0);
+            if drowned.is_none() && !walk_in.is_empty() {
+                for &(dx, dz, _, lanes) in cells.iter().filter(|c| !c.2) {
+                    base[at(dx, dz)] = 1 + u8::from(lanes);
+                }
+            }
+        };
+        let mut base: Vec<u8> = Vec::new();
+        if !lopsided {
+            levels_of(&stamp_cells, &mut base);
+        }
+        let (mut covered, mut last_covered) = (vec![0u8; walk_in.len()], vec![0u8; walk_in.len()]);
+        // Whether each offset's walk in meets a cut, as this point finds it: 0 not yet known,
+        // 1 no, 2 yes.
+        let mut cut_at = vec![0u8; walk_in.len()];
+        let mut walked: Vec<usize> = Vec::new();
+        // The core's cells, which no cut reaches, are swept along the way; a drowned crossing,
+        // which gives up some of them point by point, lays them at every point.
+        let mut sweep: Option<Sweep> = None;
         let mut last: Option<(i32, i32)> = None;
         for (i, &(bx, bz)) in points.iter().enumerate() {
             let skip_water = drowned_points.as_ref().is_some_and(|d| d[i]);
@@ -4473,54 +4529,179 @@ fn stamp_highway_surfaces(
                     segment += 1;
                 }
                 cells_along(segments[segment].1, &mut stamp_cells);
+                levels_of(&stamp_cells, &mut base);
+                sweep = None;
                 segment += 1;
             }
+            if drowned.is_none() {
+                let sweep = sweep.get_or_insert_with(|| {
+                    Sweep::new(
+                        block_range,
+                        stamp_cells
+                            .iter()
+                            .filter(|c| !c.2)
+                            .map(|&(dx, dz, _, lanes)| (dx, dz, lanes))
+                            .collect(),
+                    )
+                });
+                for &(dx, dz, lanes) in sweep.step_to(bx, bz) {
+                    stamp(lanes, bx + dx, bz + dz);
+                }
+            } else {
+                for &(dx, dz, _, lanes) in stamp_cells.iter().filter(|c| !c.2) {
+                    let (x, z) = (bx + dx, bz + dz);
+                    if skip_water && drowned.is_some_and(|e| fills(e, x, z)) {
+                        continue;
+                    }
+                    stamp(lanes, x, z);
+                }
+            }
+            let Some(core) = kept_by_walls else {
+                continue;
+            };
             found.fill(Verdict::Unknown);
-            for &(dx, dz, past_core, lanes) in &stamp_cells {
+            cut_at.fill(0);
+            covered.copy_from_slice(&base);
+            // Where an offset here lay in the stamp a step back, the last point being a step away.
+            let shift = last
+                .map(|(lx, lz)| (bx - lx, bz - lz))
+                .filter(|&(sx, sz)| sx.abs() <= 1 && sz.abs() <= 1)
+                .map(|(sx, sz)| sz as isize * side as isize + sx as isize);
+            let back_of = |k: usize| shift.map(|d| k.wrapping_add_signed(d));
+            for &(dx, dz, _, lanes) in stamp_cells.iter().filter(|c| c.2) {
+                let k = at(dx, dz);
+                let wanted = 1 + u8::from(lanes);
+                let before = if drowned.is_none() {
+                    back_of(k).map_or(0, |j| last_covered[j])
+                } else {
+                    0
+                };
+                covered[k] = before;
+                if before >= wanted {
+                    continue;
+                }
                 let (x, z) = (bx + dx, bz + dz);
                 if skip_water && drowned.is_some_and(|e| fills(e, x, z)) {
                     continue;
                 }
-                if let Some(core) = kept_by_walls.filter(|_| past_core) {
-                    let cut = cut_outward(core, dx, dz, |cx, cz| {
-                        let slot = at(cx, cz);
-                        if found[slot] == Verdict::Unknown {
-                            let (wx, wz) = (bx + cx, bz + cz);
-                            found[slot] = last
-                                .map(|(lx, lz)| (wx - lx, wz - lz))
-                                .filter(|&(ox, oz)| {
-                                    ox.abs() <= block_range && oz.abs() <= block_range
-                                })
-                                .map_or(Verdict::Unknown, |(ox, oz)| last_found[at(ox, oz)]);
-                        }
-                        if found[slot] == Verdict::Unknown {
-                            let (wx, wz) = (bx + cx, bz + cz);
-                            found[slot] = if cut_beside(
-                                |sx, sz| near_centreline(way, core, sx, sz),
-                                building_footprints,
-                                editor,
-                                |px, pz| paths.is_some_and(|p| p.contains(px, pz)),
-                                verges,
-                                wx,
-                                wz,
-                            ) {
-                                Verdict::Cut
-                            } else {
-                                Verdict::Kept
-                            };
-                        }
-                        found[slot] == Verdict::Cut
-                    });
-                    if cut {
-                        skipped(x, z);
-                        continue;
+                // `cut_outward`'s walk in, stopping at the first offset whose cut is known.
+                let mut j = k;
+                let cut = loop {
+                    if walk_in[j] == IN_CORE {
+                        break false;
                     }
+                    if cut_at[j] != 0 {
+                        break cut_at[j] == 2;
+                    }
+                    if found[j] == Verdict::Unknown {
+                        found[j] = back_of(j).map_or(Verdict::Unknown, |o| last_found[o]);
+                    }
+                    if found[j] == Verdict::Unknown {
+                        let (cx, cz) = offsets[j];
+                        found[j] = if cut_beside(
+                            |sx, sz| near_centreline(way, core, sx, sz),
+                            building_footprints,
+                            editor,
+                            |px, pz| paths.is_some_and(|p| p.contains(px, pz)),
+                            verges,
+                            bx + cx,
+                            bz + cz,
+                        ) {
+                            Verdict::Cut
+                        } else {
+                            Verdict::Kept
+                        };
+                    }
+                    walked.push(j);
+                    if found[j] == Verdict::Cut {
+                        break true;
+                    }
+                    if walk_in[j] == END {
+                        break false;
+                    }
+                    j = walk_in[j];
+                };
+                for w in walked.drain(..) {
+                    cut_at[w] = 1 + u8::from(cut);
                 }
-                stamp(lanes, x, z);
+                if cut {
+                    skipped(x, z);
+                } else {
+                    stamp(lanes, x, z);
+                    covered[k] = wanted;
+                }
             }
+            std::mem::swap(&mut covered, &mut last_covered);
             std::mem::swap(&mut found, &mut last_found);
             last = Some((bx, bz));
         }
+    }
+}
+
+/// One stamp laid at every point of a run along a way, a block apart. At each point it hands
+/// over only the cells the stamp a block back left out, or covered off the lanes where they
+/// are lanes here: the run's cells come out as the union of its stamps, each with its lanes,
+/// for a fraction of the whole stamp at every point.
+pub(crate) struct Sweep {
+    half: i32,
+    side: usize,
+    /// By offset in the stamp's square: 0 off the stamp, 1 on it, 2 on its lanes.
+    member: Vec<u8>,
+    cells: Vec<(i32, i32, bool)>,
+    /// The cells handed over after each of the nine steps, worked out as they come.
+    fresh: [Option<Vec<(i32, i32, bool)>>; 9],
+    last: Option<(i32, i32)>,
+}
+
+impl Sweep {
+    /// A sweep of `cells`: offsets within `half` of the point along both axes, with whether
+    /// each is a lane.
+    pub(crate) fn new(half: i32, cells: Vec<(i32, i32, bool)>) -> Self {
+        let side = (2 * half + 1) as usize;
+        let mut member = vec![0u8; side * side];
+        for &(dx, dz, lanes) in &cells {
+            let m = &mut member[(dz + half) as usize * side + (dx + half) as usize];
+            *m = (*m).max(1 + u8::from(lanes));
+        }
+        Self {
+            half,
+            side,
+            member,
+            cells,
+            fresh: Default::default(),
+            last: None,
+        }
+    }
+
+    /// The cells to hand over at (x, z): every one at the run's first point or after a jump,
+    /// else those the stamp a step back left out or left off its lanes.
+    pub(crate) fn step_to(&mut self, x: i32, z: i32) -> &[(i32, i32, bool)] {
+        let step = self.last.map(|(lx, lz)| (x - lx, z - lz));
+        self.last = Some((x, z));
+        let Some((sx, sz)) = step.filter(|&(sx, sz)| sx.abs() <= 1 && sz.abs() <= 1) else {
+            return &self.cells;
+        };
+        let k = ((sz + 1) * 3 + sx + 1) as usize;
+        if self.fresh[k].is_none() {
+            let (half, side, member) = (self.half, self.side, &self.member);
+            // A cell at offset (dx, dz) here lay at (dx + sx, dz + sz) in the stamp a step back.
+            let fresh = self
+                .cells
+                .iter()
+                .copied()
+                .filter(|&(dx, dz, lanes)| {
+                    let (bx, bz) = (dx + sx, dz + sz);
+                    let back = if bx.abs() <= half && bz.abs() <= half {
+                        member[(bz + half) as usize * side + (bx + half) as usize]
+                    } else {
+                        0
+                    };
+                    back < 1 + u8::from(lanes)
+                })
+                .collect();
+            self.fresh[k] = Some(fresh);
+        }
+        self.fresh[k].as_deref().unwrap_or_default()
     }
 }
 
