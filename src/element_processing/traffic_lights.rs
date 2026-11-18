@@ -851,7 +851,8 @@ fn walkways(elements: &[ProcessedElement]) -> Walkways {
 }
 
 /// The first cell off the road surface beside `origin`, or the near edge of a sidewalk
-/// mapped beside it, and how far out it is.
+/// mapped beside it, and how far out it is. Where the road stops short of its kerb, as at a
+/// wall or a verge, the cell next to where it stops.
 fn kerb_cell(
     origin: (f64, f64),
     side: (f64, f64),
@@ -859,11 +860,31 @@ fn kerb_cell(
     road_mask: &RoadMaskBitmap,
     paths: &RoadMaskBitmap,
 ) -> Option<(i32, i32, i32)> {
-    (half + 1..=half + KERB_REACH).find_map(|off| {
-        let x = (origin.0 + side.0 * off as f64).floor() as i32;
-        let z = (origin.1 + side.1 * off as f64).floor() as i32;
-        (!road_mask.contains(x, z) || paths.contains(x, z)).then_some((x, z, off))
-    })
+    let cell = |off: i32| {
+        (
+            (origin.0 + side.0 * off as f64).floor() as i32,
+            (origin.1 + side.1 * off as f64).floor() as i32,
+        )
+    };
+    let off = (half + 1..=half + KERB_REACH).find(|&off| {
+        let (x, z) = cell(off);
+        !road_mask.contains(x, z) || paths.contains(x, z)
+    })?;
+    let (x, z) = cell(off);
+    let off = if road_mask.contains(x, z) {
+        off
+    } else {
+        (1..off)
+            .rev()
+            .take_while(|&k| {
+                let (x, z) = cell(k);
+                !road_mask.contains(x, z)
+            })
+            .last()
+            .unwrap_or(off)
+    };
+    let (x, z) = cell(off);
+    Some((x, z, off))
 }
 
 /// In a junction paved wall to wall a head stands on the nearest traffic island, this
@@ -1237,6 +1258,22 @@ mod tests {
         assert_eq!(
             kerb_cell(origin, (0.0, 1.0), 3, &mask, &paths),
             Some((0, 4, 4))
+        );
+    }
+
+    #[test]
+    fn a_pole_stands_where_the_road_stops_short_of_its_kerb() {
+        // Paved five blocks out on the north side, two on the south, as a road with its cars
+        // parked on one side, or cut back at a verge.
+        let mask = road_mask((-30..=30).flat_map(|x| (-5..=2).map(move |z| (x, z))));
+        let none = RoadMaskBitmap::new_empty();
+        assert_eq!(
+            kerb_cell((0.5, 0.5), (0.0, 1.0), 5, &mask, &none),
+            Some((0, 3, 3))
+        );
+        assert_eq!(
+            kerb_cell((0.5, 0.5), (0.0, -1.0), 5, &mask, &none),
+            Some((0, -6, 6))
         );
     }
 

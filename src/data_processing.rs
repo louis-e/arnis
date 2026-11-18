@@ -1414,6 +1414,14 @@ pub fn generate_world_with_options(
     editor.index_standing_trunks();
     let standing_trunks = editor.standing_trunks();
 
+    // What a road's strip past its core stops at: the walls on the ground, not a roof on
+    // posts or a part bridging the street, which the road runs on under.
+    let wall_footprints = Arc::new(flood_fill_cache.collect_wall_footprints(&elements, &clip_bbox));
+    editor.set_wall_footprints(Arc::clone(&wall_footprints));
+    // And the water it stops at, block for block.
+    let water_areas = Arc::new(flood_fill_cache.collect_water_areas(&elements, &clip_bbox));
+    editor.set_water_areas(Arc::clone(&water_areas));
+
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
@@ -1421,7 +1429,7 @@ pub fn generate_world_with_options(
     // among them come in the same pass: trees keep their trunks out of them, mapped
     // street trees included, and leave more headroom over them than over a footway.
     let highways::RoadCoords {
-        roads: road_mask,
+        roads: mut road_mask,
         carriageways: carriageway,
         paths: mapped_paths,
         cut: road_cut,
@@ -1432,8 +1440,22 @@ pub fn generate_world_with_options(
         &clip_bbox,
         args.scale,
         args.water.water_detail,
-        &building_footprints,
+        &wall_footprints,
     );
+    // Sidewalks a block or two off the road they run beside are paved out to it.
+    let kerb_strips = Arc::new(crate::element_processing::kerb_strips::collect(
+        &elements,
+        &editor,
+        &clip_bbox,
+        args.scale,
+        &road_mask,
+        &building_footprints,
+        &flood_fill_cache.collect_kerb_blockers(&elements, &clip_bbox),
+    ));
+    for (x, z) in kerb_strips.cells() {
+        road_mask.set(x, z);
+    }
+    editor.set_kerb_strips(Arc::clone(&kerb_strips));
     let road_mask = Arc::new(road_mask);
     let carriageway = Arc::new(if carriageway.is_empty() {
         CoordinateBitmap::new_empty()
@@ -2090,6 +2112,9 @@ pub fn generate_world_with_options(
             tile_editor.set_carriageway(Arc::clone(&carriageway));
             tile_editor.set_mapped_paths(Arc::clone(&mapped_paths));
             tile_editor.set_junctions(Arc::clone(&road_junctions));
+            tile_editor.set_kerb_strips(Arc::clone(&kerb_strips));
+            tile_editor.set_wall_footprints(Arc::clone(&wall_footprints));
+            tile_editor.set_water_areas(Arc::clone(&water_areas));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
             if let Some(trunks) = &standing_trunks {
                 tile_editor.set_standing_trunks(Arc::clone(trunks));

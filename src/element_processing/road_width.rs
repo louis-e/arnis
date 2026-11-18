@@ -188,10 +188,34 @@ pub(crate) fn parking_orientation(
     (share > 0.0).then(|| kind(Some(orientation)))
 }
 
-/// Metres taken by parked cars, both sides together, and of that the part in bays.
-fn parking_m(tags: &HashMap<String, String>) -> (f64, f64) {
-    let (l, r) = (parking_side_m(tags, "left"), parking_side_m(tags, "right"));
-    (l.0 + r.0, l.1 + r.1)
+/// Metres taken by the cars parked on the left and on the right, and of that the part in
+/// bays. A deck parks nothing in bays: the bridge is no wider for them.
+fn parking_sides_m(tags: &HashMap<String, String>) -> [(f64, f64); 2] {
+    let on_bridge = tags.get("bridge").is_some_and(|b| b != "no");
+    ["left", "right"].map(|side| {
+        let (parked, bays) = parking_side_m(tags, side);
+        if on_bridge {
+            (parked - bays, 0.0)
+        } else {
+            (parked, bays)
+        }
+    })
+}
+
+/// Whether cars park on the road itself or in bays along it, which no verge takes back.
+pub(crate) fn parks_along(tags: &HashMap<String, String>) -> bool {
+    parking_sides_m(tags)
+        .iter()
+        .any(|&(parked, _)| parked > 0.0)
+}
+
+/// Whether a way carries traffic one way only.
+fn one_way(tags: &HashMap<String, String>) -> bool {
+    let tag = |key: &str| tags.get(key).map(String::as_str);
+    matches!(
+        tag("oneway"),
+        Some("yes" | "true" | "1" | "-1" | "reversible" | "alternating")
+    ) || matches!(tag("junction"), Some("roundabout" | "circular"))
 }
 
 /// Metres of cycle lanes kept for bicycles on the carriageway, both sides together:
@@ -221,10 +245,6 @@ fn cycle_lanes_m(tags: &HashMap<String, String>) -> f64 {
 /// about 5 m across; with one, 6 to 7 m.
 fn two_way_street(highway_type: &str, tags: &HashMap<String, String>) -> bool {
     let tag = |key: &str| tags.get(key).map(String::as_str);
-    let one_way = matches!(
-        tag("oneway"),
-        Some("yes" | "true" | "1" | "-1" | "reversible" | "alternating")
-    ) || matches!(tag("junction"), Some("roundabout" | "circular"));
     let sidewalk = [
         "sidewalk",
         "sidewalk:both",
@@ -235,44 +255,72 @@ fn two_way_street(highway_type: &str, tags: &HashMap<String, String>) -> bool {
     .any(|key| tag(key).is_some_and(|v| v != "no" && v != "none"));
     matches!(highway_type, "residential" | "unclassified")
         && tag("lanes").is_none()
-        && !one_way
+        && !one_way(tags)
         && sidewalk
 }
 
-/// A road's half-widths, at the scale the world is built at.
+/// A road's half-widths, at the scale the world is built at; `kerb` is the wider side's.
 ///
 /// Vehicular roads are their lanes at 3.25 m each (3.5 m on motorways and trunk roads),
 /// never narrower than their class's default, plus any cycle lanes kept for bicycles, plus
-/// the cars parked along the kerbs. A two-way street with a sidewalk and nothing parked
-/// along it has two lanes. `width` and `width:carriageway` are kerb to kerb where nothing
-/// is parked. Bays set into the sidewalk (`street_side`) come on top of them; parking on
-/// the road itself is in some mappers' `width` and not in others', so there the width is
-/// the least the road spans. Down-scaling never collapses a road to nothing; above 1:1
-/// roads keep their 1:1 width.
+/// the cars parked along the kerbs. A one-way carriageway with its lanes tagged is as wide
+/// as they are, past a motorway's or trunk road's shoulder. A two-way street with a sidewalk and nothing parked along it has two lanes.
+/// `width` and `width:carriageway` are kerb to kerb, the cars parked on the road included;
+/// bays set into the sidewalk (`street_side`) come on top, and a width too narrow for a lane
+/// besides the parked cars is widened to fit one. Down-scaling never collapses a road to
+/// nothing; above 1:1 roads keep their 1:1 width.
 pub(crate) fn road_halves(
     highway_type: &str,
     tags: &HashMap<String, String>,
     scale: f64,
 ) -> RoadHalves {
-    halves_at(highway_type, tags, scale, true)
+    widths_at(highway_type, tags, scale, true).0
 }
 
-/// The half-width a road keeps where a building stands against it: its lanes and cycle
-/// lanes, less the second lane a two-way street gets from its sidewalk, which old-town house
-/// fronts are often mapped too close to leave room for.
+/// How far a road's kerb reaches on the left of the way and on its right, in blocks: the
+/// lanes' half, and the cars parked on that side only.
+pub(crate) fn kerb_sides(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    scale: f64,
+) -> (i32, i32) {
+    widths_at(highway_type, tags, scale, true).1
+}
+
+/// The half-width a road keeps where a building stands against it, or a verge: its lanes
+/// and cycle lanes, less the second lane a two-way street gets from its sidewalk, which
+/// old-town house fronts are often mapped too close to leave room for; and never less than
+/// the half of a width tagged on it.
 pub(crate) fn wall_half(highway_type: &str, tags: &HashMap<String, String>, scale: f64) -> i32 {
-    halves_at(highway_type, tags, scale, false).lanes
+    let lanes = widths_at(highway_type, tags, scale, false).0.lanes;
+    let tagged = tags
+        .get("width:carriageway")
+        .and_then(|w| metres(w))
+        .or_else(|| parse_width_tag_m(tags));
+    tagged.map_or(lanes, |w| lanes.max(fit(half_of(w), scale)))
 }
 
-/// The road's halves. With `street_lanes`, its lanes are the ones cars drive in, a two-way
-/// street with a sidewalk given its second; without, as `wall_half` wants them, they keep
-/// the cycle lanes beside them and leave that second lane out.
-fn halves_at(
+/// A half-width in blocks at the scale the world is built at: at least one block, at most
+/// `MAX_HALF`, and down-scaled below 1:1.
+fn fit(half: i32, scale: f64) -> i32 {
+    let half = half.clamp(1, MAX_HALF);
+    if scale < 1.0 {
+        ((f64::from(half) * scale).floor() as i32).max(1)
+    } else {
+        half
+    }
+}
+
+/// The road's halves, and its kerb's reach on the left and on the right. With
+/// `street_lanes`, its lanes are the ones cars drive in, a two-way street with a sidewalk
+/// given its second; without, as `wall_half` wants them, they keep the cycle lanes beside
+/// them and leave that second lane out.
+fn widths_at(
     highway_type: &str,
     tags: &HashMap<String, String>,
     scale: f64,
     street_lanes: bool,
-) -> RoadHalves {
+) -> (RoadHalves, (i32, i32)) {
     // A road under construction is as wide as the finished road.
     let highway_type = if highway_type == "construction" {
         tags.get("construction")
@@ -281,17 +329,28 @@ fn halves_at(
         highway_type
     };
     let width = parse_width_tag_m(tags);
-    let (lanes, kerb) = if let Some(half) = fixed_half(highway_type, tags) {
+    let (lanes, kerb, sides) = if let Some(half) = fixed_half(highway_type, tags) {
         let half = width.map_or(half, half_of);
-        (half, half)
+        (half, half, (half, half))
     } else {
         let (default_m, lane_m) = carriageway_m(highway_type);
-        let lanes = tags
-            .get("lanes")
-            .and_then(|l| count(l))
+        let tagged_lanes = tags.get("lanes").and_then(|l| count(l));
+        let lanes = tagged_lanes
             .unwrap_or_else(|| highway_default_lanes(highway_type))
             .clamp(1, 16);
-        let (parked_m, bays_m) = parking_m(tags);
+        // A carriageway mapped one way with its lanes tagged spans those lanes, not the
+        // class's default for a road carrying both ways; a motorway's or trunk road's keeps
+        // the hard shoulder that default takes in.
+        let default_m = if tagged_lanes.is_some()
+            && one_way(tags)
+            && !matches!(highway_type, "motorway" | "trunk")
+        {
+            0.0
+        } else {
+            default_m
+        };
+        let [left, right] = parking_sides_m(tags);
+        let (parked_m, bays_m) = (left.0 + right.0, left.1 + right.1);
         // Where cars are parked along it, they take the room of the second lane.
         let street_m = if street_lanes && parked_m == 0.0 && two_way_street(highway_type, tags) {
             2.0 * lane_m
@@ -306,36 +365,34 @@ fn halves_at(
             .and_then(|w| metres(w))
             .or(width);
         let kerb_m = match tagged {
-            Some(w) if parked_m > 0.0 => (w + bays_m).max(traffic_m + parked_m),
+            Some(w) if parked_m > 0.0 => (w + bays_m).max(lane_m + parked_m),
             Some(w) => w,
             None => traffic_m + parked_m,
         };
         let lanes_m = if parked_m > 0.0 {
-            (kerb_m - parked_m).max(traffic_m)
+            (kerb_m - parked_m).max(if tagged.is_some() { lane_m } else { traffic_m })
         } else {
             kerb_m
         };
+        // Each kerb is half the lanes out, and the cars parked on its own side: the half
+        // of a road with that side's parking on both.
+        let sides = (
+            half_of(lanes_m + 2.0 * left.0),
+            half_of(lanes_m + 2.0 * right.0),
+        );
         // Cycle lanes run between the lanes cars drive in and the kerb, as parked cars do.
         let lanes_m = if street_lanes {
             (lanes_m - cycle_m).max(driving_m.min(lanes_m))
         } else {
             lanes_m
         };
-        (half_of(lanes_m.min(kerb_m)), half_of(kerb_m))
+        let lanes = half_of(lanes_m.min(kerb_m));
+        (lanes, sides.0.max(sides.1), sides)
     };
-    let fit = |half: i32| {
-        let half = half.clamp(1, MAX_HALF);
-        if scale < 1.0 {
-            ((f64::from(half) * scale).floor() as i32).max(1)
-        } else {
-            half
-        }
-    };
-    let kerb = fit(kerb);
-    RoadHalves {
-        lanes: fit(lanes).min(kerb),
-        kerb,
-    }
+    let kerb = fit(kerb, scale);
+    let lanes = fit(lanes, scale).min(kerb);
+    let side = |half: i32| fit(half, scale).clamp(lanes, kerb);
+    (RoadHalves { lanes, kerb }, (side(sides.0), side(sides.1)))
 }
 
 #[cfg(test)]
@@ -395,12 +452,17 @@ mod tests {
             halves("residential", &[("parking:both", "on_kerb")]).kerb,
             2
         );
-        // The side's own tag overrides both.
-        let one = halves(
-            "residential",
-            &[("parking:both", "lane"), ("parking:right", "no")],
-        );
-        assert_eq!(one.kerb, 3);
+        // The side's own tag overrides both, and the cars widen their own side only: 5 m
+        // of lanes, 2.25 m of cars on the left.
+        let one = tags(&[("parking:both", "lane"), ("parking:right", "no")]);
+        assert_eq!(road_halves("residential", &one, 1.0).kerb, 4);
+        assert_eq!(kerb_sides("residential", &one, 1.0), (4, 2));
+        // Rows across the kerb on one side: 5 m of them there, none on the other.
+        let across_one = tags(&[
+            ("parking:right", "lane"),
+            ("parking:right:orientation", "diagonal"),
+        ]);
+        assert_eq!(kerb_sides("residential", &across_one, 1.0), (2, 7));
     }
 
     #[test]
@@ -409,14 +471,11 @@ mod tests {
             halves("residential", &[("parking:lane:both", "parallel")]).kerb,
             4
         );
-        let diagonal = halves(
-            "residential",
-            &[
-                ("parking:lane:right", "diagonal"),
-                ("parking:lane:right:diagonal", "on_street"),
-            ],
-        );
-        assert_eq!(diagonal.kerb, 5);
+        let diagonal = tags(&[
+            ("parking:lane:right", "diagonal"),
+            ("parking:lane:right:diagonal", "on_street"),
+        ]);
+        assert_eq!(kerb_sides("residential", &diagonal, 1.0), (2, 7));
         assert_eq!(
             halves(
                 "residential",
@@ -435,13 +494,25 @@ mod tests {
     }
 
     #[test]
-    fn width_is_kerb_to_kerb_and_at_least_the_span_with_parking() {
+    fn width_is_kerb_to_kerb_the_cars_parked_on_the_road_included() {
         // 7 m across, not 9.
         assert_eq!(halves("residential", &[("width", "7")]).kerb, 3);
         assert_eq!(halves("residential", &[("width", "8 m")]).kerb, 4);
-        // A width that leaves out the parking rows still gets them.
+        // Too narrow for its rows of cars and a lane between them, it is widened to fit
+        // them: 7.75 m.
         let narrow = halves("residential", &[("width", "5"), ("parking:both", "lane")]);
-        assert_eq!(narrow.kerb, 4);
+        assert_eq!(narrow, RoadHalves { lanes: 1, kerb: 3 });
+        // Not to the class's lanes: 10 m of a one-way street with cars along one kerb and
+        // at an angle along the other stays 10 m, 2.25 m of cars on the left and 5 m on
+        // the right of a 3.25 m lane.
+        let ufer = tags(&[
+            ("width", "10"),
+            ("oneway", "yes"),
+            ("parking:both", "lane"),
+            ("parking:left:orientation", "parallel"),
+            ("parking:right:orientation", "diagonal"),
+        ]);
+        assert_eq!(kerb_sides("residential", &ufer, 1.0), (3, 6));
         // One that takes them in stays as it is, and the lanes are what is left.
         let wide = halves("residential", &[("width", "11"), ("parking:both", "lane")]);
         assert_eq!(wide, RoadHalves { lanes: 3, kerb: 5 });
@@ -469,6 +540,66 @@ mod tests {
             &[("width", "8.4"), ("parking:both", "street_side")],
         );
         assert_eq!(parallel_bays.kerb, 6);
+    }
+
+    #[test]
+    fn a_verge_never_takes_a_road_inside_its_tagged_width() {
+        let perpendicular = tags(&[
+            ("width", "14.9"),
+            ("parking:both", "lane"),
+            ("parking:both:orientation", "perpendicular"),
+        ]);
+        // Kerb to kerb 14.9 m: a verge may take the rows back, as the tag is wider than
+        // the lanes, but never inside the width tagged.
+        assert_eq!(road_halves("residential", &perpendicular, 1.0).kerb, 7);
+        assert_eq!(wall_half("residential", &perpendicular, 1.0), 7);
+        assert_eq!(wall_half("residential", &tags(&[]), 1.0), 2);
+        assert_eq!(
+            wall_half("residential", &tags(&[("width:carriageway", "9")]), 1.0),
+            4
+        );
+    }
+
+    #[test]
+    fn a_one_way_carriageway_spans_its_tagged_lanes() {
+        let one = |extra: &[(&str, &str)]| {
+            let pairs: Vec<(&str, &str)> = [("lanes", "1"), ("oneway", "yes")]
+                .into_iter()
+                .chain(extra.iter().copied())
+                .collect();
+            halves("primary", &pairs).kerb
+        };
+        // One 3.25 m lane, not the 8 m of a primary carrying both ways.
+        assert_eq!(one(&[]), 1);
+        assert_eq!(halves("primary", &[("lanes", "1")]).kerb, 4);
+        assert_eq!(halves("primary", &[("oneway", "yes")]).kerb, 4);
+        // Two lanes of a dual carriageway: 6.5 m; a motorway's keeps its shoulder.
+        assert_eq!(
+            halves("primary", &[("lanes", "2"), ("oneway", "yes")]).kerb,
+            3
+        );
+        assert_eq!(
+            halves("motorway", &[("lanes", "2"), ("oneway", "yes")]).kerb,
+            5
+        );
+    }
+
+    #[test]
+    fn a_bridge_parks_no_cars_in_bays() {
+        let street = [
+            ("oneway", "yes"),
+            ("parking:left", "street_side"),
+            ("parking:left:orientation", "diagonal"),
+            ("parking:right", "no"),
+        ];
+        let deck: Vec<(&str, &str)> = street.into_iter().chain([("bridge", "yes")]).collect();
+        assert_eq!(halves("residential", &street).kerb, 7);
+        assert_eq!(halves("residential", &deck), halves("residential", &[]));
+        assert!(!parks_along(&tags(&deck)));
+        assert!(parks_along(&tags(&street)));
+        // Cars parked on the deck's own road still count.
+        let lane = tags(&[("bridge", "yes"), ("parking:both", "lane")]);
+        assert_eq!(road_halves("residential", &lane, 1.0).kerb, 4);
     }
 
     #[test]

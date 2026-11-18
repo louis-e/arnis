@@ -7,8 +7,8 @@ use crate::bresenham::bresenham_line;
 use crate::clipping::is_invented_node_id;
 use crate::decals::region::SignRegion;
 use crate::element_processing::highways::{
-    highway_block_range, in_road_stamp, lane_marking_count, stamp_reach, stamps_square,
-    surface_palette, wall_core,
+    highway_block_range, in_road_stamp, in_side_stamp, lane_marking_count, stamp_reach,
+    stamps_square, surface_palette, wall_core,
 };
 use crate::element_processing::raceways::RacewayPaint;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -117,6 +117,11 @@ pub struct CarriagewayClip {
     /// The half the road keeps against what stands beside it, where past it the road may
     /// leave the ground unpaved; None where it paves its whole stamp.
     core: Option<i32>,
+    /// Whether a verge may take back what the road gains past its core, as `cut_beside`.
+    verges: bool,
+    /// How far the road's kerb reaches left and right of the way running along `along`.
+    sides: (i32, i32),
+    along: Option<(f32, f32)>,
     palette: &'static [Block],
 }
 
@@ -139,6 +144,19 @@ impl CarriagewayClip {
         self.core
     }
 
+    /// Whether a verge may take back what the road gains past its core.
+    pub fn verges(&self) -> bool {
+        self.verges
+    }
+
+    /// The road's centreline cell nearest (x, z).
+    pub fn nearest_centre(&self, x: i32, z: i32) -> Option<(i32, i32)> {
+        self.centre
+            .iter()
+            .copied()
+            .min_by_key(|&(cx, cz)| (x - cx).pow(2) + (z - cz).pow(2))
+    }
+
     /// Surface blocks of the crossed road, which crossing paint may replace.
     pub fn palette(&self) -> &'static [Block] {
         self.palette
@@ -149,7 +167,7 @@ impl CarriagewayClip {
             let (dx, dz) = (x - cx, z - cz);
             dx.abs() <= self.half
                 && dz.abs() <= self.half
-                && (self.square || in_road_stamp(dx, dz, self.half))
+                && (self.square || in_side_stamp(dx, dz, self.along, self.sides))
         })
     }
 }
@@ -738,6 +756,22 @@ impl RoadMarkingIndex {
                         half: road.half,
                         square: road.square,
                         core: wall_core(road.way, &road.way.tags["highway"], scale),
+                        verges: !crate::element_processing::road_width::parks_along(&road.way.tags),
+                        sides: crate::element_processing::road_width::kerb_sides(
+                            &road.way.tags["highway"],
+                            &road.way.tags,
+                            scale,
+                        ),
+                        along: {
+                            let nodes = &road.way.nodes;
+                            let (a, b) = (
+                                &nodes[ni.saturating_sub(1)],
+                                &nodes[(ni + 1).min(nodes.len() - 1)],
+                            );
+                            let (sx, sz) = ((b.x - a.x) as f32, (b.z - a.z) as f32);
+                            let len = sx.hypot(sz);
+                            (len > 0.0).then(|| (sx / len, sz / len))
+                        },
                         palette: road.palette,
                     };
                     // Cells the crossing paints: its width, on this carriageway only.

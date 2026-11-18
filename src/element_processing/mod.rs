@@ -31,6 +31,7 @@ pub mod greenhouses;
 pub mod highways;
 pub mod historic;
 pub mod ice_rinks;
+pub mod kerb_strips;
 pub mod landuse;
 pub mod leisure;
 pub mod level_crossings;

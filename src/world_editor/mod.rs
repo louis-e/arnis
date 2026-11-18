@@ -270,6 +270,12 @@ pub struct WorldEditor<'a> {
     mapped_paths: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Where three or more road arms meet, packed and sorted: nobody parks across their mouths.
     junctions: Option<Arc<Vec<u64>>>,
+    /// The strips paved between sidewalks and the roads they run beside, by sidewalk.
+    kerb_strips: Option<Arc<crate::element_processing::kerb_strips::KerbStrips>>,
+    /// The buildings whose walls come down to the ground, which a road's strip stops at.
+    wall_footprints: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// The water OSM maps as areas, block for block.
+    water_areas: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
     /// Where the mapped and the canopy's trunks stand, found once for the area; shared via
@@ -403,6 +409,9 @@ impl<'a> WorldEditor<'a> {
             carriageway: None,
             mapped_paths: None,
             junctions: None,
+            kerb_strips: None,
+            wall_footprints: None,
+            water_areas: None,
             mapped_trunks: None,
             standing_trunks: None,
             mapped_cranes: None,
@@ -482,6 +491,9 @@ impl<'a> WorldEditor<'a> {
             carriageway: None,
             mapped_paths: None,
             junctions: None,
+            kerb_strips: None,
+            wall_footprints: None,
+            water_areas: None,
             mapped_trunks: None,
             standing_trunks: None,
             mapped_cranes: None,
@@ -561,6 +573,9 @@ impl<'a> WorldEditor<'a> {
             carriageway: None,
             mapped_paths: None,
             junctions: None,
+            kerb_strips: None,
+            wall_footprints: None,
+            water_areas: None,
             mapped_trunks: None,
             standing_trunks: None,
             mapped_cranes: None,
@@ -723,6 +738,44 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Sets the road junctions, packed and sorted (shared across the main and tile editors).
+    /// Sets the water OSM maps as areas (shared with the tile editors).
+    pub fn set_water_areas(&mut self, water: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.water_areas = Some(water);
+    }
+
+    /// The water OSM maps as areas, where it is known.
+    pub fn water_areas(&self) -> Option<Arc<crate::floodfill_cache::CoordinateBitmap>> {
+        self.water_areas.clone()
+    }
+
+    /// Whether water is at (x, z): the land cover's, or an area OSM maps, block for block.
+    pub fn water_at(&self, x: i32, z: i32) -> bool {
+        self.water_areas.as_ref().is_some_and(|w| w.contains(x, z)) || self.is_mapped_water(x, z)
+    }
+
+    /// Sets the buildings whose walls reach the ground (shared with the tile editors).
+    pub fn set_wall_footprints(&mut self, walls: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.wall_footprints = Some(walls);
+    }
+
+    /// The buildings whose walls reach the ground, where they are known.
+    pub fn wall_footprints(&self) -> Option<Arc<crate::floodfill_cache::CoordinateBitmap>> {
+        self.wall_footprints.clone()
+    }
+
+    /// Sets the strips paved between sidewalks and roads (shared with the tile editors).
+    pub fn set_kerb_strips(
+        &mut self,
+        fills: Arc<crate::element_processing::kerb_strips::KerbStrips>,
+    ) {
+        self.kerb_strips = Some(fills);
+    }
+
+    /// The strips paved between sidewalks and the roads they run beside.
+    pub fn kerb_strips(&self) -> Option<Arc<crate::element_processing::kerb_strips::KerbStrips>> {
+        self.kerb_strips.clone()
+    }
+
     pub fn set_junctions(&mut self, junctions: Arc<Vec<u64>>) {
         self.junctions = Some(junctions);
     }
@@ -927,6 +980,28 @@ impl<'a> WorldEditor<'a> {
         }));
     }
 
+    /// Whether a trunk, mapped or one the canopy map grows, stands within a block of (x, z).
+    pub fn trunk_near(&self, x: i32, z: i32) -> bool {
+        self.standing_trunks
+            .as_ref()
+            .and_then(|t| t.within_a_block(x, z, |_, _| true))
+            .unwrap_or_else(|| self.keeps_a_pit(x, z, |_, _| false))
+    }
+
+    /// Whether land cover keeps (x, z) green: scrub, grass, crops, wetland, moss. Not tree
+    /// cover, which takes in the streets its crowns line; the trees themselves are known.
+    pub fn green_at(&self, x: i32, z: i32) -> bool {
+        use crate::land_cover::{
+            LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_WETLAND,
+        };
+        self.ground.as_ref().is_some_and(|ground| {
+            matches!(
+                ground.cover_class(self.ground_point(x, z)),
+                LC_SHRUBLAND | LC_GRASSLAND | LC_CROPLAND | LC_WETLAND | LC_MANGROVES | LC_MOSS
+            )
+        })
+    }
+
     /// The trunks `index_standing_trunks` found, to share with the tile editors.
     pub fn standing_trunks(&self) -> Option<Arc<StandingTrunks>> {
         self.standing_trunks.clone()
@@ -952,6 +1027,11 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface
             .as_ref()
             .is_some_and(|m| !m.contains(x, z))
+    }
+
+    /// Whether the man-made surfaces are known, as `surface_is_sealed` reads them.
+    pub fn knows_sealed_surface(&self) -> bool {
+        self.sealed_surface.is_some()
     }
 
     /// True if a man-made surface owns this column, so scattered vegetation
@@ -1064,22 +1144,18 @@ impl<'a> WorldEditor<'a> {
     /// does, as the road's own lanes, and a canopy one not under a mapped tree's crown,
     /// which the canopy leaves to that tree.
     pub fn keeps_its_ground(&self, x: i32, z: i32, paved: impl Fn(i32, i32) -> bool) -> bool {
-        use crate::land_cover::{
-            LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_TREE_COVER,
-            LC_WETLAND,
-        };
-        let green = |ground: &Ground| {
-            matches!(
-                ground.cover_class(self.ground_point(x, z)),
-                LC_TREE_COVER
-                    | LC_SHRUBLAND
-                    | LC_GRASSLAND
-                    | LC_CROPLAND
-                    | LC_WETLAND
-                    | LC_MANGROVES
-                    | LC_MOSS
-            )
-        };
+        self.ground_kept(x, z, paved, true)
+    }
+
+    /// Whether a tree that will stand, mapped or one the canopy map grows, has its trunk
+    /// within a block of (x, z): the pit a street tree keeps in a row of parked cars, where
+    /// the grass round it does not.
+    pub fn keeps_a_pit(&self, x: i32, z: i32, paved: impl Fn(i32, i32) -> bool) -> bool {
+        self.ground_kept(x, z, paved, false)
+    }
+
+    fn ground_kept(&self, x: i32, z: i32, paved: impl Fn(i32, i32) -> bool, green: bool) -> bool {
+        let green_at = |x: i32, z: i32| green && self.green_at(x, z);
         // Every canopy slot lies in its own lattice cell, so the trunks within a block of
         // (x, z) are the indexed ones among the cells round it.
         if let Some(near) = self
@@ -1087,7 +1163,7 @@ impl<'a> WorldEditor<'a> {
             .as_ref()
             .and_then(|t| t.within_a_block(x, z, |tx, tz| !paved(tx, tz)))
         {
-            return near || self.ground.as_deref().is_some_and(green);
+            return near || green_at(x, z);
         }
         if self
             .mapped_trunks
@@ -1099,7 +1175,7 @@ impl<'a> WorldEditor<'a> {
         let Some(ground) = self.ground.as_ref() else {
             return false;
         };
-        if green(ground) {
+        if green_at(x, z) {
             return true;
         }
         if !ground.has_canopy() || !ground.has_land_cover() {

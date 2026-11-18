@@ -1954,11 +1954,25 @@ fn kerb_beside(
             z + (sz * k as f64).round() as i32,
         )
     };
-    // Past the road's own kerb, its parking rows included, and off any lanes beyond.
+    // Past the road's own kerb, its parking rows included, and off any lanes beyond; or
+    // where the road stops short of its kerb, as at a verge, next to where it stops.
     let edge = (heading.kerb.max(0) + 1..=heading.kerb.max(0) + 12).find(|&k| {
         let (cx, cz) = cell(k);
         !editor.on_carriageway(cx, cz)
     })?;
+    let open = |k: i32| {
+        let (cx, cz) = cell(k);
+        !editor.on_carriageway(cx, cz) && !editor.surface_is_sealed(cx, cz)
+    };
+    let edge = if editor.knows_sealed_surface() && open(edge) {
+        (1..edge)
+            .rev()
+            .take_while(|&k| open(k))
+            .last()
+            .unwrap_or(edge)
+    } else {
+        edge
+    };
     (edge..edge + 4)
         .map(cell)
         .find(|&(cx, cz)| post_ground(editor, footprints, cx, cz, POST_SHAFT + 1).is_some())
