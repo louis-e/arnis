@@ -292,9 +292,14 @@ fn generate_town_wall(
             }
         }
     };
+    // A line leaving the area is clipped along its edge, where no wall stands.
+    let (lo, hi) = clearance.world;
+    let edge = |x: i32, z: i32| x <= lo.0 || x >= hi.0 || z <= lo.1 || z >= hi.1;
     let mut last: Option<(i32, i32)> = None;
     for ((&(x, z), &dir), &deck) in trace.cells.iter().zip(&trace.dirs).zip(&on_deck) {
-        let spot = if deck {
+        let spot = if edge(x, z) {
+            None
+        } else if deck {
             // The bridge keeps its deck clear and brings its own railing.
             (!bridge_surface.keeps_clear(x, z)).then_some(Spot::Post(x, z))
         } else if water(x, z) {
@@ -689,6 +694,8 @@ pub struct RoadClearance {
     wall_joints: FnvHashSet<u64>,
     /// Track at grade near town walls, with its bed.
     rails: FnvHashSet<(i32, i32)>,
+    /// Corners of the whole world, which a tile's editor does not span.
+    world: ((i32, i32), (i32, i32)),
 }
 
 struct RoadSegment {
@@ -762,6 +769,7 @@ impl RoadClearance {
             buckets: FnvHashMap::default(),
             wall_joints: FnvHashSet::default(),
             rails: FnvHashSet::default(),
+            world: (editor.get_min_coords(), editor.get_max_coords()),
         };
         let ways = || {
             elements.iter().filter_map(|e| match e {
@@ -1631,6 +1639,22 @@ mod tests {
             // The road passes under an arch.
             assert!((1..=4).all(|y| !solid(15, 20, y)));
             assert!(solid(15, 20, 8));
+        });
+    }
+
+    #[test]
+    fn a_town_wall_clipped_along_the_world_edge_stands_only_inside() {
+        // The clipper runs a wall leaving the area along its edge.
+        let elements = [ProcessedElement::Way(way(
+            1,
+            &[("barrier", "city_wall")],
+            &[(20, 40), (0, 40), (0, 20), (20, 20)],
+        ))];
+        render(40.0, &elements, |editor, _| {
+            let solid = |x, z| (1..=8).any(|y| editor.block_exists_absolute(x, y, z));
+            assert!((25..=35).all(|z| !solid(0, z) && !solid(1, z)));
+            assert!((5..=15).all(|x| !solid(x, 40) && !solid(x, 39)));
+            assert!((5..=15).all(|x| solid(x, 20)));
         });
     }
 
