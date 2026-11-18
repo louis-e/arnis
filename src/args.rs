@@ -226,6 +226,11 @@ pub struct Args {
     #[arg(long = "measured-heights", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub measured_heights: bool,
 
+    /// With --lidar: the roof shape the laser saw (gabled, hipped or flat), and a
+    /// gabled roof's ridge, for buildings OpenStreetMap gives no roof shape.
+    #[arg(long = "measured-roofs", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub measured_roofs: bool,
+
     /// Most a run may download for --lidar, in megabytes of laser scans and aerial
     /// photos not yet cached. Past it the run goes on without them.
     #[arg(long = "lidar-max-mb", default_value_t = 1000)]
@@ -1387,8 +1392,9 @@ impl Args {
             garden: self.garden_detail,
             trees: self.measured_trees,
             heights: self.measured_heights,
+            roofs: self.measured_roofs,
         };
-        let any = f.garden || f.trees || f.heights;
+        let any = f.garden || f.trees || f.heights || f.roofs;
         (self.lidar && any && self.lidar_off_reason().is_none()).then_some(f)
     }
 

@@ -2868,9 +2868,18 @@ impl BuildingStyle {
 
         // === Roof ===
 
-        // Priority: roof:shape tag, preset default, auto-gable, then flat.
+        // Priority: roof:shape tag, the shape the laser saw, preset default,
+        // auto-gable, then flat. A part or a building closed in by others keeps
+        // the generator's lid whatever the laser saw.
+        let measured_roof = element
+            .tags
+            .get(crate::survey::roofs::SHAPE_HINT)
+            .filter(|_| !roof_ctx.enclosed && !element.tags.contains_key("building:part"))
+            .map(|s| parse_roof_type(s));
         let (roof_type, generate_roof) = if let Some(roof_shape) = element.tags.get("roof:shape") {
             (parse_roof_type(roof_shape), true)
+        } else if let Some(rt) = measured_roof {
+            (rt, true)
         } else if let Some(rt) = preset.roof_type {
             let should_generate = preset.generate_roof.unwrap_or(rt != RoofType::Flat);
             (rt, should_generate)
@@ -2974,6 +2983,7 @@ impl BuildingStyle {
         // default rules gives way to a pitched one, and a pitched default
         // stays as it was.
         let defaulted = !element.tags.contains_key("roof:shape")
+            && measured_roof.is_none()
             && preset.roof_type.is_none()
             && !roof_ctx.enclosed;
         let (roof_type, generate_roof) = match roof_levels_roof(element, era, roof_ctx) {
@@ -6775,10 +6785,7 @@ fn neighbour_walls_m(
     let Some(height) = parse_building_height_tag(tags) else {
         return Some(walls);
     };
-    if tags
-        .get("roof:shape")
-        .is_some_and(|s| parse_roof_type(s) == RoofType::Flat)
-    {
+    if read_roof_shape(tags).is_some_and(|s| parse_roof_type(s) == RoofType::Flat) {
         return Some(height);
     }
     if let Some(rise) = metres("roof:height").filter(|m| *m > 0.0) {
@@ -14250,6 +14257,12 @@ fn calculate_floor_levels(
     floor_levels
 }
 
+/// A mapped `roof:shape`, else the one the laser saw (see `survey::roofs`).
+fn read_roof_shape(tags: &HashMap<String, String>) -> Option<&String> {
+    tags.get("roof:shape")
+        .or_else(|| tags.get(crate::survey::roofs::SHAPE_HINT))
+}
+
 /// Calculates roof peak height for chimney placement
 /// Parses roof:shape tag into RoofType enum.
 ///
@@ -17205,7 +17218,7 @@ fn wall_storeys(
 /// `roof:height`, else the low pitch over the shorter half-span the generator draws.
 fn mapped_roof_rise_m(element: &ProcessedWay, height: f64, scale_factor: f64) -> f64 {
     let tags = &element.tags;
-    if tags.get("roof:shape").map(|s| s.trim()) == Some("flat") {
+    if read_roof_shape(tags).map(|s| s.trim()) == Some("flat") {
         return 0.0;
     }
     let tagged = tags
@@ -20612,7 +20625,16 @@ fn generate_roof(
     }
 
     let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
-    let roof_direction = element.tags.get("roof:direction").map(|s| s.as_str());
+    // The ridge the laser saw, where none is mapped.
+    let roof_direction = element
+        .tags
+        .get("roof:direction")
+        .or_else(|| {
+            (roof_orientation.is_none() && !element.tags.contains_key("roof:shape"))
+                .then(|| element.tags.get(crate::survey::roofs::DIRECTION_HINT))
+                .flatten()
+        })
+        .map(|s| s.as_str());
     let ridge = ridge_frame(
         &element.nodes,
         config.width(),
@@ -26617,6 +26639,75 @@ mod facade_integration_tests {
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
         generate_buildings(editor, way, args, None, None, &ctx, way.id);
+    }
+
+    /// The highest block of a house over cells x 10..=24, z 10..=20 with these
+    /// tags, at each of `cells`.
+    fn house_tops(tags: &[(&str, &str)], cells: &[(i32, i32)]) -> Vec<i32> {
+        use crate::element_processing::building_test_support::bitmap_with_rect;
+        let xz = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xz);
+        let way = rect_way(1, 10, 10, 24, 20, tags);
+        let footprints = bitmap_with_rect(&xz, 11, 11, 23, 19);
+        run_building(
+            &mut editor,
+            &way,
+            &CoordinateBitmap::new_empty(),
+            &footprints,
+        );
+        cells
+            .iter()
+            .map(|&(x, z)| editor.highest_block_between(x, z, 0, 400).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_measured_roof_takes_the_laser_shape_and_ridge() {
+        use crate::survey::roofs::{DIRECTION_HINT, SHAPE_HINT};
+        // Along the middle of the long side (z = 15) and across it (x = 17).
+        let cells = [(13, 15), (21, 15), (17, 12), (17, 18), (17, 15)];
+        // Its slope facing east: the ridge runs north-south across the long
+        // side, so the line x = 17 is level and z = 15 falls to the walls.
+        let t = house_tops(
+            &[
+                ("building", "house"),
+                (SHAPE_HINT, "gabled"),
+                (DIRECTION_HINT, "90"),
+            ],
+            &cells,
+        );
+        assert_eq!(t[2], t[3], "ridge along z: {t:?}");
+        assert_eq!(t[2], t[4], "ridge along z: {t:?}");
+        assert!(
+            t[0] < t[4] && t[1] < t[4],
+            "falls to the east and west walls: {t:?}"
+        );
+        // Facing south, the ridge runs along the long side.
+        let t = house_tops(
+            &[
+                ("building", "house"),
+                (SHAPE_HINT, "gabled"),
+                (DIRECTION_HINT, "180"),
+            ],
+            &cells,
+        );
+        assert_eq!(t[0], t[1], "ridge along x: {t:?}");
+        assert!(
+            t[2] < t[4] && t[3] < t[4],
+            "falls to the north and south walls: {t:?}"
+        );
+        // A flat roof the laser saw stays flat on a house.
+        let t = house_tops(&[("building", "house"), (SHAPE_HINT, "flat")], &cells);
+        assert!(t.iter().all(|&y| y == t[0]), "flat: {t:?}");
+        // A mapped shape and direction win over the laser's.
+        let mapped = [
+            ("building", "house"),
+            ("roof:shape", "gabled"),
+            ("roof:direction", "180"),
+        ];
+        let mut hinted = mapped.to_vec();
+        hinted.extend([(SHAPE_HINT, "flat"), (DIRECTION_HINT, "90")]);
+        assert_eq!(house_tops(&hinted, &cells), house_tops(&mapped, &cells));
     }
 
     /// A building over cells x 20..=50, z 20..=40, with `track` (if any) along z = 30 from
