@@ -111,8 +111,9 @@ pub fn generate_barriers(
     let ProcessedElement::Way(way) = element else {
         return;
     };
-    if fortifications::line_wall(&way.tags) {
-        generate_town_wall(editor, way, clearance, building_footprints);
+    // A part floating at min_height keeps the plain barrier's handling.
+    if fortifications::line_wall(&way.tags) && !way.tags.contains_key("min_height") {
+        generate_town_wall(editor, way, bridge_surface, clearance, building_footprints);
         return;
     }
     // A 3D-mapped railing, say on a bridge tower, floats at min_height and its
@@ -244,10 +245,14 @@ const TOWN_WALL_M: f64 = 8.0;
 /// Thickness of a town wall mapped as a line without a width, in metres.
 const TOWN_WALL_THICK_M: f64 = 3.0;
 
+/// Past this a town wall's mapped width is junk, in metres.
+const TOWN_WALL_MAX_THICK_M: f64 = 30.0;
+
 /// A town wall mapped as a line, as thick as its width and arched over ways and gates.
 fn generate_town_wall(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
+    bridge_surface: &BridgeSurfaceMap,
     clearance: &RoadClearance,
     building_footprints: &CoordinateBitmap,
 ) {
@@ -261,10 +266,14 @@ fn generate_town_wall(
     let ruin = way.tags.get("ruins").is_some_and(|v| v != "no")
         || way.tags.get("historic").map(String::as_str) == Some("ruins");
     let height = metres("height").unwrap_or(if ruin { TOWN_WALL_M / 2.0 } else { TOWN_WALL_M });
-    let thick = parse_width_tag_m(&way.tags).unwrap_or(TOWN_WALL_THICK_M);
+    let blocks = ((height * scale).round() as i32).max(1);
+    let thick = parse_width_tag_m(&way.tags)
+        .filter(|w| (0.5..=TOWN_WALL_MAX_THICK_M).contains(w))
+        .unwrap_or(TOWN_WALL_THICK_M);
     let reach = (((thick * scale).round() as i32 - 1) / 2).max(0);
     let trace = trace(way, scale, true);
     let mut cells: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+    let mut posts: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     let mut passages: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     let mut stamp = |set: &mut FnvHashSet<(i32, i32)>, (x, z): (i32, i32)| {
         for dx in -reach..=reach {
@@ -275,7 +284,10 @@ fn generate_town_wall(
     };
     for (&(x, z), &dir) in trace.cells.iter().zip(&trace.dirs) {
         match clearance.place(x, z, dir, false, building_footprints) {
-            Spot::Post(px, pz) => stamp(&mut cells, (px, pz)),
+            Spot::Post(px, pz) => {
+                posts.insert((px, pz));
+                stamp(&mut cells, (px, pz));
+            }
             _ => {
                 stamp(&mut cells, (x, z));
                 stamp(&mut passages, (x, z));
@@ -287,10 +299,20 @@ fn generate_town_wall(
             stamp(&mut passages, trace.cells[j]);
         }
     }
-    // A gate or tower mapped as a building stands in the wall's place.
+    // A bridge keeps its deck, unless it passes high over the wall.
+    let clears_wall = |x: i32, z: i32| {
+        let deck = bridge_surface
+            .deck_y_at(x, z)
+            .or_else(|| bridge_surface.nearest_railing(x, z, 0).map(|(_, y)| y));
+        deck.is_some_and(|d| d > editor.get_absolute_y(x, 0, z) + blocks + 2)
+    };
+    // A gate or tower mapped as a building stands in the wall's place; beside a road the
+    // wall keeps off it, and is arched over it only where it crosses.
     let mut cells: Vec<(i32, i32)> = cells
         .into_iter()
         .filter(|&(x, z)| !building_footprints.contains(x, z))
+        .filter(|c| passages.contains(c) || posts.contains(c) || !clearance.on_road(c.0, c.1))
+        .filter(|&(x, z)| !bridge_surface.keeps_clear(x, z) || clears_wall(x, z))
         .collect();
     cells.sort_unstable();
     for &(x, z) in &cells {
@@ -317,7 +339,7 @@ fn generate_town_wall(
         &fortifications::Mass {
             cells: &cells,
             block,
-            height: ((height * scale).round() as i32).max(1),
+            height: blocks,
             base: None,
             raised: false,
             crenellated: !ruin,
@@ -1436,6 +1458,62 @@ mod tests {
             // The road passes under an arch.
             assert!((1..=4).all(|y| !solid(15, 20, y)));
             assert!(solid(15, 20, 8));
+        });
+    }
+
+    #[test]
+    fn a_town_wall_beside_a_road_keeps_off_it() {
+        let elements = [
+            road(1, "residential", 20),
+            ProcessedElement::Way(way(2, &[("barrier", "city_wall")], &[(5, 22), (75, 22)])),
+        ];
+        render(80.0, &elements, |editor, clearance| {
+            for x in 10..=70 {
+                for z in 12..=28 {
+                    if clearance.on_road(x, z) {
+                        assert!(
+                            !editor.block_exists_absolute(x, 4, z),
+                            "on the road at {x} {z}"
+                        );
+                    }
+                }
+                assert!((12..=28).any(|z| editor.block_exists_absolute(x, 8, z)));
+            }
+        });
+    }
+
+    #[test]
+    fn a_low_town_wall_is_open_over_the_road_and_a_junk_width_falls_back() {
+        let tags = [("barrier", "city_wall"), ("height", "5"), ("width", "300")];
+        let elements = [
+            road(1, "residential", 20),
+            ProcessedElement::Way(way(2, &tags, &[(15, 5), (15, 35)])),
+        ];
+        render(40.0, &elements, |editor, _| {
+            let solid = |x, z, y| editor.block_exists_absolute(x, y, z);
+            // Too low for a lintel: open to the sky, with no merlons over the road.
+            assert!((1..=7).all(|y| !solid(15, 20, y)));
+            assert!((1..=5).all(|y| solid(15, 10, y)));
+            assert!(!solid(13, 10, 1) && !solid(17, 10, 1));
+        });
+    }
+
+    #[test]
+    fn a_town_wall_makes_way_for_a_bridge_over_it() {
+        let bridge = way(
+            1,
+            &[
+                ("highway", "residential"),
+                ("bridge", "yes"),
+                ("layer", "1"),
+            ],
+            &[(10, 40), (70, 40)],
+        );
+        let wall = way(2, &[("barrier", "city_wall")], &[(40, 10), (40, 70)]);
+        let elements = [ProcessedElement::Way(bridge), ProcessedElement::Way(wall)];
+        render(100.0, &elements, |editor, _| {
+            assert!((1..=12).all(|y| !editor.block_exists_absolute(40, y, 40)));
+            assert!((1..=8).all(|y| editor.block_exists_absolute(40, y, 20)));
         });
     }
 
