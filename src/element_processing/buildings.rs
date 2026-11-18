@@ -14791,7 +14791,11 @@ pub fn generate_buildings(
             })
         },
     };
-    if min_level_offset == 0 && has_garden_grounds(category, &element.tags, storeys, home) {
+    let fortification = fortifications::kind(&element.tags);
+    if min_level_offset == 0
+        && fortification.is_none()
+        && has_garden_grounds(category, &element.tags, storeys, home)
+    {
         let house = mapped_as_house(&element.tags);
         for &(x, z) in &cached_floor_area {
             editor.mark_ground(crate::world_editor::GroundMark::Dwelling, x, z);
@@ -14969,7 +14973,7 @@ pub fn generate_buildings(
     }
 
     // A town wall or gate is solid masonry, with nothing of a house about it.
-    if let Some(kind) = fortifications::kind(&element.tags) {
+    if let Some(kind) = fortification {
         let gate = kind == fortifications::Kind::Gate;
         let passages = cached_floor_area
             .iter()

@@ -35,16 +35,16 @@ pub(crate) fn line_wall(tags: &HashMap<String, String>) -> bool {
     matches!(tag(tags, "barrier"), Some("city_wall" | "wall")) && defence(tags)
 }
 
-/// Whether a building is a wall or a town gate; a gate tower mapped with a roof stays a building.
+/// Whether a building is a wall or a town gate; a gate or tower mapped with a roof stays a building.
 pub(crate) fn kind(tags: &HashMap<String, String>) -> Option<Kind> {
+    let roofed = tag(tags, "roof:shape").is_some_and(|s| s != "flat");
     let gate = tag(tags, "historic") == Some("city_gate")
         || (tag(tags, "building") == Some("gatehouse") && defence(tags));
     if gate {
-        return tag(tags, "roof:shape")
-            .is_none_or(|s| s == "flat")
-            .then_some(Kind::Gate);
+        return (!roofed).then_some(Kind::Gate);
     }
-    (tag(tags, "building") == Some("wall") || defence(tags)).then_some(Kind::Wall)
+    let wall = tag(tags, "building") == Some("wall") || (defence(tags) && !roofed);
+    wall.then_some(Kind::Wall)
 }
 
 /// Whether merlons crown it: town walls and gates, unless mapped in 3D with parts of their own.
@@ -71,14 +71,20 @@ pub(crate) struct Mass<'a> {
 /// Builds a wall or gate as solid masonry: no windows, doors, rooms or roof.
 pub(crate) fn generate(editor: &mut WorldEditor, mass: &Mass) {
     let own: FnvHashSet<(i32, i32)> = mass.cells.iter().copied().collect();
-    let arch = passage_clearances(&own, &mass.passages, mass.height, mass.scale);
+    // A raised mass already spans what passes under it.
+    let arch = if mass.raised {
+        FnvHashMap::default()
+    } else {
+        passage_clearances(&own, &mass.passages, mass.height, mass.scale)
+    };
     let merlon = mass.crenellated && mass.height >= 3;
     for &(x, z) in mass.cells {
         let ground = editor.get_absolute_y(x, 0, z);
         let base = mass.base.unwrap_or(ground);
         let top = base + mass.height;
-        let from = match arch.get(&(x, z)) {
-            Some(&clear) => base.max(ground) + clear + 1,
+        let clear = arch.get(&(x, z)).copied();
+        let from = match clear {
+            Some(clear) => base.max(ground) + clear + 1,
             None if mass.raised => base + 1,
             None => ground.min(base) + 1,
         };
@@ -88,7 +94,8 @@ pub(crate) fn generate(editor: &mut WorldEditor, mass: &Mass) {
         let edge = [(1, 0), (-1, 0), (0, 1), (0, -1)]
             .iter()
             .any(|&(dx, dz)| !own.contains(&(x + dx, z + dz)));
-        if merlon && edge && (x + z).rem_euclid(2) == 0 {
+        let open = clear.is_some_and(|c| c >= mass.height);
+        if merlon && edge && !open && (x + z).rem_euclid(2) == 0 {
             editor.set_block_absolute(mass.block, x, top + 1, z, None, None);
         }
     }
@@ -183,6 +190,19 @@ mod tests {
                 ("roof:shape", "pyramidal")
             ])),
             None
+        );
+        // A wall tower under its cone stays a building too; a wall is a wall whatever its roof.
+        assert_eq!(
+            kind(&tags(&[
+                ("building", "tower"),
+                ("historic", "citywalls"),
+                ("roof:shape", "conical")
+            ])),
+            None
+        );
+        assert_eq!(
+            kind(&tags(&[("building", "wall"), ("roof:shape", "skillion")])),
+            Some(Kind::Wall)
         );
         let base = tags(&[("building", "wall"), ("building:part", "base")]);
         assert!(!crenellated(&base, Kind::Wall));
