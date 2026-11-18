@@ -23,6 +23,9 @@ enum Source {
     Schem(&'static [u8]),
     /// Built in code, laid out as a loaded `.schem`.
     Built(fn() -> PalettizedSchematic),
+    /// Built in code to sit in sloping ground: columns at most a layer above `ground_y` follow
+    /// the terrain one by one, and each taller part rests on the highest ground it meets.
+    OnTerrain(fn() -> PalettizedSchematic),
 }
 
 /// One bundled landmark model.
@@ -31,7 +34,7 @@ struct Landmark {
     name: &'static str,
     /// Wikidata QID of the object this model replaces.
     qid: &'static str,
-    /// Fallback identity if the element lost its `wikidata` tag.
+    /// Fallback identity if the element lost its `wikidata` tag, and mapped parts the model replaces.
     osm_ids: &'static [(&'static str, u64)],
     /// North-up at one block per metre.
     model: Source,
@@ -196,6 +199,45 @@ const LANDMARKS: &[Landmark] = &[
         suppress_half_z: 102.0,
         reach_m: 155,
         height: 64,
+    },
+    Landmark {
+        name: "Hollywood Sign",
+        qid: "Q180376",
+        osm_ids: crate::structures::hollywood_sign::LETTER_WAYS,
+        model: Source::OnTerrain(crate::structures::hollywood_sign::build),
+        // The mapped sign node; the letters stand on their mapped baselines around it.
+        lat: 34.134_099_1,
+        lon: -118.321_652_0,
+        anchor_x: crate::structures::hollywood_sign::ANCHOR_X as f64,
+        anchor_z: crate::structures::hollywood_sign::ANCHOR_Z as f64,
+        ground_y: crate::structures::hollywood_sign::GROUND,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        suppress_half_x: 56.0,
+        suppress_half_z: 10.0,
+        reach_m: 58,
+        height: 14,
+    },
+    Landmark {
+        name: "Stonehenge",
+        qid: "Q39671",
+        osm_ids: crate::structures::stonehenge::MAPPED,
+        model: Source::OnTerrain(crate::structures::stonehenge::build),
+        // Centre of the sarsen circle, the stone plan fitted to the mapped stones.
+        lat: 51.178_860_4,
+        lon: -1.826_203_6,
+        anchor_x: crate::structures::stonehenge::CENTRE_X as f64,
+        anchor_z: crate::structures::stonehenge::CENTRE_Z as f64,
+        ground_y: crate::structures::stonehenge::GROUND,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // The henge; nothing is built inside it.
+        suppress_half_x: 62.0,
+        suppress_half_z: 62.0,
+        reach_m: 162,
+        height: 8,
     },
 ];
 
@@ -444,6 +486,8 @@ struct Model {
     columns: Vec<(u32, u32)>,
     /// Columns dug out down to the model. Elsewhere the ground stays.
     excavated: Vec<bool>,
+    /// For a model on terrain, each column's standing part, or `DRAPED`, indexed by `slot`.
+    parts: Option<Vec<u32>>,
     min_x: i32,
     max_x: i32,
     min_z: i32,
@@ -456,7 +500,7 @@ impl Model {
     fn load(landmark: &Landmark) -> Result<Self, String> {
         let parsed = match landmark.model {
             Source::Schem(bytes) => load_palettized(bytes)?,
-            Source::Built(build) => build(),
+            Source::Built(build) | Source::OnTerrain(build) => build(),
         };
         let mut voxels = parsed.voxels;
         if voxels.is_empty() {
@@ -505,11 +549,23 @@ impl Model {
             )
         };
 
+        let parts = matches!(landmark.model, Source::OnTerrain(_)).then(|| {
+            let standing: Vec<bool> = columns
+                .iter()
+                .map(|&(offset, len)| {
+                    len > 0
+                        && i32::from(voxels[(offset + len - 1) as usize].1) > landmark.ground_y + 1
+                })
+                .collect();
+            standing_parts(&standing, span_x, span_z)
+        });
+
         Ok(Model {
             palette: parsed.palette,
             voxels,
             columns,
             excavated,
+            parts,
             min_x,
             max_x,
             min_z,
@@ -575,6 +631,39 @@ pub(crate) fn fill_enclosed(mask: &[bool], span_x: usize, span_z: usize) -> Vec<
         }
     }
     outside.iter().map(|&o| !o).collect()
+}
+
+/// Part of a column that follows the terrain on its own.
+const DRAPED: u32 = u32::MAX;
+
+/// Number the 8-connected groups of standing columns; the rest drape.
+fn standing_parts(standing: &[bool], span_x: usize, span_z: usize) -> Vec<u32> {
+    let mut parts = vec![DRAPED; standing.len()];
+    let mut next = 0u32;
+    let mut stack: Vec<usize> = Vec::new();
+    for start in 0..standing.len() {
+        if !standing[start] || parts[start] != DRAPED {
+            continue;
+        }
+        parts[start] = next;
+        stack.push(start);
+        while let Some(i) = stack.pop() {
+            let (x, z) = ((i % span_x) as i64, (i / span_x) as i64);
+            for (dx, dz) in (-1..=1).flat_map(|dz| (-1..=1).map(move |dx| (dx, dz))) {
+                let (nx, nz) = (x + dx, z + dz);
+                if nx < 0 || nz < 0 || nx >= span_x as i64 || nz >= span_z as i64 {
+                    continue;
+                }
+                let n = nx as usize + nz as usize * span_x;
+                if standing[n] && parts[n] == DRAPED {
+                    parts[n] = next;
+                    stack.push(n);
+                }
+            }
+        }
+        next += 1;
+    }
+    parts
 }
 
 /// Shrink `mask` by `r` blocks, as two linear passes rather than a square.
@@ -679,6 +768,12 @@ fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacemen
     min_z = min_z.max(world_min_z);
     max_z = max_z.min(world_max_z);
 
+    if let Some(parts) = &model.parts {
+        let bounds = (min_x, max_x, min_z, max_z);
+        stand_on_terrain(editor, args, placement, &model, parts, &palette, bounds);
+        return;
+    }
+
     let clear_top = layer(model.max_y - landmark.ground_y + 1);
     // Writes past the world floor get clamped onto it rather than dropped, so a
     // dug-in model would smear its buried courses across bedrock. Skip them.
@@ -738,6 +833,117 @@ fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacemen
                     );
                     placed += 1;
                 }
+            }
+        }
+    }
+
+    if placed > 0 {
+        println!(
+            "  Placed {} ({} blocks)",
+            landmark.name.bright_white().bold(),
+            placed
+        );
+    }
+}
+
+/// Places a model on terrain: draped columns on their own ground, each part on the highest
+/// ground under it. Nothing is dug out or underpinned, only what grows in its columns cleared.
+fn stand_on_terrain(
+    editor: &mut WorldEditor,
+    args: &Args,
+    placement: &LandmarkPlacement,
+    model: &Model,
+    parts: &[u32],
+    palette: &[BlockWithProperties],
+    (min_x, max_x, min_z, max_z): (i32, i32, i32, i32),
+) {
+    let landmark = placement.landmark;
+    // Below full scale a world column spans several model columns. The tallest, then fullest,
+    // wins, so a one block thin sign or a lintel does not drop out.
+    let samples: &[f64] = if args.scale < 1.0 {
+        &[0.25, 0.75]
+    } else {
+        &[0.5]
+    };
+    let column_at = |wx: i32, wz: i32| {
+        let mut best: Option<(&[(i16, i16, i16, u8)], u32)> = None;
+        for &oz in samples {
+            for &ox in samples {
+                let (mx, mz) = to_model_xz(placement, args, wx as f64 + ox, wz as f64 + oz);
+                let (x, z) = (mx.floor() as i32, mz.floor() as i32);
+                let (Some(column), Some(slot)) = (model.column(x, z), model.slot(x, z)) else {
+                    continue;
+                };
+                let rank = |c: &[(i16, i16, i16, u8)]| (c[c.len() - 1].1, c.len());
+                if best.is_none_or(|(kept, _)| rank(column) > rank(kept)) {
+                    best = Some((column, parts[slot]));
+                }
+            }
+        }
+        best
+    };
+
+    // A part rests on its columns that meet the ground layer; one without any, on all of them.
+    let part_count = parts
+        .iter()
+        .filter(|&&p| p != DRAPED)
+        .max()
+        .map_or(0, |&p| p as usize + 1);
+    let mut part_ground = vec![(i32::MIN, i32::MIN); part_count];
+    for wz in min_z..=max_z {
+        for wx in min_x..=max_x {
+            if let Some((column, part)) = column_at(wx, wz) {
+                if part != DRAPED {
+                    let terrain = editor.get_ground_level(wx, wz);
+                    let (bearing, any) = &mut part_ground[part as usize];
+                    *any = (*any).max(terrain);
+                    if column.iter().any(|v| i32::from(v.1) == landmark.ground_y) {
+                        *bearing = (*bearing).max(terrain);
+                    }
+                }
+            }
+        }
+    }
+
+    let world_floor = crate::world_editor::min_y() + 1;
+    let mut placed = 0usize;
+    for wz in min_z..=max_z {
+        for wx in min_x..=max_x {
+            let Some((column, part)) = column_at(wx, wz) else {
+                continue;
+            };
+            let terrain = editor.get_ground_level(wx, wz);
+            let ground = match part {
+                DRAPED => terrain,
+                _ => match part_ground[part as usize] {
+                    (i32::MIN, any) => any,
+                    (bearing, _) => bearing,
+                },
+            };
+            let base = ground + 1 + landmark.ground_offset;
+            let layer = |dy: i32| base + (dy as f64 * args.scale).round() as i32;
+            let bottom = layer(i32::from(column[0].1) - landmark.ground_y);
+            let top = layer(i32::from(column[column.len() - 1].1) + 1 - landmark.ground_y);
+            for y in (terrain + 1).max(world_floor)..=top {
+                if editor.get_block_absolute(wx, y, wz).is_some() {
+                    editor.set_block_absolute(AIR, wx, y, wz, None, Some(&[]));
+                }
+            }
+            // Each world layer takes the model layer it falls in, as the columns are sampled.
+            for y in bottom.max(world_floor)..top {
+                let my = landmark.ground_y + ((y - base) as f64 / args.scale).floor() as i32;
+                let Some(&(_, _, _, slot)) = column.iter().find(|v| i32::from(v.1) == my) else {
+                    continue;
+                };
+                editor.set_block_with_properties_absolute(
+                    palette[slot as usize].clone(),
+                    wx,
+                    y,
+                    wz,
+                    None,
+                    Some(&[]),
+                );
+                placed += 1;
             }
         }
     }
@@ -825,7 +1031,7 @@ mod tests {
         for l in LANDMARKS {
             let model = match l.model {
                 Source::Schem(bytes) => load_palettized(bytes).unwrap(),
-                Source::Built(build) => build(),
+                Source::Built(build) | Source::OnTerrain(build) => build(),
             };
             let top = model.voxels.iter().map(|v| i32::from(v.1)).max().unwrap() + 1;
             assert_eq!(
