@@ -11,7 +11,7 @@ use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::bridges::is_bridge_way;
 use crate::element_processing::highways::{
     highway_block_range, in_side_stamp, is_carriageway, stamps_square, surface_highway_type,
-    tunnel_renders_at_surface,
+    tunnel_renders_at_surface, Sweep,
 };
 use crate::element_processing::road_width::kerb_sides;
 use crate::floodfill_cache::CoordinateBitmap;
@@ -87,18 +87,33 @@ fn stamp(bits: &mut CoordinateBitmap, way: &ProcessedWay, highway_type: &str, sc
     let half = highway_block_range(highway_type, &way.tags, scale);
     let sides = kerb_sides(highway_type, &way.tags, scale);
     let square = stamps_square(way);
+    // The stamp's cells, swept along the way: once a way, or once a segment where the two
+    // kerbs lie at different reaches and the way's direction says which side is which.
+    let cells = |u: Option<(f32, f32)>| {
+        Sweep::new(
+            half,
+            (-half..=half)
+                .flat_map(|dx| (-half..=half).map(move |dz| (dx, dz)))
+                .filter(|&(dx, dz)| square || in_side_stamp(dx, dz, u, sides))
+                .map(|(dx, dz)| (dx, dz, false))
+                .collect(),
+        )
+    };
+    let lopsided = !square && sides.0 != sides.1;
+    let mut sweep = (!lopsided).then(|| cells(None));
     for pair in way.nodes.windows(2) {
         let (a, b) = (&pair[0], &pair[1]);
-        let (sx, sz) = ((b.x - a.x) as f32, (b.z - a.z) as f32);
-        let len = sx.hypot(sz);
-        let u = (len > 0.0).then(|| (sx / len, sz / len));
+        if lopsided {
+            let (sx, sz) = ((b.x - a.x) as f32, (b.z - a.z) as f32);
+            let len = sx.hypot(sz);
+            sweep = Some(cells((len > 0.0).then(|| (sx / len, sz / len))));
+        }
+        let Some(sweep) = sweep.as_mut() else {
+            continue;
+        };
         for (x, _, z) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
-            for dx in -half..=half {
-                for dz in -half..=half {
-                    if square || in_side_stamp(dx, dz, u, sides) {
-                        bits.set(x + dx, z + dz);
-                    }
-                }
+            for &(dx, dz, _) in sweep.step_to(x, z) {
+                bits.set(x + dx, z + dz);
             }
         }
     }
