@@ -442,12 +442,13 @@ const OVER_ASPHALT_PROTECTED_SURFACES: &[Block] = &[
     RED_CONCRETE,
 ];
 
-/// What a sidewalk must not overwrite off the carriageway: the list above, a path's asphalt,
-/// and the grey of a driveway or crossing, which it stops at as any footway does.
+/// What a sidewalk must not overwrite off the carriageway: the list above and a path's
+/// asphalt. Unlike other footways it may pave over a driveway's grey, since a sidewalk
+/// carries on across the driveways along it.
 const SIDEWALK_PROTECTED_SURFACES: &[Block] =
-    &joined::<{ OVER_ASPHALT_PROTECTED_SURFACES.len() + 2 }>(
+    &joined::<{ OVER_ASPHALT_PROTECTED_SURFACES.len() + 1 }>(
         OVER_ASPHALT_PROTECTED_SURFACES,
-        &[POLISHED_ANDESITE, GRAY_CONCRETE],
+        &[POLISHED_ANDESITE],
     );
 
 /// Blocks a highway way is surfaced with: by type, then `surface=*`, with paved sidewalks
@@ -5425,7 +5426,9 @@ mod tests {
         };
         // A path's asphalt keeps out of the grey; the grey ways pave over the asphalt.
         assert!(CAR_FREE_PROTECTED_SURFACES.contains(&GRAY_CONCRETE));
-        assert!(SIDEWALK_PROTECTED_SURFACES.contains(&GRAY_CONCRETE));
+        // A sidewalk carries on across a driveway, as on main.
+        assert!(!SIDEWALK_PROTECTED_SURFACES.contains(&GRAY_CONCRETE));
+        assert!(SIDEWALK_PROTECTED_SURFACES.contains(&POLISHED_ANDESITE));
         for list in [ROAD_PROTECTED_SURFACES, OVER_ASPHALT_PROTECTED_SURFACES] {
             assert!(!list.contains(&POLISHED_ANDESITE));
         }
