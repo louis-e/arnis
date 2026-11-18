@@ -11,7 +11,7 @@ use crate::element_processing::railways::{
 };
 use crate::element_processing::structure_kit::{concrete_for_colour, mix, with_props};
 use crate::floodfill_cache::CoordinateBitmap;
-use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fnv::{FnvHashMap, FnvHashSet};
 use rayon::prelude::*;
@@ -144,17 +144,33 @@ fn yes(tags: &HashMap<String, String>, key: &str) -> bool {
     tags.get(key).map(String::as_str) == Some("yes")
 }
 
+/// Whether only a negative `level` puts a platform under ground, which counts floors of a
+/// station building rather than depth.
+fn underground_by_level_only(tags: &HashMap<String, String>) -> bool {
+    tagged_underground(tags)
+        && tags.get("tunnel").is_none_or(|v| v == "no")
+        && tags.get("location").map(String::as_str) != Some("underground")
+        && !tags
+            .get("layer")
+            .and_then(|v| tag_number(v))
+            .is_some_and(|l| l < 0.0)
+}
+
 /// A mapped platform and the cells it covers.
 struct Platform {
     id: u64,
     cells: Vec<(i32, i32)>,
     low: bool,
     covered: bool,
+    /// `covered=partial`: a canopy over some of it.
+    partial: bool,
     shelter: bool,
     name: Option<String>,
     colour: Option<Block>,
     depth: Option<i32>,
     underground: bool,
+    /// Under ground by its level alone, so the tracks beside it may say otherwise.
+    level_only: bool,
     surface: bool,
 }
 
@@ -260,15 +276,172 @@ fn collect_platforms(elements: &[ProcessedElement], timeout: Option<&Duration>) 
             cells,
             low: is_low(tags),
             covered: yes(tags, "covered"),
+            partial: tags.get("covered").map(String::as_str) == Some("partial"),
             shelter: yes(tags, "shelter"),
             name: tags.get("name").cloned(),
             colour: tags.get("colour").and_then(|c| concrete_for_colour(c)),
             depth: depth_key(tags),
             underground: tagged_underground(tags),
+            level_only: underground_by_level_only(tags),
             surface: tagged_surface(tags),
         });
     }
     out
+}
+
+/// A mapped roof over platforms, which the station draws instead of the building pass.
+struct Cover {
+    id: u64,
+    cells: Vec<(i32, i32)>,
+    /// An arched train shed rather than a platform canopy.
+    shed: bool,
+    /// Tagged `height`, `roof:height` and `min_height`, in metres.
+    height: Option<f64>,
+    roof_height: Option<f64>,
+    min_height: Option<f64>,
+}
+
+/// Smallest train shed, in cells, and its least span across.
+const SHED_MIN_CELLS: usize = 300;
+const SHED_MIN_SPAN: f64 = 16.0;
+/// Ground to a shed's springing when untagged, and the least that clears trains and wires.
+const SHED_SPRING: i32 = 8;
+const SHED_SPRING_MIN: i32 = 7;
+/// Cells between a shed's ribs and columns.
+const SHED_BAY: i32 = 8;
+/// Platform surface to the canopy over it, four blocks clear; a tram stop's is lower.
+const CANOPY_LIFT: i32 = 5;
+const LOW_CANOPY_LIFT: i32 = 3;
+
+/// How far over the platform a mapped canopy hangs: as drawn, or higher if its tags say so.
+fn canopy_lift(cover: &Cover, scale: f64) -> i32 {
+    cover.min_height.map_or(CANOPY_LIFT, |m| {
+        ((m * scale).round() as i32 - 1).clamp(CANOPY_LIFT, 10)
+    })
+}
+
+/// Whether a building could be a shed (true) or a canopy (false) over platforms.
+fn cover_kind(tags: &HashMap<String, String>) -> Option<bool> {
+    let metres = |k: &str| tags.get(k).and_then(|v| tag_number(v));
+    if tags.contains_key("3dmr")
+        || tags.get("location").map(String::as_str) == Some("underground")
+        || metres("layer").is_some_and(|l| l < 0.0)
+    {
+        return None;
+    }
+    let roof = tags.get("building").map(String::as_str) == Some("roof")
+        || tags.get("building:part").map(String::as_str) == Some("roof");
+    // A hall lifted over the tracks, such as a footbridge, is no shed.
+    let raised = metres("building:min_level").is_some_and(|l| l > 0.0)
+        || metres("min_height").is_some_and(|h| h > 0.0)
+        || metres("layer").is_some_and(|l| l >= 2.0);
+    match tags.get("roof:shape").map(String::as_str) {
+        Some("round" | "barrel" | "vault" | "vaulted") if !raised => Some(true),
+        None | Some("flat" | "butterfly" | "skillion")
+            if roof
+                && metres("height").is_none_or(|h| h <= 8.0)
+                && metres("min_height").is_none_or(|h| h <= 7.0)
+                && metres("building:min_level").is_none_or(|l| l <= 0.0) =>
+        {
+            Some(false)
+        }
+        _ => None,
+    }
+}
+
+/// Roofs and round-roofed buildings with a corner near a platform, filled.
+fn collect_covers(
+    elements: &[ProcessedElement],
+    near: &FnvHashSet<(i32, i32)>,
+    timeout: Option<&Duration>,
+) -> Vec<Cover> {
+    let metres = |tags: &HashMap<String, String>, k: &str| tags.get(k).and_then(|v| tag_number(v));
+    let mut out = Vec::new();
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        let tags = &way.tags;
+        if !(tags.contains_key("building") || tags.contains_key("building:part")) {
+            continue;
+        }
+        let Some(shed) = cover_kind(tags) else {
+            continue;
+        };
+        let pts: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
+        if pts.len() < 4
+            || pts.first() != pts.last()
+            || !pts.iter().any(|&(x, z)| near.contains(&(x >> 4, z >> 4)))
+        {
+            continue;
+        }
+        let mut cells = ring_cells(&pts, timeout);
+        cells.sort_unstable();
+        cells.dedup();
+        if cells.is_empty() || cells.len() > MAX_PLATFORM_CELLS * 4 {
+            continue;
+        }
+        out.push(Cover {
+            id: way.id,
+            cells,
+            shed,
+            height: metres(tags, "height"),
+            roof_height: metres(tags, "roof:height"),
+            min_height: metres(tags, "min_height"),
+        });
+    }
+    out
+}
+
+/// What a platform's tags ask of a canopy the mapper did not draw.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Canopy {
+    None,
+    /// `covered=yes`: the whole of it out in the open.
+    Full,
+    /// `covered=partial`: most of the open stretch.
+    Part,
+    /// `shelter=yes`: a stretch of it.
+    Shelter,
+}
+
+/// Slices a drawn canopy covers, keeping off the ramps and slices under a building; a part
+/// canopy runs on from a building the platform leaves, else sits in the middle.
+fn canopy_slices(keys: &[i32], indoors: &FnvHashSet<i32>, canopy: Canopy) -> FnvHashSet<i32> {
+    let (Some(&first), Some(&last)) = (keys.first(), keys.last()) else {
+        return FnvHashSet::default();
+    };
+    let open: Vec<i32> = keys
+        .iter()
+        .copied()
+        .filter(|t| !indoors.contains(t) && t - first > 3 && last - t > 3)
+        .collect();
+    let share = match canopy {
+        Canopy::None => return FnvHashSet::default(),
+        Canopy::Full => return open.into_iter().collect(),
+        Canopy::Part => (2, 3, 24),
+        Canopy::Shelter => (1, 3, 20),
+    };
+    let mut runs: Vec<&[i32]> = open.chunk_by(|a, b| b - a <= 2).collect();
+    runs.sort_by_key(|r| std::cmp::Reverse(r[r.len() - 1] - r[0]));
+    let Some(run) = runs.first() else {
+        return FnvHashSet::default();
+    };
+    let (a, b) = (run[0], run[run.len() - 1]);
+    let len = b - a + 1;
+    let want = (len * share.0 / share.1).max(share.2).min(len);
+    let indoors_within = |from: i32, to: i32| (from..=to).any(|t| indoors.contains(&t));
+    let lo = if indoors_within(a - 4, a - 1) {
+        a
+    } else if indoors_within(b + 1, b + 4) {
+        b - want + 1
+    } else {
+        (a + b) / 2 - want / 2
+    };
+    run.iter()
+        .copied()
+        .filter(|t| (lo..lo + want).contains(t))
+        .collect()
 }
 
 /// One cell of a track near a platform.
@@ -382,7 +555,8 @@ struct DeckCell {
     top: i32,
     deck: Deck,
     prop: Prop,
-    roof: bool,
+    /// How far over the surface the canopy above it hangs.
+    roof: Option<i32>,
     /// Under a pillar of an elevated platform.
     pier: bool,
     /// A side away from the tracks, railed off when high up.
@@ -395,9 +569,42 @@ struct SurfaceStation {
     cells: Vec<DeckCell>,
     /// Ballast cells beside the tracks and the bed they lie at.
     beds: Vec<(i32, i32, i32)>,
+    /// Mapped canopy off the platform, kept off the tracks, and the height it hangs at.
+    canopy: Vec<(i32, i32, i32)>,
     low: bool,
     elevated: bool,
     name: Option<String>,
+}
+
+/// What stands on a train shed's cell under its roof.
+#[derive(Clone, Copy, Debug)]
+enum ShedSide {
+    None,
+    /// A column from `lo` up to the roof.
+    Column(i32),
+    /// An outer wall from `lo` up to the roof.
+    Wall(i32),
+    /// Glass hung from the roof down to `lo` at an open end, a mullion where `true`.
+    Screen(i32, bool),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ShedCell {
+    x: i32,
+    z: i32,
+    /// The roof from `lo` to `hi`.
+    lo: i32,
+    hi: i32,
+    skin: Block,
+    side: ShedSide,
+    /// A wall cell's window rows.
+    window: bool,
+}
+
+/// An arched train shed of glass and steel over platforms.
+struct Shed {
+    bbox: (i32, i32, i32, i32),
+    cells: Vec<ShedCell>,
 }
 
 /// What a cell of a hall is.
@@ -525,6 +732,9 @@ enum EntrancePart {
 #[derive(Default)]
 pub struct StationIndex {
     surface: Vec<SurfaceStation>,
+    sheds: Vec<Shed>,
+    /// Ways of canopies and sheds drawn here instead of by the building pass.
+    drawn: FnvHashSet<u64>,
     halls: Vec<Hall>,
     entrances: Vec<Entrance>,
     /// Rail beds of surface tracks along a platform, by way and cell.
@@ -650,6 +860,93 @@ fn boxes_within(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32), r: i32) -> boo
     a.0 - r <= b.2 && b.0 - r <= a.2 && a.1 - r <= b.3 && b.1 - r <= a.3
 }
 
+/// Smallest piece of a station building beside its parts that is drawn, in cells.
+const STATION_PIECE_MIN: usize = 150;
+
+/// Four-connected pieces of a set of cells, each sorted, in the order of their first cell.
+fn pieces(cells: &FnvHashSet<(i32, i32)>) -> Vec<Vec<(i32, i32)>> {
+    let mut sorted: Vec<(i32, i32)> = cells.iter().copied().collect();
+    sorted.sort_unstable();
+    let mut seen: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+    let mut out = Vec::new();
+    for start in sorted {
+        if !seen.insert(start) {
+            continue;
+        }
+        let mut piece = vec![start];
+        let mut i = 0;
+        while let Some(&(x, z)) = piece.get(i) {
+            i += 1;
+            for (dx, dz) in NEIGHBOURS4 {
+                let n = (x + dx, z + dz);
+                if cells.contains(&n) && seen.insert(n) {
+                    piece.push(n);
+                }
+            }
+        }
+        piece.sort_unstable();
+        out.push(piece);
+    }
+    out
+}
+
+/// The edge cells of a piece as a closed ring, clockwise from its top left, straight runs
+/// cut down to their ends.
+fn trace_ring(piece: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    const AROUND: [(i32, i32); 8] = [
+        (-1, 0),
+        (-1, -1),
+        (0, -1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+        (0, 1),
+        (-1, 1),
+    ];
+    let set: FnvHashSet<(i32, i32)> = piece.iter().copied().collect();
+    let Some(&start) = piece.iter().min_by_key(|&&(x, z)| (z, x)) else {
+        return Vec::new();
+    };
+    let step = |(x, z): (i32, i32), d: usize| (x + AROUND[d].0, z + AROUND[d].1);
+    let mut ring = vec![start];
+    // Looking round from the outside cell last passed, clockwise.
+    let (mut at, mut back) = (start, 0);
+    for _ in 0..piece.len() * 4 + 8 {
+        let Some(d) = (1..=8)
+            .map(|i| (back + i) % 8)
+            .find(|&d| set.contains(&step(at, d)))
+        else {
+            break;
+        };
+        let (next, passed) = (step(at, d), step(at, (d + 7) % 8));
+        back = (0..8).find(|&b| step(next, b) == passed).unwrap_or(0);
+        at = next;
+        if at == start {
+            break;
+        }
+        ring.push(at);
+    }
+    ring.push(start);
+    let mut corners = vec![ring[0]];
+    for w in ring.windows(3) {
+        if (w[1].0 - w[0].0, w[1].1 - w[0].1) != (w[2].0 - w[1].0, w[2].1 - w[1].1) {
+            corners.push(w[1]);
+        }
+    }
+    corners.push(start);
+    corners
+}
+
+/// Width of a set of cells across its main direction.
+fn span_across(cells: &[(i32, i32)]) -> f64 {
+    let frame = Frame::of(cells.iter().copied());
+    let (lo, hi) = cells.iter().fold((f64::MAX, f64::MIN), |(a, b), &(x, z)| {
+        let s = frame.across(x, z);
+        (a.min(s), b.max(s))
+    });
+    hi - lo + 1.0
+}
+
 fn bbox_of(cells: impl Iterator<Item = (i32, i32)>) -> (i32, i32, i32, i32) {
     cells.fold(
         (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
@@ -698,6 +995,8 @@ pub struct StationInputs<'a> {
     pub timeout: Option<&'a Duration>,
     /// Halls are built at all: the mode builds objects and the scale leaves room for them.
     pub underground: bool,
+    /// Mapped canopies and sheds over platforms are drawn here: the mode builds objects.
+    pub roofs: bool,
 }
 
 impl StationIndex {
@@ -836,17 +1135,19 @@ impl StationIndex {
                 out
             })
             .collect();
-        // Tags decide first, so a tram stop over a subway tunnel stays at the surface.
+        // Tags decide first, so a tram stop over a subway tunnel stays at the surface. A level
+        // under the station's entrance floor does not take a platform off its surface tracks.
         let underground: Vec<bool> = platforms
             .iter()
             .zip(&adjacent)
             .map(|(p, adj)| {
+                let tunnels = adj.iter().filter(|t| t.tunnel).count();
                 if p.underground {
-                    true
+                    !p.level_only || tunnels * 2 >= adj.len()
                 } else if p.low || p.surface {
                     false
                 } else {
-                    adj.iter().filter(|t| t.tunnel).count() * 2 > adj.len()
+                    tunnels * 2 > adj.len()
                 }
             })
             .collect();
@@ -871,17 +1172,65 @@ impl StationIndex {
             }
         }
         let sets = groups.sets();
+
+        // Mapped roofs over surface platforms: a canopy goes to the station it covers most, a
+        // round roof spanning them is a train shed.
+        let covers = if inputs.roofs {
+            collect_covers(elements, &near, inputs.timeout)
+        } else {
+            Vec::new()
+        };
+        let mut deck_set: FnvHashMap<(i32, i32), usize> = FnvHashMap::default();
+        for (s, set) in sets.iter().enumerate() {
+            for &i in set
+                .iter()
+                .filter(|&&i| !underground[i] && !platforms[i].low)
+            {
+                deck_set.extend(platforms[i].cells.iter().map(|&c| (c, s)));
+            }
+        }
+        let mut canopies: Vec<Vec<&Cover>> = vec![Vec::new(); sets.len()];
+        let mut sheds: Vec<&Cover> = Vec::new();
+        for cover in &covers {
+            let mut by_set: FnvHashMap<usize, usize> = FnvHashMap::default();
+            for c in &cover.cells {
+                if let Some(&s) = deck_set.get(c) {
+                    *by_set.entry(s).or_default() += 1;
+                }
+            }
+            let over: usize = by_set.values().sum();
+            if cover.shed {
+                if cover.cells.len() >= SHED_MIN_CELLS
+                    && over * 100 >= cover.cells.len() * 15
+                    && span_across(&cover.cells) >= SHED_MIN_SPAN
+                {
+                    sheds.push(cover);
+                }
+            } else if over >= 8 && over * 5 >= cover.cells.len() {
+                if let Some((&s, _)) = by_set
+                    .iter()
+                    .max_by_key(|&(&s, &n)| (n, std::cmp::Reverse(s)))
+                {
+                    canopies[s].push(cover);
+                }
+            }
+        }
+        index
+            .drawn
+            .extend(canopies.iter().flatten().chain(&sheds).map(|c| c.id));
+
         let mut hall_sets = Vec::new();
-        for set in sets {
+        for (s, set) in sets.into_iter().enumerate() {
             if underground[set[0]] {
                 // A platform tagged under ground with no tunnel beside it has nothing to serve.
                 if inputs.underground && set.iter().any(|&i| !adjacent[i].is_empty()) {
                     hall_sets.push(set);
                 }
             } else {
-                index.lay_surface(&platforms, &adjacent, &set, inputs);
+                index.lay_surface(&platforms, &adjacent, &set, inputs, &canopies[s], &tracks);
             }
         }
+        index.lay_sheds(&sheds, &tracks, inputs);
         index.lay_halls(
             &platforms,
             &adjacent,
@@ -965,6 +1314,8 @@ impl StationIndex {
         adjacent: &[Vec<TrackCell>],
         set: &[usize],
         inputs: &StationInputs,
+        canopies: &[&Cover],
+        near_tracks: &FnvHashMap<(i32, i32), Vec<TrackCell>>,
     ) {
         let editor = inputs.editor;
         let ground = |x: i32, z: i32| {
@@ -1068,17 +1419,41 @@ impl StationIndex {
             .count()
             * 3
             > cells.len();
-        let covered = set.iter().any(|&i| platforms[i].covered) && !roofed_by_building;
-        let sheltered = set.iter().any(|&i| platforms[i].shelter) && !roofed_by_building;
+        let any = |f: fn(&Platform) -> bool| set.iter().any(|&i| f(&platforms[i]));
+        let covered = any(|p| p.covered) && !roofed_by_building;
+        let sheltered = any(|p| p.shelter) && !roofed_by_building;
         let t_mid = (t_min + t_max) / 2.0;
-        let under_roof = |t: f64| -> bool {
+        let under_low_roof = |t: f64| -> bool {
             if covered {
                 t - t_min > 3.0 && t_max - t > 3.0
             } else if sheltered {
-                (t - t_mid).abs() <= if low { 2.5 } else { 10.0 }
+                (t - t_mid).abs() <= 2.5
             } else {
                 false
             }
+        };
+
+        // Mapped canopies and the height each hangs at; without them one as the tags ask.
+        let mut canopy_at: FnvHashMap<(i32, i32), i32> = FnvHashMap::default();
+        for cover in canopies {
+            let lift = canopy_lift(cover, inputs.scale);
+            for &c in &cover.cells {
+                let held = canopy_at.entry(c).or_insert(lift);
+                *held = (*held).max(lift);
+            }
+        }
+        let mapped = !canopy_at.is_empty()
+            && cells.iter().filter(|c| canopy_at.contains_key(c)).count() * 10 >= cells.len();
+        let canopy = if low || mapped {
+            Canopy::None
+        } else if any(|p| p.covered) {
+            Canopy::Full
+        } else if any(|p| p.partial) {
+            Canopy::Part
+        } else if any(|p| p.shelter) {
+            Canopy::Shelter
+        } else {
+            Canopy::None
         };
 
         let decks_of: Vec<Deck> = cells
@@ -1119,12 +1494,26 @@ impl StationIndex {
                 .push(k);
         }
         let mut props = vec![Prop::None; cells.len()];
-        let mut roofs = vec![false; cells.len()];
+        let mut roofs: Vec<Option<i32>> = vec![None; cells.len()];
         let mut piers = vec![false; cells.len()];
         let (ax, az) = frame.grid_along();
         let side = (-az, ax);
         let mut keys: Vec<i32> = slices.keys().copied().collect();
         keys.sort_unstable();
+        // Slices mostly under a building, such as a train shed, need no canopy of their own.
+        let indoors: FnvHashSet<i32> = keys
+            .iter()
+            .copied()
+            .filter(|t| {
+                let slice = &slices[t];
+                let under = slice
+                    .iter()
+                    .filter(|&&k| inputs.building_footprints.contains(cells[k].0, cells[k].1))
+                    .count();
+                under * 2 > slice.len()
+            })
+            .collect();
+        let drawn = canopy_slices(&keys, &indoors, canopy);
         let board_slice = ((t_mid - t_min).round()) as i32;
         let has_name = first.name.is_some() && !low;
         for &t in &keys {
@@ -1149,12 +1538,18 @@ impl StationIndex {
                 continue;
             };
             let t_abs = t_min + t as f64;
-            let roofed = under_roof(t_abs);
             for &k in slice {
-                if roofed && decks_of[k] != Deck::Edge && decks_of[k] != Deck::End {
-                    roofs[k] = true;
-                }
+                let deck = decks_of[k];
+                roofs[k] = if low {
+                    (under_low_roof(t_abs) && deck != Deck::Edge && deck != Deck::End)
+                        .then_some(LOW_CANOPY_LIFT)
+                } else if let Some(&lift) = canopy_at.get(&cells[k]) {
+                    Some(lift)
+                } else {
+                    (drawn.contains(&t) && deck != Deck::End).then_some(CANOPY_LIFT)
+                };
             }
+            let roofed = roofs[centre].is_some();
             if elevated && t.rem_euclid(6) == 3 {
                 piers[centre] = true;
             }
@@ -1206,19 +1601,217 @@ impl StationIndex {
             self.tree_free.set(x, z);
             self.on_platform.set(x, z);
         }
+        // The rest of a mapped canopy hangs at the platform's height, short of the tracks.
+        let on_track = |x: i32, z: i32| {
+            (-1..=1).any(|dx| {
+                (-1..=1).any(|dz| {
+                    near_tracks
+                        .get(&(x + dx, z + dz))
+                        .is_some_and(|ts| ts.iter().any(|t| !t.tunnel))
+                })
+            })
+        };
+        let mut canopy: Vec<(i32, i32, i32)> = canopy_at
+            .iter()
+            .filter(|&(c, _)| !set_cells.contains(c) && !on_track(c.0, c.1))
+            .map(|(&(x, z), &lift)| (x, z, level_at(x, z) + lift))
+            .collect();
+        canopy.sort_unstable();
         let bbox = bbox_of(
             out.iter()
                 .map(|c| (c.x, c.z))
-                .chain(beds.iter().map(|b| (b.0, b.1))),
+                .chain(beds.iter().map(|b| (b.0, b.1)))
+                .chain(canopy.iter().map(|c| (c.0, c.1))),
         );
         self.surface.push(SurfaceStation {
             bbox,
             cells: out,
             beds,
+            canopy,
             low,
             elevated,
             name: first.name.clone(),
         });
+    }
+
+    /// Train sheds over the platforms: an arch of glass between steel ribs on columns, walled
+    /// where it meets the open and screened in glass over its ends.
+    fn lay_sheds(
+        &mut self,
+        sheds: &[&Cover],
+        near_tracks: &FnvHashMap<(i32, i32), Vec<TrackCell>>,
+        inputs: &StationInputs,
+    ) {
+        if sheds.is_empty() {
+            return;
+        }
+        let editor = inputs.editor;
+        let level: FnvHashMap<(i32, i32), i32> =
+            self.levels.iter().map(|&(x, z, y)| ((x, z), y)).collect();
+        // A cell where two sheds meet is the first one's.
+        let mut owner: FnvHashMap<(i32, i32), usize> = FnvHashMap::default();
+        for (k, shed) in sheds.iter().enumerate() {
+            for &c in &shed.cells {
+                owner.entry(c).or_insert(k);
+            }
+        }
+        let on_track = |x: i32, z: i32| {
+            (-1..=1).any(|dx| {
+                (-1..=1).any(|dz| {
+                    near_tracks
+                        .get(&(x + dx, z + dz))
+                        .is_some_and(|ts| ts.iter().any(|t| !t.tunnel))
+                })
+            })
+        };
+        let blocks = |m: f64| (m * inputs.scale).round() as i32;
+        for (k, shed) in sheds.iter().enumerate() {
+            let fp: Vec<(i32, i32)> = shed
+                .cells
+                .iter()
+                .copied()
+                .filter(|c| owner[c] == k)
+                .collect();
+            if fp.is_empty() {
+                continue;
+            }
+            let inside: FnvHashSet<(i32, i32)> = fp.iter().copied().collect();
+            // The arch runs along the tracks under it, else along the shed's length.
+            let length = Frame::of(fp.iter().copied());
+            let (c2, s2) = fp
+                .iter()
+                .flat_map(|c| near_tracks.get(c).into_iter().flatten())
+                .filter(|t| !t.tunnel)
+                .fold((0.0, 0.0), |(c, s), t| {
+                    let a = 2.0 * f64::from(t.dir.1).atan2(f64::from(t.dir.0));
+                    (c + a.cos(), s + a.sin())
+                });
+            let frame = if c2.hypot(s2) > 8.0 {
+                let a = 0.5 * s2.atan2(c2);
+                Frame {
+                    ux: a.cos(),
+                    uz: a.sin(),
+                    ..length
+                }
+            } else {
+                length
+            };
+            // The ground it stands on: under its platforms, else the lowest terrain.
+            let mut ys: Vec<i32> = fp.iter().filter_map(|c| level.get(c).copied()).collect();
+            ys.sort_unstable();
+            let ground = match ys.get(ys.len() / 2) {
+                Some(&y) => y - 1,
+                None => fp
+                    .iter()
+                    .map(|&(x, z)| {
+                        editor
+                            .terrain_level(x, z)
+                            .unwrap_or(editor.get_ground_level(x, z))
+                    })
+                    .min()
+                    .unwrap_or(0),
+            };
+            let t0 = fp
+                .iter()
+                .map(|&(x, z)| frame.along(x, z))
+                .fold(f64::MAX, f64::min);
+            let key = |x: i32, z: i32| (frame.along(x, z) - t0).round() as i32;
+            let mut extent: FnvHashMap<i32, (f64, f64)> = FnvHashMap::default();
+            for &(x, z) in &fp {
+                let s = frame.across(x, z);
+                let e = extent.entry(key(x, z)).or_insert((f64::MAX, f64::MIN));
+                *e = (e.0.min(s), e.1.max(s));
+            }
+            let width = extent.values().map(|e| e.1 - e.0 + 1.0).fold(0.0, f64::max);
+            let (t_first, t_last) = (
+                extent.keys().copied().min().unwrap_or(0),
+                extent.keys().copied().max().unwrap_or(0),
+            );
+            // Springing and rise from the tagged height and roof height, else a third of the span.
+            let total = shed.height.map(blocks);
+            let spring = match (total, shed.roof_height.map(blocks)) {
+                (Some(h), Some(r)) => h - r,
+                (Some(h), None) => h - (width * 0.35) as i32,
+                _ => SHED_SPRING,
+            }
+            .max(SHED_SPRING_MIN);
+            let rise = match total {
+                Some(h) => (h - spring).max(4),
+                None => ((width * 0.35) as i32).clamp(5, 24),
+            };
+            let arch = |x: i32, z: i32| -> (i32, f64) {
+                let (lo, hi) = extent[&key(x, z)];
+                let half = ((hi - lo) / 2.0 + 0.5).max(1.0);
+                let u = ((frame.across(x, z) - (lo + hi) / 2.0) / half).clamp(-1.0, 1.0);
+                let lift = (f64::from(rise) * (1.0 - u * u).sqrt()).round() as i32;
+                (ground + spring + lift, u)
+            };
+            let mut cells = Vec::with_capacity(fp.len());
+            for &(x, z) in &fp {
+                let (hi, u) = arch(x, z);
+                let t = key(x, z);
+                let outward = NEIGHBOURS4
+                    .iter()
+                    .map(|&(dx, dz)| (x + dx, z + dz))
+                    .find(|c| !inside.contains(c));
+                let end = t <= t_first + 1 || t >= t_last - 1;
+                let bay = t.rem_euclid(SHED_BAY);
+                // Steep flanks close down to the next cell, the sides down to the springing.
+                let lo = if outward.is_some() && !end {
+                    ground + spring
+                } else {
+                    NEIGHBOURS4
+                        .iter()
+                        .filter(|&&(dx, dz)| inside.contains(&(x + dx, z + dz)))
+                        .map(|&(dx, dz)| arch(x + dx, z + dz).0 + 1)
+                        .fold(hi, i32::min)
+                        .max(ground + spring)
+                };
+                let skin = if bay == 0 || end {
+                    POLISHED_DEEPSLATE
+                } else if u.abs() > 0.7 {
+                    LIGHT_GRAY_CONCRETE
+                } else {
+                    GLASS
+                };
+                let foot = level.get(&(x, z)).map_or(ground + 1, |y| y + 1);
+                let side = match outward {
+                    None => ShedSide::None,
+                    Some(_) if end => ShedSide::Screen(
+                        (ground + spring - 1).max(ground + SHED_SPRING_MIN),
+                        (frame.across(x, z).round() as i32).rem_euclid(4) == 0,
+                    ),
+                    Some(_) if on_track(x, z) => ShedSide::None,
+                    // Between two sheds the one first in line stands the columns.
+                    Some(out) if owner.get(&out).is_some_and(|&j| j < k) => ShedSide::None,
+                    Some(out)
+                        if owner.contains_key(&out)
+                            || level.contains_key(&(x, z))
+                            || inputs.road_mask.contains(x, z) =>
+                    {
+                        if bay == 0 {
+                            ShedSide::Column(foot)
+                        } else {
+                            ShedSide::None
+                        }
+                    }
+                    Some(_) => ShedSide::Wall(ground + 1),
+                };
+                cells.push(ShedCell {
+                    x,
+                    z,
+                    lo,
+                    hi,
+                    skin,
+                    side,
+                    window: (2..=SHED_BAY - 2).contains(&bay),
+                });
+            }
+            self.sheds.push(Shed {
+                bbox: bbox_of(fp.iter().copied()),
+                cells,
+            });
+        }
     }
 
     /// Station halls round the platforms of tunnel tracks, stacked where lines cross.
@@ -2231,6 +2824,11 @@ impl StationIndex {
         !self.dug.is_empty() && self.dug.contains(x, z)
     }
 
+    /// Whether the station draws this building way: a canopy or a train shed over platforms.
+    pub fn draws_building(&self, way: u64) -> bool {
+        !self.drawn.is_empty() && self.drawn.contains(&way)
+    }
+
     /// Whether a surface platform covers (x, z).
     pub fn is_platform(&self, x: i32, z: i32) -> bool {
         !self.on_platform.is_empty() && self.on_platform.contains(x, z)
@@ -2260,6 +2858,118 @@ impl StationIndex {
         self.floors.get(&(way, x, z)).copied()
     }
 
+    /// What the parts of a station building leave of its outline once they include a shed
+    /// drawn here: the reception building and wings the parts replaced, each piece a building
+    /// way with the outline's tags.
+    pub fn station_buildings(
+        &self,
+        elements: &[ProcessedElement],
+        replaced: &crate::osm_parser::OutlineSuppression,
+        timeout: Option<&Duration>,
+    ) -> Vec<ProcessedElement> {
+        let mut out = Vec::new();
+        if self.sheds.is_empty() {
+            return out;
+        }
+        let shed: FnvHashSet<(i32, i32)> = self
+            .sheds
+            .iter()
+            .flat_map(|s| s.cells.iter().map(|c| (c.x, c.z)))
+            .collect();
+        let ring_of = |way: &ProcessedWay| -> Option<Vec<(i32, i32)>> {
+            let pts: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
+            (pts.len() >= 4 && pts.first() == pts.last()).then_some(pts)
+        };
+        for element in elements {
+            let ProcessedElement::Way(way) = element else {
+                continue;
+            };
+            if !matches!(
+                way.tags.get("building").map(String::as_str),
+                Some("train_station" | "transportation")
+            ) || !replaced.contains(&("way", way.id))
+            {
+                continue;
+            }
+            let Some(ring) = ring_of(way) else {
+                continue;
+            };
+            let mut rest: FnvHashSet<(i32, i32)> = ring_cells(&ring, timeout).into_iter().collect();
+            if rest.iter().filter(|c| shed.contains(c)).count() < SHED_MIN_CELLS {
+                continue;
+            }
+            let bbox = bbox_of(rest.iter().copied());
+            for other in elements {
+                let ProcessedElement::Way(o) = other else {
+                    continue;
+                };
+                if o.id == way.id
+                    || !(o.tags.contains_key("building") || o.tags.contains_key("building:part"))
+                {
+                    continue;
+                }
+                let Some(pts) = ring_of(o) else {
+                    continue;
+                };
+                if boxes_within(bbox_of(pts.iter().copied()), bbox, 0) {
+                    for c in ring_cells(&pts, timeout) {
+                        rest.remove(&c);
+                    }
+                }
+            }
+            rest.retain(|c| !shed.contains(c));
+            // Slivers between the parts are no building.
+            let inner = |set: &FnvHashSet<(i32, i32)>, (x, z): (i32, i32)| {
+                NEIGHBOURS4
+                    .iter()
+                    .all(|&(dx, dz)| set.contains(&(x + dx, z + dz)))
+            };
+            let core: FnvHashSet<(i32, i32)> =
+                rest.iter().copied().filter(|&c| inner(&rest, c)).collect();
+            let opened: FnvHashSet<(i32, i32)> = rest
+                .iter()
+                .copied()
+                .filter(|&(x, z)| {
+                    core.contains(&(x, z))
+                        || NEIGHBOURS4
+                            .iter()
+                            .any(|&(dx, dz)| core.contains(&(x + dx, z + dz)))
+                })
+                .collect();
+            let kept = pieces(&opened)
+                .into_iter()
+                .filter(|p| p.len() >= STATION_PIECE_MIN)
+                .take(16);
+            for (k, piece) in kept.enumerate() {
+                let ring = trace_ring(&piece);
+                if ring.len() < 4 || ring.len() >= 1 << 14 {
+                    continue;
+                }
+                // A piece that wraps right round a shed would fill it.
+                let fill: FnvHashSet<(i32, i32)> = ring_cells(&ring, timeout).into_iter().collect();
+                if fill.len() > piece.len() * 21 / 20 + 8 || fill.iter().any(|c| shed.contains(c)) {
+                    continue;
+                }
+                let base = (1u64 << 59) | (way.id << 18) | ((k as u64) << 14);
+                out.push(ProcessedElement::Way(ProcessedWay {
+                    id: (1u64 << 59) | (way.id << 4) | k as u64,
+                    tags: way.tags.clone(),
+                    nodes: ring
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &(x, z))| ProcessedNode {
+                            id: base | i as u64,
+                            tags: HashMap::new(),
+                            x,
+                            z,
+                        })
+                        .collect(),
+                }));
+            }
+        }
+        out
+    }
+
     /// Sets the platforms' surfaces as ground in an editor, before anything stands on them.
     pub fn register_levels(&self, editor: &mut WorldEditor) {
         for &(x, z, y) in &self.levels {
@@ -2275,6 +2985,9 @@ impl StationIndex {
         let overlaps = |b: &(i32, i32, i32, i32)| b.0 <= x1 && b.2 >= x0 && b.1 <= z1 && b.3 >= z0;
         for station in self.surface.iter().filter(|s| overlaps(&s.bbox)) {
             render_surface(editor, station);
+        }
+        for shed in self.sheds.iter().filter(|s| overlaps(&s.bbox)) {
+            render_shed(editor, shed);
         }
         for hall in self.halls.iter().filter(|h| overlaps(&h.bbox)) {
             render_hall(editor, hall, voids);
@@ -2424,8 +3137,13 @@ fn render_surface(editor: &mut WorldEditor, station: &SurfaceStation) {
             }
         }
         // A bottom slab, so the posts reach right up to it.
-        if c.roof {
-            put_with(editor, slab(SMOOTH_STONE_SLAB, "bottom"), x, y + 5, z);
+        if let Some(lift) = c.roof {
+            put_with(editor, slab(SMOOTH_STONE_SLAB, "bottom"), x, y + lift, z);
+        }
+    }
+    for &(x, z, y) in &station.canopy {
+        if editor.in_bounds(x, z) {
+            put_with(editor, slab(SMOOTH_STONE_SLAB, "bottom"), x, y, z);
         }
     }
     for c in &station.cells {
@@ -2464,7 +3182,11 @@ fn render_props(editor: &mut WorldEditor, c: &DeckCell, y: i32, low: bool, name:
             editor.set_block_absolute(LANTERN, x, y + 3, z, None, None);
         }
         Prop::Post => {
-            let top = if low { y + 2 } else { y + 3 };
+            let top = if low {
+                y + 2
+            } else {
+                y + c.roof.unwrap_or(CANOPY_LIFT) - 2
+            };
             for py in y..=top {
                 editor.set_block_absolute(ANDESITE_WALL, x, py, z, None, None);
             }
@@ -2502,7 +3224,7 @@ fn render_props(editor: &mut WorldEditor, c: &DeckCell, y: i32, low: bool, name:
         Prop::Hanging => editor.set_block_with_properties_absolute(
             with_props(LANTERN, &[("hanging", "true")]),
             x,
-            y + 3,
+            y + c.roof.unwrap_or(CANOPY_LIFT) - 2,
             z,
             None,
             None,
@@ -2530,8 +3252,45 @@ fn render_props(editor: &mut WorldEditor, c: &DeckCell, y: i32, low: bool, name:
         }
         Prop::Pillar | Prop::None => {}
     }
-    if c.roof && low {
+    if c.roof.is_some() && low {
         put_with(editor, slab(SMOOTH_STONE_SLAB, "bottom"), x, y + 3, z);
+    }
+}
+
+fn render_shed(editor: &mut WorldEditor, shed: &Shed) {
+    for c in &shed.cells {
+        if !editor.in_bounds(c.x, c.z) {
+            continue;
+        }
+        let (x, z) = (c.x, c.z);
+        for y in c.lo..=c.hi {
+            put(editor, c.skin, x, y, z);
+        }
+        match c.side {
+            ShedSide::None => {}
+            ShedSide::Column(lo) => {
+                for y in lo..c.lo {
+                    put(editor, POLISHED_DEEPSLATE_WALL, x, y, z);
+                }
+            }
+            ShedSide::Wall(lo) => {
+                for y in lo..c.lo {
+                    let window = c.window && y >= lo + 2 && y < c.lo - 1;
+                    put(editor, if window { GLASS } else { STONE_BRICKS }, x, y, z);
+                }
+            }
+            ShedSide::Screen(lo, mullion) => {
+                for y in lo..c.lo {
+                    put(
+                        editor,
+                        if mullion { POLISHED_DEEPSLATE } else { GLASS },
+                        x,
+                        y,
+                        z,
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -2993,6 +3752,7 @@ mod tests {
                 scale: 1.0,
                 timeout: None,
                 underground: true,
+                roofs: true,
             },
         )
     }
@@ -3099,6 +3859,204 @@ mod tests {
         );
         assert!(index.surface.len() == 1 && index.surface[0].low);
         assert_eq!(index.track_bed(1, 70, 50), None);
+    }
+
+    #[test]
+    fn a_part_canopy_runs_on_from_the_shed_and_a_shelter_sits_mid_platform() {
+        let keys: Vec<i32> = (0..=100).collect();
+        let shed: FnvHashSet<i32> = (0..40).collect();
+        let part = canopy_slices(&keys, &shed, Canopy::Part);
+        // Two thirds of the open stretch past the shed, short of the far ramp.
+        assert_eq!(
+            (part.iter().min(), part.iter().max()),
+            (Some(&40), Some(&77))
+        );
+        let shelter = canopy_slices(&keys, &FnvHashSet::default(), Canopy::Shelter);
+        assert_eq!(
+            (shelter.iter().min(), shelter.iter().max()),
+            (Some(&35), Some(&65))
+        );
+        let full = canopy_slices(&keys, &shed, Canopy::Full);
+        assert_eq!(full.len(), 57);
+        assert!(canopy_slices(&keys, &shed, Canopy::None).is_empty());
+    }
+
+    #[test]
+    fn a_platform_a_floor_below_the_entrance_stays_by_its_surface_tracks() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 200, 100).unwrap();
+        let platform = |extra: (&'static str, &'static str)| {
+            lay_out(
+                &[
+                    way(1, &[(10, 50), (190, 50)], &[("railway", "rail")]),
+                    way(
+                        2,
+                        &rect(60, 52, 120, 57),
+                        &[("railway", "platform"), ("level", "-1"), extra],
+                    ),
+                ],
+                &xzbbox,
+            )
+        };
+        let index = platform(("train", "yes"));
+        assert_eq!((index.surface.len(), index.halls.len()), (1, 0));
+        assert_eq!(index.track_bed(1, 90, 50), Some(0));
+        // A negative layer still puts it under ground, where it has no tunnel to serve.
+        let index = platform(("layer", "-1"));
+        assert!(index.surface.is_empty() && index.halls.is_empty());
+    }
+
+    #[test]
+    fn a_roof_over_a_platform_is_its_canopy_four_blocks_up() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 200, 100).unwrap();
+        let roof = &[("building", "roof"), ("layer", "1"), ("min_height", "3.2")];
+        let index = lay_out(
+            &[
+                way(1, &[(10, 50), (190, 50)], &[("railway", "rail")]),
+                way(2, &rect(60, 52, 120, 57), &[("railway", "platform")]),
+                way(3, &rect(70, 51, 110, 58), roof),
+                way(4, &rect(150, 70, 170, 90), roof),
+            ],
+            &xzbbox,
+        );
+        assert!(index.draws_building(3) && !index.draws_building(4));
+        let station = &index.surface[0];
+        let roofed = |x: i32, z: i32| {
+            station
+                .cells
+                .iter()
+                .find(|c| (c.x, c.z) == (x, z))
+                .and_then(|c| c.roof)
+        };
+        assert_eq!((roofed(90, 55), roofed(65, 55)), (Some(CANOPY_LIFT), None));
+        // Past the platform it carries on at the same height, but not over the track.
+        assert!(station.canopy.contains(&(90, 58, 1 + CANOPY_LIFT)));
+        assert!(station.canopy.iter().all(|c| c.1 != 51));
+        let posts = station
+            .cells
+            .iter()
+            .filter(|c| c.prop == Prop::Post)
+            .count();
+        assert!(posts >= 4, "{posts} posts");
+    }
+
+    #[test]
+    fn a_round_roof_over_the_platforms_is_an_arched_shed() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 200, 100).unwrap();
+        let index = lay_out(
+            &[
+                way(1, &[(10, 50), (190, 50)], &[("railway", "rail")]),
+                way(2, &[(10, 62), (190, 62)], &[("railway", "rail")]),
+                way(3, &rect(40, 53, 160, 59), &[("railway", "platform")]),
+                way(
+                    4,
+                    &rect(50, 44, 150, 68),
+                    &[
+                        ("building:part", "yes"),
+                        ("roof:shape", "round"),
+                        ("height", "20"),
+                        ("roof:height", "12"),
+                    ],
+                ),
+                way(
+                    5,
+                    &rect(10, 70, 30, 90),
+                    &[("building", "industrial"), ("roof:shape", "round")],
+                ),
+            ],
+            &xzbbox,
+        );
+        assert!(index.draws_building(4) && !index.draws_building(5));
+        assert_eq!(index.sheds.len(), 1);
+        let cell = |x: i32, z: i32| {
+            *index.sheds[0]
+                .cells
+                .iter()
+                .find(|c| (c.x, c.z) == (x, z))
+                .unwrap()
+        };
+        // Springing eight blocks up, the crown twelve over it, the sides closed down to it.
+        assert_eq!(cell(100, 56).hi, 20);
+        let side = cell(100, 44);
+        assert_eq!(side.lo, 8);
+        assert!(matches!(side.side, ShedSide::Wall(1) | ShedSide::Column(1)));
+        // The ends hang glass over the tracks, high enough for trains.
+        assert!(matches!(cell(50, 50).side, ShedSide::Screen(lo, _) if lo >= SHED_SPRING_MIN));
+
+        let mut editor = test_editor(&xzbbox);
+        let mut voids = Vec::new();
+        index.render(&mut editor, &mut voids);
+        assert!(open(&editor, 100, 10, 56));
+        assert!(matches!(
+            editor.get_block_absolute(100, 20, 56),
+            Some(GLASS | POLISHED_DEEPSLATE)
+        ));
+    }
+
+    #[test]
+    fn a_station_building_keeps_what_its_shed_and_parts_leave() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 200, 100).unwrap();
+        let elements = [
+            way(1, &[(10, 50), (190, 50)], &[("railway", "rail")]),
+            way(2, &[(10, 62), (190, 62)], &[("railway", "rail")]),
+            way(3, &rect(40, 53, 160, 59), &[("railway", "platform")]),
+            way(
+                4,
+                &rect(20, 44, 150, 68),
+                &[("building:part", "yes"), ("roof:shape", "round")],
+            ),
+            way(
+                6,
+                &rect(40, 40, 170, 72),
+                &[("building", "train_station"), ("building:levels", "3")],
+            ),
+        ];
+        let index = lay_out(&elements, &xzbbox);
+        assert!(index.draws_building(4) && !index.draws_building(6));
+        let replaced: crate::osm_parser::OutlineSuppression = [("way", 6)].into_iter().collect();
+        let rest = index.station_buildings(&elements, &replaced, None);
+        assert_eq!(rest.len(), 1);
+        let ProcessedElement::Way(rest) = &rest[0] else {
+            panic!("a way");
+        };
+        assert_eq!(
+            rest.tags.get("building:levels").map(String::as_str),
+            Some("3")
+        );
+        let pts: Vec<(i32, i32)> = rest.nodes.iter().map(|n| (n.x, n.z)).collect();
+        let cells: FnvHashSet<(i32, i32)> = ring_cells(&pts, None).into_iter().collect();
+        // The wing past the shed's end and the strips beside it, none of the shed.
+        assert!(cells.contains(&(160, 56)) && cells.contains(&(100, 41)));
+        assert!(!cells.contains(&(100, 56)) && !cells.contains(&(45, 56)));
+        assert!(index
+            .station_buildings(&elements, &Default::default(), None)
+            .is_empty());
+    }
+
+    #[test]
+    fn a_traced_ring_goes_round_the_edge_of_its_piece() {
+        let cells: FnvHashSet<(i32, i32)> = (0..10)
+            .flat_map(|x| (0..6).map(move |z| (x, z)))
+            .filter(|&(x, z)| !(x >= 3 && z <= 2))
+            .collect();
+        let found = pieces(&cells);
+        assert_eq!(found.len(), 1);
+        let ring = trace_ring(&found[0]);
+        assert_eq!(ring.first(), ring.last());
+        assert_eq!(
+            ring,
+            vec![
+                (0, 0),
+                (2, 0),
+                (2, 2),
+                (3, 3),
+                (9, 3),
+                (9, 5),
+                (0, 5),
+                (0, 0)
+            ]
+        );
+        let filled: FnvHashSet<(i32, i32)> = ring_cells(&ring, None).into_iter().collect();
+        assert_eq!(filled, cells);
     }
 
     #[test]
@@ -3338,6 +4296,7 @@ mod tests {
                 scale: 1.0,
                 timeout: None,
                 underground: true,
+                roofs: true,
             },
         );
         let floors: Vec<i32> = index.halls.iter().map(|h| h.floor).collect();
@@ -3404,6 +4363,7 @@ mod tests {
                 scale: 1.0,
                 timeout: None,
                 underground: false,
+                roofs: false,
             },
         );
         assert!(index.halls.is_empty() && index.surface.is_empty());

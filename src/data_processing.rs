@@ -349,6 +349,10 @@ fn process_element(
                         args.timeout.as_ref(),
                     );
                 }
+            } else if (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
+                && editor.stations().is_some_and(|s| s.draws_building(way.id))
+            {
+                // A canopy or train shed over platforms, drawn with its station.
             } else if args.mode == GenerationMode::Blueprint
                 && (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
             {
@@ -1702,10 +1706,15 @@ pub fn generate_world_with_options(
             scale: args.scale,
             timeout: args.timeout.as_ref(),
             underground: args.mode != GenerationMode::Blueprint,
+            roofs: args.mode != GenerationMode::Blueprint,
         },
     ));
     editor.set_stations(Arc::clone(&stations));
     let mut station_voids: Vec<stations::StationVoid> = Vec::new();
+    // The rest of a station building whose parts include a shed the station draws.
+    let station_buildings =
+        stations.station_buildings(&elements, &outline_suppression, args.timeout.as_ref());
+    elements.extend(station_buildings);
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
