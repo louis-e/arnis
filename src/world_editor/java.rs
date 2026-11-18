@@ -2370,7 +2370,8 @@ mod merge_tests {
             std::fs::metadata(&mca).unwrap().modified().unwrap(),
         );
 
-        let summary = crate::distant_horizons::from_existing(dir.path(), (-64, 319)).unwrap();
+        let summary =
+            crate::distant_horizons::from_existing(dir.path(), (-64, 319), &|| false).unwrap();
         assert!(summary.sections > 0, "LOD rows written");
         assert!(dir
             .path()
@@ -2384,7 +2385,8 @@ mod merge_tests {
         assert!(before == after, "region file untouched");
         assert!(crate::distant_horizons::from_existing(
             tempfile::tempdir().unwrap().path(),
-            (-64, 319)
+            (-64, 319),
+            &|| false
         )
         .is_err());
     }
@@ -3123,10 +3125,10 @@ mod merge_tests {
         written(baked.path(), &region, true, None);
         assert_ne!(chunk_values(plain.path()), chunk_values(baked.path()));
 
-        let done = crate::saved_chunks::bake_unlit(plain.path()).unwrap();
+        let done = crate::saved_chunks::bake_unlit(plain.path(), &|| false).unwrap();
         assert_eq!((done.chunks, done.regions, done.skipped), (1024, 1, 0));
         assert!(chunk_values(plain.path()) == chunk_values(baked.path()));
-        let again = crate::saved_chunks::bake_unlit(plain.path()).unwrap();
+        let again = crate::saved_chunks::bake_unlit(plain.path(), &|| false).unwrap();
         assert_eq!(again.chunks, 0, "a lit chunk is left alone");
     }
 
@@ -3146,7 +3148,7 @@ mod merge_tests {
         let on_write = crate::voxy::logged_puts(dir.path());
         assert!(on_write.len() > 10);
 
-        let summary = crate::voxy::from_existing(dir.path()).unwrap();
+        let summary = crate::voxy::from_existing(dir.path(), &|| false).unwrap();
         assert_eq!((summary.skipped_regions, summary.skipped_chunks), (0, 0));
         let rebuilt = crate::voxy::logged_puts(dir.path());
         assert!(rebuilt == on_write);
@@ -3178,10 +3180,26 @@ mod merge_tests {
         std::fs::create_dir_all(&regions).unwrap();
         std::fs::write(regions.join("r.0.0.mca"), b"garbage").unwrap();
 
-        assert!(crate::voxy::from_existing(dir.path()).is_err());
+        assert!(crate::voxy::from_existing(dir.path(), &|| false).is_err());
         assert_eq!(std::fs::read(storage.join("CURRENT")).unwrap(), b"old");
         assert!(!storage.with_file_name("storage.arnis-tmp").exists());
         assert!(crate::voxy::has_cache(dir.path()));
+
+        // Stopped, it keeps the old cache too.
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        std::fs::remove_file(regions.join("r.0.0.mca")).unwrap();
+        written(dir.path(), &mixed_region(), false, None);
+        assert!(crate::voxy::from_existing(dir.path(), &|| true).is_err());
+        assert_eq!(std::fs::read(storage.join("CURRENT")).unwrap(), b"old");
+        assert!(!storage.with_file_name("storage.arnis-tmp").exists());
+
+        // With every region removed, the cache is emptied rather than kept.
+        std::fs::remove_file(regions.join("r.0.0.mca")).unwrap();
+        let summary = crate::voxy::from_existing(dir.path(), &|| false).unwrap();
+        assert_eq!(summary.sections, 0);
+        assert_ne!(std::fs::read(storage.join("CURRENT")).unwrap(), b"old");
     }
 }
 

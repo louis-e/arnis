@@ -2715,14 +2715,17 @@ fn gui_one_world_upkeep(
     if crate::one_world::Manifest::load(&world)?.is_none() {
         return Err("Not a One World.".to_string());
     }
+    // A Stop left from an earlier job would end this at once; no job runs now.
+    crate::scale::STOP.store(false, std::sync::atomic::Ordering::Release);
     let upkeep = crate::one_world::Upkeep { light, voxy, dh };
-    let (done, failed): (Vec<_>, Vec<_>) = crate::one_world::upkeep(&world, upkeep, false)
-        .into_iter()
-        .partition(Result::is_ok);
-    if let Some(e) = failed.into_iter().find_map(Result::err) {
-        return Err(e);
+    let lines = crate::one_world::upkeep(&world, upkeep, false);
+    let failed = lines.iter().any(Result::is_err);
+    let text: Vec<String> = lines.into_iter().map(|l| l.unwrap_or_else(|e| e)).collect();
+    // On a failure the row still shows what finished, not only the error.
+    if failed {
+        return Err(text.join(" "));
     }
-    Ok(done.into_iter().flatten().collect())
+    Ok(text)
 }
 
 // Everything before the `spawn` below - the spawn point written into level.dat -
@@ -3552,6 +3555,7 @@ fn gui_start_generation(
                     emit_gui_error(&e);
                     return Err(e);
                 }
+                crate::one_world::after_run(&args);
                 if let Some(g) = cleanup_guard.as_mut() {
                     g.disarm();
                 }
@@ -3771,6 +3775,7 @@ fn gui_start_generation(
                         emit_gui_error(&e);
                         return Err(e);
                     }
+                    crate::one_world::after_run(&args);
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
                     }

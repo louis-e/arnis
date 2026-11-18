@@ -178,19 +178,42 @@ const ups = initProjects({
 });
 await ups();
 const upRow = () => document.getElementById('projects-list').children[0];
-assert.ok(btn(upRow(), 'Light & LODs').disabled, 'nothing asked, nothing to do');
+const settle = () => new Promise((r) => setTimeout(r, 0));
 assert.ok(!btn(rows[0], 'Light & LODs'), 'no hook, no button');
-want = { light: true, voxy: true, dh: false };
-await ups();
 assert.ok(btn(document.getElementById('projects-list').children[1], 'Light & LODs').disabled, 'a world in use is held');
+// The settings are read on the press: with nothing on, it says so and asks nothing.
 await btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
+assert.strictEqual(upCalls.length, 0);
+assert.ok(upRow().children.some((c) => c.className === 'projects-error'), 'it says what to turn on');
+want = { light: true, voxy: true, dh: false };
+await btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
 assert.deepStrictEqual(upCalls, [{ worldPath: 's/Paris', light: true, voxy: true, dh: false }]);
 assert.ok(cells(upRow()).includes('Lighting: every area is baked. Voxy LOD: 3 sections.'), 'the result shows in its row');
 assert.ok(!btn(upRow(), 'Light & LODs').disabled, 'and the button is back');
 upFail = 'The world is in use (open in Minecraft, or another run writes it); close it first.';
 await btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
 assert.ok(cells(upRow()).includes(upFail), 'a refusal shows in its row');
 assert.ok(!cells(upRow()).includes('Lighting: every area is baked. Voxy LOD: 3 sections.'), 'the old result goes');
+
+// A redraw while it runs keeps it running and holds the world's other buttons.
+let finish;
+const slow = initProjects({
+  invoke: async (cmd) => (cmd === 'gui_one_world_upkeep' ? new Promise((r) => { finish = r; }) : upWorlds),
+  savePath: () => 's', scale: () => 1, open: async () => {}, upkeep: () => ({ light: true, voxy: false, dh: false }),
+});
+await slow();
+const pressed = btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
+await slow();
+const busyRow = flat(upRow());
+assert.ok(busyRow.some((c) => c.textContent === 'Running' && c.disabled), 'still running after a redraw');
+assert.ok(btn(upRow(), 'Open').disabled && btn(upRow(), 'Delete').disabled, 'the world is held');
+finish(['Lighting: every area is baked.']);
+await pressed;
+assert.ok(btn(upRow(), 'Light & LODs') && !btn(upRow(), 'Open').disabled, 'released when done');
 
 // Advanced features off hides the tab.
 const html = fs.readFileSync(new URL('../../src/gui/index.html', import.meta.url), 'utf8');

@@ -3163,11 +3163,6 @@ pub fn generate_world_with_options(
         if let Err(e) = crate::world_utils::touch_last_played(&run.world_dir) {
             eprintln!("Warning: Failed to update LastPlayed: {e}");
         }
-        let upkeep = crate::one_world::Upkeep::of(args);
-        if upkeep.any() && java {
-            drop(editor);
-            crate::one_world::refresh(&run.world_dir, upkeep, true);
-        }
     }
 
     if let Some(start) = generation_start {

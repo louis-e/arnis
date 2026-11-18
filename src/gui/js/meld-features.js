@@ -1405,6 +1405,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   // A thumbnail is asked for when its card scrolls into view; no image leaves the placeholder.
   const thumbs = new Map();
   const loaders = new Map();
+  // Light & LODs: the worlds it runs on, and its last answer per world, which redraws keep.
+  const upkeeping = new Set();
+  const upkeepNotes = new Map();
   const seen = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
@@ -1649,7 +1652,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       if (w.locked) kids.push(text('projects-meta is-warn', t('projects_in_use', 'In use')));
       // One World needs Java on Earth; a run holds every world.
       const off = !available();
-      const held = Boolean(w.locked || off || busy());
+      const worldPath = w.world_path || `${savePath()}/${w.name}`;
+      const held = Boolean(w.locked || off || busy() || upkeeping.has(worldPath));
       const job = resume ? projectJob(w) : null;
       const acts = [];
       if (job && job.total > 0) {
@@ -1681,29 +1685,31 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
       if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position.'); });
       if (upkeep) {
-        const want = upkeep();
-        const label = t('projects_upkeep', 'Light & LODs');
-        let note = null;
-        const up = button('projects_upkeep', 'Light & LODs', held || !(want.light || want.voxy || want.dh), async () => {
-          up.disabled = true;
-          up.textContent = t('run_state_running', 'Running');
-          note?.remove();
-          row.querySelector('.projects-error')?.remove();
-          try {
-            const lines = await invoke('gui_one_world_upkeep', { worldPath: w.world_path || `${savePath()}/${w.name}`, ...upkeep() });
-            note = text('projects-meta', (lines || []).join(' '));
-            row.append(note);
-          } catch (e) {
-            row.append(errorLine(String((e && e.message) || e)));
+        const running = upkeeping.has(worldPath);
+        const up = button('projects_upkeep', 'Light & LODs', held, async () => {
+          const want = upkeep();
+          if (!(want.light || want.voxy || want.dh)) {
+            upkeepNotes.set(worldPath, { error: true, text: up.title });
+            return refresh();
           }
-          up.textContent = label;
-          up.disabled = false;
+          upkeeping.add(worldPath);
+          upkeepNotes.delete(worldPath);
+          refresh();
+          try {
+            const lines = await invoke('gui_one_world_upkeep', { worldPath, ...want });
+            upkeepNotes.set(worldPath, { error: false, text: (lines || []).join(' ') });
+          } catch (e) {
+            upkeepNotes.set(worldPath, { error: true, text: String((e && e.message) || e) });
+          }
+          upkeeping.delete(worldPath);
+          await refresh();
         });
+        if (running) up.textContent = t('run_state_running', 'Running');
         up.title = t('projects_upkeep_tip', 'Bakes light into the areas built without it and builds the Voxy and Distant Horizons LOD caches over every area, as Bake lighting and the Pre-generate LOD settings ask. Nothing is generated.');
         acts.push(up);
       }
       // Held like Rebuild; the world goes to the system trash, where it can still be restored.
-      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy()), () => {});
+      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy() || upkeeping.has(worldPath)), () => {});
       del.classList.add('projects-hold', 'projects-delete');
       del.title = t('projects_delete_tip', 'Hold to move this world to the trash. It can be restored from there.');
       globalThis.arnisHold(del, async () => {
@@ -1725,6 +1731,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       actions.className = 'projects-actions';
       actions.append(...acts);
       row.append(...kids, actions);
+      const note = upkeepNotes.get(worldPath);
+      if (note) row.append(note.error ? errorLine(note.text) : text('projects-meta', note.text));
       return row;
     });
     if (!rows.length) rows.push(text('projects-empty', t('projects_empty', 'No worlds yet. Build one with One World on.')));

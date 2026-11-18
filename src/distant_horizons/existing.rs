@@ -11,16 +11,22 @@ use std::sync::Mutex;
 
 /// Builds the world's LOD database from the overworld's `region/*.mca`, cut to the build range
 /// `y_range`. Unreadable regions and chunks are skipped and counted; the old database is
-/// replaced only once the new one is complete.
-pub fn from_existing(world_dir: &Path, y_range: (i32, i32)) -> Result<Summary, BoxError> {
+/// replaced only once the new one is complete. A region folder with no files gives an empty
+/// database, so removed land does not stay.
+/// Gives up, keeping the old database, once `stop` says so.
+pub fn from_existing(
+    world_dir: &Path,
+    y_range: (i32, i32),
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<Summary, BoxError> {
     let (region_dir, regions) = overworld_regions(world_dir)?;
-    if regions.is_empty() {
-        return Err(format!("{} has no .mca region files", region_dir.display()).into());
-    }
     let writer = DhWriter::create_keeping_old(world_dir)?;
     let (read, bad_chunks) = (AtomicU64::new(0), AtomicU64::new(0));
     let bad_regions = Mutex::new(Vec::new());
     regions.par_iter().for_each(|&(rx, rz)| {
+        if stop() {
+            return;
+        }
         match ingest_region(&writer, &region_dir, rx, rz, y_range) {
             Ok(None) => {}
             Ok(Some(bad)) => {
@@ -33,6 +39,9 @@ pub fn from_existing(world_dir: &Path, y_range: (i32, i32)) -> Result<Summary, B
                 .push(format!("r.{rx}.{rz}.mca: {e}")),
         }
     });
+    if stop() {
+        return Err("stopped".into());
+    }
     let mut bad_regions = bad_regions.into_inner().unwrap_or_else(|p| p.into_inner());
     bad_regions.sort();
     if read.into_inner() == 0 && !bad_regions.is_empty() {
@@ -167,7 +176,7 @@ mod tests {
         // Only unreadable regions: the run fails and the old database is kept.
         std::fs::write(regions.join("r.1.0.mca"), b"garbage").unwrap();
         std::fs::write(regions.join("r.2.0.mca"), b"").unwrap();
-        assert!(from_existing(world.path(), (-64, 319)).is_err());
+        assert!(from_existing(world.path(), (-64, 319), &|| false).is_err());
         assert_eq!(std::fs::read(&db).unwrap(), b"old");
 
         // One good region, with one chunk that does not parse.
@@ -183,7 +192,7 @@ mod tests {
         region.write_chunk(4, 4, &chunk_26x()).unwrap();
         region.write_chunk(5, 4, b"not nbt").unwrap();
         drop(region);
-        let summary = from_existing(world.path(), (-64, 319)).unwrap();
+        let summary = from_existing(world.path(), (-64, 319), &|| false).unwrap();
         assert!(summary.sections > 0);
         assert_eq!((summary.skipped_regions, summary.skipped_chunks), (1, 1));
         assert_ne!(std::fs::read(&db).unwrap(), b"old");

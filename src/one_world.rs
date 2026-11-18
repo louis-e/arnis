@@ -1375,27 +1375,49 @@ pub fn upkeep(world_dir: &Path, upkeep: Upkeep, in_run: bool) -> Vec<Result<Stri
             crate::progress::emit_gui_progress_update(crate::progress::MESSAGE_ONLY, message);
         }
     };
+    // Stop ends a job at once; what is still to build here keeps its old state.
+    let stop = || crate::scale::STOP.load(std::sync::atomic::Ordering::Acquire);
+    let stopped = |what: &str| Err(format!("Stopped: {what} was left as it was."));
     if upkeep.light {
         say("Baking light into the older areas...");
-        out.push(match crate::saved_chunks::bake_unlit(world_dir) {
-            Ok(b) if b.chunks + b.skipped == 0 => Ok("Lighting: every area is baked.".to_string()),
-            Ok(b) => Ok(format!(
-                "Lighting: baked into {} chunk(s) of {} region(s) built without it.{}",
-                b.chunks,
-                b.regions,
-                if b.skipped > 0 {
-                    format!(" {} chunk(s) could not be lit.", b.skipped)
-                } else {
-                    String::new()
+        match crate::saved_chunks::bake_unlit(world_dir, &stop) {
+            Ok(b) => {
+                if b.chunks + b.skipped > 0 || b.failed.is_empty() {
+                    out.push(Ok(if b.chunks + b.skipped == 0 {
+                        "Lighting: every area is baked.".to_string()
+                    } else {
+                        format!(
+                            "Lighting: baked into {} chunk(s) of {} region(s) built without it.{}",
+                            b.chunks,
+                            b.regions,
+                            if b.skipped > 0 {
+                                format!(" {} chunk(s) could not be lit.", b.skipped)
+                            } else {
+                                String::new()
+                            }
+                        )
+                    }));
                 }
-            )),
-            Err(e) => Err(format!("Failed to bake the lighting: {e}")),
-        });
+                if !b.failed.is_empty() {
+                    out.push(Err(format!(
+                        "Lighting: {} region(s) could not be baked ({}).",
+                        b.failed.len(),
+                        b.failed[0]
+                    )));
+                }
+                if stop() {
+                    out.push(stopped("the rest of the lighting"));
+                }
+            }
+            Err(e) => out.push(Err(format!("Failed to bake the lighting: {e}"))),
+        }
     }
-    if upkeep.voxy {
+    if upkeep.voxy && stop() {
+        out.push(stopped("the Voxy LOD cache"));
+    } else if upkeep.voxy {
         say("Building the Voxy LOD cache...");
         let started = std::time::Instant::now();
-        out.push(match crate::voxy::from_existing(world_dir) {
+        out.push(match crate::voxy::from_existing(world_dir, &stop) {
             Ok(s) => Ok(format!(
                 "Voxy LOD: {} sections, {:.1} MB, over every area ({:.0} s).{}",
                 s.sections,
@@ -1403,14 +1425,17 @@ pub fn upkeep(world_dir: &Path, upkeep: Upkeep, in_run: bool) -> Vec<Result<Stri
                 started.elapsed().as_secs_f64(),
                 skipped(s.skipped_regions, s.skipped_chunks)
             )),
+            Err(_) if stop() => stopped("the Voxy LOD cache"),
             Err(e) => Err(format!("Failed to build the Voxy LOD cache: {e}")),
         });
     }
-    if upkeep.dh {
+    if upkeep.dh && stop() {
+        out.push(stopped("the Distant Horizons LOD cache"));
+    } else if upkeep.dh {
         say("Building the Distant Horizons LOD cache...");
         let started = std::time::Instant::now();
         let built = match Manifest::load(world_dir) {
-            Ok(Some(m)) => crate::distant_horizons::from_existing(world_dir, m.y_range())
+            Ok(Some(m)) => crate::distant_horizons::from_existing(world_dir, m.y_range(), &stop)
                 .map_err(|e| e.to_string()),
             Ok(None) => Err(format!("{} is not a One World.", world_dir.display())),
             Err(e) => Err(e),
@@ -1430,6 +1455,7 @@ pub fn upkeep(world_dir: &Path, upkeep: Upkeep, in_run: bool) -> Vec<Result<Stri
                     )));
                 }
             }
+            Err(_) if stop() => out.push(stopped("the Distant Horizons LOD cache")),
             Err(e) => out.push(Err(format!(
                 "Failed to build the Distant Horizons LOD cache: {e}"
             ))),
@@ -1450,6 +1476,21 @@ pub fn refresh(world_dir: &Path, upkeep: Upkeep, in_run: bool) {
                 crate::telemetry::send_log(crate::telemetry::LogLevel::Warning, &e);
             }
         }
+    }
+}
+
+/// After a run wrote an area: the whole world up to the run's light and LOD settings, once the
+/// run's own data is gone. A piece leaves that to its job, and a Live tile to nobody.
+pub fn after_run(args: &Args) {
+    let Some(run) = args.one_world_run.as_ref() else {
+        return;
+    };
+    if run.unit.is_some() || args.live.tile || args.prewarm || !args.java() {
+        return;
+    }
+    let upkeep = Upkeep::of(args);
+    if upkeep.any() {
+        refresh(&run.world_dir, upkeep, true);
     }
 }
 

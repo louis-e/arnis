@@ -1,7 +1,7 @@
 //! Chunks read back from a world's region files, in every form the game saves them, and light
 //! baked into the ones saved without it.
 
-use crate::live::region::{mcc_file, read_slots, region_file, slot_index, write_slots, Slot};
+use crate::live::region::{mcc_file, region_file, replace_atomically, slot_index};
 use crate::world_editor::common::{Blockstates, PaletteItem, Section};
 use fastnbt::{LongArray, Value};
 use serde::Deserialize;
@@ -18,11 +18,12 @@ pub(crate) struct SavedChunk {
     pub biomes: [&'static str; 16],
 }
 
-pub(crate) enum Saved {
+/// A slot of a region file. A chunk the game has not finished generating counts as absent.
+pub(crate) enum Saved<T> {
     Absent,
     /// Present but unreadable.
     Bad,
-    Chunk(Box<SavedChunk>),
+    Chunk(T),
 }
 
 /// The overworld region folder of `world_dir` and the regions in it.
@@ -102,7 +103,17 @@ impl SavedRegion {
     }
 
     /// The chunk at local `(x, z)`.
-    pub fn chunk(&self, x: i32, z: i32) -> Saved {
+    pub fn chunk(&self, x: i32, z: i32) -> Saved<Box<SavedChunk>> {
+        self.read(x, z, |nbt| parse(nbt, false).map(|c| c.map(Box::new)))
+    }
+
+    /// The `Y` of each section of the chunk at local `(x, z)` that holds a block, read without
+    /// its block data.
+    pub fn block_ys(&self, x: i32, z: i32) -> Saved<Vec<i8>> {
+        self.read(x, z, block_ys)
+    }
+
+    fn read<T>(&self, x: i32, z: i32, parse: impl Fn(&[u8]) -> Option<Option<T>>) -> Saved<T> {
         let raw = match &self.entries[slot_index(x, z)] {
             None => return Saved::Absent,
             Some(Entry::Bad) => return Saved::Bad,
@@ -112,8 +123,9 @@ impl SavedRegion {
                     .and_then(|data| decompress(*version, &data))
             }
         };
-        match raw.ok().and_then(|nbt| parse(&nbt, false)) {
-            Some(chunk) => Saved::Chunk(Box::new(chunk)),
+        match raw.ok().and_then(|nbt| parse(&nbt)) {
+            Some(Some(chunk)) => Saved::Chunk(chunk),
+            Some(None) => Saved::Absent,
             None => Saved::Bad,
         }
     }
@@ -148,8 +160,59 @@ fn decompress(version: u8, data: &[u8]) -> io::Result<Vec<u8>> {
 
 #[derive(Deserialize)]
 struct ChunkNbt {
+    #[serde(rename = "Status")]
+    status: Option<String>,
     #[serde(default)]
     sections: Vec<SectionNbt>,
+}
+
+/// Arnis and the game write `minecraft:full`; older saves wrote `full`.
+fn is_full(status: Option<&str>) -> bool {
+    status.is_none_or(|s| s == "minecraft:full" || s == "full")
+}
+
+#[derive(Deserialize)]
+struct ChunkYs {
+    #[serde(rename = "Status")]
+    status: Option<String>,
+    #[serde(default)]
+    sections: Vec<SectionYs>,
+}
+
+#[derive(Deserialize)]
+struct SectionYs {
+    #[serde(rename = "Y")]
+    y: i8,
+    block_states: Option<PaletteOnly>,
+}
+
+#[derive(Deserialize)]
+struct PaletteOnly {
+    #[serde(default)]
+    palette: Vec<Value>,
+}
+
+/// `None` when it does not parse, `Some(None)` for a chunk not fully generated.
+fn block_ys(nbt: &[u8]) -> Option<Option<Vec<i8>>> {
+    let ChunkYs { status, sections } = fastnbt::from_bytes(nbt).ok()?;
+    if !is_full(status.as_deref()) {
+        return Some(None);
+    }
+    let mut ys = Vec::new();
+    for s in sections {
+        let Some(states) = s.block_states else {
+            continue;
+        };
+        let names = states
+            .palette
+            .into_iter()
+            .map(|e| palette_item(e).map(|p| p.name))
+            .collect::<Option<Vec<_>>>()?;
+        if !names.iter().all(|n| crate::voxy::is_air_name(n)) {
+            ys.push(s.y);
+        }
+    }
+    Some(Some(ys))
 }
 
 #[derive(Deserialize)]
@@ -167,9 +230,13 @@ struct Container {
     data: Option<LongArray>,
 }
 
-/// `keep_air` keeps the sections that hold only air.
-fn parse(nbt: &[u8], keep_air: bool) -> Option<SavedChunk> {
-    let ChunkNbt { sections } = fastnbt::from_bytes(nbt).ok()?;
+/// `keep_air` keeps the sections that hold only air. `None` when it does not parse,
+/// `Some(None)` for a chunk not fully generated.
+fn parse(nbt: &[u8], keep_air: bool) -> Option<Option<SavedChunk>> {
+    let ChunkNbt { status, sections } = fastnbt::from_bytes(nbt).ok()?;
+    if !is_full(status.as_deref()) {
+        return Some(None);
+    }
     let biomes = sections
         .iter()
         .find_map(|s| s.biomes.as_ref().and_then(biome_grid))
@@ -197,10 +264,10 @@ fn parse(nbt: &[u8], keep_air: bool) -> Option<SavedChunk> {
             other: Default::default(),
         });
     }
-    Some(SavedChunk {
+    Some(Some(SavedChunk {
         sections: out,
         biomes,
-    })
+    }))
 }
 
 /// Arnis writes `{Name, Properties}`; 26.x writes a bare name, `{"": name}` in a mixed list, or `{id, properties}`.
@@ -263,17 +330,25 @@ pub(crate) struct Baked {
     pub regions: u64,
     /// Unlit chunks left as they were: unreadable, or too large once lit.
     pub skipped: u64,
+    /// Regions that could not be read or rewritten, with why.
+    pub failed: Vec<String>,
 }
 
 /// Bakes light into every full chunk saved without it, as `--bake-lighting` writes it. Chunks
-/// the game lit keep their light, which reaches across chunk borders.
-pub(crate) fn bake_unlit(world_dir: &Path) -> Result<Baked, String> {
+/// the game lit keep their light, which reaches across chunk borders. Once `stop` says so, the
+/// regions not started yet are left as they are.
+pub(crate) fn bake_unlit(
+    world_dir: &Path,
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<Baked, String> {
     use rayon::prelude::*;
     let (dir, regions) = overworld_regions(world_dir)?;
     let total = Mutex::new(Baked::default());
     regions.par_iter().for_each(|&(rx, rz)| {
-        let path = region_file(&dir, rx, rz);
-        let result = bake_region(&path);
+        if stop() {
+            return;
+        }
+        let result = bake_region(&dir, rx, rz);
         let mut t = total.lock().unwrap_or_else(|p| p.into_inner());
         match result {
             Ok((chunks, skipped)) => {
@@ -281,21 +356,34 @@ pub(crate) fn bake_unlit(world_dir: &Path) -> Result<Baked, String> {
                 t.regions += u64::from(chunks > 0);
                 t.skipped += skipped;
             }
-            Err(e) => eprintln!("Warning: light not baked into {}: {e}", path.display()),
+            Err(e) => t.failed.push(format!("r.{rx}.{rz}.mca: {e}")),
         }
     });
-    Ok(total.into_inner().unwrap_or_else(|p| p.into_inner()))
+    let mut total = total.into_inner().unwrap_or_else(|p| p.into_inner());
+    total.failed.sort();
+    Ok(total)
 }
 
-/// Returns the chunks baked and the unlit ones skipped; the file is rewritten only for the first.
-fn bake_region(path: &Path) -> io::Result<(u64, u64)> {
-    let mut slots = read_slots(path)?;
+/// Returns the chunks baked and the unlit ones skipped. The file is rewritten only when a chunk
+/// was baked, with the other chunks and every timestamp as they were. A file with a damaged
+/// entry is left alone.
+fn bake_region(dir: &Path, rx: i32, rz: i32) -> io::Result<(u64, u64)> {
+    let Some(region) = SavedRegion::open(dir, rx, rz)? else {
+        return Ok((0, 0));
+    };
+    if region.entries.iter().any(|e| matches!(e, Some(Entry::Bad))) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "it has damaged chunk entries, so it is left as it was",
+        ));
+    }
     let (mut baked, mut skipped) = (0, 0);
-    for slot in &mut slots {
-        let Slot::Inline { version, data } = slot else {
+    let mut lit: Vec<Option<Vec<u8>>> = vec![None; 1024];
+    for (i, entry) in region.entries.iter().enumerate() {
+        let Some(Entry::Inline(version, range)) = entry else {
             continue;
         };
-        let Ok(nbt) = decompress(*version, data) else {
+        let Ok(nbt) = decompress(*version, &region.bytes[range.clone()]) else {
             skipped += 1;
             continue;
         };
@@ -303,19 +391,16 @@ fn bake_region(path: &Path) -> io::Result<(u64, u64)> {
             continue;
         }
         match lit_chunk(&nbt) {
-            Some(Some(lit)) => {
+            Some(Some(chunk)) => {
                 let mut enc =
                     flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
-                enc.write_all(&lit)?;
+                enc.write_all(&chunk)?;
                 let packed = enc.finish()?;
                 if packed.len() + 5 > MAX_INLINE_BYTES {
                     skipped += 1;
                     continue;
                 }
-                *slot = Slot::Inline {
-                    version: 2,
-                    data: packed,
-                };
+                lit[i] = Some(packed);
                 baked += 1;
             }
             Some(None) => {}
@@ -323,9 +408,48 @@ fn bake_region(path: &Path) -> io::Result<(u64, u64)> {
         }
     }
     if baked > 0 {
-        write_slots(path, &slots)?;
+        replace_atomically(&region_file(dir, rx, rz), &region.with_chunks(&lit))?;
     }
     Ok((baked, skipped))
+}
+
+impl SavedRegion {
+    /// The file again, with `replace[i]` (zlib) in slot `i` where given.
+    fn with_chunks(&self, replace: &[Option<Vec<u8>>]) -> Vec<u8> {
+        let mut header = self.bytes[..2 * SECTOR].to_vec();
+        let mut body: Vec<u8> = Vec::new();
+        for (i, entry) in self.entries.iter().enumerate() {
+            let blob: Vec<u8> = match (entry, &replace[i]) {
+                (None, _) | (Some(Entry::Bad), _) => {
+                    header[i * 4..i * 4 + 4].fill(0);
+                    continue;
+                }
+                (_, Some(zlib)) => {
+                    [&(zlib.len() as u32 + 1).to_be_bytes()[..], &[2], zlib].concat()
+                }
+                (Some(Entry::Inline(version, range)), None) => {
+                    let data = &self.bytes[range.clone()];
+                    [
+                        &(data.len() as u32 + 1).to_be_bytes()[..],
+                        &[*version],
+                        data,
+                    ]
+                    .concat()
+                }
+                (Some(Entry::External(version)), None) => {
+                    [&1u32.to_be_bytes()[..], &[*version | EXTERNAL]].concat()
+                }
+            };
+            let start = 2 + body.len() / SECTOR;
+            let sectors = blob.len().div_ceil(SECTOR);
+            body.extend_from_slice(&blob);
+            body.resize((start - 2 + sectors) * SECTOR, 0);
+            let loc = ((start as u32) << 8) | sectors as u32;
+            header[i * 4..i * 4 + 4].copy_from_slice(&loc.to_be_bytes());
+        }
+        header.extend_from_slice(&body);
+        header
+    }
 }
 
 const MAX_INLINE_BYTES: usize = 255 * SECTOR;
@@ -344,7 +468,7 @@ fn lit_chunk(nbt: &[u8]) -> Option<Option<Vec<u8>>> {
     if !matches!(root.get("Status"), Some(Value::String(s)) if s == "minecraft:full") {
         return Some(None);
     }
-    let chunk = parse(nbt, true)?;
+    let chunk = parse(nbt, true)??;
     let span = crate::world_editor::java::chunk_section_span(&chunk.sections);
     let mut light = crate::world_editor::java::compute_chunk_lighting(&chunk.sections, span);
     let Some(Value::List(sections)) = root.get_mut("sections") else {
@@ -514,6 +638,89 @@ mod tests {
         assert!(SavedRegion::open(dir.path(), 0, 0).unwrap().is_none());
         std::fs::write(dir.path().join("r.0.0.mca"), b"garbage").unwrap();
         assert!(SavedRegion::open(dir.path(), 0, 0).is_err());
+    }
+
+    /// A chunk the game has not finished counts as absent; the first pass sees the same sections.
+    #[test]
+    fn unfinished_chunks_are_absent_and_heights_skip_air() {
+        let dir = tempfile::tempdir().unwrap();
+        let unfinished = compound(&[
+            ("Status", s("minecraft:features")),
+            (
+                "sections",
+                Value::List(vec![section(0, vec![s("minecraft:stone")])]),
+            ),
+        ]);
+        let mut slots = vec![Slot::Empty; SLOTS];
+        slots[0] = Slot::Inline {
+            version: 2,
+            data: zlib(&chunk_26x()),
+        };
+        slots[1] = Slot::Inline {
+            version: 2,
+            data: zlib(&unfinished),
+        };
+        write_slots(&dir.path().join("r.0.0.mca"), &slots).unwrap();
+        let region = SavedRegion::open(dir.path(), 0, 0).unwrap().unwrap();
+        assert!(matches!(region.chunk(1, 0), Saved::Absent));
+        assert!(matches!(region.block_ys(1, 0), Saved::Absent));
+        let Saved::Chunk(ys) = region.block_ys(0, 0) else {
+            panic!("heights unread");
+        };
+        assert_eq!(ys, [-4, 0, 1]);
+    }
+
+    /// A bake rewrites only regions with an unlit chunk, keeps every other slot and timestamp,
+    /// and leaves a region with a damaged entry alone.
+    #[test]
+    fn a_bake_keeps_the_rest_of_the_file_and_skips_damaged_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let regions = dir.path().join("region");
+        std::fs::create_dir_all(&regions).unwrap();
+        let unlit = compound(&[
+            ("Status", s("minecraft:full")),
+            ("isLightOn", Value::Byte(0)),
+            (
+                "sections",
+                Value::List(vec![section(0, vec![s("minecraft:stone")])]),
+            ),
+        ]);
+        let mut slots = vec![Slot::Empty; SLOTS];
+        slots[0] = Slot::Inline {
+            version: 2,
+            data: zlib(&unlit),
+        };
+        slots[1] = Slot::External { version: 2 };
+        let path = regions.join("r.0.0.mca");
+        write_slots(&path, &slots).unwrap();
+        let mut before = std::fs::read(&path).unwrap();
+        before[4096..4100].copy_from_slice(&7u32.to_be_bytes());
+        std::fs::write(&path, &before).unwrap();
+        let damaged = regions.join("r.1.0.mca");
+        let mut bad = before.clone();
+        bad[8..12].copy_from_slice(&[0xFF, 0xFF, 0xFF, 1]);
+        std::fs::write(&damaged, &bad).unwrap();
+
+        let baked = bake_unlit(dir.path(), &|| false).unwrap();
+        assert_eq!((baked.chunks, baked.regions), (1, 1));
+        assert_eq!(baked.failed.len(), 1, "{:?}", baked.failed);
+        assert_eq!(std::fs::read(&damaged).unwrap(), bad, "left alone");
+        let after = std::fs::read(&path).unwrap();
+        assert_eq!(&after[4096..8192], &before[4096..8192], "timestamps kept");
+        assert_eq!(&after[4..8], &[0, 0, 3, 1], "the external stub stays");
+        let region = SavedRegion::open(&regions, 0, 0).unwrap().unwrap();
+        let Some(Entry::Inline(version, range)) = &region.entries[0] else {
+            panic!("chunk gone");
+        };
+        assert!(is_lit(
+            &decompress(*version, &region.bytes[range.clone()]).unwrap()
+        ));
+        assert!(matches!(region.entries[1], Some(Entry::External(2))));
+        assert_eq!(
+            bake_unlit(dir.path(), &|| true).unwrap().chunks,
+            0,
+            "stopped"
+        );
     }
 
     #[test]

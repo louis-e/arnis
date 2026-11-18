@@ -376,18 +376,28 @@ fn run_cli() {
             exit_failed();
         }
         let world_dir = one_world_dir(&args);
-        let result = if args.map_item_only {
-            map_item::redraw_one_world_map(&world_dir)
-                .map(|id| format!("World map item (map #{id}) redrawn over every area."))
-        } else {
-            redraw_lods(&args, &world_dir)
-        };
-        match result {
-            Ok(line) => println!("{line}"),
-            Err(e) => {
-                eprintln!("{} {e}", "Error:".red().bold());
-                exit_failed();
+        let mut results = Vec::new();
+        if args.map_item_only {
+            results.push(
+                map_item::redraw_one_world_map(&world_dir)
+                    .map(|id| format!("World map item (map #{id}) redrawn over every area.")),
+            );
+        }
+        if args.bake_lighting_only || args.voxy_lod_only || args.dh_lod_only {
+            results.push(redraw_lods(&args, &world_dir));
+        }
+        let mut failed = false;
+        for result in results {
+            match result {
+                Ok(line) => println!("{line}"),
+                Err(e) => {
+                    eprintln!("{} {e}", "Error:".red().bold());
+                    failed = true;
+                }
             }
+        }
+        if failed {
+            exit_failed();
         }
         return;
     }
@@ -1280,6 +1290,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         housing_parts,
     ) {
         Ok(_) => {
+            one_world::after_run(&args);
             if args.bedrock {
                 println!(
                     "{} Bedrock world saved to: {}",

@@ -106,8 +106,8 @@ impl<W: Write> LogWriter<W> {
         Ok(())
     }
 
-    pub(crate) fn flush(&mut self) -> std::io::Result<()> {
-        self.out.flush()
+    pub(crate) fn into_inner(self) -> W {
+        self.out
     }
 }
 

@@ -120,18 +120,23 @@ fn derive_db_id(world_id: &str) -> String {
 /// The seed decides the storage directory name, so a wrong one would leave voxy
 /// looking at an empty database rather than anything broken.
 fn read_world_seed(world_dir: &Path) -> Option<i64> {
+    let seed = |settings: &std::collections::HashMap<String, fastnbt::Value>| match settings
+        .get("seed")?
+    {
+        fastnbt::Value::Long(seed) => Some(*seed),
+        fastnbt::Value::Int(seed) => Some(*seed as i64),
+        _ => None,
+    };
     let level = read_nbt(&world_dir.join("level.dat"));
     let from_level = level
         .as_ref()
         .and_then(|root| child(root, "Data"))
-        .and_then(|data| child(data, "WorldGenSettings"));
-    let moved = read_nbt(&world_dir.join("data/minecraft/world_gen_settings.dat"));
-    let from_data = moved.as_ref().and_then(|root| child(root, "data"));
-    match from_level.or(from_data)?.get("seed")? {
-        fastnbt::Value::Long(seed) => Some(*seed),
-        fastnbt::Value::Int(seed) => Some(*seed as i64),
-        _ => None,
-    }
+        .and_then(|data| child(data, "WorldGenSettings"))
+        .and_then(seed);
+    from_level.or_else(|| {
+        let moved = read_nbt(&world_dir.join("data/minecraft/world_gen_settings.dat"))?;
+        child(&moved, "data").and_then(seed)
+    })
 }
 
 fn read_nbt(path: &Path) -> Option<std::collections::HashMap<String, fastnbt::Value>> {
@@ -164,7 +169,8 @@ fn child<'a>(
 /// The write-ahead log under construction, plus the sequence counter RocksDB
 /// replays it with.
 struct Wal {
-    log: rocks::LogWriter<BufWriter<File>>,
+    /// Taken and closed by [`VoxyWriter::finish`].
+    log: Option<rocks::LogWriter<BufWriter<File>>>,
     seq: u64,
     error: Option<std::io::Error>,
     sections: u64,
@@ -179,9 +185,13 @@ impl Wal {
         if self.error.is_some() {
             return;
         }
+        let Some(log) = self.log.as_mut() else {
+            self.error = Some(std::io::Error::other("the voxy log is already closed"));
+            return;
+        };
         self.seq += 1;
         let batch = rocks::write_batch_put(self.seq, cf, key, value);
-        if let Err(e) = self.log.add_record(&batch) {
+        if let Err(e) = log.add_record(&batch) {
             self.error = Some(e);
             return;
         }
@@ -240,7 +250,10 @@ impl VoxyWriter {
             config_dir,
             db_id: derive_db_id(&world_id),
             wal: Mutex::new(Wal {
-                log: rocks::LogWriter::new(BufWriter::with_capacity(1 << 20, log)),
+                log: Some(rocks::LogWriter::new(BufWriter::with_capacity(
+                    1 << 20,
+                    log,
+                ))),
                 seq: 0,
                 error: None,
                 sections: 0,
@@ -305,9 +318,13 @@ impl VoxyWriter {
                 );
             }
         }
-        wal.log.flush()?;
         if let Some(e) = wal.error.take() {
             return Err(e);
+        }
+        // Closed before the folder moves: Windows will not rename one holding an open file.
+        if let Some(log) = wal.log.take() {
+            let file = log.into_inner().into_inner().map_err(|e| e.into_error())?;
+            file.sync_all()?;
         }
 
         fs::write(
@@ -331,6 +348,14 @@ impl VoxyWriter {
     /// Drops a rebuild that will not be finished; the old database stays.
     pub(crate) fn abandon(&self) {
         if self.replaces.is_some() {
+            // Closed first, so Windows lets the folder go.
+            drop(
+                self.wal
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .log
+                    .take(),
+            );
             let _ = fs::remove_dir_all(&self.storage_dir);
         }
     }
@@ -500,8 +525,22 @@ mod tests {
         let path = dir.path().join("data/minecraft/world_gen_settings.dat");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, encoder.finish().unwrap()).unwrap();
-        // A 26.x level.dat has no WorldGenSettings.
+        // A 26.x level.dat has no WorldGenSettings, or one without the seed.
         write_level_dat_without_settings(dir.path());
+        assert_eq!(read_world_seed(dir.path()), Some(-1743857021154781143));
+        write_level_dat_without_settings(dir.path());
+        let mut settings = read_nbt(&dir.path().join("level.dat")).unwrap();
+        let fastnbt::Value::Compound(data) = settings.get_mut("Data").unwrap() else {
+            panic!("no Data")
+        };
+        data.insert(
+            "WorldGenSettings".to_string(),
+            fastnbt::Value::Compound(HashMap::new()),
+        );
+        let bytes = fastnbt::to_bytes(&fastnbt::Value::Compound(settings)).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bytes).unwrap();
+        fs::write(dir.path().join("level.dat"), encoder.finish().unwrap()).unwrap();
         assert_eq!(read_world_seed(dir.path()), Some(-1743857021154781143));
     }
 

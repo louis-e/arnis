@@ -1,7 +1,7 @@
 //! The voxy LOD cache of a world already on disk, from its region files. No region is touched.
 
 use super::{mark_live, LiveSections, VoxyWriter};
-use crate::saved_chunks::{overworld_regions, Saved, SavedChunk, SavedRegion};
+use crate::saved_chunks::{overworld_regions, Saved, SavedRegion};
 use crate::world_editor::java::{chunk_section_span, compute_chunk_lighting, morton_16};
 use rayon::prelude::*;
 use std::path::Path;
@@ -19,11 +19,16 @@ pub struct Summary {
 }
 
 /// Builds the overworld's voxy database from `region/*.mca`. Unreadable regions and chunks are
-/// skipped and counted; the old database is replaced only once the new one is complete.
-pub fn from_existing(world_dir: &Path) -> Result<Summary, BoxError> {
+/// skipped and counted; the old database is replaced only once the new one is complete. A
+/// region folder with no files gives an empty database, so removed land does not stay.
+/// Gives up, keeping the old database, once `stop` says so.
+pub fn from_existing(
+    world_dir: &Path,
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<Summary, BoxError> {
     let writer = VoxyWriter::create_keeping_old(world_dir)?
         .ok_or("the world's seed could not be read from level.dat")?;
-    let built = build(&writer, world_dir).and_then(|mut summary| {
+    let built = build(&writer, world_dir, stop).and_then(|mut summary| {
         (summary.sections, summary.bytes) = writer.finish()?;
         Ok(summary)
     });
@@ -33,16 +38,19 @@ pub fn from_existing(world_dir: &Path) -> Result<Summary, BoxError> {
     built
 }
 
-fn build(writer: &VoxyWriter, world_dir: &Path) -> Result<Summary, BoxError> {
+fn build(
+    writer: &VoxyWriter,
+    world_dir: &Path,
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<Summary, BoxError> {
     let (dir, regions) = overworld_regions(world_dir)?;
-    if regions.is_empty() {
-        return Err(format!("{} has no .mca region files", dir.display()).into());
-    }
     let (read, bad_chunks) = (AtomicU64::new(0), AtomicU64::new(0));
     let bad_regions = Mutex::new(Vec::new());
-    regions
-        .par_iter()
-        .for_each(|&(rx, rz)| match ingest_region(writer, &dir, rx, rz) {
+    regions.par_iter().for_each(|&(rx, rz)| {
+        if stop() {
+            return;
+        }
+        match ingest_region(writer, &dir, rx, rz) {
             Ok(None) => {}
             Ok(Some(bad)) => {
                 read.fetch_add(1, Ordering::Relaxed);
@@ -52,7 +60,11 @@ fn build(writer: &VoxyWriter, world_dir: &Path) -> Result<Summary, BoxError> {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .push(format!("r.{rx}.{rz}.mca: {e}")),
-        });
+        }
+    });
+    if stop() {
+        return Err("stopped".into());
+    }
     let mut bad_regions = bad_regions.into_inner().unwrap_or_else(|p| p.into_inner());
     bad_regions.sort();
     if read.into_inner() == 0 && !bad_regions.is_empty() {
@@ -84,28 +96,24 @@ fn ingest_region(
     let Some(region) = SavedRegion::open(dir, rx, rz)? else {
         return Ok(None);
     };
-    let mut bad = 0;
-    // The builder needs every section that can hold a block before the first chunk arrives.
-    let mut chunks: Vec<Option<Box<SavedChunk>>> = (0..1024)
-        .map(|i| match region.chunk(i % 32, i / 32) {
-            Saved::Chunk(chunk) => Some(chunk),
-            Saved::Bad => {
-                bad += 1;
-                None
-            }
-            Saved::Absent => None,
-        })
-        .collect();
-    drop(region);
-
+    // The builder needs every section that can hold a block before the first chunk arrives;
+    // a first pass reads only their heights, so a region is never held parsed whole.
+    let (mut bad, mut present) = (0, [false; 1024]);
     let mut live = LiveSections::default();
     let (mut min_y, mut max_y) = (-4, None::<i32>);
-    for (i, chunk) in chunks.iter().enumerate() {
-        let Some(chunk) = chunk else { continue };
-        let (cx, cz) = (rx * 32 + (i % 32) as i32, rz * 32 + (i / 32) as i32);
-        for s in &chunk.sections {
-            let y = i32::from(s.y);
-            mark_live(&mut live, cx, y, cz);
+    for (i, slot) in present.iter_mut().enumerate() {
+        let (x, z) = ((i % 32) as i32, (i / 32) as i32);
+        let ys = match region.block_ys(x, z) {
+            Saved::Chunk(ys) => ys,
+            Saved::Bad => {
+                bad += 1;
+                continue;
+            }
+            Saved::Absent => continue,
+        };
+        *slot = true;
+        for y in ys.into_iter().map(i32::from) {
+            mark_live(&mut live, rx * 32 + x, y, rz * 32 + z);
             min_y = min_y.min(y);
             max_y = Some(max_y.map_or(y, |m| m.max(y)));
         }
@@ -120,7 +128,11 @@ fn ingest_region(
         let (sx, sz) = morton_16(column);
         for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             let (x, z) = (sx * 2 + dx, sz * 2 + dz);
-            let Some(chunk) = chunks[(x + z * 32) as usize].take() else {
+            if !present[(x + z * 32) as usize] {
+                continue;
+            }
+            // The first pass read it; one that fails only now is left out.
+            let Saved::Chunk(chunk) = region.chunk(x, z) else {
                 continue;
             };
             let span = chunk_section_span(&chunk.sections);
