@@ -1434,30 +1434,52 @@ pub fn generate_world_with_options(
     // Amenity processors use this for O(1) nearest-road-block lookups. The carriageways
     // among them come in the same pass: trees keep their trunks out of them, mapped
     // street trees included, and leave more headroom over them than over a footway.
+    // Sidewalks a block or two off the road they run beside are paved out to it.
+    // Alongside, on another thread, what the gardens read besides the marks: commercial
+    // land, which is never filled while elements are placed, and the streets and car parks
+    // that keep paving beside them, which read neither the kerb strips nor anything set
+    // from the road masks.
+    let ((road_coords, kerb_strips), garden_land) = rayon::join(
+        || {
+            let road_coords = highways::collect_road_and_carriageway_coords(
+                &elements,
+                &editor,
+                &clip_bbox,
+                args.scale,
+                args.water.water_detail,
+                &wall_footprints,
+            );
+            let kerb_strips = crate::element_processing::kerb_strips::collect(
+                &elements,
+                &editor,
+                &clip_bbox,
+                args.scale,
+                &road_coords.roads,
+                &building_footprints,
+                &flood_fill_cache.collect_kerb_blockers(&elements, &clip_bbox),
+            );
+            (road_coords, kerb_strips)
+        },
+        || crate::world_editor::GardenLand {
+            commercial: crate::element_processing::landuse::commercial_land(&elements, &xzbbox),
+            streets: highways::collect_garden_streets(
+                &elements,
+                &editor,
+                &clip_bbox,
+                args.scale,
+                args.water.water_detail,
+                |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
+            ),
+        },
+    );
     let highways::RoadCoords {
         roads: mut road_mask,
         carriageways: carriageway,
         paths: mapped_paths,
         cut: road_cut,
         junctions: road_junctions,
-    } = highways::collect_road_and_carriageway_coords(
-        &elements,
-        &editor,
-        &clip_bbox,
-        args.scale,
-        args.water.water_detail,
-        &wall_footprints,
-    );
-    // Sidewalks a block or two off the road they run beside are paved out to it.
-    let kerb_strips = Arc::new(crate::element_processing::kerb_strips::collect(
-        &elements,
-        &editor,
-        &clip_bbox,
-        args.scale,
-        &road_mask,
-        &building_footprints,
-        &flood_fill_cache.collect_kerb_blockers(&elements, &clip_bbox),
-    ));
+    } = road_coords;
+    let kerb_strips = Arc::new(kerb_strips);
     for (x, z) in kerb_strips.cells() {
         road_mask.set(x, z);
     }
@@ -1488,19 +1510,7 @@ pub fn generate_world_with_options(
     let road_junctions = Arc::new(road_junctions);
     editor.set_junctions(Arc::clone(&road_junctions));
 
-    // What the gardens read besides the marks: commercial land, which is never filled
-    // while elements are placed, and the streets and car parks that keep paving beside them.
-    let garden_land = Arc::new(crate::world_editor::GardenLand {
-        commercial: crate::element_processing::landuse::commercial_land(&elements, &xzbbox),
-        streets: highways::collect_garden_streets(
-            &elements,
-            &editor,
-            &clip_bbox,
-            args.scale,
-            args.water.water_detail,
-            |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
-        ),
-    });
+    let garden_land = Arc::new(garden_land);
     editor.set_garden_land(Arc::clone(&garden_land));
 
     // Indexed up front, so a construction site skips its own crane whichever renders first.
