@@ -252,6 +252,37 @@ impl RegionWriteMode {
 /// The location and timestamp tables at the start of a region file. Chunks come after them.
 const REGION_HEADER_BYTES: u64 = 8192;
 
+/// Clears the location entries fastanvil cannot write past: inside the header, which it would
+/// write over, past the end of the file, which it would grow to reach, or with no sectors.
+/// Returns how many it cleared and whether any chunk is left.
+fn repair_header(file: &mut File) -> std::io::Result<(usize, bool)> {
+    use std::io::{Read, Seek, Write};
+    let sectors_in_file = file.metadata()?.len().div_ceil(4096);
+    let mut table = [0u8; 4096];
+    file.rewind()?;
+    file.read_exact(&mut table)?;
+    let (mut cleared, mut any) = (0, false);
+    for entry in table.as_chunks_mut::<4>().0 {
+        let [a, b, c, sectors] = *entry;
+        let offset = u32::from_be_bytes([0, a, b, c]);
+        if offset == 0 && sectors == 0 {
+            continue;
+        }
+        if offset < 2 || sectors == 0 || u64::from(offset) + u64::from(sectors) > sectors_in_file {
+            *entry = [0; 4];
+            cleared += 1;
+        } else {
+            any = true;
+        }
+    }
+    if cleared > 0 {
+        file.rewind()?;
+        file.write_all(&table)?;
+    }
+    file.rewind()?;
+    Ok((cleared, any))
+}
+
 /// Opens `r.X.Z.mca` for a merge, or creates it empty. Never from the
 /// template: its placeholder chunks carry another region's positions, and
 /// Minecraft refuses to load the ones a merge leaves standing.
@@ -263,14 +294,29 @@ fn open_region_file_for_merge(
     let region_dir = overworld_dir.join("region");
     let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
     // A save that never finished leaves a file too short to hold a chunk, which starts over.
-    let holds_chunks =
+    let long_enough =
         std::fs::metadata(&out_path).is_ok_and(|m| m.is_file() && m.len() >= REGION_HEADER_BYTES);
-    if holds_chunks {
-        let file = File::options().read(true).write(true).open(&out_path)?;
+    if long_enough {
+        let mut file = File::options().read(true).write(true).open(&out_path)?;
+        let unreadable = |why: String| {
+            format!(
+                "{} is not a readable region file: {why}",
+                out_path.display()
+            )
+        };
+        let (cleared, any) = repair_header(&mut file).map_err(|e| unreadable(e.to_string()))?;
+        if cleared > 0 {
+            eprintln!(
+                "Warning: {}: {cleared} damaged chunk entries were dropped from its header.",
+                out_path.display()
+            );
+        }
         // Refused rather than replaced: the file holds chunks of other areas.
-        return Region::from_stream(file).map_err(|e| {
-            format!("{} is not a readable region file: {e}", out_path.display()).into()
-        });
+        if any {
+            return Region::from_stream(file).map_err(|e| unreadable(e.to_string()).into());
+        }
+        // With none, fastanvil would put the first chunk over the header, so it starts over.
+        drop(file);
     }
     std::fs::create_dir_all(&region_dir)?;
     let file = File::options()
@@ -2507,6 +2553,93 @@ mod merge_tests {
             }
         }
         None
+    }
+
+    /// A region file with a header and no chunks, as a merge that stopped before its first chunk
+    /// or a removal leaves it, starts over instead of taking its first chunk over the header.
+    #[test]
+    fn a_merge_into_a_region_without_chunks_starts_it_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let regions = dir.path().join("region");
+        std::fs::create_dir_all(&regions).unwrap();
+        std::fs::write(regions.join("r.0.0.mca"), vec![0u8; 8192]).unwrap();
+        let merge = RegionWriteMode::Merge {
+            min_x: 0,
+            min_z: 0,
+            max_x: 511,
+            max_z: 511,
+            layout: crate::world_utils::WorldLayout::Legacy,
+        };
+        let cells: Vec<(i32, i32)> = (0..40).map(|i| (i % 32, i / 32)).collect();
+        write(dir.path(), &region_with(&cells, STONE), merge);
+        assert_eq!(
+            present_chunks(dir.path()).len(),
+            1024,
+            "every chunk in the bounds"
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 7, 1).as_deref(),
+            Some("minecraft:stone")
+        );
+    }
+
+    /// Entries fastanvil cannot write past are dropped, the chunks around them kept, as in a
+    /// region whose header a 3.4.0 merge wrote a chunk over.
+    #[test]
+    fn a_merge_drops_header_entries_it_cannot_write_past() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            &region_with(&[(0, 0), (3, 0)], STONE),
+            RegionWriteMode::Merge {
+                min_x: 0,
+                min_z: 0,
+                max_x: 511,
+                max_z: 511,
+                layout: crate::world_utils::WorldLayout::Legacy,
+            },
+        );
+        let path = dir.path().join("region").join("r.0.0.mca");
+        let mut bytes = std::fs::read(&path).unwrap();
+        // Slot 1 into the header, slot 2 with no sectors, slot 5 far past the end.
+        bytes[4..8].copy_from_slice(&[0, 0, 1, 1]);
+        bytes[8..12].copy_from_slice(&[0, 0, 9, 0]);
+        bytes[20..24].copy_from_slice(&[0xAB, 0xCD, 0xEF, 1]);
+        std::fs::write(&path, &bytes).unwrap();
+
+        let cells: Vec<(i32, i32)> = (4..40).map(|i| (i % 32, i / 32)).collect();
+        write(
+            dir.path(),
+            &region_with(&cells, SMOOTH_STONE),
+            RegionWriteMode::Merge {
+                min_x: 64,
+                min_z: 0,
+                max_x: 511,
+                max_z: 511,
+                layout: crate::world_utils::WorldLayout::Legacy,
+            },
+        );
+        let present = present_chunks(dir.path());
+        assert!(
+            present.contains(&(0, 0)) && present.contains(&(3, 0)),
+            "kept"
+        );
+        assert!(
+            !present.contains(&(1, 0)) && !present.contains(&(2, 0)),
+            "dropped"
+        );
+        assert!(
+            std::fs::metadata(&path).unwrap().len() < 1 << 30,
+            "not grown to reach a far entry"
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 0, 0).as_deref(),
+            Some("minecraft:stone")
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 7, 1).as_deref(),
+            Some("minecraft:smooth_stone")
+        );
     }
 
     #[test]

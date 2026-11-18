@@ -3745,6 +3745,15 @@ fn region_storage_bytes(region: &common::RegionToModify) -> u64 {
     bytes
 }
 
+/// The message a panic carried.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "panicked".to_string())
+}
+
 /// Background writer pool for stream-to-disk eviction. Regions taken off the merge
 /// thread are compacted, serialized and written here, overlapping I/O with the next
 /// batch's compute. At most `capacity + threads + 1` regions are alive at once; the
@@ -3803,7 +3812,13 @@ impl FlushWorker {
                         };
                         let started = bench.then(std::time::Instant::now);
                         region.compact_sections();
-                        let result = ctx.write(rxx, rzz, &region);
+                        // A panic here would leave only "terminated early"; its message is the cause.
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            ctx.write(rxx, rzz, &region)
+                        }))
+                        .unwrap_or_else(|payload| {
+                            Err(format!("r.{rxx}.{rzz}.mca: {}", panic_text(&*payload)).into())
+                        });
                         if let Some(t) = started {
                             write_ns.fetch_add(
                                 t.elapsed().as_nanos() as u64,

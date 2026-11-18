@@ -18382,7 +18382,10 @@ fn place_roof_surface(
     // Patches span several cells, so each seeds its stream once.
     let mut sheet_patches: FnvHashMap<(i32, i32), bool> = FnvHashMap::default();
     for &(x, z) in floor_area {
-        let l = levels[&(x, z)];
+        // Crash reports show a cell without a level; a cell left bare beats losing the run.
+        let Some(&l) = levels.get(&(x, z)) else {
+            continue;
+        };
         let y = l.div_euclid(2);
         let mut sheet = false;
         let cap = if l.rem_euclid(2) == 0 {
@@ -18486,7 +18489,9 @@ fn place_rake_trim(
     let mut trims: Vec<((i32, i32), (i32, i32))> = Vec::new();
     let mut seen: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     for &(x, z) in floor_area {
-        let (y, cap) = tops[&(x, z)];
+        let Some(&(y, cap)) = tops.get(&(x, z)) else {
+            continue;
+        };
         let block = match (cap, slab) {
             (RoofCap::Stair(facing, _), _) => {
                 create_stair_with_properties(stair_mat, facing, StairShape::Straight)
