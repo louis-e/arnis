@@ -22,13 +22,23 @@ const USER_OVERRIDES: [&str; 3] = [
     "GALLIUM_DRIVER",
 ];
 
-/// How long a renderer has to bring the window up. WebKit gives up on EGL as it starts;
-/// a crash after this is not the renderer's, and starts nothing again.
+/// How long a renderer has to bring the window up: the launcher counts it from the spawn,
+/// the GUI's web process watch from the window's setup. A crash of the GUI after it is not
+/// the renderer's; the exit codes below are, whenever the launcher sees them.
 const STARTUP: Duration = Duration::from_secs(15);
 
-/// What the child exits with when the window failed on EGL with an error, not an abort, or
-/// its web process crashed while starting. It counts as a failed renderer whenever it comes.
+/// What the child exits with when the window failed on EGL with an error, not an abort.
 pub const EGL_FAILED_EXIT: i32 = 86;
+
+/// What the child exits with when its web process crashed while the window came up. EGL is
+/// one cause but not the only one, so a renderer that has worked gets a second launch.
+const WEB_PROCESS_CRASHED_EXIT: i32 = 87;
+
+/// Where to look when the web process crashes, whatever the renderer.
+const WEB_PROCESS_HELP: &str = "WebKit's messages above, and the log in \
+    ~/.local/share/com.louisdev.arnis/logs, say why; on Ubuntu 24.04 and later, AppArmor \
+    stopping WebKit's bubblewrap sandbox is one known cause. The command line works without \
+    a window: arnis --help";
 
 /// What a child dies of when WebKit or Mesa gives up natively. A Rust panic exits with 101
 /// instead, and a stop the user asked for (SIGINT, SIGTERM) is none of these.
@@ -120,9 +130,10 @@ pub fn watch_web_process(window: &tauri::WebviewWindow) {
             .inner()
             .connect_web_process_terminated(move |_, reason| {
                 if web_process_failed_start(reason, begun.elapsed()) {
-                    eprintln!("Error: the window's web process crashed while starting.");
+                    log::error!("The window's web process crashed while it came up.");
+                    log::logger().flush();
                     // Not `exit`: its atexit handlers could hang inside the running main loop.
-                    unsafe { libc::_exit(EGL_FAILED_EXIT) };
+                    unsafe { libc::_exit(WEB_PROCESS_CRASHED_EXIT) };
                 }
             });
     });
@@ -155,7 +166,8 @@ pub fn supervise() -> Option<i32> {
     };
     let memory = memory_file();
     let remembered = memory.as_deref().and_then(read_remembered);
-    let order = attempt_order(remembered);
+    let order = attempt_order(remembered.map(|(renderer, _)| renderer));
+    let mut only_web_process_crashes = true;
     for (i, &renderer) in order.iter().enumerate() {
         let mut cmd = Command::new(&exe);
         renderer.configure(&mut cmd);
@@ -166,13 +178,21 @@ pub fn supervise() -> Option<i32> {
         };
         match run_child(cmd, STARTUP, started) {
             Ok(Outcome::Exited(code)) => return Some(code),
-            Ok(Outcome::Failed) => {
-                // A child that failed after `STARTUP` was remembered as working.
+            // A renderer that has worked may have crashed for a reason of WebKit's own.
+            Ok(Outcome::WebProcessCrashed) if remembered == Some((renderer, false)) => {
                 if let Some(path) = memory.as_deref() {
-                    if read_remembered(path) == Some(renderer) {
-                        let _ = std::fs::remove_file(path);
-                    }
+                    remember_crashed(path, renderer);
                 }
+                eprintln!(
+                    "Error: the window's web process crashed while it came up. The {} \
+                     renderer worked before, so the next start tries it once more before the \
+                     others. {WEB_PROCESS_HELP}",
+                    renderer.name()
+                );
+                return Some(1);
+            }
+            Ok(outcome @ (Outcome::Failed | Outcome::WebProcessCrashed)) => {
+                only_web_process_crashes &= outcome == Outcome::WebProcessCrashed;
                 if let Some(next) = order.get(i + 1) {
                     eprintln!(
                         "Warning: the window could not start with the {} renderer, trying {}.",
@@ -190,11 +210,18 @@ pub fn supervise() -> Option<i32> {
     if let Some(path) = memory.as_deref() {
         let _ = std::fs::remove_file(path);
     }
-    eprintln!(
-        "Error: Arnis could not open its window with any renderer. If the messages above \
-         say EGL could not start, installing your distribution's Mesa Vulkan drivers can \
-         help; the command line works without a window: arnis --help"
-    );
+    if only_web_process_crashes {
+        eprintln!(
+            "Error: the window's web process crashed with every renderer, so the graphics \
+             driver is likely not the cause. {WEB_PROCESS_HELP}"
+        );
+    } else {
+        eprintln!(
+            "Error: Arnis could not open its window with any renderer. If the messages above \
+             say EGL could not start, installing your distribution's Mesa Vulkan drivers can \
+             help; the command line works without a window: arnis --help"
+        );
+    }
     Some(1)
 }
 
@@ -213,8 +240,18 @@ fn memory_file() -> Option<PathBuf> {
     dirs::cache_dir().map(|d| d.join("arnis").join("linux-renderer"))
 }
 
-fn read_remembered(path: &Path) -> Option<Renderer> {
-    Renderer::from_name(&std::fs::read_to_string(path).ok()?)
+/// The remembered renderer, and whether its web process has crashed once since it worked.
+fn read_remembered(path: &Path) -> Option<(Renderer, bool)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let text = text.trim();
+    match text.strip_suffix('?') {
+        Some(name) => Some((Renderer::from_name(name)?, true)),
+        None => Some((Renderer::from_name(text)?, false)),
+    }
+}
+
+fn remember_crashed(path: &Path, renderer: Renderer) {
+    let _ = std::fs::write(path, format!("{}?", renderer.name()));
 }
 
 fn remember(path: &Path, renderer: Renderer) {
@@ -233,6 +270,8 @@ enum Outcome {
     Exited(i32),
     /// The window never came up: the child crashed within `STARTUP`, or reported EGL failing.
     Failed,
+    /// The window's web process crashed while it came up.
+    WebProcessCrashed,
 }
 
 /// Runs `cmd` until it exits, its output going straight to this process's. `started` runs
@@ -259,8 +298,8 @@ fn run_child(
         };
         if let Some(status) = status {
             let early = begun.elapsed() < startup;
-            if failed_to_start(status, early) {
-                return Ok(Outcome::Failed);
+            if let Some(failed) = renderer_failure(status, early) {
+                return Ok(failed);
             }
             if status.success() || !early {
                 if let Some(started) = started.take() {
@@ -274,8 +313,8 @@ fn run_child(
                 started();
             }
             return match child.wait() {
-                Ok(status) if failed_to_start(status, false) => Ok(Outcome::Failed),
-                Ok(status) => Ok(Outcome::Exited(exit_code(status))),
+                Ok(status) => Ok(renderer_failure(status, false)
+                    .unwrap_or_else(|| Outcome::Exited(exit_code(status)))),
                 Err(e) => lost(e),
             };
         }
@@ -283,12 +322,19 @@ fn run_child(
     }
 }
 
-fn failed_to_start(status: ExitStatus, early: bool) -> bool {
-    status.code() == Some(EGL_FAILED_EXIT)
-        || (early
-            && status
-                .signal()
-                .is_some_and(|signal| CRASH_SIGNALS.contains(&signal)))
+/// How the child's end says its renderer failed, if it does. A crash counts only `early`.
+fn renderer_failure(status: ExitStatus, early: bool) -> Option<Outcome> {
+    let crashed = || {
+        status
+            .signal()
+            .is_some_and(|signal| CRASH_SIGNALS.contains(&signal))
+    };
+    match status.code() {
+        Some(EGL_FAILED_EXIT) => Some(Outcome::Failed),
+        Some(WEB_PROCESS_CRASHED_EXIT) => Some(Outcome::WebProcessCrashed),
+        _ if early && crashed() => Some(Outcome::Failed),
+        _ => None,
+    }
 }
 
 /// The child's exit code, or the shell's 128 plus the signal that ended it.
@@ -354,6 +400,14 @@ mod tests {
         assert!(started);
     }
 
+    #[test]
+    fn a_web_process_crash_is_told_apart_whenever_it_comes() {
+        let startup = Duration::from_secs(10);
+        assert_eq!(run("exit 87", startup), (Outcome::WebProcessCrashed, false));
+        let late = run("sleep 1; exit 87", Duration::from_millis(200));
+        assert_eq!(late, (Outcome::WebProcessCrashed, true));
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn only_a_web_process_crash_while_starting_fails_the_renderer() {
@@ -394,11 +448,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("arnis").join("linux-renderer");
         remember(&path, Renderer::Zink);
-        assert_eq!(read_remembered(&path), Some(Renderer::Zink));
+        assert_eq!(read_remembered(&path), Some((Renderer::Zink, false)));
         remember(&path, Renderer::Software);
         assert!(!path.exists());
         assert_eq!(Renderer::from_name("gpu\n"), Some(Renderer::Gpu));
         assert_eq!(Renderer::from_name("zink-gpu"), Some(Renderer::ZinkGpu));
         assert_eq!(Renderer::from_name("vulkan"), None);
+    }
+
+    #[test]
+    fn a_web_process_crash_is_remembered_until_the_renderer_works_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("linux-renderer");
+        remember(&path, Renderer::Gpu);
+        remember_crashed(&path, Renderer::Gpu);
+        assert_eq!(read_remembered(&path), Some((Renderer::Gpu, true)));
+        remember(&path, Renderer::Gpu);
+        assert_eq!(read_remembered(&path), Some((Renderer::Gpu, false)));
     }
 }
