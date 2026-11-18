@@ -14776,6 +14776,15 @@ pub fn generate_buildings(
         floor_cycle,
         scale_factor,
     );
+    // A mobile home is drawn one storey, whatever height Overture guessed for it.
+    let mobile_home = super::mobile_homes::claims(&element.tags)
+        && min_level_offset == 0
+        && hole_points.is_empty();
+    let storeys = if mobile_home {
+        storeys.min(1.0)
+    } else {
+        storeys
+    };
     if storeys >= TALL_STOREYS {
         mark_tall(editor, &cached_floor_area);
     }
@@ -14838,6 +14847,22 @@ pub fn generate_buildings(
                 editor.mark_ground(crate::world_editor::GroundMark::House, x, z);
             }
         }
+    }
+
+    if mobile_home
+        && super::mobile_homes::generate(
+            editor,
+            element,
+            &cached_floor_area,
+            start_y_offset + abs_terrain_offset,
+            args,
+            super::mobile_homes::Surroundings {
+                road_mask: ctx.road_mask,
+                footprints: ctx.building_footprints,
+            },
+        )
+    {
+        return None;
     }
 
     // Street/neighbor classification: party walls, fronting streets, corner.
