@@ -440,6 +440,18 @@ fn inset_with(
     if ring_cells(&ring).any(|c| !outline.contains(&c)) {
         return None;
     }
+    // The stepped footprint spans what its corners do, its walls running between them and
+    // the fill inside them, so one narrower than `MIN_INSET_SPAN` is turned down unfilled.
+    let corner_spans = |axis: fn(&ProcessedNode) -> i32| {
+        let (lo, hi) = ring
+            .iter()
+            .map(axis)
+            .fold((i32::MAX, i32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+        hi - lo + 1
+    };
+    if corner_spans(|n| n.x).min(corner_spans(|n| n.z)) < MIN_INSET_SPAN {
+        return None;
+    }
     let coords: Vec<(i32, i32)> = ring.iter().map(|n| (n.x, n.z)).collect();
     // No wall-clock timeout: the ring is no bigger than the outline, whose
     // fill is already cached, and a fill cut short in one tile but not the
