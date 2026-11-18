@@ -440,6 +440,7 @@ struct Pole {
 /// Every pole and head, planned once for the whole area.
 pub struct SignalIndex {
     poles: Vec<Pole>,
+    grid: PoleGrid,
     /// Poles each signal node builds.
     by_node: FnvHashMap<u64, Vec<usize>>,
     /// Signal nodes the plan found a kerb for, including those whose heads another node's
@@ -454,8 +455,36 @@ pub struct SignalIndex {
 /// mapped with a signal on each approach and one in the middle is.
 const COVER: i32 = 6;
 
+/// Pole indices by cell, so a lookup sees only the poles near it instead of a city's.
+#[derive(Default)]
+struct PoleGrid(FnvHashMap<(i32, i32), Vec<usize>>);
+
+impl PoleGrid {
+    const CELL: i32 = 16;
+
+    fn insert(&mut self, x: i32, z: i32, i: usize) {
+        let key = (x.div_euclid(Self::CELL), z.div_euclid(Self::CELL));
+        self.0.entry(key).or_default().push(i);
+    }
+
+    /// Every pole within `r` of (x, z) on both axes, and maybe a few more, in planning order.
+    fn near(&self, x: i32, z: i32, r: i32) -> Vec<usize> {
+        let mut out = Vec::new();
+        for cx in (x - r).div_euclid(Self::CELL)..=(x + r).div_euclid(Self::CELL) {
+            for cz in (z - r).div_euclid(Self::CELL)..=(z + r).div_euclid(Self::CELL) {
+                if let Some(found) = self.0.get(&(cx, cz)) {
+                    out.extend_from_slice(found);
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+}
+
 struct Plan<'r> {
     poles: Vec<Pole>,
+    grid: PoleGrid,
     by_node: FnvHashMap<u64, Vec<usize>>,
     handled: FnvHashSet<u64>,
     drives_on_left: bool,
@@ -544,12 +573,17 @@ impl Plan<'_> {
         for sign in [1.0, -1.0] {
             let side = (across.0 * sign, across.1 * sign);
             // A car head's pole on this kerb carries it when there is one.
-            let existing = self.poles.iter().position(|p| {
-                let (dx, dz) = (p.x as f64 + 0.5 - origin.0, p.z as f64 + 0.5 - origin.1);
-                dx * side.0 + dz * side.1 > 0.0
-                    && (dx * road.dir.0 + dz * road.dir.1).abs() < 3.0
-                    && (dx * side.0 + dz * side.1) <= (road.half + 5) as f64
-            });
+            let existing = self
+                .grid
+                .near(node.x, node.z, road.half + 9)
+                .into_iter()
+                .find(|&i| {
+                    let p = &self.poles[i];
+                    let (dx, dz) = (p.x as f64 + 0.5 - origin.0, p.z as f64 + 0.5 - origin.1);
+                    dx * side.0 + dz * side.1 > 0.0
+                        && (dx * road.dir.0 + dz * road.dir.1).abs() < 3.0
+                        && (dx * side.0 + dz * side.1) <= (road.half + 5) as f64
+                });
             let pole = match existing {
                 Some(p) => p,
                 None => {
@@ -590,7 +624,8 @@ impl Plan<'_> {
 
     /// Whether a head of this kind already faces this way nearby.
     fn covered(&self, x: i32, z: i32, head: Head) -> bool {
-        self.poles.iter().any(|p| {
+        self.grid.near(x, z, COVER).into_iter().any(|i| {
+            let p = &self.poles[i];
             (p.x - x).abs() <= COVER
                 && (p.z - z).abs() <= COVER
                 && p.heads.iter().any(|h| {
@@ -602,13 +637,13 @@ impl Plan<'_> {
 
     /// The pole standing at or right next to this cell, or a new one there.
     fn pole(&mut self, owner: u64, x: i32, z: i32) -> usize {
-        if let Some(i) = self
-            .poles
-            .iter()
-            .position(|p| (p.x - x).abs() <= 1 && (p.z - z).abs() <= 1)
-        {
+        if let Some(i) = self.grid.near(x, z, 1).into_iter().find(|&i| {
+            let p = &self.poles[i];
+            (p.x - x).abs() <= 1 && (p.z - z).abs() <= 1
+        }) {
             return i;
         }
+        self.grid.insert(x, z, self.poles.len());
         self.poles.push(Pole {
             x,
             z,
@@ -659,6 +694,7 @@ impl SignalIndex {
         ids.sort_unstable();
         let mut plan = Plan {
             poles: Vec::new(),
+            grid: PoleGrid::default(),
             by_node: FnvHashMap::default(),
             handled: FnvHashSet::default(),
             drives_on_left,
@@ -671,6 +707,7 @@ impl SignalIndex {
         }
         Self {
             poles: plan.poles,
+            grid: plan.grid,
             by_node: plan.by_node,
             handled: plan.handled,
             cycling,
@@ -686,7 +723,13 @@ impl SignalIndex {
     /// `facing`: towards traffic that has to stop there.
     pub(crate) fn shows(&self, at: (f64, f64), facing: (f64, f64), scale: f64) -> bool {
         let reach = (HEAD_REACH_M * scale).max(12.0);
-        self.poles.iter().any(|pole| {
+        let (x, z, r) = (
+            at.0.floor() as i32,
+            at.1.floor() as i32,
+            reach.ceil() as i32 + 1,
+        );
+        self.grid.near(x, z, r).into_iter().any(|i| {
+            let pole = &self.poles[i];
             let d = (f64::from(pole.x) + 0.5 - at.0).hypot(f64::from(pole.z) + 0.5 - at.1);
             d <= reach
                 && pole
@@ -1308,6 +1351,7 @@ mod tests {
         let paths = road_mask((-30..=30).flat_map(|x| (4..=6).map(move |z| (x, z))));
         let plan = |line_z: i32| Plan {
             poles: Vec::new(),
+            grid: PoleGrid::default(),
             by_node: FnvHashMap::default(),
             handled: FnvHashSet::default(),
             drives_on_left: false,
