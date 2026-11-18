@@ -676,9 +676,17 @@ fn finish(mut m: Model) -> PalettizedSchematic {
             slot,
         ));
     }
+    // Voxels sit shifted by the origin, so the box reaches one past the farthest of them.
+    let span = |axis: fn(&(i16, i16, i16, u8)) -> i16| {
+        voxels
+            .iter()
+            .map(axis)
+            .max()
+            .map_or(0, |m| i32::from(m) + 1)
+    };
     PalettizedSchematic {
-        width: MAX_X - MIN_X,
-        length: MAX_Z - MIN_Z,
+        width: span(|v| v.0),
+        length: span(|v| v.2),
         palette,
         voxels,
     }
@@ -707,6 +715,23 @@ mod tests {
             .voxels
             .iter()
             .all(|v| v.0 >= 0 && v.1 >= 0 && v.2 >= 0));
+    }
+
+    #[test]
+    fn every_voxel_lies_inside_the_schematic() {
+        let model = build();
+        assert!(model.voxels.iter().all(|v| i32::from(v.0) < model.width
+            && i32::from(v.2) < model.length
+            && v.0 >= 0
+            && v.2 >= 0));
+        assert!(model
+            .voxels
+            .iter()
+            .any(|v| i32::from(v.0) == model.width - 1));
+        assert!(model
+            .voxels
+            .iter()
+            .any(|v| i32::from(v.2) == model.length - 1));
     }
 
     #[test]
