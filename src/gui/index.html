@@ -260,14 +260,6 @@
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
-          <button type="button" class="settings-nav-item" data-target="settings-section-facades">
-            <svg class="icon" aria-hidden="true"><use href="#i-brick-wall"></use></svg>
-            <span class="settings-nav-text">
-              <span class="settings-nav-title" data-localize="settings_section_facades">Building Facades</span>
-              <span class="settings-nav-sub" data-localize="settings_nav_facades">Photo textures on walls</span>
-            </span>
-            <span class="settings-nav-dot" aria-hidden="true"></span>
-          </button>
           <button type="button" class="settings-nav-item" data-target="settings-section-gameplay">
             <svg class="icon" aria-hidden="true"><use href="#i-gamepad"></use></svg>
             <span class="settings-nav-text">
@@ -313,6 +305,14 @@
             <span class="settings-nav-text">
               <span class="settings-nav-title" data-localize="settings_section_tuning">Fine Tuning</span>
               <span class="settings-nav-sub" data-localize="settings_nav_tuning">Seed, roads, rocks, caves, water</span>
+            </span>
+            <span class="settings-nav-dot" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="settings-nav-item" data-target="settings-section-facades">
+            <svg class="icon" aria-hidden="true"><use href="#i-brick-wall"></use></svg>
+            <span class="settings-nav-text">
+              <span class="settings-nav-title" data-localize="settings_section_facades">Building Facades</span>
+              <span class="settings-nav-sub" data-localize="settings_nav_facades">Photo textures on walls</span>
             </span>
             <span class="settings-nav-dot" aria-hidden="true"></span>
           </button>
@@ -879,126 +879,6 @@
                     </div>
                   </div>
                 </div>
-              </div>
-            </section>
-
-            <!-- Building Facades -->
-            <section class="settings-section" id="settings-section-facades">
-              <header class="settings-section-head">
-                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-brick-wall"></use></svg></span>
-                <div>
-                  <h3 data-localize="settings_section_facades">Building Facades</h3>
-                  <p data-localize="settings_section_facades_desc">Dress building walls with textures from photographs.</p>
-                </div>
-              </header>
-
-              <!-- One decision, not two toggles: both sources hang panels on the same
-                   walls and write the same resource pack, so they were mutually
-                   exclusive anyway and a single control cannot express an invalid
-                   state. -->
-              <div class="settings-row setting-choice">
-                <label class="setting-label">
-                  <span class="setting-heading">
-                    <span data-localize="facade_source">Facade Source</span>
-                    <span class="tooltip-icon" data-tooltip-key="facade_source_tip" data-tooltip="Preset uses bundled photos picked by building type, Mapillary real street photos where available. Photo walls need Java 1.21.4+ and the world's resources.zip. On a server, host it and set resource-pack in server.properties.">?</span>
-                  </span>
-                </label>
-                <div class="segmented-control choice-cards" id="facade-source-group">
-                  <button type="button" class="segment active" data-default data-facade-source="off">
-                    <svg class="icon" aria-hidden="true"><use href="#i-off"></use></svg>
-                    <span class="choice-title" data-localize="facade_source_off">Off</span>
-                    <span class="choice-desc" data-localize="facade_source_off_desc">Walls use the colours and materials from the map data.</span>
-                  </button>
-                  <button type="button" class="segment" data-facade-source="preset">
-                    <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
-                    <span class="choice-title" data-localize="facade_source_preset">Preset</span>
-                    <span class="choice-desc" data-localize="facade_source_preset_desc">Bundled photos picked by building type. Java only.</span>
-                  </button>
-                  <button type="button" class="segment" data-facade-source="mapillary">
-                    <svg class="icon" aria-hidden="true"><use href="#i-camera"></use></svg>
-                    <span class="choice-title" data-localize="facade_source_mapillary">Mapillary</span>
-                    <span class="choice-desc" data-localize="facade_source_mapillary_desc">Real street photos of each building, where available.</span>
-                  </button>
-                </div>
-              </div>
-
-              <div class="setting-grid">
-                <!-- Mapillary API token, the credential the facade download needs -->
-                <div class="settings-row setting-tile is-wide">
-                  <label for="mapillary-token" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-key"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="mapillary_token">Mapillary Token</span>
-                        <span class="tooltip-icon" data-tooltip-key="mapillary_token_tip" data-tooltip="Free: register an app at mapillary.com/developer and copy its Client Token (starts with MLY|). It stays on this computer and is only sent to Mapillary.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="mapillary_token_desc">Free from mapillary.com/developer. Stays on this computer.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <input type="password" id="mapillary-token" name="mapillary-token" placeholder="MLY|..." autocomplete="off" spellcheck="false">
-                  </div>
-                </div>
-
-                <div class="settings-row setting-tile is-wide">
-                  <label class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-image"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="facade_mode">Facade Mode</span>
-                        <span class="tooltip-icon" data-tooltip-key="facade_mode_tip" data-tooltip="Photos hangs the photo itself on the wall (Java 1.21.4+). Blocks builds walls in matching colours and works on every world format.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="facade_mode_desc">Hang the photos themselves, or match wall blocks to them.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <div class="segmented-control" id="facade-mode-group">
-                      <button type="button" class="segment" data-facade-mode="blocks" data-localize="facade_mode_blocks">Blocks</button>
-                      <button type="button" class="segment active" data-default data-facade-mode="photos" data-localize="facade_mode_photos">Photos</button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- How large an atlas the panels may fill, which is how sharp they are -->
-                <div class="settings-row setting-tile is-wide">
-                  <label class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="facade_detail">Facade Detail</span>
-                        <span class="tooltip-icon" data-tooltip-key="facade_detail_tip" data-tooltip="Standard works on any graphics card. High is sharper but needs a recent graphics card on every computer that opens the world.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="facade_detail_desc">Higher detail is sharper but needs a modern graphics card.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <div class="segmented-control" id="facade-detail-group">
-                      <button type="button" class="segment active" data-default data-facade-detail="standard" data-localize="facade_detail_standard">Standard</button>
-                      <button type="button" class="segment" data-facade-detail="high" data-localize="facade_detail_high">High</button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Fills the facade cache for the selected area ahead of generating -->
-                <div class="settings-row setting-tile is-wide">
-                  <label for="precompute-facades-button" class="setting-label">
-                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-download"></use></svg>
-                    <span class="setting-text">
-                      <span class="setting-heading">
-                        <span data-localize="facade_precompute">Precompute Area</span>
-                        <span class="tooltip-icon" data-tooltip-key="facade_precompute_tip" data-tooltip="Builds the facades for the selected area ahead of time, so generating there is quick and the 3D preview shows them. Up to 0.1 km²; a city block takes about 20 minutes. Check coverage on mapillary.com first.">?</span>
-                      </span>
-                      <span class="setting-desc" data-localize="facade_precompute_desc">Build the selected area's facades ahead of generating.</span>
-                    </span>
-                  </label>
-                  <div class="settings-control">
-                    <button type="button" id="precompute-facades-button" class="clear-cache-button" data-localize="facade_precompute_button">Precompute</button>
-                  </div>
-                </div>
-
-                <!-- What the precompute is doing, what it did, or why it cannot run -->
-                <div id="facade-precompute-status" class="settings-notice" style="display: none;"></div>
-
               </div>
             </section>
 
@@ -2020,6 +1900,126 @@
                     <div class="segmented-control" id="meld-climate-mode-group"><button type="button" class="segment active" data-default data-v="origin" data-localize="meld_climate_mode_origin">Origin</button><button type="button" class="segment" data-v="per-position" data-localize="meld_climate_mode_per_position">Per position</button></div>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            <!-- Building Facades -->
+            <section class="settings-section" id="settings-section-facades">
+              <header class="settings-section-head">
+                <span class="settings-section-icon" aria-hidden="true"><svg class="icon"><use href="#i-brick-wall"></use></svg></span>
+                <div>
+                  <h3 data-localize="settings_section_facades">Building Facades</h3>
+                  <p data-localize="settings_section_facades_desc">Dress building walls with textures from photographs.</p>
+                </div>
+              </header>
+
+              <!-- One decision, not two toggles: both sources hang panels on the same
+                   walls and write the same resource pack, so they were mutually
+                   exclusive anyway and a single control cannot express an invalid
+                   state. -->
+              <div class="settings-row setting-choice">
+                <label class="setting-label">
+                  <span class="setting-heading">
+                    <span data-localize="facade_source">Facade Source</span>
+                    <span class="tooltip-icon" data-tooltip-key="facade_source_tip" data-tooltip="Preset uses bundled photos picked by building type, Mapillary real street photos where available. Photo walls need Java 1.21.4+ and the world's resources.zip. On a server, host it and set resource-pack in server.properties.">?</span>
+                  </span>
+                </label>
+                <div class="segmented-control choice-cards" id="facade-source-group">
+                  <button type="button" class="segment active" data-default data-facade-source="off">
+                    <svg class="icon" aria-hidden="true"><use href="#i-off"></use></svg>
+                    <span class="choice-title" data-localize="facade_source_off">Off</span>
+                    <span class="choice-desc" data-localize="facade_source_off_desc">Walls use the colours and materials from the map data.</span>
+                  </button>
+                  <button type="button" class="segment" data-facade-source="preset">
+                    <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg>
+                    <span class="choice-title" data-localize="facade_source_preset">Preset</span>
+                    <span class="choice-desc" data-localize="facade_source_preset_desc">Bundled photos picked by building type. Java only.</span>
+                  </button>
+                  <button type="button" class="segment" data-facade-source="mapillary">
+                    <svg class="icon" aria-hidden="true"><use href="#i-camera"></use></svg>
+                    <span class="choice-title" data-localize="facade_source_mapillary">Mapillary</span>
+                    <span class="choice-desc" data-localize="facade_source_mapillary_desc">Real street photos of each building, where available.</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="setting-grid">
+                <!-- Mapillary API token, the credential the facade download needs -->
+                <div class="settings-row setting-tile is-wide">
+                  <label for="mapillary-token" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-key"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="mapillary_token">Mapillary Token</span>
+                        <span class="tooltip-icon" data-tooltip-key="mapillary_token_tip" data-tooltip="Free: register an app at mapillary.com/developer and copy its Client Token (starts with MLY|). It stays on this computer and is only sent to Mapillary.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="mapillary_token_desc">Free from mapillary.com/developer. Stays on this computer.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="password" id="mapillary-token" name="mapillary-token" placeholder="MLY|..." autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
+
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-image"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="facade_mode">Facade Mode</span>
+                        <span class="tooltip-icon" data-tooltip-key="facade_mode_tip" data-tooltip="Photos hangs the photo itself on the wall (Java 1.21.4+). Blocks builds walls in matching colours and works on every world format.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="facade_mode_desc">Hang the photos themselves, or match wall blocks to them.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="facade-mode-group">
+                      <button type="button" class="segment" data-facade-mode="blocks" data-localize="facade_mode_blocks">Blocks</button>
+                      <button type="button" class="segment active" data-default data-facade-mode="photos" data-localize="facade_mode_photos">Photos</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- How large an atlas the panels may fill, which is how sharp they are -->
+                <div class="settings-row setting-tile is-wide">
+                  <label class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="facade_detail">Facade Detail</span>
+                        <span class="tooltip-icon" data-tooltip-key="facade_detail_tip" data-tooltip="Standard works on any graphics card. High is sharper but needs a recent graphics card on every computer that opens the world.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="facade_detail_desc">Higher detail is sharper but needs a modern graphics card.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <div class="segmented-control" id="facade-detail-group">
+                      <button type="button" class="segment active" data-default data-facade-detail="standard" data-localize="facade_detail_standard">Standard</button>
+                      <button type="button" class="segment" data-facade-detail="high" data-localize="facade_detail_high">High</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Fills the facade cache for the selected area ahead of generating -->
+                <div class="settings-row setting-tile is-wide">
+                  <label for="precompute-facades-button" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-download"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="facade_precompute">Precompute Area</span>
+                        <span class="tooltip-icon" data-tooltip-key="facade_precompute_tip" data-tooltip="Builds the facades for the selected area ahead of time, so generating there is quick and the 3D preview shows them. Up to 0.1 km²; a city block takes about 20 minutes. Check coverage on mapillary.com first.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="facade_precompute_desc">Build the selected area's facades ahead of generating.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <button type="button" id="precompute-facades-button" class="clear-cache-button" data-localize="facade_precompute_button">Precompute</button>
+                  </div>
+                </div>
+
+                <!-- What the precompute is doing, what it did, or why it cannot run -->
+                <div id="facade-precompute-status" class="settings-notice" style="display: none;"></div>
+
               </div>
             </section>
 
