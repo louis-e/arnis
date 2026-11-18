@@ -533,6 +533,10 @@ function injectRevertButtons(localization) {
       revert(entry);
     });
 
+    // No space before it: the room a name keeps for its icons has none (settings.css).
+    if (slot.classList.contains('setting-heading')) {
+      for (const node of Array.from(slot.childNodes)) if (node.nodeType === 3 && !node.textContent.trim()) node.remove();
+    }
     // Before a "New!" badge: WebKit kept the heading's sibling-based padding stale when one went.
     slot.insertBefore(button, slot.querySelector(':scope > .new-badge'));
   }
