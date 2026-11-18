@@ -160,7 +160,7 @@ pub fn prescan(
                 continue;
             }
             let tags = element.tags();
-            if !tags.contains_key("building") && !tags.contains_key("building:part") {
+            if !crate::models_3d::may_be_hidden(tags) {
                 continue;
             }
             let Some((cx, cz)) = anchor_xz(element) else {

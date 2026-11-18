@@ -43,6 +43,8 @@ const IGNORED_TAGS: &[&str] = &[
 
 // Tag-key prefixes Arnis never reads (localized names, addresses, regional import refs).
 const IGNORED_PREFIXES: &[&str] = &[
+    // Arnis keeps its own working tags in this namespace.
+    "arnis:",
     "addr:",
     "source",
     "name:",
@@ -1229,14 +1231,21 @@ pub fn parse_osm_data(
         if closed && crate::element_processing::parking_lots::is_surface_lot(&tags) {
             lot_ways.insert(element.id, nodes.clone());
         }
-        // A field's plots and a 3D model's place come from the way as mapped, not the part
-        // the area kept, so every piece of a One World agrees on them.
-        let field_frame = (closed && crate::element_processing::field_texture::is_field(&tags))
-            .then(|| crate::element_processing::field_texture::frame_tag(&nodes))
-            .flatten();
-        let model_footprint = crate::models_3d::may_replace(&tags)
-            .then(|| crate::models_3d::footprint_tag(nodes.iter()))
-            .flatten();
+        // A field's plots come from the way as mapped, not the part the area kept, so every
+        // piece of a One World agrees on them. So do a 3D model's place and size, and whether
+        // a building the area cuts stands in its footprint; a plain run keeps what it has.
+        let field_frame = (is_closed_ring(&nodes)
+            && crate::element_processing::field_texture::is_field(&tags))
+        .then(|| crate::element_processing::field_texture::frame_tag(&nodes))
+        .flatten();
+        let model_footprint = (projection.clip_pad > 0
+            && (crate::models_3d::may_replace(&tags)
+                || (crate::models_3d::may_be_hidden(&tags)
+                    && nodes
+                        .iter()
+                        .any(|n| !clip_bbox.contains(&XZPoint::new(n.x, n.z))))))
+        .then(|| crate::models_3d::footprint_tag(nodes.iter()))
+        .flatten();
         if tags.get("service").map(String::as_str) == Some("parking_aisle")
             && tags.contains_key("highway")
         {
@@ -1371,7 +1380,7 @@ pub fn parse_osm_data(
                     &ways_map,
                 ));
                 let mut tags = tags.clone();
-                if crate::models_3d::may_replace(&tags) {
+                if projection.clip_pad > 0 && crate::models_3d::may_replace(&tags) {
                     let whole = whole_area_rings(element.id, &element.members, &roles, &ways_map);
                     tags.extend(crate::models_3d::footprint_tag(
                         whole.iter().flat_map(|m| m.way.nodes.iter()),
@@ -1418,7 +1427,7 @@ pub fn parse_osm_data(
                         return None;
                     }
                     let mut tags = way.tags.clone();
-                    if field && role == ProcessedMemberRole::Outer && is_closed_way(&way) {
+                    if field && role == ProcessedMemberRole::Outer && is_closed_ring(&way.nodes) {
                         tags.extend(crate::element_processing::field_texture::frame_tag(
                             &way.nodes,
                         ));
@@ -1446,7 +1455,7 @@ pub fn parse_osm_data(
                 &ways_map,
             ));
             let mut tags = tags.clone();
-            if crate::models_3d::may_replace(&tags) {
+            if projection.clip_pad > 0 && crate::models_3d::may_replace(&tags) {
                 let whole = element
                     .members
                     .iter()
@@ -2956,10 +2965,14 @@ fn area_member_role(role: &str) -> Option<ProcessedMemberRole> {
 }
 
 fn is_closed_way(way: &ProcessedWay) -> bool {
-    match (way.nodes.first(), way.nodes.last()) {
+    is_closed_ring(&way.nodes)
+}
+
+/// Closed by its node ids or its coordinates, as the clipper reads a polygon.
+fn is_closed_ring(nodes: &[ProcessedNode]) -> bool {
+    match (nodes.first(), nodes.last()) {
         (Some(first), Some(last)) => {
-            way.nodes.len() >= 3
-                && (first.id == last.id || (first.x == last.x && first.z == last.z))
+            nodes.len() >= 3 && (first.id == last.id || (first.x == last.x && first.z == last.z))
         }
         _ => false,
     }
@@ -4502,7 +4515,8 @@ mod osm_xml_tests {
     }
 
     // Across x = 0: a tilted field 900 m long, a Parthenon 280 m long, two fields mapped as
-    // multipolygons, one ring closed and one in two ways, and an Acropolis mapped as one.
+    // multipolygons, one ring closed and one in two ways, an Acropolis mapped as one, and a
+    // plain building 270 m long.
     const ACROSS_THE_SEAM: &str = r#"<osm version="0.6">
   <node id="1" lat="47.9975" lon="10.9940"/>
   <node id="2" lat="47.9990" lon="11.0060"/>
@@ -4546,6 +4560,12 @@ mod osm_xml_tests {
     <tag k="type" v="multipolygon"/><tag k="historic" v="castle"/>
     <tag k="wikidata" v="Q131013"/>
   </relation>
+  <node id="35" lat="48.0004" lon="10.9965"/>
+  <node id="36" lat="48.0004" lon="11.0002"/>
+  <node id="37" lat="48.0008" lon="11.0002"/>
+  <node id="38" lat="48.0008" lon="10.9965"/>
+  <way id="46"><nd ref="35"/><nd ref="36"/><nd ref="37"/><nd ref="38"/><nd ref="35"/>
+    <tag k="building" v="yes"/></way>
 </osm>"#;
 
     #[test]
@@ -4615,6 +4635,25 @@ mod osm_xml_tests {
         let whole = crate::models_3d::whole_footprint(&a.tags);
         assert!(whole.is_some());
         assert_eq!(whole, crate::models_3d::whole_footprint(&b.tags));
+
+        // A building the east area cuts is weighed against a model's footprint as mapped.
+        let (a, b) = (way(&west, 46), way(&east, 46));
+        assert_ne!(a.nodes, b.nodes);
+        assert_eq!(crate::models_3d::whole_footprint(&a.tags), None, "not cut");
+        let whole = crate::models_3d::whole_footprint(&b.tags);
+        assert_eq!(whole.map(|(_, b)| b[2]), a.nodes.iter().map(|n| n.x).max());
+
+        // A plain run places models from what it holds, as before.
+        let plain = parse_osm_data(
+            parse(ACROSS_THE_SEAM).0,
+            LLBBox::new(47.995, 11.0, 48.005, 11.01).unwrap(),
+            false,
+            &crate::projection::ProjectionSpec::local(1.0),
+        )
+        .0;
+        assert!(plain
+            .iter()
+            .all(|e| crate::models_3d::whole_footprint(e.tags()).is_none()));
     }
 
     #[test]

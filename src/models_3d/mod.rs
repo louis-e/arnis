@@ -15,9 +15,10 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 
-/// Tag the parser leaves on an element a model may stand in for: its anchor and bounds as
-/// mapped, "x z min_x min_z max_x max_z", before the area's edge cuts it. Every area or piece
-/// of a One World then puts the model in one place at one size.
+/// Tag the parser leaves in a One World on an element a model may stand in for, and on a
+/// building the area's edge cuts: its anchor and bounds as mapped, "x z min_x min_z max_x
+/// max_z". Every area or piece then puts the model in one place at one size and hides the
+/// same buildings under it.
 const FOOTPRINT_TAG: &str = "arnis:model_footprint";
 
 /// Whether a 3D model may stand in for an element with these tags.
@@ -26,6 +27,11 @@ pub(crate) fn may_replace(tags: &HashMap<String, String>) -> bool {
         || tags
             .get("wikidata")
             .is_some_and(|q| wikidata::has_model(q.trim()))
+}
+
+/// Whether an element with these tags is hidden when its anchor lies in a model's footprint.
+pub(crate) fn may_be_hidden(tags: &HashMap<String, String>) -> bool {
+    tags.contains_key("building") || tags.contains_key("building:part")
 }
 
 /// `FOOTPRINT_TAG` for an element made of `nodes` as mapped: their mean and bounds.
