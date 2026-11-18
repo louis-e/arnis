@@ -4,6 +4,7 @@ use crate::element_processing::bridges::{is_bridge_way, BridgeSurfaceMap};
 use crate::element_processing::connected_blocks::{
     four_connected_line, is_connectable, place_connected, place_gate,
 };
+use crate::element_processing::fortifications;
 use crate::element_processing::highways::{
     highway_block_range, is_carriageway, parse_width_tag_m, stamp_radius, surface_highway_type,
     tunnel_renders_at_surface,
@@ -110,6 +111,10 @@ pub fn generate_barriers(
     let ProcessedElement::Way(way) = element else {
         return;
     };
+    if fortifications::line_wall(&way.tags) {
+        generate_town_wall(editor, way, clearance, building_footprints);
+        return;
+    }
     // A 3D-mapped railing, say on a bridge tower, floats at min_height and its
     // height is measured from the ground, not from where it starts.
     // Both scale with the world, like the structure it is attached to.
@@ -231,6 +236,95 @@ pub fn generate_barriers(
             }
         }
     }
+}
+
+/// Height of a town wall mapped as a line without one, in metres; a ruin keeps half.
+const TOWN_WALL_M: f64 = 8.0;
+
+/// Thickness of a town wall mapped as a line without a width, in metres.
+const TOWN_WALL_THICK_M: f64 = 3.0;
+
+/// A town wall mapped as a line, as thick as its width and arched over ways and gates.
+fn generate_town_wall(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    clearance: &RoadClearance,
+    building_footprints: &CoordinateBitmap,
+) {
+    let scale = editor.scale();
+    let metres = |key: &str| {
+        way.tags
+            .get(key)
+            .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+            .filter(|m| (0.5..=100.0).contains(m))
+    };
+    let ruin = way.tags.get("ruins").is_some_and(|v| v != "no")
+        || way.tags.get("historic").map(String::as_str) == Some("ruins");
+    let height = metres("height").unwrap_or(if ruin { TOWN_WALL_M / 2.0 } else { TOWN_WALL_M });
+    let thick = parse_width_tag_m(&way.tags).unwrap_or(TOWN_WALL_THICK_M);
+    let reach = (((thick * scale).round() as i32 - 1) / 2).max(0);
+    let trace = trace(way, scale, true);
+    let mut cells: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+    let mut passages: FnvHashSet<(i32, i32)> = FnvHashSet::default();
+    let mut stamp = |set: &mut FnvHashSet<(i32, i32)>, (x, z): (i32, i32)| {
+        for dx in -reach..=reach {
+            for dz in -reach..=reach {
+                set.insert((x + dx, z + dz));
+            }
+        }
+    };
+    for (&(x, z), &dir) in trace.cells.iter().zip(&trace.dirs) {
+        match clearance.place(x, z, dir, false, building_footprints) {
+            Spot::Post(px, pz) => stamp(&mut cells, (px, pz)),
+            _ => {
+                stamp(&mut cells, (x, z));
+                stamp(&mut passages, (x, z));
+            }
+        }
+    }
+    for &(at, _, width) in &trace.marks {
+        for j in span(at, width, trace.cells.len()) {
+            stamp(&mut passages, trace.cells[j]);
+        }
+    }
+    // A gate or tower mapped as a building stands in the wall's place.
+    let mut cells: Vec<(i32, i32)> = cells
+        .into_iter()
+        .filter(|&(x, z)| !building_footprints.contains(x, z))
+        .collect();
+    cells.sort_unstable();
+    for &(x, z) in &cells {
+        editor.register_barrier(x, z);
+    }
+    let tag = |k: &str| way.tags.get(k).map(String::as_str);
+    let colour = ["barrier:colour", "colour", "wall:colour"]
+        .iter()
+        .find_map(|k| tag(k).and_then(crate::colors::color_text_to_rgb_tuple));
+    let material = ["barrier:material", "material", "wall:material"]
+        .iter()
+        .find_map(|k| tag(k));
+    let block = match (material, colour) {
+        (Some("brick" | "bricks"), _) => BRICK,
+        (_, Some(rgb)) => crate::block_palette::wall_block_for_color(
+            rgb,
+            &mut crate::deterministic_rng::element_rng(way.id),
+        ),
+        (Some("sandstone"), _) => SANDSTONE,
+        _ => STONE_BRICKS,
+    };
+    fortifications::generate(
+        editor,
+        &fortifications::Mass {
+            cells: &cells,
+            block,
+            height: ((height * scale).round() as i32).max(1),
+            base: None,
+            raised: false,
+            crenellated: !ruin,
+            passages,
+            scale,
+        },
+    );
 }
 
 /// One cell of a barrier run; `gate` is Some(runs along x) for a fence gate.
@@ -1322,6 +1416,27 @@ mod tests {
         assert_eq!(height(&[("barrier", "fence"), ("height", "1")]), 1);
         assert_eq!(height(&[("barrier", "retaining_wall")]), 1);
         assert_eq!(height(&[("barrier", "kerb")]), 0);
+    }
+
+    #[test]
+    fn town_walls_are_thick_crenellated_and_arched_over_roads() {
+        let elements = [
+            road(1, "residential", 20),
+            ProcessedElement::Way(way(2, &[("barrier", "city_wall")], &[(15, 5), (15, 35)])),
+        ];
+        render(40.0, &elements, |editor, _| {
+            let solid = |x, z, y| editor.block_exists_absolute(x, y, z);
+            for x in 14..=16 {
+                assert!((1..=8).all(|y| solid(x, 10, y)), "wall at x {x}");
+            }
+            assert!(!solid(13, 10, 1) && !solid(17, 10, 1));
+            // Merlons on both faces, one block in two.
+            assert!(solid(14, 10, 9) != solid(14, 11, 9));
+            assert!(solid(16, 10, 9) != solid(16, 11, 9));
+            // The road passes under an arch.
+            assert!((1..=4).all(|y| !solid(15, 20, y)));
+            assert!(solid(15, 20, 8));
+        });
     }
 
     #[test]

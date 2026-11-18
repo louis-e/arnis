@@ -10,6 +10,7 @@ use crate::element_processing::building_facade::{
     FacadeAnchor, FacadeClass, FacadePlan, MIN_FACADE_FOOTPRINT,
 };
 use crate::element_processing::building_inset;
+use crate::element_processing::fortifications;
 use crate::element_processing::historic;
 use crate::element_processing::railways::RailThrough;
 use crate::element_processing::rooftops::{self, RoofDeck, RoofMembrane, RooftopBrief};
@@ -14952,6 +14953,36 @@ pub fn generate_buildings(
             has_single_door = false;
         }
         BuildingCondition::Disused | BuildingCondition::Normal => {}
+    }
+
+    // A town wall or gate is solid masonry, with nothing of a house about it.
+    if let Some(kind) = fortifications::kind(&element.tags) {
+        let gate = kind == fortifications::Kind::Gate;
+        let passages = cached_floor_area
+            .iter()
+            .copied()
+            .filter(|&(x, z)| {
+                building_passages.contains(x, z) || (gate && ctx.road_mask.contains(x, z))
+            })
+            .collect();
+        fortifications::generate(
+            editor,
+            &fortifications::Mass {
+                cells: &cached_floor_area,
+                block: if is_glass_wall(wall_block) {
+                    STONE_BRICKS
+                } else {
+                    wall_block
+                },
+                height: effective_building_height,
+                base: (gate || min_level_offset > 0).then_some(start_y_offset + abs_terrain_offset),
+                raised: min_level_offset > 0,
+                crenellated: fortifications::crenellated(&element.tags, kind),
+                passages,
+                scale: scale_factor,
+            },
+        );
+        return None;
     }
 
     // Decided on the walls as mapped, before a roof's rise comes off them.

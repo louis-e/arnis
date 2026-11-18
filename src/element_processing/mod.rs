@@ -26,6 +26,7 @@ pub mod construction_site;
 pub mod doors;
 pub mod emergency;
 pub mod field_texture;
+pub(crate) mod fortifications;
 pub mod fuel_stations;
 pub mod golf;
 pub mod greenhouses;
