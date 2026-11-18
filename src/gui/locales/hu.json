@@ -208,6 +208,8 @@
   "dh_lod_desc": "A távoli terep már az első belépéskor megjelenik.",
   "enable_luanti_desc": "Hozzáadja a Luantit (Mineclonia) kimeneti formátumként. Kísérleti.",
   "enable_hytale_desc": "Hozzáadja a Hytale-t kimeneti formátumként. Kísérleti.",
+  "enable_luanti_tip": "A Luantit hozzáadja a világformátumokhoz a Java és a Bedrock mellé. A világok a Mineclonia játékhoz készülnek, és a Luanti mentési útvonalra kerülnek az Alkalmazás alatt. One World és kiterjesztett építési magasság nélkül.",
+  "enable_hytale_tip": "A Hytale-t hozzáadja a világformátumokhoz a Java és a Bedrock mellé. A világok a Hytale mentési útvonalra kerülnek az Alkalmazás alatt. One World, kiterjesztett építési magasság és Speciális funkciók nélkül.",
   "map_tool_area": "Terület kijelölése",
   "map_tool_area_desc": "Húzd át a térképen, hogy kiválaszd, mi generálódjon.",
   "map_tool_add_hint": "Rajzolás közben tartsd lenyomva a Shiftet, hogy az alakzatot a kijelöléshez add.",

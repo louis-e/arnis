@@ -208,6 +208,8 @@
   "dh_lod_desc": "Entferntes Terrain erscheint beim ersten Betreten.",
   "enable_luanti_desc": "Fügt Luanti (Mineclonia) als Ausgabeformat hinzu. Experimentell.",
   "enable_hytale_desc": "Fügt Hytale als Ausgabeformat hinzu. Experimentell.",
+  "enable_luanti_tip": "Fügt Luanti neben Java und Bedrock zu den Weltformaten hinzu. Welten sind für das Spiel Mineclonia gemacht und werden im Luanti-Speicherpfad unter Anwendung gespeichert. Ohne One World und erweiterte Bauhöhe.",
+  "enable_hytale_tip": "Fügt Hytale neben Java und Bedrock zu den Weltformaten hinzu. Welten werden im Hytale-Speicherpfad unter Anwendung gespeichert. Ohne One World, erweiterte Bauhöhe und Erweiterte Funktionen.",
   "map_tool_area": "Bereich auswählen",
   "map_tool_area_desc": "Über die Karte ziehen, um zu wählen, was generiert wird.",
   "map_tool_add_hint": "Halte beim Zeichnen Shift gedrückt, um die Form zur Auswahl hinzuzufügen.",

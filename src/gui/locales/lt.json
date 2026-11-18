@@ -208,6 +208,8 @@
   "dh_lod_desc": "Tolimas reljefas matomas nuo pirmo įėjimo.",
   "enable_luanti_desc": "Prideda Luanti (Mineclonia) kaip išvesties formatą. Eksperimentinis.",
   "enable_hytale_desc": "Prideda Hytale kaip išvesties formatą. Eksperimentinis.",
+  "enable_luanti_tip": "Prideda Luanti prie pasaulio formatų šalia Java ir Bedrock. Pasauliai kuriami žaidimui Mineclonia ir išsaugomi Luanti išsaugojimo kelyje, skiltyje Programa. Be One World ir praplėsto statybos aukščio.",
+  "enable_hytale_tip": "Prideda Hytale prie pasaulio formatų šalia Java ir Bedrock. Pasauliai išsaugomi Hytale išsaugojimo kelyje, skiltyje Programa. Be One World, praplėsto statybos aukščio ir Išplėstinių funkcijų.",
   "map_tool_area": "Pasirinkti sritį",
   "map_tool_area_desc": "Vilkite per žemėlapį, kad pasirinktumėte, kas bus generuojama.",
   "map_tool_add_hint": "Piešdami laikykite Shift, kad pridėtumėte figūrą prie pasirinkimo.",

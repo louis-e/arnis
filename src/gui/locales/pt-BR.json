@@ -208,6 +208,8 @@
   "dh_lod_desc": "O terreno distante aparece já na primeira entrada.",
   "enable_luanti_desc": "Adiciona o Luanti (Mineclonia) como formato de saída. Experimental.",
   "enable_hytale_desc": "Adiciona o Hytale como formato de saída. Experimental.",
+  "enable_luanti_tip": "Adiciona o Luanti aos formatos de mundo, ao lado de Java e Bedrock. Os mundos são feitos para o jogo Mineclonia e salvos no Caminho de salvamento do Luanti, em Aplicação. Sem One World nem altura de construção ampliada.",
+  "enable_hytale_tip": "Adiciona o Hytale aos formatos de mundo, ao lado de Java e Bedrock. Os mundos são salvos no Caminho de salvamento do Hytale, em Aplicação. Sem One World, altura de construção ampliada nem Recursos avançados.",
   "map_tool_area": "Selecionar área",
   "map_tool_area_desc": "Arraste sobre o mapa para escolher o que será gerado.",
   "map_tool_add_hint": "Segure Shift enquanto desenha para adicionar a forma à seleção.",

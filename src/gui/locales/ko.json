@@ -208,6 +208,8 @@
   "dh_lod_desc": "처음 접속할 때부터 먼 지형이 보입니다.",
   "enable_luanti_desc": "Luanti(Mineclonia)를 출력 형식으로 추가합니다. 실험적.",
   "enable_hytale_desc": "Hytale을 출력 형식으로 추가합니다. 실험적.",
+  "enable_luanti_tip": "Java와 Bedrock 외에 Luanti를 월드 형식으로 추가합니다. 월드는 Mineclonia 게임용으로 만들어지며 애플리케이션의 Luanti 저장 경로에 저장됩니다. One World와 건축 높이 확장은 사용할 수 없습니다.",
+  "enable_hytale_tip": "Java와 Bedrock 외에 Hytale을 월드 형식으로 추가합니다. 월드는 애플리케이션의 Hytale 저장 경로에 저장됩니다. One World, 건축 높이 확장, 고급 기능은 사용할 수 없습니다.",
   "map_tool_area": "영역 선택",
   "map_tool_area_desc": "지도 위를 드래그해 생성할 영역을 고릅니다.",
   "map_tool_add_hint": "그리는 동안 Shift를 누르고 있으면 선택에 추가됩니다.",

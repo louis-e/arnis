@@ -208,6 +208,8 @@
   "dh_lod_desc": "Avlägsen terräng syns redan första gången du går in.",
   "enable_luanti_desc": "Lägger till Luanti (Mineclonia) som utdataformat. Experimentellt.",
   "enable_hytale_desc": "Lägger till Hytale som utdataformat. Experimentellt.",
+  "enable_luanti_tip": "Lägger till Luanti bland världsformaten bredvid Java och Bedrock. Världarna görs för spelet Mineclonia och sparas i Sökväg för Luanti under Applikation. Ingen One World eller utökad byggnadshöjd.",
+  "enable_hytale_tip": "Lägger till Hytale bland världsformaten bredvid Java och Bedrock. Världarna sparas i Sökväg för Hytale under Applikation. Ingen One World, utökad byggnadshöjd eller Avancerade funktioner.",
   "map_tool_area": "Välj område",
   "map_tool_area_desc": "Dra över kartan för att välja vad som genereras.",
   "map_tool_add_hint": "Håll ned Shift medan du ritar för att lägga till formen i markeringen.",

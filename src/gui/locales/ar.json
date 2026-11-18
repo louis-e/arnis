@@ -208,6 +208,8 @@
   "dh_lod_desc": "تظهر التضاريس البعيدة من أول دخول.",
   "enable_luanti_desc": "يضيف Luanti (Mineclonia) كصيغة إخراج. تجريبي.",
   "enable_hytale_desc": "يضيف Hytale كصيغة إخراج. تجريبي.",
+  "enable_luanti_tip": "يضيف Luanti إلى صيغ العالم بجانب Java وBedrock. تُصنع العوالم للعبة Mineclonia وتُحفظ في مسار حفظ Luanti ضمن التطبيق. بدون One World أو ارتفاع بناء موسّع.",
+  "enable_hytale_tip": "يضيف Hytale إلى صيغ العالم بجانب Java وBedrock. تُحفظ العوالم في مسار حفظ Hytale ضمن التطبيق. بدون One World أو ارتفاع بناء موسّع أو الميزات المتقدمة.",
   "map_tool_area": "تحديد منطقة",
   "map_tool_area_desc": "اسحب على الخريطة لاختيار ما سيُولَّد.",
   "map_tool_add_hint": "اضغط مع الاستمرار على Shift أثناء الرسم لإضافة الشكل إلى التحديد.",

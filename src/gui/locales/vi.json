@@ -208,6 +208,8 @@
   "dh_lod_desc": "Địa hình ở xa hiển thị ngay lần vào đầu tiên.",
   "enable_luanti_desc": "Thêm Luanti (Mineclonia) làm định dạng đầu ra. Thử nghiệm.",
   "enable_hytale_desc": "Thêm Hytale làm định dạng đầu ra. Thử nghiệm.",
+  "enable_luanti_tip": "Thêm Luanti vào các định dạng thế giới bên cạnh Java và Bedrock. Thế giới được tạo cho trò chơi Mineclonia và lưu vào Đường dẫn lưu Luanti trong Ứng dụng. Không có One World hay chiều cao xây dựng mở rộng.",
+  "enable_hytale_tip": "Thêm Hytale vào các định dạng thế giới bên cạnh Java và Bedrock. Thế giới được lưu vào Đường dẫn lưu Hytale trong Ứng dụng. Không có One World, chiều cao xây dựng mở rộng hay Tính năng nâng cao.",
   "map_tool_area": "Chọn khu vực",
   "map_tool_area_desc": "Kéo trên bản đồ để chọn phần sẽ được tạo.",
   "map_tool_add_hint": "Giữ Shift khi vẽ để thêm hình vào vùng chọn.",

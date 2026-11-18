@@ -208,6 +208,8 @@
   "dh_lod_desc": "Odległy teren widać już przy pierwszym wejściu.",
   "enable_luanti_desc": "Dodaje Luanti (Mineclonia) jako format wyjściowy. Eksperymentalne.",
   "enable_hytale_desc": "Dodaje Hytale jako format wyjściowy. Eksperymentalne.",
+  "enable_luanti_tip": "Dodaje Luanti do formatów świata obok Javy i Bedrocka. Światy są tworzone dla gry Mineclonia i zapisywane w Ścieżce zapisu Luanti w sekcji Aplikacja. Bez One World i rozszerzonej wysokości budowania.",
+  "enable_hytale_tip": "Dodaje Hytale do formatów świata obok Javy i Bedrocka. Światy są zapisywane w Ścieżce zapisu Hytale w sekcji Aplikacja. Bez One World, rozszerzonej wysokości budowania i Funkcji zaawansowanych.",
   "map_tool_area": "Zaznacz obszar",
   "map_tool_area_desc": "Przeciągnij po mapie, aby wybrać, co zostanie wygenerowane.",
   "map_tool_add_hint": "Przytrzymaj Shift podczas rysowania, aby dodać kształt do zaznaczenia.",

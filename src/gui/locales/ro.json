@@ -208,6 +208,8 @@
   "dh_lod_desc": "Terenul îndepărtat se randă la prima intrare.",
   "enable_luanti_desc": "Adaugă Luanti (Mineclonia) ca format de ieșire. Experimental.",
   "enable_hytale_desc": "Adaugă Hytale ca format de ieșire. Experimental.",
+  "enable_luanti_tip": "Adaugă Luanti la formatele de lume, alături de Java și Bedrock. Lumile sunt făcute pentru jocul Mineclonia și salvate în Calea de salvare Luanti, la Aplicație. Fără One World și fără înălțime de construcție extinsă.",
+  "enable_hytale_tip": "Adaugă Hytale la formatele de lume, alături de Java și Bedrock. Lumile sunt salvate în Calea de salvare Hytale, la Aplicație. Fără One World, înălțime de construcție extinsă sau Funcții avansate.",
   "map_tool_area": "Selectează zona",
   "map_tool_area_desc": "Trage pe hartă pentru a alege ce va fi generat.",
   "map_tool_add_hint": "Ține apăsat Shift în timp ce desenezi, ca să adaugi forma la selecție.",

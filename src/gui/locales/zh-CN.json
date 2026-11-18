@@ -208,6 +208,8 @@
   "dh_lod_desc": "首次进入时即可看到远处地形。",
   "enable_luanti_desc": "将 Luanti（Mineclonia）添加为输出格式。实验性。",
   "enable_hytale_desc": "将 Hytale 添加为输出格式。实验性。",
+  "enable_luanti_tip": "在 Java 和 Bedrock 之外，将 Luanti 添加为世界格式。世界为 Mineclonia 游戏生成，并保存到“应用”中的 Luanti 存档路径。不支持 One World 和扩展建造高度。",
+  "enable_hytale_tip": "在 Java 和 Bedrock 之外，将 Hytale 添加为世界格式。世界保存到“应用”中的 Hytale 存档路径。不支持 One World、扩展建造高度和高级功能。",
   "map_tool_area": "选择区域",
   "map_tool_area_desc": "在地图上拖动以选择要生成的内容。",
   "map_tool_add_hint": "绘制时按住 Shift 可将该形状添加到选区。",

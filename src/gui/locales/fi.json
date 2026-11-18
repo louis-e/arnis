@@ -208,6 +208,8 @@
   "dh_lod_desc": "Kaukainen maasto näkyy jo ensimmäisellä liittymisellä.",
   "enable_luanti_desc": "Lisää Luantin (Mineclonia) tulostusmuodoksi. Kokeellinen.",
   "enable_hytale_desc": "Lisää Hytalen tulostusmuodoksi. Kokeellinen.",
+  "enable_luanti_tip": "Lisää Luantin maailmamuodoksi Javan ja Bedrockin rinnalle. Maailmat tehdään Mineclonia-peliin ja tallennetaan Luanti-tallennuspolkuun kohdassa Sovellus. Ei One Worldia eikä laajennettua rakennuskorkeutta.",
+  "enable_hytale_tip": "Lisää Hytalen maailmamuodoksi Javan ja Bedrockin rinnalle. Maailmat tallennetaan Hytale-tallennuspolkuun kohdassa Sovellus. Ei One Worldia, laajennettua rakennuskorkeutta eikä Lisäominaisuuksia.",
   "map_tool_area": "Valitse alue",
   "map_tool_area_desc": "Vedä kartan yli valitaksesi, mitä generoidaan.",
   "map_tool_add_hint": "Pidä Shift pohjassa piirtäessäsi, niin muoto lisätään valintaan.",

@@ -208,6 +208,8 @@
   "dh_lod_desc": "Oddaljen teren je viden že ob prvem vstopu.",
   "enable_luanti_desc": "Doda Luanti (Mineclonia) kot izhodno obliko. Poskusno.",
   "enable_hytale_desc": "Doda Hytale kot izhodno obliko. Poskusno.",
+  "enable_luanti_tip": "Doda Luanti med oblike sveta poleg Jave in Bedrocka. Svetovi so narejeni za igro Mineclonia in shranjeni v Pot shranjevanja Luanti pod Aplikacija. Brez One World in razširjene višine gradnje.",
+  "enable_hytale_tip": "Doda Hytale med oblike sveta poleg Jave in Bedrocka. Svetovi se shranijo v Pot shranjevanja Hytale pod Aplikacija. Brez One World, razširjene višine gradnje in Naprednih funkcij.",
   "map_tool_area": "Izberi območje",
   "map_tool_area_desc": "Povlecite čez zemljevid, da izberete, kaj se generira.",
   "map_tool_add_hint": "Med risanjem držite Shift, da obliko dodate izboru.",

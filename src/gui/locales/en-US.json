@@ -208,6 +208,8 @@
   "dh_lod_desc": "Distant terrain renders on first join.",
   "enable_luanti_desc": "Adds Luanti (Mineclonia) as an output format. Experimental.",
   "enable_hytale_desc": "Adds Hytale as an output format. Experimental.",
+  "enable_luanti_tip": "Adds Luanti to the world formats beside Java and Bedrock. Worlds are made for the Mineclonia game and saved to the Luanti Save Path under Application. No One World or extended build height.",
+  "enable_hytale_tip": "Adds Hytale to the world formats beside Java and Bedrock. Worlds are saved to the Hytale Save Path under Application. No One World, extended build height or Advanced features.",
   "map_tool_area": "Select area",
   "map_tool_area_desc": "Drag over the map to choose what gets generated.",
   "map_tool_add_hint": "Hold Shift while drawing to add the shape to the selection.",
