@@ -281,6 +281,8 @@ pub fn run_gui() -> Result<(), String> {
             let app_handle = app.handle();
             let main_window = tauri::Manager::get_webview_window(app_handle, "main")
                 .ok_or_else(|| std::io::Error::other("Failed to get main window"))?;
+            #[cfg(target_os = "linux")]
+            crate::linux_gui::watch_web_process(&main_window);
             progress::set_main_window(main_window);
             Ok(())
         })

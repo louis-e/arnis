@@ -29,6 +29,10 @@ const STARTUP: Duration = Duration::from_secs(15);
 /// What the child exits with when the window failed on EGL with an error, not an abort.
 pub const EGL_FAILED_EXIT: i32 = 86;
 
+/// `STARTUP` as the child counts it, shorter since the launcher's runs from the spawn.
+const WEB_PROCESS_STARTUP: Duration = Duration::from_secs(12);
+const _: () = assert!(WEB_PROCESS_STARTUP.as_secs() < STARTUP.as_secs());
+
 /// What a child dies of when WebKit or Mesa gives up natively. A Rust panic exits with 101
 /// instead, and a stop the user asked for (SIGINT, SIGTERM) is none of these.
 const CRASH_SIGNALS: [i32; 6] = [
@@ -103,6 +107,38 @@ pub fn is_egl_error(message: &str) -> bool {
     lowered.contains("egl_not_initialized")
         || lowered.contains("surfaceless egl")
         || (lowered.contains("libegl") && lowered.contains("failed"))
+}
+
+/// WebKit can also give up on EGL in the page's own process, which leaves a blank window
+/// and this process running (#1481), so a crash there while starting ends this one too.
+#[cfg(target_os = "linux")]
+pub fn watch_web_process(window: &tauri::WebviewWindow) {
+    if current().is_none() {
+        return;
+    }
+    let begun = Instant::now();
+    let watched = window.with_webview(move |webview| {
+        use webkit2gtk::WebViewExt;
+        webview
+            .inner()
+            .connect_web_process_terminated(move |_, reason| {
+                if web_process_failed_start(reason, begun.elapsed()) {
+                    eprintln!("Error: the window's web process crashed while starting.");
+                    std::process::exit(EGL_FAILED_EXIT);
+                }
+            });
+    });
+    if let Err(e) = watched {
+        eprintln!("Warning: could not watch the window's web process ({e}).");
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn web_process_failed_start(
+    reason: webkit2gtk::WebProcessTerminationReason,
+    since_start: Duration,
+) -> bool {
+    reason == webkit2gtk::WebProcessTerminationReason::Crashed && since_start < WEB_PROCESS_STARTUP
 }
 
 /// Runs the GUI in a child process and returns the exit code to leave with, or `None`
@@ -302,6 +338,23 @@ mod tests {
         .unwrap();
         assert_eq!(outcome, Outcome::Exited(128 + libc::SIGABRT));
         assert!(started.get(), "remembered once it outlived the start");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_a_web_process_crash_while_starting_fails_the_renderer() {
+        use webkit2gtk::WebProcessTerminationReason as Reason;
+        let early = Duration::from_secs(3);
+        assert!(web_process_failed_start(Reason::Crashed, early));
+        assert!(!web_process_failed_start(
+            Reason::Crashed,
+            WEB_PROCESS_STARTUP
+        ));
+        assert!(!web_process_failed_start(
+            Reason::ExceededMemoryLimit,
+            early
+        ));
+        assert!(!web_process_failed_start(Reason::TerminatedByApi, early));
     }
 
     #[test]
