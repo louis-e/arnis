@@ -1,69 +1,44 @@
 // Run: node tests/gui/world-size.mjs
-// The size estimate on the selection line against worlds the 3.4 build made (MiB, 1 km² at scale 1 unless said), and how it reads.
+// The size estimate on the selection line: what the backend is asked (its figures are tested in world_utils.rs), and how the answer reads.
 import assert from 'node:assert';
 import fs from 'node:fs';
-import { worldSizeMb, formatMb, formatSizeRange, ringsKm2 } from '../../src/gui/js/world-size.js';
+import { sizeRequest, formatMb, formatSizeRange, rangeText, ringsKm2 } from '../../src/gui/js/world-size.js';
 
-const within = (measured, [low, high], slack, what) =>
-  assert.ok(measured >= low * (1 - slack) && measured <= high * (1 + slack), `${what}: ${measured} MiB is not about ${low.toFixed(1)}-${high.toFixed(1)}`);
-
-// The window's defaults, 30% either way: the landscape is not known before the run.
-for (const [what, mib] of [['farmland', 15.6], ['sea', 15.6], ['suburb', 16.0], ['Alps', 16.3], ['Munich', 16.7], ['Manhattan', 18.8], ['forest', 21.7]]) {
-  within(mib, worldSizeMb({ km2: 1 }), 0.3, what);
+// The window's defaults, and the scale squared.
+const plain = sizeRequest({ km2: 2 });
+assert.deepStrictEqual(plain, {
+  blocksKm2: 2, worldFormat: 'java', interior: false, bakeLighting: false, voxyLod: false, dhLod: false,
+  caves: false, fillground: false, tall: true, groundLevel: -62,
+});
+assert.strictEqual(sizeRequest({ km2: 0.25, scale: 2 }).blocksKm2, 1);
+// Caves fill the ground; Disasters fill it too and raise it to -40, but leave a higher level alone.
+assert.strictEqual(sizeRequest({ km2: 1, caves: true }).fillground, true);
+assert.deepStrictEqual([sizeRequest({ km2: 1, disasters: true }).fillground, sizeRequest({ km2: 1, disasters: true }).groundLevel], [true, -40]);
+assert.strictEqual(sizeRequest({ km2: 1, disasters: true, groundLevel: 63 }).groundLevel, 63);
+// Interiors only where buildings stand.
+for (const [mode, built] of [['geo-terrain', true], ['geo-only', true], ['terrain-only', false], ['blueprint', false]]) {
+  assert.strictEqual(sizeRequest({ km2: 1, interior: true, mode }).interior, built, mode);
 }
-// Larger areas and other scales: blocks grow with the scale squared.
-within(66.5, worldSizeMb({ km2: 4 }), 0.1, 'Munich 4 km²');
-within(146, worldSizeMb({ km2: 9 }), 0.1, 'Munich 9 km²');
-within(1307, worldSizeMb({ km2: 85 }), 0.15, 'Munich 85 km²');
-within(16.4, worldSizeMb({ km2: 0.25, scale: 2 }), 0.1, 'Munich 0.25 km² at scale 2');
-within(18.8, worldSizeMb({ km2: 4, scale: 0.5 }), 0.15, 'Munich 4 km² at scale 0.5');
-// Options a run measured on the same area.
-within(21.4, worldSizeMb({ km2: 1, interior: true }), 0.35, 'Munich interiors');
-within(35.4, worldSizeMb({ km2: 1, interior: true }), 0.35, 'Manhattan interiors');
-within(28.1, worldSizeMb({ km2: 1, light: true }), 0.1, 'Munich baked light');
-within(39.7, worldSizeMb({ km2: 1, voxy: true }), 0.1, 'Munich Voxy');
-within(36.2, worldSizeMb({ km2: 1, dh: true }), 0.1, 'Munich Distant Horizons');
-// Filled ground and caves: flat land at the low end, mountains at the high end.
-within(17.0, worldSizeMb({ km2: 1, fill: true }), 0.1, 'Munich filled');
-within(19.8, worldSizeMb({ km2: 1, caves: true }), 0.1, 'Munich caves');
-within(18.3, worldSizeMb({ km2: 1, fill: true, groundLevel: 0 }), 0.1, 'Munich filled at 0');
-within(33.3, worldSizeMb({ km2: 1, caves: true, groundLevel: 0 }), 0.1, 'Munich caves at 0');
-within(19.3, worldSizeMb({ km2: 1, fill: true, groundLevel: 63 }), 0.1, 'Munich filled at 63');
-within(34.9, worldSizeMb({ km2: 1, caves: true, groundLevel: 63 }), 0.1, 'Munich caves at 63');
-within(32.5, worldSizeMb({ km2: 1, caves: true, groundLevel: 63 }), 0.1, 'suburb caves at 63');
-within(29.2, worldSizeMb({ km2: 1, fill: true }), 0, 'forest filled');
-within(42.5, worldSizeMb({ km2: 1, caves: true }), 0, 'forest caves');
-within(36.6, worldSizeMb({ km2: 1, fill: true }), 0, 'Alps filled');
-within(63.9, worldSizeMb({ km2: 1, caves: true }), 0, 'Alps caves');
-within(24.3, worldSizeMb({ km2: 1, fill: true, tall: false }), 0, 'Alps filled at vanilla height');
-within(41.7, worldSizeMb({ km2: 1, caves: true, tall: false }), 0, 'Alps caves at vanilla height');
-// Bedrock's .mcworld, and the Moon and Mars at their own scale (5 by 5 degrees about the equator).
-within(6.4, worldSizeMb({ km2: 1, format: 'bedrock' }), 0.2, 'Munich Bedrock');
-within(9.3, worldSizeMb({ km2: 1, format: 'bedrock' }), 0.25, 'Manhattan Bedrock');
-within(18.8, worldSizeMb({ km2: 1, format: 'bedrock', caves: true, groundLevel: 63 }), 0.2, 'Munich Bedrock caves at 63');
-within(9.5, worldSizeMb({ km2: 22988, body: 'moon' }), 0.1, 'Moon');
-within(5.9, worldSizeMb({ km2: 87827, body: 'mars' }), 0.1, 'Mars');
-// Off Earth there are no caves, interiors or extended height; the scale slider does not apply.
-assert.deepStrictEqual(worldSizeMb({ km2: 22988, body: 'moon', caves: true, interior: true, scale: 3 }), worldSizeMb({ km2: 22988, body: 'moon' }));
-// Formats nobody measured, and no area, say nothing.
-for (const format of ['luanti_mineclonia', 'hytale']) assert.strictEqual(worldSizeMb({ km2: 1, format }), null);
-assert.strictEqual(worldSizeMb({ km2: 0 }), null);
+// The Moon and Mars at their own block size, without caves, interiors, Disasters or the extended height.
+const moon = sizeRequest({ km2: 22988, body: 'moon', scale: 3, caves: true, interior: true, disasters: true });
+assert.ok(Math.abs(moon.blocksKm2 - 0.5747) < 0.001);
+assert.deepStrictEqual([moon.caves, moon.interior, moon.fillground, moon.tall, moon.groundLevel], [false, false, false, false, -62]);
+assert.ok(Math.abs(sizeRequest({ km2: 87827, body: 'mars' }).blocksKm2 - 0.3513) < 0.001);
+// Bedrock is asked; Luanti, Hytale and no area are not.
+assert.strictEqual(sizeRequest({ km2: 1, format: 'bedrock' }).worldFormat, 'bedrock');
+for (const format of ['luanti_mineclonia', 'hytale']) assert.strictEqual(sizeRequest({ km2: 1, format }), null);
+assert.strictEqual(sizeRequest({ km2: 0 }), null);
 
 // Two significant figures, in the unit Windows shows.
-assert.strictEqual(formatMb(146), '150 MB');
-assert.strictEqual(formatMb(399), '400 MB');
-assert.strictEqual(formatMb(38.2), '38 MB');
-assert.strictEqual(formatMb(7.4), '7 MB');
-assert.strictEqual(formatMb(0.2), '1 MB');
-assert.strictEqual(formatMb(999), '1.0 GB');
-assert.strictEqual(formatMb(1307), '1.3 GB');
-assert.strictEqual(formatMb(23000), '22 GB');
-assert.strictEqual(formatMb(2.5e6), '2.4 TB');
+for (const [mib, text] of [[146, '150 MB'], [399, '400 MB'], [38.2, '38 MB'], [7.4, '7 MB'], [9.7, '10 MB'], [0.2, '1 MB'], [999, '1.0 GB'],
+  [1307, '1.3 GB'], [10230, '10 GB'], [23000, '22 GB'], [2.5e6, '2.4 TB']]) {
+  assert.strictEqual(formatMb(mib), text, String(mib));
+}
 assert.strictEqual(formatSizeRange([17, 17.2]), '17 MB');
 assert.strictEqual(formatSizeRange([18.5, 65]), '19–65 MB');
 assert.strictEqual(formatSizeRange([900, 1400]), '900 MB–1.4 GB');
-assert.strictEqual(formatSizeRange(worldSizeMb({ km2: 9 })), '150 MB');
-assert.strictEqual(formatSizeRange(worldSizeMb({ km2: 25 })), '430 MB');
+// The cells plan joins its ranges with the same helper.
+assert.strictEqual(rangeText([327, 388], (v) => `${v} MB`), '327–388 MB');
 
 // A drawn square of 1 km by 1 km over Munich, and two of them.
 const dLat = 1000 / (6371000 * Math.PI / 180);
@@ -71,6 +46,7 @@ const dLng = dLat / Math.cos(48.137 * Math.PI / 180);
 const square = [[48.137, 11.57], [48.137 + dLat, 11.57], [48.137 + dLat, 11.57 + dLng], [48.137, 11.57 + dLng]];
 assert.ok(Math.abs(ringsKm2([square], 6371000) - 1) < 0.01);
 assert.ok(Math.abs(ringsKm2([square, square.slice().reverse()], 6371000) - 2) < 0.02);
+
 // Every language says it, with the figure in it.
 for (const f of fs.readdirSync(new URL('../../src/gui/locales/', import.meta.url))) {
   const loc = JSON.parse(fs.readFileSync(new URL(`../../src/gui/locales/${f}`, import.meta.url), 'utf8'));

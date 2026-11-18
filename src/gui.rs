@@ -255,6 +255,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_precompute_facades,
             gui_cancel_precompute,
             gui_one_world_info,
+            gui_world_size_estimate,
             gui_list_one_worlds,
             gui_world_thumbnail,
             gui_set_place_name,
@@ -1721,6 +1722,45 @@ struct OneWorldInfo {
     knee_m: Option<f64>,
     /// Changes whenever an area is recorded.
     revision: u32,
+}
+
+/// The settings the size of a world depends on, as a run would take them.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldSizeRequest {
+    /// Ground km² times the scale squared.
+    blocks_km2: f64,
+    world_format: String,
+    interior: bool,
+    bake_lighting: bool,
+    voxy_lod: bool,
+    dh_lod: bool,
+    caves: bool,
+    fillground: bool,
+    tall: bool,
+    ground_level: i32,
+}
+
+/// The estimate under the map: MiB on disk on flat land and in the Alps, from the table the
+/// disk check uses; nothing for Luanti and Hytale.
+#[tauri::command]
+fn gui_world_size_estimate(request: WorldSizeRequest) -> Option<(f64, f64)> {
+    let format = match request.world_format.as_str() {
+        "java" => WorldFormat::JavaAnvil,
+        "bedrock" => WorldFormat::BedrockMcWorld,
+        _ => return None,
+    };
+    let options = crate::world_utils::WorldSizeOptions {
+        interior: request.interior,
+        bake_lighting: request.bake_lighting,
+        voxy_lod: request.voxy_lod,
+        dh_lod: request.dh_lod,
+        caves: request.caves,
+        fillground: request.fillground,
+        tall: request.tall,
+        ground_level: request.ground_level,
+    };
+    crate::world_utils::typical_world_mib(request.blocks_km2, format, options)
 }
 
 fn one_world_request(one_world: bool, world_format: &str, body: &str) -> Result<(), String> {
@@ -3253,7 +3293,7 @@ fn gui_start_generation(
             crate::args::apply_body_defaults(&mut args);
             crate::args::apply_feature_needs(&mut args);
             crate::y_bounds::apply(&mut args);
-            if let Err(e) = crate::args::validate_ground_level(&args) {
+            if let Err(e) = crate::args::validate_ground_level(&args, "Ground Level") {
                 eprintln!("{e}");
                 emit_gui_error(&e);
                 return Err(e);

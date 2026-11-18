@@ -20,7 +20,7 @@ import {
   setPlanMask, hasPlanMask, refreshStretch,
   initDataPanel, initProjects, resumeJob, placeForRun, groundLevelFor,
 } from './meld-features.js';
-import { worldSizeMb, formatSizeRange, ringsKm2 } from './world-size.js';
+import { sizeRequest, formatSizeRange, ringsKm2 } from './world-size.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -72,33 +72,62 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
 // The lines about a selection that is built as it is drawn, which the size estimate follows.
 const SIZE_ESTIMATE_KEYS = new Set(['selection_confirmed', 'custom_selection_confirmed', 'shapes_one_world', 'area_extensive', 'area_too_large', 'area_extreme']);
 
-// "Selection confirmed! · about 400 MB", the estimate quieter than the line.
+// The last estimate the backend gave, for the request it answered, and the request still out.
+let sizeAnswer = { key: '', mib: null };
+let sizeAsked = '';
+
+// "Selection confirmed! · about 400 MB", the estimate quieter than the line. Asked of the backend once per request.
 function showSizeEstimate(element) {
   element.querySelector('.bbox-size-estimate')?.remove();
-  const mb = SIZE_ESTIMATE_KEYS.has(currentBboxSelectionKey) ? sizeEstimateMb() : null;
-  if (!mb) return;
+  const request = SIZE_ESTIMATE_KEYS.has(currentBboxSelectionKey) ? sizeEstimateRequest() : null;
+  if (!request) return;
+  const key = JSON.stringify(request);
+  if (sizeAnswer.key !== key && sizeAsked !== key) {
+    sizeAsked = key;
+    const answer = (mib) => {
+      if (sizeAsked !== key) return;
+      sizeAnswer = { key, mib: Array.isArray(mib) ? mib : null };
+      showSizeEstimate(document.getElementById('bbox-selection-info'));
+    };
+    Promise.resolve(invoke('gui_world_size_estimate', { request })).then(answer, () => answer(null));
+  }
+  // Until the answer comes the last figure stands, so the line does not flicker while the scale is dragged.
+  if (!sizeAnswer.mib) return;
   const note = document.createElement('span');
   note.className = 'bbox-size-estimate';
-  note.textContent = ` · ${oneWorldText('size_estimate', 'about {size}', { size: formatSizeRange(mb) })}`;
+  note.textContent = ` · ${oneWorldText('size_estimate', 'about {size}', { size: formatSizeRange(sizeAnswer.mib) })}`;
   note.title = oneWorldText('size_estimate_tip', 'Estimated size of the world on disk. With Fill Ground or Caves it depends on the terrain: the larger figure is for mountains.');
   element.appendChild(note);
 }
 
-// What the next run's world takes on disk; not in Live, which grows as it is played, for an existing One World, or for cells, whose plan says it.
-function sizeEstimateMb() {
+// What the next run's world is made of; not in Live, which grows as it is played, for an existing One World, or for cells, whose plan says it.
+function sizeEstimateRequest() {
   if (!selectedBBox || selectedBBox === "0.000000 0.000000 0.000000 0.000000") return null;
   const oneWorld = isOneWorldEnabled();
   if (isLiveMode() || planPending() || planPieces() || (oneWorld && oneWorldInfo?.exists)) return null;
-  const s = readGenerationSettings(oneWorld);
+  // A greyed switch is not sent as on.
+  const on = (id) => { const el = document.getElementById(id); return !!(el && el.checked && !el.disabled); };
   const [lat1, lng1, lat2, lng2] = selectedBBox.split(/[\s,]+/).map(Number);
   // Drawn shapes are clipped to, except by a One World, which builds the rectangle around them.
   const km2 = selectedShapes && !oneWorld
     ? ringsKm2(selectedShapes, BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth)
     : calculateBBoxSize(lat1, lng1, lat2, lng2) / 1e6;
-  return worldSizeMb({
-    km2, scale: s.worldScale, body: selectedCelestialBody, format: getEffectiveWorldFormat(),
-    groundLevel: s.groundLevel, tall: s.disableHeightLimit, fill: s.fillgroundEnabled, caves: s.cavesEnabled,
-    interior: s.interiorEnabled, light: s.bakeLightingEnabled, voxy: s.voxyLodEnabled, dh: s.dhLodEnabled,
+  return sizeRequest({
+    km2,
+    scale: parseFloat(document.getElementById('scale-value-slider').value) || 1,
+    body: selectedCelestialBody,
+    format: getEffectiveWorldFormat(),
+    mode: document.getElementById('generation-mode-select').value,
+    groundLevel: groundLevelChoice(oneWorld).level,
+    // A new One World is always built with the extended height.
+    tall: oneWorld || on('disable-height-limit-toggle'),
+    fill: on('fillground-toggle'),
+    caves: on('caves-toggle'),
+    interior: on('interior-toggle'),
+    light: on('bake-lighting-toggle'),
+    voxy: on('voxy-lod-toggle'),
+    dh: on('dh-lod-toggle'),
+    disasters: gameplayToggle('disasters-toggle'),
   });
 }
 
@@ -3189,6 +3218,8 @@ async function noteOutline(geojson) {
     outlineFailed = true;
     postToMap({ type: 'planMask', geojson: null });
     const info = document.getElementById('bbox-selection-info');
+    // Not a line of its own key, so no size estimate is put after it.
+    currentBboxSelectionKey = '';
     info.textContent = error;
     info.style.color = "#fa7878";
     return;
@@ -4199,7 +4230,7 @@ async function refreshOneWorldState() {
     clearOneWorldOverlays();
     if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
     if (!isWorldNameEditing()) refreshWorldNameEditUI();
-    refreshBboxSelectionInfo();
+    showSizeEstimate(document.getElementById('bbox-selection-info'));
     return;
   }
   if (!savePath) {
@@ -4236,8 +4267,8 @@ async function refreshOneWorldState() {
   refreshWorldRulesRows();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   renderOneWorldStatus();
-  // An existing world takes no size estimate; a new one does.
-  refreshBboxSelectionInfo();
+  // An existing world takes no size estimate, a new one does; the rest of the line stays as it is.
+  showSizeEstimate(document.getElementById('bbox-selection-info'));
 
   if (!info.exists || info.foreign) {
     clearOneWorldOverlays();

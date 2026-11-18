@@ -407,7 +407,7 @@ pub fn write_world_skeleton(
 }
 
 /// What grows a world on disk beyond its block area.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct WorldSizeOptions {
     pub interior: bool,
     pub bake_lighting: bool,
@@ -417,6 +417,23 @@ pub struct WorldSizeOptions {
     pub fillground: bool,
     /// The extended build height, where filled ground and caves reach 2000 blocks down.
     pub tall: bool,
+    /// Filled ground and caves on flat land grow with the rock under it.
+    pub ground_level: i32,
+}
+
+impl Default for WorldSizeOptions {
+    fn default() -> Self {
+        Self {
+            interior: false,
+            bake_lighting: false,
+            voxy_lod: false,
+            dh_lod: false,
+            caves: false,
+            fillground: false,
+            tall: false,
+            ground_level: crate::args::DEFAULT_GROUND_LEVEL,
+        }
+    }
 }
 
 impl WorldSizeOptions {
@@ -429,6 +446,7 @@ impl WorldSizeOptions {
             caves: args.caves,
             fillground: args.fillground,
             tall: args.disable_height_limit,
+            ground_level: args.ground_level,
         }
     }
 }
@@ -436,37 +454,85 @@ impl WorldSizeOptions {
 /// Free space a run leaves beside the world it writes, and the whole check for a small one.
 pub const DISK_HEADROOM_BYTES: u64 = 3 * 1024 * 1024 * 1024;
 
+// MiB per km² of blocks of a finished Java world, from 1 km² runs of the 3.4 build with the
+// window's defaults (the test below lists them). A chunk nearly always fits one 4 KiB region
+// sector, so the landscape matters little until the ground is filled.
+const BASE_MIB: f64 = 17.0;
+const INTERIOR_MIB: f64 = 10.0;
+const LIGHT_MIB: f64 = 11.0;
+const VOXY_MIB: f64 = 12.0;
+const DH_MIB: f64 = 8.0;
+/// Filled ground and caves on flat land, and per block of rock under the default level's.
+const FILL_FLAT: (f64, f64) = (0.1, 0.03);
+const CAVES_FLAT: (f64, f64) = (1.5, 0.22);
+/// The same in the Alps, at vanilla height and with the extended build height.
+const FILL_ALPS: (f64, f64) = (8.0, 20.0);
+const CAVES_ALPS: (f64, f64) = (26.0, 48.0);
+/// A finished Bedrock .mcworld against the Java world.
+const BEDROCK_SHARE: f64 = 0.45;
+/// Most the measured worlds came above the table: Bedrock's forest 1.39.
+const LANDSCAPE_SPREAD: f64 = 1.4;
+
+/// Rock between `level` and the bedrock plane 64 under it, on a section line, never below -64.
+fn rock_under(level: i32) -> f64 {
+    let floor = (level - 64).div_euclid(16) * 16;
+    f64::from(level - floor.max(crate::world_editor::DEFAULT_MIN_Y))
+}
+
+/// MiB per km² of blocks of a finished Java world, on flat land and in the Alps.
+fn java_mib_per_km2(o: WorldSizeOptions) -> (f64, f64) {
+    let light = o.bake_lighting || o.voxy_lod || o.dh_lod;
+    let base: f64 = [
+        (true, BASE_MIB),
+        (o.interior, INTERIOR_MIB),
+        (light, LIGHT_MIB),
+        (o.voxy_lod, VOXY_MIB),
+        (o.dh_lod, DH_MIB),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, mib)| mib)
+    .sum();
+    let rock = rock_under(o.ground_level) - rock_under(crate::args::DEFAULT_GROUND_LEVEL);
+    let alps = |(vanilla, tall): (f64, f64)| if o.tall { tall } else { vanilla };
+    let (flat, mountains) = if o.caves {
+        (CAVES_FLAT.0 + CAVES_FLAT.1 * rock, alps(CAVES_ALPS))
+    } else if o.fillground {
+        (FILL_FLAT.0 + FILL_FLAT.1 * rock, alps(FILL_ALPS))
+    } else {
+        (0.0, 0.0)
+    };
+    (base + flat, base + flat.max(mountains))
+}
+
+/// What a finished world of `blocks_km2` takes on disk in MiB, on flat land and in the Alps.
+/// None for Luanti and Hytale, which were not measured.
+#[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
+pub fn typical_world_mib(
+    blocks_km2: f64,
+    format: crate::world_editor::WorldFormat,
+    o: WorldSizeOptions,
+) -> Option<(f64, f64)> {
+    use crate::world_editor::WorldFormat::{BedrockMcWorld, JavaAnvil};
+    let share = match format {
+        JavaAnvil => 1.0,
+        BedrockMcWorld => BEDROCK_SHARE,
+        _ => return None,
+    };
+    let (flat, mountains) = java_mib_per_km2(o);
+    let km2 = blocks_km2.max(0.0) * share;
+    Some((flat * km2, mountains * km2))
+}
+
 /// Most disk a world of `blocks_km2` (ground times scale², in km² of blocks) takes while it is
-/// written. Measured on 9 km² boxes in Oct 2026: a Java chunk nearly always fits one 4 KiB
-/// region sector, so city, farmland, forest, sea and the Alps all took 15.4-16.7 MiB per km²
-/// whatever stood on them. The options add their worst measured cost, rounded up.
+/// written: the mountain end of the table above, with its landscape spread.
 pub fn estimated_world_bytes(
     blocks_km2: f64,
     format: crate::world_editor::WorldFormat,
     o: WorldSizeOptions,
 ) -> u64 {
     const MIB: f64 = 1024.0 * 1024.0;
-    let mut per_km2 = 17.0;
-    if o.interior {
-        per_km2 += 10.0; // Manhattan +9.4
-    }
-    if o.bake_lighting {
-        per_km2 += 10.0; // Munich +9.0
-    }
-    if o.voxy_lod {
-        per_km2 += 20.0; // Munich +19.0
-    }
-    if o.dh_lod {
-        per_km2 += 19.0; // Munich +17.9
-    }
-    // Caves bring the filled ground with them.
-    per_km2 += match (o.caves, o.fillground, o.tall) {
-        (true, _, true) => 35.0,     // Zermatt +34.3
-        (true, _, false) => 12.0,    // Zermatt +11.4
-        (false, true, true) => 15.0, // Zermatt +14.0
-        (false, true, false) => 2.0, // Zermatt +0.8
-        (false, false, _) => 0.0,
-    };
+    let mut per_km2 = java_mib_per_km2(o).1 * LANDSCAPE_SPREAD;
     // Bedrock holds its staging folder and the .mcworld at once (0.67-0.77x Java at the
     // peak); Luanti's map.sqlite came to 0.60-0.75x.
     if format != crate::world_editor::WorldFormat::JavaAnvil {
@@ -1674,6 +1740,7 @@ fn move_player(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world_editor::WorldFormat;
 
     #[test]
     fn a_new_world_name_must_be_free_and_land_as_typed() {
@@ -1768,97 +1835,130 @@ mod tests {
         );
     }
 
-    /// Disk at the peak of real runs, Oct 2026: 9 km² boxes at scale 1 unless the area says.
-    #[test]
-    fn the_disk_estimate_covers_every_measured_world() {
-        use crate::world_editor::WorldFormat::{BedrockMcWorld, JavaAnvil, LuantiWorld};
+    /// Finished worlds of the 3.4 build with the window's defaults, in MiB: 1 km² at scale 1
+    /// unless the name says, the Alps around Zermatt, Bedrock as its .mcworld.
+    fn measured_worlds() -> Vec<(&'static str, f64, WorldFormat, WorldSizeOptions, f64)> {
+        use WorldFormat::{BedrockMcWorld, JavaAnvil};
         let o = WorldSizeOptions::default();
-        let caves = WorldSizeOptions {
-            caves: true,
-            fillground: true,
-            ..o
+        let with = |f: fn(&mut WorldSizeOptions)| {
+            let mut w = o;
+            f(&mut w);
+            w
         };
-        let fill = WorldSizeOptions {
-            fillground: true,
-            ..o
-        };
-        let tall = |w: WorldSizeOptions| WorldSizeOptions { tall: true, ..w };
-        let cases = [
-            ("Munich", 9.0, JavaAnvil, o, 141.0),
-            ("Munich 85 km²", 85.0, JavaAnvil, o, 1307.0),
-            ("Munich 150 km²", 150.0, JavaAnvil, o, 2302.0),
-            ("Munich scale 0.5", 2.25, JavaAnvil, o, 38.2),
-            ("Munich scale 2", 36.0, JavaAnvil, o, 563.7),
-            ("Manhattan", 9.0, JavaAnvil, o, 150.1),
-            ("farmland", 9.0, JavaAnvil, o, 138.5),
-            ("Zermatt tall", 9.0, JavaAnvil, tall(o), 138.5),
+        let tall = with(|w| w.tall = true);
+        let interior = with(|w| w.interior = true);
+        let fill = with(|w| w.fillground = true);
+        let caves = with(|w| (w.caves, w.fillground) = (true, true));
+        let at = |w: WorldSizeOptions, ground_level| WorldSizeOptions { ground_level, ..w };
+        let up = |w: WorldSizeOptions| WorldSizeOptions { tall: true, ..w };
+        vec![
+            ("farmland", 1.002, JavaAnvil, o, 15.67),
+            ("sea", 0.998, JavaAnvil, o, 15.58),
+            ("suburb", 1.004, JavaAnvil, o, 16.06),
+            ("Munich", 1.003, JavaAnvil, o, 16.74),
+            ("Munich 4 km²", 4.01, JavaAnvil, o, 66.53),
+            ("Munich scale 2", 0.995, JavaAnvil, o, 16.41),
+            ("Munich scale 0.5", 1.003, JavaAnvil, o, 18.75),
+            ("Manhattan", 1.003, JavaAnvil, o, 18.81),
+            ("forest", 1.0, JavaAnvil, o, 21.7),
+            ("Alps", 0.998, JavaAnvil, tall, 16.25),
+            ("Alps vanilla", 0.998, JavaAnvil, o, 15.85),
+            ("Moon", 0.59, JavaAnvil, o, 9.48),
+            ("Mars", 0.37, JavaAnvil, o, 5.88),
+            ("Munich interior", 1.003, JavaAnvil, interior, 21.43),
+            ("Manhattan interior", 1.003, JavaAnvil, interior, 35.4),
             (
-                "Munich interior",
-                9.0,
+                "Munich light",
+                1.003,
                 JavaAnvil,
-                WorldSizeOptions {
-                    interior: true,
-                    ..o
-                },
-                168.7,
-            ),
-            (
-                "Manhattan interior",
-                9.0,
-                JavaAnvil,
-                WorldSizeOptions {
-                    interior: true,
-                    ..o
-                },
-                235.1,
-            ),
-            ("Munich caves", 9.0, JavaAnvil, caves, 164.5),
-            ("Zermatt caves", 9.0, JavaAnvil, caves, 241.1),
-            ("Zermatt tall caves", 9.0, JavaAnvil, tall(caves), 447.3),
-            ("Zermatt fillground", 9.0, JavaAnvil, fill, 145.5),
-            ("Zermatt tall fillground", 9.0, JavaAnvil, tall(fill), 264.4),
-            (
-                "Munich bake lighting",
-                9.0,
-                JavaAnvil,
-                WorldSizeOptions {
-                    bake_lighting: true,
-                    ..o
-                },
-                221.9,
+                with(|w| w.bake_lighting = true),
+                28.07,
             ),
             (
                 "Munich Voxy",
-                9.0,
+                1.003,
                 JavaAnvil,
-                WorldSizeOptions {
-                    voxy_lod: true,
-                    ..o
-                },
-                312.7,
+                with(|w| w.voxy_lod = true),
+                39.66,
             ),
             (
-                "Munich Distant Horizons",
-                9.0,
+                "Munich DH",
+                1.003,
                 JavaAnvil,
-                WorldSizeOptions { dh_lod: true, ..o },
-                303.6,
+                with(|w| w.dh_lod = true),
+                36.22,
             ),
-            ("Munich Bedrock", 9.0, BedrockMcWorld, o, 94.7),
-            ("Manhattan Bedrock", 9.0, BedrockMcWorld, o, 116.0),
-            ("Munich Luanti", 9.0, LuantiWorld, o, 84.5),
-            ("Manhattan Luanti", 9.0, LuantiWorld, o, 112.5),
+            ("Munich at 63", 1.003, JavaAnvil, at(o, 63), 16.74),
+            ("Munich filled", 1.003, JavaAnvil, fill, 16.96),
+            ("Munich filled at 0", 1.003, JavaAnvil, at(fill, 0), 18.32),
+            ("Munich filled at 63", 1.003, JavaAnvil, at(fill, 63), 19.25),
+            ("Munich caves", 1.003, JavaAnvil, caves, 19.79),
+            ("Munich caves at 0", 1.003, JavaAnvil, at(caves, 0), 33.25),
+            ("Munich caves at 63", 1.003, JavaAnvil, at(caves, 63), 34.88),
+            ("suburb caves", 1.004, JavaAnvil, caves, 16.07),
+            ("suburb caves at 63", 1.004, JavaAnvil, at(caves, 63), 32.53),
+            ("forest filled", 1.0, JavaAnvil, fill, 29.16),
+            ("forest caves", 1.0, JavaAnvil, caves, 42.51),
+            ("Alps filled", 0.998, JavaAnvil, up(fill), 36.6),
+            ("Alps caves", 0.998, JavaAnvil, up(caves), 63.87),
+            ("Alps vanilla filled", 0.998, JavaAnvil, fill, 24.27),
+            ("Alps vanilla caves", 0.998, JavaAnvil, caves, 41.66),
+            ("Munich Bedrock", 1.003, BedrockMcWorld, o, 6.45),
+            ("Manhattan Bedrock", 1.003, BedrockMcWorld, o, 9.26),
+            ("forest Bedrock", 1.0, BedrockMcWorld, o, 10.64),
+            (
+                "Munich Bedrock caves at 63",
+                1.003,
+                BedrockMcWorld,
+                at(caves, 63),
+                17.9,
+            ),
+        ]
+    }
+
+    #[test]
+    fn the_size_table_follows_every_measured_world() {
+        for (name, km2, format, opts, measured) in measured_worlds() {
+            let (flat, mountains) = typical_world_mib(km2, format, opts).unwrap();
+            assert!(
+                measured >= 0.75 * flat && measured <= LANDSCAPE_SPREAD * mountains,
+                "{name}: {measured} MiB is not about {flat:.1}-{mountains:.1}"
+            );
+        }
+        assert_eq!(
+            typical_world_mib(1.0, WorldFormat::LuantiWorld, WorldSizeOptions::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn the_disk_estimate_covers_every_measured_world() {
+        use crate::world_editor::WorldFormat::{BedrockMcWorld, LuantiWorld};
+        // Bedrock and Luanti at the peak of a 9 km² run, with the staging folder (Oct 2026).
+        let o = WorldSizeOptions::default();
+        let peaks = [
+            ("Munich Bedrock peak", 9.0, BedrockMcWorld, o, 94.7),
+            ("Manhattan Bedrock peak", 9.0, BedrockMcWorld, o, 116.0),
+            ("Munich Luanti peak", 9.0, LuantiWorld, o, 84.5),
+            ("Manhattan Luanti peak", 9.0, LuantiWorld, o, 112.5),
         ];
-        for (name, km2, format, opts, measured_mib) in cases {
+        for (name, km2, format, opts, measured) in measured_worlds().into_iter().chain(peaks) {
             let est = estimated_world_bytes(km2, format, opts) as f64 / (1024.0 * 1024.0);
             assert!(
-                est >= measured_mib,
-                "{name}: {est:.0} MiB is under the {measured_mib} measured"
+                est >= measured,
+                "{name}: {est:.0} MiB is under the {measured} measured"
             );
-            assert!(
-                est <= 2.0 * measured_mib,
-                "{name}: {est:.0} MiB is over twice the {measured_mib} measured"
-            );
+            // Filled ground on flat land is far under the mountains the check has to allow for,
+            // and a finished .mcworld under the folder it is staged in.
+            let flat_fill = (opts.fillground || opts.caves) && !name.starts_with("Alps");
+            let mcworld = format == BedrockMcWorld && !name.ends_with("peak");
+            if !flat_fill && !mcworld {
+                let over = est - 8.0;
+                assert!(
+                    over <= 2.5 * measured,
+                    "{name}: {est:.0} MiB is far over {measured}"
+                );
+            }
         }
     }
 

@@ -2,6 +2,7 @@
 // control marked meld-only is hidden and generation gets no flags, so it runs as stock.
 
 import { interfaceLocale, languageTag } from './language.js';
+import { rangeText } from './world-size.js';
 
 const el = (id) => document.getElementById(id);
 const value = (id) => (el(id) ? el(id).value.trim() : '');
@@ -846,13 +847,7 @@ export function selectWithRing(bounds, oneWorld, skipBuilt = false) {
 }
 
 const gb = (mbs) => (mbs >= 1048576 ? `${(mbs / 1048576).toFixed(1)} TB` : mbs >= 1024 ? `${(mbs / 1024).toFixed(1)} GB` : `${Math.round(mbs)} MB`);
-// "327–388 MB": a unit both ends share is said once.
-const range = ([lo, hi], unit) => {
-  const [a, b] = [unit(lo), unit(hi)];
-  if (a === b) return a;
-  const u = a.match(/^[\d.,]+( \S+)$/);
-  return u && b.endsWith(u[1]) ? `${a.slice(0, -u[1].length)}–${b}` : `${a}–${b}`;
-};
+
 // Rounded so a time never claims more than it knows: 5 s
 // steps, then minutes, then 10 minutes.
 const minutes = (m) => {
@@ -878,7 +873,7 @@ export function planHead(e, more) {
     ['disk', 'plan_disk_tip', 'Disk space', `≈ ${gb(mid(e.disk_mb))}`],
   ]) head.append(Object.assign(div(`plan-stat plan-stat-${kind}`, text), { title: t(key, tip) }));
   const tip = Object.assign(div('plan-tip', ''), { id: 'plan-tip', role: 'tooltip' });
-  tip.append(...[`${range(e.time_min, longTime(e.time_min[1] >= 600))} · ${range(e.disk_mb, gb)}`, ...more].map((x) => div('', x)));
+  tip.append(...[`${rangeText(e.time_min, longTime(e.time_min[1] >= 600))} · ${rangeText(e.disk_mb, gb)}`, ...more].map((x) => div('', x)));
   // The one "?": hover or focus shows the details; a click holds them open, with the legend card (showPlan).
   const help = Object.assign(document.createElement('button'), { type: 'button', className: 'tooltip-icon plan-help', id: 'legend-help', textContent: '?', title: t('plan_more', 'Details') });
   help.setAttribute('aria-describedby', 'plan-tip');
@@ -895,7 +890,7 @@ export function planHead(e, more) {
   const fits = e.free_disk_mb == null ? null : e.disk_mb[1] <= e.free_disk_mb;
   const disk = div(`plan-disk${fits === false ? ' is-low' : ''}`, fits == null ? '' : fits
     ? t('plan_disk_fits', 'Fits: {free} free', { free: gb(e.free_disk_mb) })
-    : t('plan_disk_short', 'Needs {need}, {free} free on this disk', { need: range(e.disk_mb, gb), free: gb(e.free_disk_mb) }));
+    : t('plan_disk_short', 'Needs {need}, {free} free on this disk', { need: rangeText(e.disk_mb, gb), free: gb(e.free_disk_mb) }));
   disk.hidden = fits == null;
   return [head, disk];
 }
@@ -1081,7 +1076,7 @@ async function updatePlan() {
       ...(ring ? [t('plan_ring', 'ring {n}', { n: ring })] : []),
       tn('plan_workers', '{n} workers', '{n} worker', e.workers),
     ].join(' · '),
-    `${t('plan_ram_tip', 'Memory per worker')}: ${range(e.ram_mb, gb)}`,
+    `${t('plan_ram_tip', 'Memory per worker')}: ${rangeText(e.ram_mb, gb)}`,
   ]), units.some((u) => u.ring), single);
   if (single && !pieces.size) {
     postToMap({ type: 'pieceOutlines', pieces: [] });
