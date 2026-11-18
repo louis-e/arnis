@@ -10227,6 +10227,19 @@ fn tagged_roof_block(
     colour.map(|rgb| roof_family_for_colour(rgb, rng))
 }
 
+/// A dome or onion mapped in gold is gilded, as the Dome of the Rock and the Kremlin's are.
+fn gilded_dome(tags: &HashMap<String, String>, roof_type: RoofType) -> bool {
+    let gold = crate::colors::oklab_components(&(246, 208, 62));
+    matches!(roof_type, RoofType::Dome | RoofType::Onion)
+        && tags
+            .get("roof:colour")
+            .and_then(|c| color_text_to_rgb_tuple(c))
+            .is_some_and(|rgb| {
+                let (l, a, b) = crate::colors::oklab_components(&rgb);
+                (l - gold.0).hypot((a - gold.1).hypot(b - gold.2)) < 0.1
+            })
+}
+
 /// Whether a `roof:material` value is sheet metal, whose colour is paint or
 /// patina rather than a material of its own.
 fn is_sheet_metal(material: &str) -> bool {
@@ -20608,12 +20621,16 @@ fn generate_roof(
 
     // OSM roof:material / roof:colour override the preset.
     let mut roof_rng = element_rng(style_seed ^ 0xF00F_C010_BA5E_F00D);
-    let osm_roof_block = tagged_roof_block(
-        &element.tags,
-        roof_type != RoofType::Flat,
-        roof_block_override,
-        &mut roof_rng,
-    );
+    let osm_roof_block = if gilded_dome(&element.tags, roof_type) {
+        Some(GOLD_BLOCK)
+    } else {
+        tagged_roof_block(
+            &element.tags,
+            roof_type != RoofType::Flat,
+            roof_block_override,
+            &mut roof_rng,
+        )
+    };
 
     if let Some(block) = osm_roof_block {
         // A glass roof over a glass wall carries the curtain wall on: a
@@ -25760,6 +25777,17 @@ mod style_tests {
             );
             assert!(SPIRE_ROOFS.iter().any(|&(b, _)| b == roof));
         }
+    }
+
+    #[test]
+    fn domes_mapped_in_gold_are_gilded() {
+        let tags = |colour: &str| HashMap::from([("roof:colour".to_string(), colour.to_string())]);
+        // The Dome of the Rock and a Kremlin cathedral's onions.
+        assert!(gilded_dome(&tags("#FFD700"), RoofType::Dome));
+        assert!(gilded_dome(&tags("gold"), RoofType::Onion));
+        assert!(!gilded_dome(&tags("#FFD700"), RoofType::Gabled));
+        assert!(!gilded_dome(&tags("yellow"), RoofType::Dome));
+        assert!(!gilded_dome(&tags("#707090"), RoofType::Dome));
     }
 
     #[test]
