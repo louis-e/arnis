@@ -188,13 +188,73 @@ fn reach(
     None
 }
 
-/// The strips between the sidewalks and the roads they run beside. `roads` is every road and
-/// path surface as the masks laid it, `blocked` what the strip must not pave over besides the
-/// buildings in `footprints`: mapped lawns and paved areas, hedges, fences and walls.
-pub fn collect(
-    elements: &[ProcessedElement],
+/// The ways a strip lies between, stamped from their tags alone, before the road masks are
+/// laid: the roads on the ground and every path and footway, as wide as the renderer draws
+/// them, and the sidewalks that may run beside a road. `KerbWays::strips` reads them with
+/// the masks.
+pub struct KerbWays<'a> {
+    vehicles: CoordinateBitmap,
+    walkways: CoordinateBitmap,
+    sidewalks: Vec<(&'a ProcessedWay, i32)>,
+}
+
+impl<'a> KerbWays<'a> {
+    pub fn stamp(
+        elements: &'a [ProcessedElement],
+        editor: &WorldEditor,
+        xzbbox: &XZBBox,
+        scale: f64,
+    ) -> Self {
+        let mut vehicles = CoordinateBitmap::new(xzbbox);
+        let mut walkways = CoordinateBitmap::new(xzbbox);
+        let mut sidewalks: Vec<(&ProcessedWay, i32)> = Vec::new();
+        for element in elements {
+            let ProcessedElement::Way(way) = element else {
+                continue;
+            };
+            let Some(highway_type) = surface_highway_type(way) else {
+                continue;
+            };
+            if is_carriageway(highway_type) {
+                let at_grade = !is_bridge_way(way)
+                    && way.tags.get("tunnel").is_none_or(|t| t == "no")
+                    && way.tags.get("layer").is_none_or(|l| l.trim() == "0");
+                if at_grade && tunnel_renders_at_surface(way, Some(editor), scale) {
+                    stamp(&mut vehicles, way, highway_type, scale);
+                }
+                continue;
+            }
+            stamp(&mut walkways, way, highway_type, scale);
+            if runs_as_sidewalk(way, highway_type) {
+                sidewalks.push((way, highway_block_range(highway_type, &way.tags, scale)));
+            }
+        }
+        Self {
+            vehicles,
+            walkways,
+            sidewalks,
+        }
+    }
+
+    /// The strips between the sidewalks and the roads they run beside. `roads` is every road
+    /// and path surface as the masks laid it, `blocked` what the strip must not pave over
+    /// besides the buildings in `footprints`: mapped lawns and paved areas, hedges, fences
+    /// and walls.
+    pub fn strips(
+        &self,
+        editor: &WorldEditor,
+        scale: f64,
+        roads: &CoordinateBitmap,
+        footprints: &CoordinateBitmap,
+        blocked: &CoordinateBitmap,
+    ) -> KerbStrips {
+        strips_beside(self, editor, scale, roads, footprints, blocked)
+    }
+}
+
+fn strips_beside(
+    ways: &KerbWays,
     editor: &WorldEditor,
-    xzbbox: &XZBBox,
     scale: f64,
     roads: &CoordinateBitmap,
     footprints: &CoordinateBitmap,
@@ -202,31 +262,11 @@ pub fn collect(
 ) -> KerbStrips {
     let max_gap = ((MAX_GAP_M * scale).round() as usize).max(1);
     let min_run = ((MIN_RUN_M * scale).round() as usize).max(4);
-    // The roads on the ground, as the masks laid them, and every path and footway.
-    let mut vehicles = CoordinateBitmap::new(xzbbox);
-    let mut walkways = CoordinateBitmap::new(xzbbox);
-    let mut sidewalks: Vec<(&ProcessedWay, i32)> = Vec::new();
-    for element in elements {
-        let ProcessedElement::Way(way) = element else {
-            continue;
-        };
-        let Some(highway_type) = surface_highway_type(way) else {
-            continue;
-        };
-        if is_carriageway(highway_type) {
-            let at_grade = !is_bridge_way(way)
-                && way.tags.get("tunnel").is_none_or(|t| t == "no")
-                && way.tags.get("layer").is_none_or(|l| l.trim() == "0");
-            if at_grade && tunnel_renders_at_surface(way, Some(editor), scale) {
-                stamp(&mut vehicles, way, highway_type, scale);
-            }
-            continue;
-        }
-        stamp(&mut walkways, way, highway_type, scale);
-        if runs_as_sidewalk(way, highway_type) {
-            sidewalks.push((way, highway_block_range(highway_type, &way.tags, scale)));
-        }
-    }
+    let KerbWays {
+        vehicles,
+        walkways,
+        sidewalks,
+    } = ways;
     if sidewalks.is_empty() {
         return KerbStrips::default();
     }
@@ -356,10 +396,8 @@ mod tests {
                 }
             }
         }
-        collect(
-            elements,
+        KerbWays::stamp(elements, &editor, xzbbox, 1.0).strips(
             &editor,
-            xzbbox,
             1.0,
             &roads,
             &CoordinateBitmap::new_empty(),
