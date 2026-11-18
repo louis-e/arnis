@@ -3,6 +3,7 @@
 pub mod boat;
 pub mod car;
 pub mod crane;
+pub mod elbphilharmonie;
 pub mod elizabeth_tower;
 pub mod excavator;
 pub mod fountain;
