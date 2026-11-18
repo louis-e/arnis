@@ -99,6 +99,7 @@ const SETTINGS = [
   { id: 'meld-ram-budget-input', kind: 'text', store: OWN },
   { id: 'meld-threads-input', kind: 'text', store: OWN },
   { id: 'meld-seed-input', kind: 'text', store: OWN },
+  { id: 'meld-ground-level-input', kind: 'text', store: OWN },
   { id: 'meld-min-y-input', kind: 'text', store: OWN },
   { id: 'meld-max-y-input', kind: 'text', store: OWN },
   { id: 'meld-road-detail-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },

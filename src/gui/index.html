@@ -1618,6 +1618,21 @@
                     <input type="checkbox" class="switch" id="meld-world-border-toggle" name="meld-world-border-toggle">
                   </div>
                 </div>
+                <div class="settings-row setting-tile is-wide meld-only">
+                  <label for="meld-ground-level-input" class="setting-label">
+                    <svg class="icon setting-icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+                    <span class="setting-text">
+                      <span class="setting-heading">
+                        <span data-localize="ground_level">Ground Level</span>
+                        <span class="tooltip-icon" data-tooltip-key="ground_level_tip" data-tooltip="A whole number from -62 to 304; empty keeps -62. At 63 the sea sits where vanilla Minecraft has it. Without Fill Ground the ground under the surface stays hollow, as it does under hills. A One World with terrain keeps its own heights.">?</span>
+                      </span>
+                      <span class="setting-desc" data-localize="ground_level_desc">Height of the sea and the lowest ground.</span>
+                    </span>
+                  </label>
+                  <div class="settings-control">
+                    <input type="text" id="meld-ground-level-input" name="meld-ground-level-input" class="meld-short" placeholder="-62" autocomplete="off" spellcheck="false">
+                  </div>
+                </div>
                 <div class="settings-row setting-tile meld-only">
                   <label for="meld-min-y-input" class="setting-label">
                     <svg class="icon setting-icon" aria-hidden="true"><use href="#i-cave"></use></svg>

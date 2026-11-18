@@ -396,6 +396,9 @@ struct LiveStartOptions {
     spawn_point: Option<(f64, f64)>,
     world_scale: f64,
     height_multiplier: f64,
+    /// Only a world this session creates takes it; an existing one keeps its own.
+    #[serde(default)]
+    ground_level: Option<i32>,
     generation_mode: String,
     winter_enabled: bool,
     post_apocalyptic_enabled: bool,
@@ -487,6 +490,9 @@ fn gui_live_start(options: LiveStartOptions) -> Result<(), String> {
         ));
     }
     let mut args = Args::try_parse_from(&argv).map_err(|e| e.to_string())?;
+    if let Some(level) = options.ground_level {
+        args.ground_level = level;
+    }
     args.mode = crate::args::GenerationMode::from_name(&options.generation_mode);
     args.winter = options.winter_enabled;
     args.post_apocalyptic = options.post_apocalyptic_enabled;
@@ -3247,6 +3253,11 @@ fn gui_start_generation(
             crate::args::apply_body_defaults(&mut args);
             crate::args::apply_feature_needs(&mut args);
             crate::y_bounds::apply(&mut args);
+            if let Err(e) = crate::args::validate_ground_level(&args) {
+                eprintln!("{e}");
+                emit_gui_error(&e);
+                return Err(e);
+            }
             crate::scale::budget::single_below_break_even(&mut args, one_world);
 
             let mut one_world_extending = false;
@@ -3416,7 +3427,7 @@ fn gui_start_generation(
                 level_name,
                 spawn_point: None,
                 luanti_game,
-                ground_level,
+                ground_level: args.ground_level,
                 facades: crate::mapillary::FacadeJob::default(),
             };
 

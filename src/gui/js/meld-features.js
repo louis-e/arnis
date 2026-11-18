@@ -1750,13 +1750,31 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   return refresh;
 }
 
-// Lowest / Highest Y: what is typed is snapped to a height the world can have (sections are 16 tall).
-function snapY(id, lo, hi, off) {
+// Ground Level runs from the default to the highest base vanilla's ceiling still leaves terrain room above.
+export const DEFAULT_GROUND_LEVEL = -62;
+const GROUND_LEVEL_MAX = 304;
+
+// What is typed, as the level a run gets; anything else keeps the default.
+export const typedGroundLevel = (text) => {
+  const v = parseInt(text, 10);
+  return Number.isFinite(v) ? Math.min(GROUND_LEVEL_MAX, Math.max(DEFAULT_GROUND_LEVEL, v)) : DEFAULT_GROUND_LEVEL;
+};
+
+// The level a run sends and why the field is greyed: a One World keeps its own, and off Earth or on One World terrain it changes nothing.
+export function groundLevelFor({ advanced, typed, earth, oneWorld, terrain, world }) {
+  if (oneWorld && world && world.exists && typeof world.ground_level === 'number') return { level: world.ground_level, why: 'reason_world_set' };
+  const why = !earth ? 'reason_earth' : oneWorld && terrain ? 'reason_not_one_world' : null;
+  return { level: advanced && !why ? typedGroundLevel(typed) : DEFAULT_GROUND_LEVEL, why };
+}
+
+// Lowest / Highest Y snap to whole sections and Ground Level into its range; a greyed field keeps the One World value it shows.
+function snapY(id, lo, hi, off, step = 16) {
   const el = typeof document !== 'undefined' && document.getElementById && document.getElementById(id);
   if (!el || !el.addEventListener) return;
   el.addEventListener('change', () => {
+    if (el.disabled) return;
     const v = parseInt(el.value, 10);
-    const s = Number.isFinite(v) ? String(Math.min(hi, Math.max(lo, Math.round((v - off) / 16) * 16 + off))) : '';
+    const s = Number.isFinite(v) ? String(Math.min(hi, Math.max(lo, Math.round((v - off) / step) * step + off))) : '';
     if (s === el.value) return;
     el.value = s;
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1764,3 +1782,4 @@ function snapY(id, lo, hi, off) {
 }
 snapY('meld-min-y-input', -2032, -64, 0);
 snapY('meld-max-y-input', 319, 2031, -1);
+snapY('meld-ground-level-input', DEFAULT_GROUND_LEVEL, GROUND_LEVEL_MAX, 0, 1);

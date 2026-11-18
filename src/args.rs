@@ -2141,6 +2141,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("Rotation angle must be between -90 and 90 degrees.".to_string());
     }
 
+    validate_ground_level(args)
+}
+
+/// Checks `--ground-level` for the world the run builds; the window skips `validate_args`.
+pub fn validate_ground_level(args: &Args) -> Result<(), String> {
     let (floor, ceiling) = ground_level_bounds(args);
     if args.ground_level < floor || args.ground_level > ceiling {
         return Err(format!(
@@ -2148,7 +2153,6 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             args.ground_level
         ));
     }
-
     Ok(())
 }
 

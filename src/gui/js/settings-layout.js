@@ -197,6 +197,7 @@ const SEARCH_WORDS = {
   'meld-threads-input': 'cpu cores performance',
   'meld-seed-input': 'random variation',
   'meld-world-border-toggle': 'wall edge limit',
+  'meld-ground-level-input': 'sea level height y spawn mobs animals',
   'meld-min-y-input': 'height depth bottom',
   'meld-max-y-input': 'height top',
   'meld-road-detail-group': 'markings lines sidewalks footways',
