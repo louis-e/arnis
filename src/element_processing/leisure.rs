@@ -104,27 +104,24 @@ fn leisure_area(
                 let bresenham_points: Vec<(i32, i32, i32)> =
                     bresenham_line(prev.0, 0, prev.1, node.x, 0, node.z);
                 for (bx, _, bz) in bresenham_points {
-                    // A park's edge along a paved path leaves the path whole, as its lawn does.
-                    if edge_in_hole(holes, bx, bz)
-                        || (block_type == GRASS_BLOCK && editor.surface_is_sealed(bx, bz))
-                    {
+                    if edge_in_hole(holes, bx, bz) {
                         continue;
                     }
-                    editor.set_block(
-                        block_type,
-                        bx,
-                        0,
-                        bz,
-                        Some(&[
+                    // On a path or other paving the edge goes only where the fill would, so a
+                    // path it runs along stays whole.
+                    let over: &[Block] = if editor.surface_is_sealed(bx, bz) {
+                        &[GRASS_BLOCK]
+                    } else {
+                        &[
                             GRASS_BLOCK,
                             STONE_BRICKS,
                             SMOOTH_STONE,
                             LIGHT_GRAY_CONCRETE,
                             COBBLESTONE,
                             GRAY_CONCRETE,
-                        ]),
-                        None,
-                    );
+                        ]
+                    };
+                    editor.set_block(block_type, bx, 0, bz, Some(over), None);
                 }
 
                 current_leisure.push((node.x, node.z));

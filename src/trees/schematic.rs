@@ -9,8 +9,7 @@ use crate::block_definitions::{
     Block, ACACIA_LEAVES, ACACIA_LOG, AIR, AZALEA_LEAVES, BIRCH_LEAVES, BIRCH_LOG, BLACK_CONCRETE,
     CHERRY_LEAVES, CHERRY_LOG, CYAN_TERRACOTTA, DARK_OAK_LEAVES, DARK_OAK_LOG, DIRT_PATH,
     GRAY_CONCRETE, GRAY_CONCRETE_POWDER, JUNGLE_LEAVES, JUNGLE_LOG, LIGHT_GRAY_CONCRETE,
-    MANGROVE_LEAVES, MANGROVE_LOG, OAK_LEAVES, OAK_LOG, POLISHED_ANDESITE, SPRUCE_LEAVES,
-    SPRUCE_LOG, WATER,
+    MANGROVE_LEAVES, MANGROVE_LOG, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG, WATER,
 };
 use crate::ground_decoration::{LOOSE_PLANTS, PLANT_LOWER_HALVES};
 use crate::world_editor::WorldEditor;
@@ -586,7 +585,6 @@ pub fn place_schematic_tree(
         GRAY_CONCRETE,
         LIGHT_GRAY_CONCRETE,
         DIRT_PATH,
-        POLISHED_ANDESITE,
     ]);
     for ((wx, wz), (top, log)) in trunk_bottom {
         if top - base_y > min_log_vy + ROOT_BASE_VY {

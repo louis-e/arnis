@@ -34,12 +34,14 @@ const AISLE_TAG: &str = "arnis:parking_aisle";
 /// "ux uz ox oz aisle". Every piece of a One World the lot reaches into lays it out alike.
 const GRID_TAG: &str = "arnis:stall_grid";
 
-/// What a stall line or the asphalt may be laid over.
+/// What a stall line or the asphalt may be laid over, a footway's asphalt drawn through the
+/// lot among them.
 const LOT_SURFACES: &[Block] = &[
     BLACK_CONCRETE,
     GRAY_CONCRETE_POWDER,
     CYAN_TERRACOTTA,
     GRAY_CONCRETE,
+    POLISHED_ANDESITE,
 ];
 
 /// The grid stalls are laid out on: rows run along `u`, stalls reach along `v`, and
