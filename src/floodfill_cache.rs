@@ -539,6 +539,25 @@ struct WayFill {
     fill: Mutex<CachedFill>,
 }
 
+/// Which elements a pass keeps, by their tags.
+type TagFilter = fn(&std::collections::HashMap<String, String>) -> bool;
+
+/// Whether a building's walls come down to the ground: not a roof on posts, nor a part that
+/// starts above the street, which a road runs on under.
+fn walls_to_ground(tags: &std::collections::HashMap<String, String>) -> bool {
+    let raised = |key: &str| {
+        tags.get(key)
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .is_some_and(|v| v > 0.0)
+    };
+    !matches!(
+        tags.get("building").map(String::as_str),
+        Some("roof" | "carport")
+    ) && !["min_level", "building:min_level", "min_height"]
+        .iter()
+        .any(|k| raised(k))
+}
+
 /// Fills prepared per pass, so a pre-pass never holds every fill of the world at once.
 const PREPASS_BATCH: usize = 512;
 /// Cells a pass that applies fills in order holds at once (8 bytes each).
@@ -857,44 +876,59 @@ impl FloodFillCache {
     /// Returns a memory-efficient bitmap of all (x, z) coordinates that are part of buildings.
     ///
     /// The bitmap uses only 1 bit per coordinate in the world bounds, compared to ~24 bytes
-    /// per entry in a HashSet, reducing memory usage by ~200x for large worlds.
+    /// per entry in a HashSet, reducing memory usage by ~200x for large worlds. A run takes
+    /// it with the wall footprints, `collect_building_and_wall_footprints`.
+    #[cfg(test)]
     pub fn collect_building_footprints(
         &self,
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
     ) -> BuildingFootprintBitmap {
-        self.collect_footprints(elements, xzbbox, |_| true)
+        self.collect_footprints(elements, xzbbox, |_| true, None).0
     }
 
     /// The footprints of the buildings whose walls come down to the ground: not a roof on
     /// posts, nor a part that starts above the street, which a road runs on under.
+    #[cfg(test)]
     pub fn collect_wall_footprints(
         &self,
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
     ) -> BuildingFootprintBitmap {
-        self.collect_footprints(elements, xzbbox, |tags| {
-            let raised = |key: &str| {
-                tags.get(key)
-                    .and_then(|v| v.trim().parse::<f64>().ok())
-                    .is_some_and(|v| v > 0.0)
-            };
-            !matches!(
-                tags.get("building").map(String::as_str),
-                Some("roof" | "carport")
-            ) && !["min_level", "building:min_level", "min_height"]
-                .iter()
-                .any(|k| raised(k))
-        })
+        self.collect_footprints(elements, xzbbox, walls_to_ground, None)
+            .0
     }
 
+    /// Every building's footprint (`collect_building_footprints`) and, apart, those of the
+    /// buildings whose walls come down to the ground (`collect_wall_footprints`), each
+    /// building filled once for both.
+    pub fn collect_building_and_wall_footprints(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+    ) -> (BuildingFootprintBitmap, BuildingFootprintBitmap) {
+        let (all, walls) =
+            self.collect_footprints(elements, xzbbox, |_| true, Some(walls_to_ground));
+        (
+            all,
+            walls.unwrap_or_else(BuildingFootprintBitmap::new_empty),
+        )
+    }
+
+    /// The footprints of the buildings `keep` lets through and, with `also`, apart, those of
+    /// the buildings it lets through.
     fn collect_footprints(
         &self,
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
         keep: impl Fn(&std::collections::HashMap<String, String>) -> bool,
-    ) -> BuildingFootprintBitmap {
+        also: Option<TagFilter>,
+    ) -> (BuildingFootprintBitmap, Option<BuildingFootprintBitmap>) {
         let mut footprints = BuildingFootprintBitmap::new(xzbbox);
+        let mut second = also.map(|_| BuildingFootprintBitmap::new(xzbbox));
+        let wanted = |tags: &std::collections::HashMap<String, String>| {
+            (keep(tags), also.is_some_and(|f| f(tags)))
+        };
 
         // Relations first (outer fills, courtyards clear), ways second so courtyard buildings re-mark.
         for element in elements {
@@ -902,9 +936,9 @@ impl FloodFillCache {
                 let is_building = (rel.tags.contains_key("building")
                     || rel.tags.contains_key("building:part")
                     || rel.tags.get("type").map(|t| t.as_str()) == Some("building"))
-                    && !crate::element_processing::buildings::is_underground_building(&rel.tags)
-                    && keep(&rel.tags);
-                if !is_building {
+                    && !crate::element_processing::buildings::is_underground_building(&rel.tags);
+                let (first, apart) = wanted(&rel.tags);
+                if !is_building || !(first || apart) {
                     continue;
                 }
                 // Each outer less the courtyards that cut it, so a keep mapped as an outer in
@@ -925,7 +959,12 @@ impl FloodFillCache {
                     for &o in &members {
                         for (x, z) in flood_fill_area(&outers[o], None) {
                             if !courtyard.contains(x, z) {
-                                footprints.set(x, z);
+                                if first {
+                                    footprints.set(x, z);
+                                }
+                                if let Some(second) = second.as_mut().filter(|_| apart) {
+                                    second.set(x, z);
+                                }
                             }
                         }
                     }
@@ -933,7 +972,7 @@ impl FloodFillCache {
             }
         }
 
-        let buildings: Vec<u64> = elements
+        let buildings: Vec<(u64, bool, bool)> = elements
             .iter()
             .filter_map(|element| match element {
                 ProcessedElement::Way(way)
@@ -941,10 +980,10 @@ impl FloodFillCache {
                         || way.tags.contains_key("building:part"))
                         && !crate::element_processing::buildings::is_underground_building(
                             &way.tags,
-                        )
-                        && keep(&way.tags) =>
+                        ) =>
                 {
-                    Some(way.id)
+                    let (first, apart) = wanted(&way.tags);
+                    (first || apart).then_some((way.id, first, apart))
                 }
                 _ => None,
             })
@@ -952,16 +991,28 @@ impl FloodFillCache {
         for batch in buildings.chunks(PREPASS_BATCH) {
             let fills: Vec<Option<FloodFillResult>> = batch
                 .par_iter()
-                .map(|&id| self.transient_fill(id))
+                .map(|&(id, _, _)| self.transient_fill(id))
                 .collect();
-            for fill in fills.iter().flatten() {
-                for &(x, z) in fill.iter() {
-                    footprints.set(x, z);
+            // Each mask on a thread of its own.
+            let mark = |bits: &mut BuildingFootprintBitmap,
+                        wants: fn(&(u64, bool, bool)) -> bool| {
+                for (fill, building) in fills.iter().zip(batch) {
+                    if wants(building) {
+                        for &(x, z) in fill.iter().flat_map(|f| f.iter()) {
+                            bits.set(x, z);
+                        }
+                    }
                 }
+            };
+            match second.as_mut() {
+                Some(second) => {
+                    rayon::join(|| mark(&mut footprints, |b| b.1), || mark(second, |b| b.2));
+                }
+                None => mark(&mut footprints, |b| b.1),
             }
         }
 
-        footprints
+        (footprints, second)
     }
 
     /// Builds the sealed-surface mask: the road mask plus every cached footprint

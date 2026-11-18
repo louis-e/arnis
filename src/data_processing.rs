@@ -1390,7 +1390,10 @@ pub fn generate_world_with_options(
 
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
-    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &clip_bbox);
+    // The walls that come down to the ground among them come in the same pass, each
+    // building filled once for both.
+    let (building_footprints, wall_footprints) =
+        flood_fill_cache.collect_building_and_wall_footprints(&elements, &clip_bbox);
 
     // Tenants and surrounding areas per building, for interiors furnished by use.
     let interior_uses = if args.interior {
@@ -1422,7 +1425,7 @@ pub fn generate_world_with_options(
 
     // What a road's strip past its core stops at: the walls on the ground, not a roof on
     // posts or a part bridging the street, which the road runs on under.
-    let wall_footprints = Arc::new(flood_fill_cache.collect_wall_footprints(&elements, &clip_bbox));
+    let wall_footprints = Arc::new(wall_footprints);
     editor.set_wall_footprints(Arc::clone(&wall_footprints));
     // And the water it stops at, block for block.
     let water_areas = Arc::new(flood_fill_cache.collect_water_areas(&elements, &clip_bbox));
