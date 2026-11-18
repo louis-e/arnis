@@ -4,7 +4,7 @@ use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
 use crate::element_processing::construction_site;
-use crate::element_processing::field_texture::{place_cover, FieldLayout, Plot};
+use crate::element_processing::field_texture::{self, place_cover, FieldLayout, Plot};
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{
     in_hole, without_holes, BuildingFootprintBitmap, FloodFillCache, Holes, InnerRings,
@@ -200,7 +200,7 @@ fn landuse_area(
     let area_climate = editor.climate();
 
     let field_layout = (landuse_tag == "farmland")
-        .then(|| FieldLayout::new(args.fields, args.scale, element.id, &element.nodes))
+        .then(|| FieldLayout::of_way(args.fields, args.scale, element))
         .flatten();
 
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
@@ -615,10 +615,14 @@ pub fn generate_landuse_from_relation(
             if member.role == ProcessedMemberRole::Outer {
                 let holes = flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
                 // Use relation tags so the member inherits the relation's landuse=* type
+                let mut tags = rel.tags.clone();
+                if let Some(frame) = member.way.tags.get(field_texture::FRAME_TAG) {
+                    tags.insert(field_texture::FRAME_TAG.to_string(), frame.clone());
+                }
                 let way_with_rel_tags = ProcessedWay {
                     id: member.way.id,
                     nodes: member.way.nodes.clone(),
-                    tags: rel.tags.clone(),
+                    tags,
                 };
                 landuse_area(
                     editor,

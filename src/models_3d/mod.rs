@@ -9,9 +9,61 @@ pub use pipeline::Models3dPipeline;
 
 use crate::block_definitions::Block;
 use crate::elevation::cache::{clear_cache_dir, CacheClearStats};
+use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
+
+/// Tag the parser leaves in a One World on an element a model may stand in for, and on a
+/// building the area's edge cuts: its anchor and bounds as mapped, "x z min_x min_z max_x
+/// max_z". Every area or piece then puts the model in one place at one size and hides the
+/// same buildings under it.
+const FOOTPRINT_TAG: &str = "arnis:model_footprint";
+
+/// Whether a 3D model may stand in for an element with these tags.
+pub(crate) fn may_replace(tags: &HashMap<String, String>) -> bool {
+    tags.contains_key("3dmr")
+        || tags
+            .get("wikidata")
+            .is_some_and(|q| wikidata::has_model(q.trim()))
+}
+
+/// Whether an element with these tags is hidden when its anchor lies in a model's footprint.
+pub(crate) fn may_be_hidden(tags: &HashMap<String, String>) -> bool {
+    tags.contains_key("building") || tags.contains_key("building:part")
+}
+
+/// `FOOTPRINT_TAG` for an element made of `nodes` as mapped: their mean and bounds.
+pub(crate) fn footprint_tag<'a>(
+    nodes: impl Iterator<Item = &'a ProcessedNode>,
+) -> Option<(String, String)> {
+    let (mut sx, mut sz, mut n) = (0i64, 0i64, 0i64);
+    let (mut x0, mut z0, mut x1, mut z1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for p in nodes {
+        sx += i64::from(p.x);
+        sz += i64::from(p.z);
+        n += 1;
+        (x0, z0, x1, z1) = (x0.min(p.x), z0.min(p.z), x1.max(p.x), z1.max(p.z));
+    }
+    (n > 0).then(|| {
+        let value = format!("{} {} {x0} {z0} {x1} {z1}", sx / n, sz / n);
+        (FOOTPRINT_TAG.to_string(), value)
+    })
+}
+
+/// The anchor and bounds `[min_x, min_z, max_x, max_z]` the parser left in `FOOTPRINT_TAG`.
+pub(crate) fn whole_footprint(tags: &HashMap<String, String>) -> Option<((i32, i32), [i32; 4])> {
+    let v: Vec<i32> = tags
+        .get(FOOTPRINT_TAG)?
+        .split(' ')
+        .map(|s| s.parse().ok())
+        .collect::<Option<_>>()?;
+    let [x, z, x0, z0, x1, z1] = v[..] else {
+        return None;
+    };
+    Some(((x, z), [x0, z0, x1, z1]))
+}
 
 /// Why a model download gave nothing.
 #[derive(Debug)]
@@ -245,5 +297,28 @@ mod tests {
         let failed = unless_absent::<()>(&other, "o", || Err(FetchError::Failed("reset".into())));
         assert!(matches!(failed, Err(FetchError::Failed(_))));
         assert!(!other.exists());
+    }
+
+    #[test]
+    fn a_footprint_is_the_mean_and_bounds_of_the_nodes() {
+        let node = |x, z| ProcessedNode {
+            id: 1,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        let nodes = [node(-7, 3), node(20, 3), node(20, 40), node(-7, 3)];
+        let tags: HashMap<_, _> = footprint_tag(nodes.iter()).into_iter().collect();
+        // Truncated towards zero, as the placers took the mean of the nodes they were given.
+        assert_eq!(whole_footprint(&tags), Some(((6, 12), [-7, 3, 20, 40])));
+        assert!(footprint_tag(std::iter::empty()).is_none());
+        assert!(may_replace(&HashMap::from([(
+            "wikidata".to_string(),
+            " Q10288".to_string()
+        )])));
+        assert!(!may_replace(&HashMap::from([(
+            "wikidata".to_string(),
+            "Q1".to_string()
+        )])));
     }
 }

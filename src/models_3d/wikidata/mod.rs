@@ -12,6 +12,11 @@ use crate::elevation::TallModel;
 use crate::osm_parser::OsmData;
 use std::collections::{HashMap, HashSet};
 
+/// Whether the bundled index has a model for this QID.
+pub(crate) fn has_model(qid: &str) -> bool {
+    index::lookup(qid).is_some()
+}
+
 /// Bundled models in a raw OSM fetch with a known height, for the terrain fit.
 /// Ways stand at the mean of their nodes; relations are left out.
 pub fn tall_models_in(data: &OsmData) -> Vec<TallModel> {

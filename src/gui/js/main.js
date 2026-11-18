@@ -18,8 +18,9 @@ import {
   initRunControls, initCellMenu, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls,
   initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing,
   setPlanMask, hasPlanMask, refreshStretch,
-  initDataPanel, initProjects, resumeJob, placeForRun,
+  initDataPanel, initProjects, resumeJob, placeForRun, groundLevelFor,
 } from './meld-features.js';
+import { sizeRequest, formatSizeRange, ringsKm2 } from './world-size.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -62,9 +63,83 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
   
   localizeElement(localization, { element: bboxSelectionElement }, localizationKey);
   fillBboxSelectionVars(bboxSelectionElement);
+  showSizeEstimate(bboxSelectionElement);
   bboxSelectionElement.style.color = color;
   // The map-first card says the pieces in its plan block; this line would repeat them.
   bboxSelectionElement.classList.toggle('is-plan', localizationKey === 'area_pieces_info' || localizationKey === 'area_single_info');
+}
+
+// The lines about a selection that is built as it is drawn, which the size estimate follows.
+const SIZE_ESTIMATE_KEYS = new Set(['selection_confirmed', 'custom_selection_confirmed', 'shapes_one_world', 'area_extensive', 'area_too_large', 'area_extreme']);
+
+// The backend's answers by request, the request the line is for now, and the figure it shows while that one's answer is out.
+const sizeAnswers = new Map();
+let sizeWanted = '';
+let sizeShown = null;
+let sizeTimer = 0;
+
+// "Selection confirmed! · about 400 MB", the estimate quieter than the line.
+function showSizeEstimate(element) {
+  element.querySelector('.bbox-size-estimate')?.remove();
+  clearTimeout(sizeTimer);
+  const request = SIZE_ESTIMATE_KEYS.has(currentBboxSelectionKey) ? sizeEstimateRequest() : null;
+  sizeWanted = request ? JSON.stringify(request) : '';
+  if (!request) {
+    sizeShown = null;
+    return;
+  }
+  const key = sizeWanted;
+  if (sizeAnswers.has(key)) sizeShown = sizeAnswers.get(key);
+  // Asked once the line rests, so dragging the scale does not ask at every step.
+  else sizeTimer = setTimeout(() => askSizeEstimate(key, request), 150);
+  // Until then the last figure stands, so the line does not flicker.
+  if (!sizeShown) return;
+  const note = document.createElement('span');
+  note.className = 'bbox-size-estimate';
+  note.textContent = ` · ${oneWorldText('size_estimate', 'about {size}', { size: formatSizeRange(sizeShown) })}`;
+  note.title = oneWorldText('size_estimate_tip', 'Estimated size of the world on disk. With Fill Ground or Caves it depends on the terrain: the larger figure is for mountains.');
+  element.appendChild(note);
+}
+
+// An answer is kept for its own request and redraws the line only while that is still the line's.
+function askSizeEstimate(key, request) {
+  Promise.resolve(invoke('gui_world_size_estimate', { request })).catch(() => null).then((mib) => {
+    if (sizeAnswers.size > 200) sizeAnswers.clear();
+    sizeAnswers.set(key, Array.isArray(mib) ? mib : null);
+    const line = document.getElementById('bbox-selection-info');
+    if (line && sizeWanted === key) showSizeEstimate(line);
+  });
+}
+
+// What the next run's world is made of; not in Live, which grows as it is played, for an existing One World, or for cells, whose plan says it.
+function sizeEstimateRequest() {
+  if (!selectedBBox || selectedBBox === "0.000000 0.000000 0.000000 0.000000") return null;
+  const oneWorld = isOneWorldEnabled();
+  if (isLiveMode() || planPending() || planPieces() || (oneWorld && oneWorldInfo?.exists)) return null;
+  // A greyed switch is not sent as on.
+  const on = (id) => { const el = document.getElementById(id); return !!(el && el.checked && !el.disabled); };
+  const [lat1, lng1, lat2, lng2] = selectedBBox.split(/[\s,]+/).map(Number);
+  // Drawn shapes are clipped to, except by a One World, which builds the rectangle around them.
+  const km2 = selectedShapes && !oneWorld
+    ? ringsKm2(selectedShapes, BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth)
+    : calculateBBoxSize(lat1, lng1, lat2, lng2) / 1e6;
+  return sizeRequest({
+    km2,
+    scale: parseFloat(document.getElementById('scale-value-slider').value) || 1,
+    body: selectedCelestialBody,
+    format: getEffectiveWorldFormat(),
+    mode: document.getElementById('generation-mode-select').value,
+    groundLevel: groundLevelChoice(oneWorld).level,
+    // A new One World is always built with the extended height.
+    tall: oneWorld || on('disable-height-limit-toggle'),
+    fill: on('fillground-toggle'),
+    caves: on('caves-toggle'),
+    interior: on('interior-toggle'),
+    light: on('bake-lighting-toggle'),
+    voxy: on('voxy-lod-toggle'),
+    dh: on('dh-lod-toggle'),
+    disasters: gameplayToggle('disasters-toggle'),
+  });
 }
 
 // Initialize elements and start the demo progress
@@ -232,6 +307,7 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
+  if (bboxSelectionInfo) showSizeEstimate(bboxSelectionInfo);
   renderOneWorldStatus();
   refreshStartButton();
   // An open Projects list is built in the language it was drawn in.
@@ -1602,6 +1678,7 @@ function initSettings() {
         gardenDetailEnabled: liveLaser("garden-detail-toggle"),
         measuredTreesEnabled: liveLaser("measured-trees-toggle"),
         measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+        measuredRoofsEnabled: liveLaser("measured-roofs-toggle"),
         lidarMaxMb: lidarLimitMb(),
         overtureEnabled: document.getElementById("overture-toggle").checked,
         awsOnlyElevation: document.getElementById("aws-only-elevation-toggle").checked,
@@ -3153,6 +3230,8 @@ async function noteOutline(geojson) {
     outlineFailed = true;
     postToMap({ type: 'planMask', geojson: null });
     const info = document.getElementById('bbox-selection-info');
+    // Not a line of its own key, so no size estimate is put after it.
+    currentBboxSelectionKey = '';
     info.textContent = error;
     info.style.color = "#fa7878";
     return;
@@ -3851,7 +3930,7 @@ function setSettingsRowAvailable(inputId, available, reason = null) {
 // Laser data is Earth-only, never used for One World, and needs a World Scale of 0.75 or more
 // (mirrors LASER_MIN_SCALE in src/args.rs). Its features and limit sit in the same block and show
 // only while the master switch is on, as the Live rows under One World do.
-const LASER_ROWS = ['garden-detail-row', 'measured-trees-row', 'measured-heights-row', 'lidar-limit-row'];
+const LASER_ROWS = ['garden-detail-row', 'measured-trees-row', 'measured-heights-row', 'measured-roofs-row', 'lidar-limit-row'];
 const LASER_MIN_SCALE = 0.75;
 function refreshLidarRows() {
   const master = document.getElementById('lidar-toggle');
@@ -3870,7 +3949,7 @@ function refreshLidarRows() {
     const row = document.getElementById(id);
     if (row) row.style.display = open ? '' : 'none';
   });
-  ['garden-detail-toggle', 'measured-trees-toggle', 'measured-heights-toggle'].forEach((id) => {
+  ['garden-detail-toggle', 'measured-trees-toggle', 'measured-heights-toggle', 'measured-roofs-toggle'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.disabled = !open;
   });
@@ -3921,6 +4000,8 @@ function refreshAdvancedRows() {
     [on('disable-height-limit-toggle'), 'reason_height']);
   row('meld-min-y-input', !heightWhy, heightWhy);
   row('meld-max-y-input', !heightWhy, heightWhy);
+  // Not greyed by Live: a new flat world there takes it too.
+  refreshGroundLevelRow();
   row('meld-world-border-toggle', java, 'reason_java');
   const formatChecks = [[java, 'reason_java'], [!oneWorld, 'reason_not_one_world'], [!on('voxy-lod-toggle'), 'reason_voxy'],
     [!on('dh-lod-toggle'), 'reason_dh']];
@@ -3945,6 +4026,30 @@ function refreshAdvancedRows() {
   refreshLayout();
 }
 
+// Ground Level for a run into the One World if `oneWorld`, else into a world of its own.
+function groundLevelChoice(oneWorld = isOneWorldEnabled()) {
+  return groundLevelFor({
+    advanced: meldOn(),
+    typed: document.getElementById('meld-ground-level-input')?.value || '',
+    earth: selectedCelestialBody === 'earth',
+    oneWorld,
+    terrain: document.getElementById('generation-mode-select')?.value !== 'geo-only',
+    world: oneWorldInfo,
+  });
+}
+
+function refreshGroundLevelRow() {
+  const { why } = groundLevelChoice();
+  setSettingsRowAvailable('meld-ground-level-input', !why, why);
+}
+
+// Shows an existing One World's level; greyed before it is written, so the field does not snap it.
+function pinGroundLevel(level) {
+  if (level !== null) setSettingsRowAvailable('meld-ground-level-input', false, 'reason_world_set');
+  pinControl('meld-ground-level-input', level);
+  refreshGroundLevelRow();
+}
+
 function initAdvancedRows() {
   const modal = document.getElementById('settings-modal');
   if (!modal) return;
@@ -3967,7 +4072,8 @@ function writeOneWorldRestore(record) {
 }
 
 function controlValue(el) {
-  return el.type === 'checkbox' ? el.checked : parseFloat(el.value);
+  if (el.type === 'checkbox') return el.checked;
+  return el.type === 'text' ? el.value : parseFloat(el.value);
 }
 
 function writeControl(el, value) {
@@ -4053,6 +4159,7 @@ function applyOneWorldPins(info) {
     exists && typeof info.height_multiplier === 'number' ? info.height_multiplier : null);
   pinControl('disable-height-limit-toggle',
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
+  pinGroundLevel(exists && typeof info.ground_level === 'number' ? String(info.ground_level) : null);
   restoreNaturalRows();
   setSettingsRowAvailable('disable-height-limit-toggle', false, 'reason_not_one_world');
   if (exists) {
@@ -4068,6 +4175,7 @@ function releaseOneWorldPins() {
   pinControl('scale-value-slider', null);
   pinControl('height-multiplier-slider', null);
   pinControl('disable-height-limit-toggle', null);
+  pinGroundLevel(null);
   setSettingsRowAvailable('rotation-angle-input', true);
   restoreNaturalRows();
   postToMap({ type: 'setRotationLocked', locked: false });
@@ -4134,6 +4242,7 @@ async function refreshOneWorldState() {
     clearOneWorldOverlays();
     if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
     if (!isWorldNameEditing()) refreshWorldNameEditUI();
+    showSizeEstimate(document.getElementById('bbox-selection-info'));
     return;
   }
   if (!savePath) {
@@ -4170,6 +4279,8 @@ async function refreshOneWorldState() {
   refreshWorldRulesRows();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   renderOneWorldStatus();
+  // An existing world takes no size estimate, a new one does; the rest of the line stays as it is.
+  showSizeEstimate(document.getElementById('bbox-selection-info'));
 
   if (!info.exists || info.foreign) {
     clearOneWorldOverlays();
@@ -4633,6 +4744,7 @@ async function startLive() {
     spawnPoint: useSelection ? spawnPoint : null,
     worldScale: settings.worldScale,
     heightMultiplier: settings.heightMultiplier,
+    groundLevel: world && world.exists ? null : settings.groundLevel,
     generationMode: settings.generationMode,
     winterEnabled: settings.winterEnabled,
     postApocalypticEnabled: settings.postApocalypticEnabled,
@@ -4647,6 +4759,7 @@ async function startLive() {
     gardenDetailEnabled: settings.gardenDetailEnabled,
     measuredTreesEnabled: settings.measuredTreesEnabled,
     measuredHeightsEnabled: settings.measuredHeightsEnabled,
+    measuredRoofsEnabled: settings.measuredRoofsEnabled,
     lidarMaxMb: settings.lidarMaxMb,
     overtureEnabled: settings.overtureEnabled,
     use3dEnabled: settings.use3dEnabled,
@@ -4864,11 +4977,7 @@ function readGenerationSettings(oneWorld) {
   } else if (oneWorld) {
     disableHeightLimit = true;
   }
-  // The ground level input is gone from the UI; a world the CLI made may sit on another level.
-  let groundLevel = -62;
-  if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
-    groundLevel = oneWorldInfo.ground_level;
-  }
+  const groundLevel = groundLevelChoice(oneWorld).level;
   // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
   const clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
   const worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
@@ -4890,6 +4999,7 @@ function readGenerationSettings(oneWorld) {
     gardenDetailEnabled: liveLaser("garden-detail-toggle"),
     measuredTreesEnabled: liveLaser("measured-trees-toggle"),
     measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+    measuredRoofsEnabled: liveLaser("measured-roofs-toggle"),
     lidarMaxMb: lidarLimitMb(),
     overtureEnabled: checked("overture-toggle"),
     use3dEnabled: checked("use-3d-toggle"),

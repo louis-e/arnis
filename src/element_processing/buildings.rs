@@ -2868,9 +2868,18 @@ impl BuildingStyle {
 
         // === Roof ===
 
-        // Priority: roof:shape tag, preset default, auto-gable, then flat.
+        // Priority: roof:shape tag, the shape the laser saw, preset default,
+        // auto-gable, then flat. A part or a building closed in by others keeps
+        // the generator's lid whatever the laser saw.
+        let measured_roof = element
+            .tags
+            .get(crate::survey::roofs::SHAPE_HINT)
+            .filter(|_| !roof_ctx.enclosed && !element.tags.contains_key("building:part"))
+            .map(|s| parse_roof_type(s));
         let (roof_type, generate_roof) = if let Some(roof_shape) = element.tags.get("roof:shape") {
             (parse_roof_type(roof_shape), true)
+        } else if let Some(rt) = measured_roof {
+            (rt, true)
         } else if let Some(rt) = preset.roof_type {
             let should_generate = preset.generate_roof.unwrap_or(rt != RoofType::Flat);
             (rt, should_generate)
@@ -2974,6 +2983,7 @@ impl BuildingStyle {
         // default rules gives way to a pitched one, and a pitched default
         // stays as it was.
         let defaulted = !element.tags.contains_key("roof:shape")
+            && measured_roof.is_none()
             && preset.roof_type.is_none()
             && !roof_ctx.enclosed;
         let (roof_type, generate_roof) = match roof_levels_roof(element, era, roof_ctx) {
@@ -6775,10 +6785,7 @@ fn neighbour_walls_m(
     let Some(height) = parse_building_height_tag(tags) else {
         return Some(walls);
     };
-    if tags
-        .get("roof:shape")
-        .is_some_and(|s| parse_roof_type(s) == RoofType::Flat)
-    {
+    if read_roof_shape(tags).is_some_and(|s| parse_roof_type(s) == RoofType::Flat) {
         return Some(height);
     }
     if let Some(rise) = metres("roof:height").filter(|m| *m > 0.0) {
@@ -10777,8 +10784,12 @@ fn shell_glass_for(
 
 /// Whether a glass-walled building is one open hall rather than glazed
 /// storeys: a pavilion, conservatory or station shed, a glass vault, or a
-/// glass building mapped as a single level. Mapped storeys keep their floors.
+/// glass building mapped as a single level. Mapped storeys keep their floors,
+/// and so does a tower's sloped glass face (`is_sloped_glass_facade`).
 fn is_glass_hall(tags: &HashMap<String, String>, building_type: &str) -> bool {
+    if is_sloped_glass_facade(tags) {
+        return false;
+    }
     let levels = tags
         .get("building:levels")
         .and_then(|l| l.trim().parse::<f64>().ok());
@@ -10795,6 +10806,42 @@ fn is_glass_hall(tags: &HashMap<String, String>, building_type: &str) -> bool {
             building_type,
             "pavilion" | "conservatory" | "train_station" | "hangar"
         )
+}
+
+/// Rise from which a part's glass roof is a facade, not a roof, in metres: a
+/// station vault or a glazed atrium stays well under it.
+const GLASS_FACADE_RISE_M: f64 = 20.0;
+
+/// Walls a tower's sloped face stands on, in metres: about a storey. A glass
+/// pyramid standing on the ground has none.
+const GLASS_FACADE_WALL_M: f64 = 3.0;
+
+/// Whether a part's glass roof is a tower's tapering face, mapped as a roof:
+/// One World Trade Center's corners are glass parts whose 362 m `roof:height`
+/// slopes from 55 m of wall up to the crown. Storeys stand behind such a
+/// face, so the part is no hall, and its roof is a skin over them, not a
+/// solid wedge of glass (`GlassSkin`). Only a skillion or pyramidal face:
+/// a dome or a vault is a hall's roof however tall.
+fn is_sloped_glass_facade(tags: &HashMap<String, String>) -> bool {
+    let metres = |key: &str| {
+        tags.get(key)
+            .and_then(|v| v.trim_end_matches('m').trim().parse::<f64>().ok())
+            .filter(|m| m.is_finite())
+    };
+    let Some(rise) = metres("roof:height") else {
+        return false;
+    };
+    let walls = metres("height").map(|h| h - rise - metres("min_height").unwrap_or(0.0));
+    tags.contains_key("building:part")
+        && tags.get("roof:material").map(String::as_str) == Some("glass")
+        && tags.get("roof:shape").is_some_and(|shape| {
+            matches!(
+                parse_roof_type(shape),
+                RoofType::Skillion | RoofType::Pyramidal
+            )
+        })
+        && rise >= GLASS_FACADE_RISE_M
+        && walls.is_some_and(|w| w >= GLASS_FACADE_WALL_M)
 }
 
 /// The street-level shopfront or lobby: display glass from the pavement up
@@ -14250,6 +14297,12 @@ fn calculate_floor_levels(
     floor_levels
 }
 
+/// A mapped `roof:shape`, else the one the laser saw (see `survey::roofs`).
+fn read_roof_shape(tags: &HashMap<String, String>) -> Option<&String> {
+    tags.get("roof:shape")
+        .or_else(|| tags.get(crate::survey::roofs::SHAPE_HINT))
+}
+
 /// Calculates roof peak height for chimney placement
 /// Parses roof:shape tag into RoofType enum.
 ///
@@ -14723,6 +14776,15 @@ pub fn generate_buildings(
         floor_cycle,
         scale_factor,
     );
+    // A mobile home is drawn one storey, whatever height Overture guessed for it.
+    let mobile_home = super::mobile_homes::claims(&element.tags)
+        && min_level_offset == 0
+        && hole_points.is_empty();
+    let storeys = if mobile_home {
+        storeys.min(1.0)
+    } else {
+        storeys
+    };
     if storeys >= TALL_STOREYS {
         mark_tall(editor, &cached_floor_area);
     }
@@ -14785,6 +14847,22 @@ pub fn generate_buildings(
                 editor.mark_ground(crate::world_editor::GroundMark::House, x, z);
             }
         }
+    }
+
+    if mobile_home
+        && super::mobile_homes::generate(
+            editor,
+            element,
+            &cached_floor_area,
+            start_y_offset + abs_terrain_offset,
+            args,
+            super::mobile_homes::Surroundings {
+                road_mask: ctx.road_mask,
+                footprints: ctx.building_footprints,
+            },
+        )
+    {
+        return None;
     }
 
     // Street/neighbor classification: party walls, fronting streets, corner.
@@ -16517,6 +16595,14 @@ fn generate_building_roof(
         // A mansard keeps its eaves and dormers, as no slab roof can stand in for it.
         turned: outline_turned && style.roof_type != RoofType::Mansard,
         low_pitch: config.low_pitch_roof && !steep_gable,
+        // Not with interiors, whose glass is there to be seen through: a
+        // backing would close the view out of the storeys behind it.
+        glass_skin: (config.glass_backed() && is_sloped_glass_facade(&element.tags)).then(|| {
+            GlassSkin {
+                floor_cycle: config.floor_cycle.max(1),
+                floor_row_y: config.start_y_offset + config.grammar_anchor(),
+            }
+        }),
     };
 
     // Generate the roof using the pre-determined roof type from style
@@ -17205,7 +17291,7 @@ fn wall_storeys(
 /// `roof:height`, else the low pitch over the shorter half-span the generator draws.
 fn mapped_roof_rise_m(element: &ProcessedWay, height: f64, scale_factor: f64) -> f64 {
     let tags = &element.tags;
-    if tags.get("roof:shape").map(|s| s.trim()) == Some("flat") {
+    if read_roof_shape(tags).map(|s| s.trim()) == Some("flat") {
         return 0.0;
     }
     let tagged = tags
@@ -17661,6 +17747,20 @@ struct RoofTrim {
     turned: bool,
     /// A low 1:2 pitch in slabs whatever the span.
     low_pitch: bool,
+    /// A sloped glass facade (`is_sloped_glass_facade`): a skillion or
+    /// pyramidal roof is built as a skin of glass on a backing, on the walls'
+    /// storeys.
+    glass_skin: Option<GlassSkin>,
+}
+
+/// The storeys a sloped glass facade's backing marks: a spandrel on every
+/// floor row, as on the walls beneath it, so the floor lines step in with
+/// the taper.
+#[derive(Clone, Copy, Debug)]
+struct GlassSkin {
+    floor_cycle: i32,
+    /// A floor row, relative to the terrain like the roof heights.
+    floor_row_y: i32,
 }
 
 impl RoofConfig {
@@ -18028,6 +18128,10 @@ fn place_roof_blocks_with_stairs(
     stair_direction_fn: impl Fn(i32, i32, i32) -> BlockWithProperties,
     footprint: Option<&FnvHashSet<(i32, i32)>>,
 ) {
+    if let Some(skin) = config.trim.glass_skin {
+        place_glass_skin(editor, floor_area, roof_heights, config, skin);
+        return;
+    }
     // Use empty blacklist to allow overwriting wall/ceiling blocks
     let replace_any: &[Block] = &[];
 
@@ -18074,6 +18178,80 @@ fn place_roof_blocks_with_stairs(
                     Some(replace_any),
                 );
             }
+        }
+    }
+}
+
+/// A sloped glass facade over `floor_area`: glass where a cell faces the
+/// open air, the curtain wall's backing in the cell behind it (a spandrel on
+/// the floor rows), and nothing further in. Filled solid, a face hundreds of
+/// blocks tall turns into a block of clear glass the inner parts show through.
+///
+/// A cell faces the air from just above its lowest neighbour's roof (or from
+/// the roof's base, beside a cell outside the area) up to its own; the cells
+/// below that, down to where its neighbours' glass starts and at least one,
+/// stand behind glass.
+fn place_glass_skin(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    roof_heights: &FnvHashMap<(i32, i32), i32>,
+    config: &RoofConfig,
+    skin: GlassSkin,
+) {
+    let replace_any: &[Block] = &[];
+    let base = config.base_height;
+    let glass_from = |x: i32, z: i32| -> i32 {
+        let top = roof_heights[&(x, z)];
+        ROOF_SIDES
+            .iter()
+            .map(|&(dx, dz)| roof_heights.get(&(x + dx, z + dz)).map_or(base, |&h| h + 1))
+            .min()
+            .unwrap_or(base)
+            .clamp(base, top)
+    };
+    let starts: FnvHashMap<(i32, i32), i32> = floor_area
+        .iter()
+        .map(|&(x, z)| ((x, z), glass_from(x, z)))
+        .collect();
+    let backing = glass_backing(config.roof_block);
+    for &(x, z) in floor_area {
+        let top = roof_heights[&(x, z)];
+        let glass = starts[&(x, z)];
+        // Behind the glass of the neighbours its own glass stands above, and
+        // at least a block under its own: a cell no lower than its neighbours
+        // shows a single block of glass, with the open inside right under it.
+        let behind = ROOF_SIDES
+            .iter()
+            .filter_map(|&(dx, dz)| starts.get(&(x + dx, z + dz)).copied())
+            .min()
+            .unwrap_or(glass)
+            .min(glass - 1)
+            .max(base);
+        for y in behind..glass {
+            let row = (y - skin.floor_row_y).rem_euclid(skin.floor_cycle);
+            let block = if row == 0 {
+                backing.spandrel
+            } else {
+                backing.panel
+            };
+            editor.set_block_absolute(
+                block,
+                x,
+                y + config.abs_terrain_offset,
+                z,
+                None,
+                Some(replace_any),
+            );
+        }
+        for y in glass..=top {
+            editor.set_block_absolute(
+                config.roof_block,
+                x,
+                y + config.abs_terrain_offset,
+                z,
+                None,
+                Some(replace_any),
+            );
         }
     }
 }
@@ -20612,7 +20790,16 @@ fn generate_roof(
     }
 
     let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
-    let roof_direction = element.tags.get("roof:direction").map(|s| s.as_str());
+    // The ridge the laser saw, where none is mapped.
+    let roof_direction = element
+        .tags
+        .get("roof:direction")
+        .or_else(|| {
+            (roof_orientation.is_none() && !element.tags.contains_key("roof:shape"))
+                .then(|| element.tags.get(crate::survey::roofs::DIRECTION_HINT))
+                .flatten()
+        })
+        .map(|s| s.as_str());
     let ridge = ridge_frame(
         &element.nodes,
         config.width(),
@@ -24114,6 +24301,55 @@ mod style_tests {
             &tags(&[("roof:material", "glass"), ("roof:shape", "flat")]),
             "yes"
         ));
+        // One World Trade Center's corners: glass parts whose 362 m roof is the
+        // tower's tapering face, with storeys behind it.
+        let corner = [
+            ("building:part", "yes"),
+            ("building:material", "glass"),
+            ("roof:material", "glass"),
+            ("roof:shape", "skillion"),
+            ("roof:height", "362"),
+            ("height", "417"),
+        ];
+        assert!(is_sloped_glass_facade(&tags(&corner)));
+        assert!(!is_glass_hall(&tags(&corner), "yes"));
+        // A glass vault on a part, a few metres high, stays a hall.
+        let vault = [
+            ("building:part", "yes"),
+            ("roof:material", "glass"),
+            ("roof:shape", "round"),
+            ("roof:height", "6"),
+        ];
+        assert!(!is_sloped_glass_facade(&tags(&vault)));
+        assert!(is_glass_hall(&tags(&vault), "yes"));
+        // So does a whole building's: only a part is a tower's face.
+        let mut whole = corner.to_vec();
+        whole.retain(|&(k, _)| k != "building:part");
+        assert!(!is_sloped_glass_facade(&tags(&whole)));
+        // A tall glass dome or vault is a hall's roof, whatever its rise.
+        let dome = [
+            ("building:part", "yes"),
+            ("roof:material", "glass"),
+            ("roof:shape", "dome"),
+            ("roof:height", "24"),
+            ("height", "40"),
+        ];
+        assert!(!is_sloped_glass_facade(&tags(&dome)));
+        assert!(is_glass_hall(&tags(&dome), "yes"));
+        // A glass pyramid on the ground has no walls for storeys to stand in.
+        let pyramid = [
+            ("building:part", "yes"),
+            ("roof:material", "glass"),
+            ("roof:shape", "pyramidal"),
+            ("roof:height", "21.6"),
+            ("height", "21.6"),
+        ];
+        assert!(!is_sloped_glass_facade(&tags(&pyramid)));
+        assert!(is_glass_hall(&tags(&pyramid), "yes"));
+        // On a raised part, the walls are what is left above min_height.
+        let mut raised = corner.to_vec();
+        raised.push(("min_height", "414"));
+        assert!(!is_sloped_glass_facade(&tags(&raised)));
     }
 
     /// A glass curtain wall hangs on fins: the glass stands back a block and
@@ -26617,6 +26853,75 @@ mod facade_integration_tests {
                 crate::element_processing::subprocessor::interior::InteriorUseIndex::empty(),
         };
         generate_buildings(editor, way, args, None, None, &ctx, way.id);
+    }
+
+    /// The highest block of a house over cells x 10..=24, z 10..=20 with these
+    /// tags, at each of `cells`.
+    fn house_tops(tags: &[(&str, &str)], cells: &[(i32, i32)]) -> Vec<i32> {
+        use crate::element_processing::building_test_support::bitmap_with_rect;
+        let xz = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xz);
+        let way = rect_way(1, 10, 10, 24, 20, tags);
+        let footprints = bitmap_with_rect(&xz, 11, 11, 23, 19);
+        run_building(
+            &mut editor,
+            &way,
+            &CoordinateBitmap::new_empty(),
+            &footprints,
+        );
+        cells
+            .iter()
+            .map(|&(x, z)| editor.highest_block_between(x, z, 0, 400).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_measured_roof_takes_the_laser_shape_and_ridge() {
+        use crate::survey::roofs::{DIRECTION_HINT, SHAPE_HINT};
+        // Along the middle of the long side (z = 15) and across it (x = 17).
+        let cells = [(13, 15), (21, 15), (17, 12), (17, 18), (17, 15)];
+        // Its slope facing east: the ridge runs north-south across the long
+        // side, so the line x = 17 is level and z = 15 falls to the walls.
+        let t = house_tops(
+            &[
+                ("building", "house"),
+                (SHAPE_HINT, "gabled"),
+                (DIRECTION_HINT, "90"),
+            ],
+            &cells,
+        );
+        assert_eq!(t[2], t[3], "ridge along z: {t:?}");
+        assert_eq!(t[2], t[4], "ridge along z: {t:?}");
+        assert!(
+            t[0] < t[4] && t[1] < t[4],
+            "falls to the east and west walls: {t:?}"
+        );
+        // Facing south, the ridge runs along the long side.
+        let t = house_tops(
+            &[
+                ("building", "house"),
+                (SHAPE_HINT, "gabled"),
+                (DIRECTION_HINT, "180"),
+            ],
+            &cells,
+        );
+        assert_eq!(t[0], t[1], "ridge along x: {t:?}");
+        assert!(
+            t[2] < t[4] && t[3] < t[4],
+            "falls to the north and south walls: {t:?}"
+        );
+        // A flat roof the laser saw stays flat on a house.
+        let t = house_tops(&[("building", "house"), (SHAPE_HINT, "flat")], &cells);
+        assert!(t.iter().all(|&y| y == t[0]), "flat: {t:?}");
+        // A mapped shape and direction win over the laser's.
+        let mapped = [
+            ("building", "house"),
+            ("roof:shape", "gabled"),
+            ("roof:direction", "180"),
+        ];
+        let mut hinted = mapped.to_vec();
+        hinted.extend([(SHAPE_HINT, "flat"), (DIRECTION_HINT, "90")]);
+        assert_eq!(house_tops(&hinted, &cells), house_tops(&mapped, &cells));
     }
 
     /// A building over cells x 20..=50, z 20..=40, with `track` (if any) along z = 30 from
@@ -29236,6 +29541,96 @@ mod roof_geometry_tests {
         // Along the bearing it descends monotonically.
         let along: Vec<i32> = (0..20).map(|i| top(&editor, i, 19 - i)).collect();
         assert!(along.windows(2).all(|w| w[0] >= w[1]), "{along:?}");
+    }
+
+    /// A tall sloped glass face is a skin: glass facing the air, the curtain
+    /// wall's backing behind it (a spandrel on each floor row), and nothing
+    /// further in, where filled solid it would be a block of clear glass.
+    #[test]
+    fn a_sloped_glass_facade_is_a_skin_over_its_storeys() {
+        let xz = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xz);
+        let cells = rect_cells(10, 10);
+        let mut config = roof_config(&cells);
+        config.roof_block = CYAN_STAINED_GLASS;
+        config.peak_cap = Some(60);
+        config.trim.glass_skin = Some(GlassSkin {
+            floor_cycle: 4,
+            floor_row_y: config.base_height,
+        });
+        // Falling to the south (+z): the north row is the crown.
+        generate_skillion_roof(&mut editor, &cells, &config, Some("south"));
+        let at = |x: i32, y: i32, z: i32| editor.get_block_absolute(x, y, z);
+        let backing = glass_backing(CYAN_STAINED_GLASS);
+        // The south row faces the air from the base up: all glass.
+        let (south_top, mid_top) = (top(&editor, 5, 9), top(&editor, 5, 5));
+        assert!(mid_top - south_top > 10, "{south_top} {mid_top}");
+        for y in config.base_height..=south_top {
+            assert_eq!(at(5, y, 9), Some(CYAN_STAINED_GLASS), "south face at {y}");
+        }
+        // A row further in: glass above its southern neighbour's roof, the
+        // backing behind that neighbour's glass, empty further down.
+        let below = top(&editor, 5, 6);
+        assert_eq!(at(5, mid_top, 5), Some(CYAN_STAINED_GLASS));
+        assert_eq!(at(5, top(&editor, 5, 6) + 1, 5), Some(CYAN_STAINED_GLASS));
+        let behind: Vec<Option<Block>> = (top(&editor, 5, 7) + 1..=below)
+            .map(|y| at(5, y, 5))
+            .collect();
+        assert!(
+            behind
+                .iter()
+                .all(|b| *b == Some(backing.panel) || *b == Some(backing.spandrel)),
+            "{behind:?}"
+        );
+        // A spandrel on the floor rows of the backing.
+        let floor_y = (top(&editor, 5, 7) + 1..=below)
+            .find(|y| (y - config.base_height).rem_euclid(4) == 0)
+            .expect("a floor row behind the glass");
+        assert_eq!(at(5, floor_y, 5), Some(backing.spandrel));
+        assert_eq!(at(5, config.base_height + 1, 5), None, "open inside");
+        // Without the skin the same roof is solid glass.
+        let mut solid = test_editor(&xz);
+        config.trim.glass_skin = None;
+        generate_skillion_roof(&mut solid, &cells, &config, Some("south"));
+        assert_eq!(
+            solid.get_block_absolute(5, config.base_height + 1, 5),
+            Some(CYAN_STAINED_GLASS)
+        );
+    }
+
+    /// On a slope shallower than a block a cell, a cell's glass is a single
+    /// block: the backing still closes it, so the open inside never shows.
+    #[test]
+    fn a_shallow_glass_facade_has_no_holes() {
+        let xz = XZBBox::rect_from_xz_lengths(40.0, 40.0).unwrap();
+        let mut editor = test_editor(&xz);
+        let cells = rect_cells(20, 20);
+        let mut config = roof_config(&cells);
+        config.roof_block = CYAN_STAINED_GLASS;
+        config.peak_cap = Some(6);
+        config.trim.glass_skin = Some(GlassSkin {
+            floor_cycle: 4,
+            floor_row_y: config.base_height,
+        });
+        generate_skillion_roof(&mut editor, &cells, &config, Some("south"));
+        let mut open_below = 0;
+        for &(x, z) in &cells {
+            let top = top(&editor, x, z);
+            assert_eq!(
+                editor.get_block_absolute(x, top, z),
+                Some(CYAN_STAINED_GLASS)
+            );
+            if top > config.base_height {
+                assert!(
+                    editor.get_block_absolute(x, top - 1, z).is_some(),
+                    "open under the glass at {x},{z}"
+                );
+            }
+            if top - 2 > config.base_height && editor.get_block_absolute(x, top - 2, z).is_none() {
+                open_below += 1;
+            }
+        }
+        assert!(open_below > 0, "still a skin, not a solid wedge");
     }
 
     #[test]

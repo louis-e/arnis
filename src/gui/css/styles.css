@@ -208,6 +208,13 @@ a:hover {
   margin-top: 8px;
 }
 
+/* The size estimate after the selection line, quieter than the line itself */
+.bbox-size-estimate {
+  color: var(--ui-muted);
+  font-weight: normal;
+  white-space: nowrap;
+}
+
 .secret-parrot {
   height: 100px;
   width: auto;

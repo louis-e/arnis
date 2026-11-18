@@ -43,9 +43,10 @@ pub fn rotator_from_json(config: &serde_json::Value) -> Result<Box<dyn Operator>
         .map_err(|e| format!("Rotator config format error:\n{e}"))
 }
 
-/// Tag keys holding an absolute compass bearing, which must turn with the map.
-/// Excludes `direction`, already offset by models_3d, and `roof:orientation`.
-const BEARING_TAGS: [&str; 1] = ["roof:direction"];
+/// Tag keys holding an absolute compass bearing, which must turn with the map:
+/// the mapped roof direction and the one the laser saw. Excludes `direction`,
+/// already offset by models_3d, and `roof:orientation`.
+const BEARING_TAGS: [&str; 2] = ["roof:direction", crate::survey::roofs::DIRECTION_HINT];
 
 /// Parses a 16-point abbreviation, cardinal name or degrees into degrees from north.
 fn compass_bearing_degrees(value: &str) -> Option<f64> {
@@ -498,6 +499,7 @@ mod tests {
             garden: true,
             trees: false,
             heights: false,
+            roofs: false,
         };
         let mut ground = Ground::new_flat(0);
         ground.set_world_dims(w, h);
@@ -538,6 +540,10 @@ mod tests {
             let mut tags = HashMap::new();
             tags.insert("building".to_string(), "house".to_string());
             tags.insert("roof:direction".to_string(), dir.to_string());
+            tags.insert(
+                crate::survey::roofs::DIRECTION_HINT.to_string(),
+                dir.to_string(),
+            );
             tags.insert("roof:orientation".to_string(), "along".to_string());
             ProcessedElement::Way(ProcessedWay {
                 id: 1,
@@ -574,6 +580,14 @@ mod tests {
                 w.tags.get("roof:direction").map(String::as_str),
                 Some(expected),
                 "roof:direction {input:?} rotated by {angle}"
+            );
+            // The ridge the laser saw turns the same way.
+            assert_eq!(
+                w.tags
+                    .get(crate::survey::roofs::DIRECTION_HINT)
+                    .map(String::as_str),
+                Some(expected),
+                "measured roof direction {input:?} rotated by {angle}"
             );
             // Footprint-relative values must not be touched.
             assert_eq!(

@@ -216,7 +216,7 @@ pub fn prescan(
                 continue;
             }
             let tags = element.tags();
-            if !tags.contains_key("building") && !tags.contains_key("building:part") {
+            if !crate::models_3d::may_be_hidden(tags) {
                 continue;
             }
             let Some((cx, cz)) = anchor_xz(element) else {
@@ -955,6 +955,9 @@ fn apply_fit(v: [f32; 3], fit: &ModelFit) -> [f32; 3] {
 }
 
 fn anchor_xz(element: &ProcessedElement) -> Option<(i32, i32)> {
+    if let Some((anchor, _)) = crate::models_3d::whole_footprint(element.tags()) {
+        return Some(anchor);
+    }
     match element {
         ProcessedElement::Node(n) => Some((n.x, n.z)),
         ProcessedElement::Way(w) => centroid(w.nodes.iter().map(|n| (n.x, n.z))),
@@ -983,6 +986,16 @@ fn centroid<I: Iterator<Item = (i32, i32)>>(coords: I) -> Option<(i32, i32)> {
 }
 
 fn osm_bbox(element: &ProcessedElement) -> Option<Bbox> {
+    if let Some((_, [min_x, min_z, max_x, max_z])) =
+        crate::models_3d::whole_footprint(element.tags())
+    {
+        return Some(Bbox {
+            min_x,
+            min_z,
+            max_x,
+            max_z,
+        });
+    }
     let mut iter: Box<dyn Iterator<Item = (i32, i32)>> = match element {
         ProcessedElement::Node(n) => Box::new(std::iter::once((n.x, n.z))),
         ProcessedElement::Way(w) => Box::new(w.nodes.iter().map(|n| (n.x, n.z))),

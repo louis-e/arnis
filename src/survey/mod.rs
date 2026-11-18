@@ -39,6 +39,7 @@ pub mod netherlands;
 pub mod nrw;
 pub mod photo;
 pub mod place;
+pub mod roofs;
 pub mod source;
 pub mod switzerland;
 pub mod usa;
@@ -56,6 +57,7 @@ pub struct Features {
     pub garden: bool,
     pub trees: bool,
     pub heights: bool,
+    pub roofs: bool,
 }
 
 /// Margin around the area, in metres: components that cross the edge are judged
@@ -994,11 +996,13 @@ mod tests {
             garden: false,
             trees: false,
             heights: true,
+            roofs: false,
         };
         let all = Features {
             garden: true,
             trees: true,
             heights: true,
+            roofs: false,
         };
         assert_eq!(plan.need_mb(&root, heights), plan.download_mb);
         assert!(plan.need_mb(&root, all) > plan.download_mb);
