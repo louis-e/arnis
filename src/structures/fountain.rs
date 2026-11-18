@@ -471,6 +471,13 @@ pub fn node_columns(
     pick_node(tags, x, z, scale, room).map_or_else(Vec::new, |p| p.columns().collect())
 }
 
+/// How far into the tiles beside its own a fountain mapped as a point reaches, so each
+/// of them builds it and its sunk basin is not covered by their ground.
+pub fn node_spread(tags: &HashMap<String, String>, scale: f64) -> Option<i32> {
+    (tags.get("amenity").map(String::as_str) == Some("fountain"))
+        .then(|| node_reach_bound(tags, scale) + 1)
+}
+
 /// How far from where it stands a point fountain with these tags can reach at most.
 pub fn node_reach_bound(tags: &HashMap<String, String>, scale: f64) -> i32 {
     if is_splash_pad(tags) {
@@ -771,6 +778,14 @@ pub fn place_area(editor: &mut WorldEditor, tags: &HashMap<String, String>, cell
 /// Jets a block or two high standing in the paving, falling water with no source that
 /// at most dries up.
 fn jets_in_paving(editor: &mut WorldEditor, jets: &[(i32, i32)]) {
+    // Luanti and Hytale turn falling water into sources, which would flood the paving.
+    if matches!(
+        editor.format(),
+        crate::world_editor::WorldFormat::LuantiWorld
+            | crate::world_editor::WorldFormat::HytaleWorld
+    ) {
+        return;
+    }
     let jet = BlockWithProperties::new(
         WATER,
         Some(fastnbt::Value::Compound(HashMap::from([(

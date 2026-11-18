@@ -589,6 +589,28 @@ fn process_element(
             }
         }
         ProcessedElement::Node(node) => {
+            // A fountain is handed to the tiles its basin reaches; outside its own only the basin is built.
+            if !editor.owns(node.x, node.z)
+                && crate::structures::fountain::node_spread(&node.tags, args.scale).is_some()
+            {
+                // Only if its own tile reaches the amenity branch below with it too.
+                let claimed_before = node.tags.contains_key("door")
+                    || node.tags.contains_key("entrance")
+                    || node.tags.get("natural").map(String::as_str) == Some("tree")
+                    || attractions::claims(&node.tags)
+                    || man_made::is_summit_cross(&node.tags);
+                if !claimed_before {
+                    amenities::generate_amenities(
+                        editor,
+                        element,
+                        args,
+                        flood_fill_cache,
+                        road_mask,
+                        bridge_surface,
+                    );
+                }
+                return;
+            }
             if signage {
                 signage::generate_node_signage(editor, node, building_footprints, road_mask);
             }
