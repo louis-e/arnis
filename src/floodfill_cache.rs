@@ -183,6 +183,35 @@ impl CoordinateBitmap {
         false
     }
 
+    /// The cells of row `z` from `x0` along x, `n` of them (at most 32), as bits from the
+    /// lowest up; a cell outside the bitmap reads as unset, as `contains` has it.
+    pub fn row_bits(&self, x0: i32, z: i32, n: u32) -> u32 {
+        debug_assert!(n <= 32);
+        let local_z = i64::from(z) - i64::from(self.min_z);
+        if n == 0 || local_z < 0 || local_z >= self.height as i64 {
+            return 0;
+        }
+        let first = i64::from(x0) - i64::from(self.min_x);
+        let (a, b) = (
+            first.max(0),
+            (first + i64::from(n) - 1).min(self.width as i64 - 1),
+        );
+        if a > b {
+            return 0;
+        }
+        let start = local_z as usize * self.width + a as usize;
+        let byte = start / 8;
+        let mut word = 0u64;
+        for (k, &v) in self.bits[byte..(byte + 5).min(self.bits.len())]
+            .iter()
+            .enumerate()
+        {
+            word |= u64::from(v) << (8 * k);
+        }
+        let run = (word >> (start % 8)) & ((1u64 << ((b - a + 1) as u32)) - 1);
+        (run << ((a - first) as u32)) as u32
+    }
+
     /// Marks every coordinate `other` marks. Both cover the same bounds, or either is empty.
     pub fn union_with(&mut self, other: &CoordinateBitmap) {
         if other.is_empty() {
@@ -682,7 +711,7 @@ impl FloodFillCache {
 
     /// A registered way's fill for a pre-pass: shared if a reader already made it,
     /// otherwise computed without being kept.
-    fn transient_fill(&self, way_id: u64) -> Option<FloodFillResult> {
+    pub(crate) fn transient_fill(&self, way_id: u64) -> Option<FloodFillResult> {
         let way = self.way_cache.get(&way_id)?;
         if let CachedFill::Ready(fill) = &*way.fill.lock().unwrap_or_else(|p| p.into_inner()) {
             return Some(Arc::clone(fill));
@@ -1491,6 +1520,7 @@ enum KeptWater {
 
 fn kept_water(
     tags: &std::collections::HashMap<String, String>,
+    scale: f64,
     channel_width_cap: Option<i32>,
 ) -> Option<KeptWater> {
     use crate::element_processing::waterways;
@@ -1511,7 +1541,7 @@ fn kept_water(
     let kind = tags.get("waterway")?;
     (waterways::is_channel_waterway(kind) && !waterways::is_underground_waterway(tags)).then(|| {
         // As `create_water_channel` draws it around each point of the line.
-        let width = waterways::capped_waterway_width(kind, tags, channel_width_cap);
+        let width = waterways::capped_waterway_width(kind, tags, scale, channel_width_cap);
         KeptWater::Channel(width / 2 + 1)
     })
 }
@@ -1524,6 +1554,7 @@ fn kept_water(
 pub fn collect_tree_keep_clear(
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
+    scale: f64,
     channel_width_cap: Option<i32>,
     margin: i32,
 ) -> Option<CoordinateBitmap> {
@@ -1537,7 +1568,7 @@ pub fn collect_tree_keep_clear(
     };
     let point_fountain = crate::structures::fountain::reach(0) + margin;
     for element in elements {
-        let Some(kind) = kept_water(element.tags(), channel_width_cap) else {
+        let Some(kind) = kept_water(element.tags(), scale, channel_width_cap) else {
             continue;
         };
         let fountain = matches!(kind, KeptWater::Fountain);
@@ -1711,6 +1742,31 @@ mod tests {
     use super::*;
     use crate::osm_parser::ProcessedNode;
     use std::collections::HashMap;
+
+    /// A row read at once gives what `contains` gives cell by cell, past the edges too.
+    #[test]
+    fn row_bits_read_as_contains_does() {
+        let bbox = XZBBox::rect_from_min_max(-13, -5, 57, 20).unwrap();
+        let mut bitmap = CoordinateBitmap::new(&bbox);
+        for z in -5..=20i32 {
+            for x in -13..=57 {
+                if (x * 7 + z * 13).rem_euclid(5) == 0 || x == -13 || x == 57 {
+                    bitmap.set(x, z);
+                }
+            }
+        }
+        for z in -7..=22 {
+            for x0 in -50..=60 {
+                for n in [0, 1, 7, 22, 32] {
+                    let want = (0..n).fold(0u32, |w, i| {
+                        w | (u32::from(bitmap.contains(x0 + i as i32, z)) << i)
+                    });
+                    assert_eq!(bitmap.row_bits(x0, z, n), want, "x0={x0} z={z} n={n}");
+                }
+            }
+        }
+        assert_eq!(CoordinateBitmap::new_empty().row_bits(0, 0, 32), 0);
+    }
 
     #[test]
     fn coarse_mask_marks_cells_and_finds_them_nearby() {
@@ -2175,7 +2231,7 @@ mod tests {
             }),
             ProcessedElement::Node(fountain),
         ];
-        let keep = collect_tree_keep_clear(&elements, &xzbbox, None, 1).unwrap();
+        let keep = collect_tree_keep_clear(&elements, &xzbbox, 1.0, None, 1).unwrap();
         assert!(keep.contains(15, 15) && !keep.contains(7, 15), "the pool");
         // A stream is drawn 3 wide and a block either side; one more is the margin.
         assert!(keep.contains(53, 50) && keep.contains(47, 50));
@@ -2189,7 +2245,7 @@ mod tests {
         let r = crate::structures::fountain::reach(0);
         assert!(r > 0);
         assert!(keep.contains(100 + r + 1, 160) && !keep.contains(100 + r + 2, 160));
-        assert!(collect_tree_keep_clear(&elements[3..4], &xzbbox, None, 1).is_none());
+        assert!(collect_tree_keep_clear(&elements[3..4], &xzbbox, 1.0, None, 1).is_none());
     }
 
     #[test]

@@ -20,9 +20,11 @@ pub struct ChannelBed<'a> {
 
 /// How line waterways are drawn. Their drawing and every mask of their water take the same
 /// one, so the water a mask marks is the water drawn.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct ChannelShape<'a> {
-    /// Narrows every channel (`--water-detail scaled` on small maps).
+    /// Blocks per metre (`--scale`): widths are lengths.
+    pub scale: f64,
+    /// Narrows every channel (`--water-detail scaled` on small maps), in blocks.
     pub width_cap: Option<i32>,
     /// With a water option on, the road and path surfaces at grade a channel is piped under:
     /// nothing is drawn around a centreline cell on one, so a path along a stream leaves no
@@ -30,10 +32,20 @@ pub struct ChannelShape<'a> {
     pub roads_at_grade: Option<&'a CoordinateBitmap>,
 }
 
+impl Default for ChannelShape<'_> {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            width_cap: None,
+            roads_at_grade: None,
+        }
+    }
+}
+
 impl ChannelShape<'_> {
     /// Width of a channel of this type and tags, in blocks.
     pub fn width(&self, waterway_type: &str, tags: &HashMap<String, String>) -> i32 {
-        capped_waterway_width(waterway_type, tags, self.width_cap)
+        capped_waterway_width(waterway_type, tags, self.scale, self.width_cap)
     }
 }
 
@@ -151,19 +163,17 @@ pub fn get_waterway_width(waterway_type: &str) -> i32 {
 /// width squared per centreline point, so an unbounded tag value hangs generation.
 pub const MAX_WATERWAY_WIDTH: i32 = 128;
 
-/// Channel width in blocks, from `width=*` when it parses and the type default otherwise.
-/// The tag reads as a length (`1,5`, `2 m`, `6 ft`); of a list such as `3;4` the first
-/// value counts. Any positive width draws at least one block.
-pub fn waterway_width(waterway_type: &str, tags: &HashMap<String, String>) -> i32 {
-    let tagged = tags
+/// Channel width in blocks at `scale` blocks a metre, from `width=*` when it parses and the
+/// type default (metres) otherwise. The tag reads as a length (`1,5`, `2 m`, `6 ft`); of a
+/// list such as `3;4` the first value counts. Any positive width draws at least one block.
+pub fn waterway_width(waterway_type: &str, tags: &HashMap<String, String>, scale: f64) -> i32 {
+    let metres = tags
         .get("width")
         .and_then(|s| s.split(';').next())
         .and_then(parse_length_m)
-        .filter(|w| w.is_finite() && *w > 0.0);
-    match tagged {
-        Some(w) => (w.round() as i64).clamp(1, i64::from(MAX_WATERWAY_WIDTH)) as i32,
-        None => get_waterway_width(waterway_type),
-    }
+        .filter(|w| w.is_finite() && *w > 0.0)
+        .unwrap_or_else(|| f64::from(get_waterway_width(waterway_type)));
+    ((metres * scale).round() as i64).clamp(1, i64::from(MAX_WATERWAY_WIDTH)) as i32
 }
 
 /// Widest a stream or ditch is drawn under the small-map cap, so it still reads apart from
@@ -175,9 +185,10 @@ const SMALL_CHANNEL_CAP: i32 = 3;
 pub fn capped_waterway_width(
     waterway_type: &str,
     tags: &HashMap<String, String>,
+    scale: f64,
     cap: Option<i32>,
 ) -> i32 {
-    let width = waterway_width(waterway_type, tags);
+    let width = waterway_width(waterway_type, tags, scale);
     match cap {
         Some(cap) if get_waterway_width(waterway_type) <= 3 => {
             width.min(cap).min(SMALL_CHANNEL_CAP)
@@ -446,8 +457,8 @@ mod waterway_profile_tests {
         };
         // The road is at grade, so the channel is piped under it.
         let shape = ChannelShape {
-            width_cap: None,
             roads_at_grade: Some(&road_mask),
+            ..Default::default()
         };
         generate_waterways(&mut editor, &stream(FIRST_Z, LAST_Z), shape, &bed);
 
@@ -549,13 +560,54 @@ mod waterway_profile_tests {
         assert_eq!(total, 31 + 30);
     }
 
+    /// Widths are lengths, tagged or the type's own, so they follow the scale; the drawing
+    /// and the masks take them from the same shape.
+    #[test]
+    fn widths_follow_the_scale() {
+        let tags = |w: Option<&str>| -> HashMap<String, String> {
+            w.map(|w| HashMap::from([("width".to_string(), w.to_string())]))
+                .unwrap_or_default()
+        };
+        for (kind, width, scale, want) in [
+            ("ditch", None, 1.0, 1),
+            ("ditch", None, 2.0, 2),
+            ("stream", None, 2.0, 6),
+            ("stream", None, 0.5, 2),
+            ("river", None, 0.25, 2),
+            ("ditch", Some("1.1"), 2.0, 2),
+            ("ditch", Some("2.8"), 2.0, 6),
+            ("stream", Some("0.3"), 0.5, 1),
+            ("river", Some("100"), 2.0, MAX_WATERWAY_WIDTH),
+        ] {
+            assert_eq!(
+                waterway_width(kind, &tags(width), scale),
+                want,
+                "{kind} {width:?} at {scale}"
+            );
+            let shape = ChannelShape {
+                scale,
+                ..Default::default()
+            };
+            assert_eq!(shape.width(kind, &tags(width)), want);
+        }
+        // At full scale every width is as it was.
+        for kind in [
+            "river", "canal", "stream", "brook", "ditch", "drain", "fairway",
+        ] {
+            assert_eq!(
+                waterway_width(kind, &tags(None), 1.0),
+                get_waterway_width(kind)
+            );
+        }
+    }
+
     /// Width tags read as lengths; of a list the first value counts, and any positive width
     /// draws at least one block.
     #[test]
     fn a_width_tag_reads_as_a_length() {
         let width = |tag: &str| {
             let tags = HashMap::from([("width".to_string(), tag.to_string())]);
-            waterway_width("stream", &tags)
+            waterway_width("stream", &tags, 1.0)
         };
         for (tag, want) in [
             ("2", 2),
@@ -608,7 +660,7 @@ mod waterway_profile_tests {
             ("ditch", Some("4"), 3),
         ] {
             assert_eq!(
-                capped_waterway_width(kind, &tags(width), cap),
+                capped_waterway_width(kind, &tags(width), 1.0, cap),
                 want,
                 "{kind} {width:?}"
             );
@@ -622,7 +674,7 @@ mod waterway_profile_tests {
             .insert("waterway".to_string(), "river".to_string());
         let shape = ChannelShape {
             width_cap: cap,
-            roads_at_grade: None,
+            ..Default::default()
         };
         generate_waterways(&mut editor, &river, shape, &no_bed());
         assert_eq!(wet_columns_in_row(&editor, 30), vec![30, 31, 32, 33, 34]);
@@ -654,7 +706,7 @@ mod waterway_profile_tests {
                 .filter(|&(x, z)| !water_ys(&editor, x, z).is_empty())
                 .collect();
             let mut stamped = std::collections::BTreeSet::new();
-            let w = capped_waterway_width(kind, &way.tags, None);
+            let w = capped_waterway_width(kind, &way.tags, 1.0, None);
             channel_cells(
                 &way.nodes,
                 w,
@@ -685,8 +737,8 @@ mod waterway_profile_tests {
             roads.set(CENTER_X, z);
         }
         let shape = ChannelShape {
-            width_cap: None,
             roads_at_grade: Some(&roads),
+            ..Default::default()
         };
         let way = stream(FIRST_Z, LAST_Z);
         let mut editor = editor_over_slope(&bbox, 8.0, 0.0);

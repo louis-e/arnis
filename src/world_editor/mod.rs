@@ -237,19 +237,26 @@ pub enum GroundMark {
     Dwelling,
     /// Footprints of buildings over four storeys, near which open ground stays paved.
     Tall,
+    /// Footprints of dwellings mapped as houses, whose gardens reach into school and
+    /// hospital grounds as well: a caretaker's house, a rectory, a farmhouse.
+    House,
 }
 
 impl GroundMark {
-    const COUNT: usize = 4;
+    const COUNT: usize = 5;
 }
 
 /// What the gardens read besides the marks, built once from the element list before
 /// anything is placed and shared with the tile editors.
 pub struct GardenLand {
-    /// Commercial and retail land, whose open ground stays paved.
-    pub commercial: crate::floodfill_cache::CoarseMask,
-    /// Streets and car parks, which keep a few metres of paving beside them; footways,
-    /// paths and driveways keep only a step's width (the sealed-surface mask).
+    /// Land whose open ground stays paved whatever stands near it: commercial and retail
+    /// land, and the grounds of schools, hospitals and town halls.
+    pub grounds: crate::floodfill_cache::CoarseMask,
+    /// Residential land, where a plain building of any size counts as a home.
+    pub residential: crate::floodfill_cache::CoarseMask,
+    /// Streets, pedestrian streets, squares and car parks, which keep a few metres of
+    /// paving beside them; footways, paths and driveways keep only a step's width (the
+    /// sealed-surface mask).
     pub streets: crate::floodfill_cache::CoordinateBitmap,
 }
 
@@ -422,6 +429,9 @@ pub struct WorldEditor<'a> {
     frame_cells: FnvHashSet<(i32, i32, i32)>,
     /// Trunk slots a schematic tree already stands in.
     tree_slots: FnvHashSet<(i32, i32)>,
+    /// Door nodes on an outline whose walls stepped in under the eave: the
+    /// building set their door on the stepped wall, so none stands in the strip.
+    stepped_doors: FnvHashSet<(i32, i32)>,
     /// Set for a One World run: merge into the world's existing regions.
     merge_into_existing: Option<crate::world_utils::WorldLayout>,
     /// A piece of a job builds past its own area and writes only inside these block bounds.
@@ -505,6 +515,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -592,6 +603,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -679,6 +691,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -777,6 +790,11 @@ impl<'a> WorldEditor<'a> {
     /// Sets the sealed-surface mask (shared across the main and tile editors).
     pub fn set_sealed_surface(&mut self, mask: Arc<crate::floodfill_cache::SealedSurfaceBitmap>) {
         self.sealed_surface = Some(mask);
+    }
+
+    /// The sealed-surface mask, while vegetation is placed.
+    pub fn sealed_surface(&self) -> Option<&crate::floodfill_cache::SealedSurfaceBitmap> {
+        self.sealed_surface.as_deref()
     }
 
     /// Sets the carriageway mask (shared across the main and tile editors).
@@ -1399,6 +1417,16 @@ impl<'a> WorldEditor<'a> {
     /// Claims the trunk slot (x, z); false when a tree already stands in it.
     pub fn claim_tree_slot(&mut self, x: i32, z: i32) -> bool {
         self.tree_slots.insert((x, z))
+    }
+
+    /// Marks the door node at (x, z) as moved onto a stepped wall.
+    pub fn step_door_in(&mut self, x: i32, z: i32) {
+        self.stepped_doors.insert((x, z));
+    }
+
+    /// Whether the door node at (x, z) has its door on a stepped wall.
+    pub fn door_stepped_in(&self, x: i32, z: i32) -> bool {
+        self.stepped_doors.contains(&(x, z))
     }
 
     /// Strict bounds of a tile editor (inclusive), used by placements that must run in

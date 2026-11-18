@@ -13,6 +13,7 @@ pub mod bridge_towers;
 pub mod bridges;
 pub(crate) mod building_construction;
 pub mod building_facade;
+pub(crate) mod building_inset;
 #[cfg(test)]
 pub mod building_test_support;
 pub mod buildings;

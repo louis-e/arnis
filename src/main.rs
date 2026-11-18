@@ -1072,6 +1072,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     ground.apply_osm_water_override(
         &parsed_elements,
         &xzbbox,
+        args.scale,
         args.water.water_detail.channel_width_cap(args.scale),
     );
     // Before the land override, which would give them land to stand on.

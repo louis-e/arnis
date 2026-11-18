@@ -1857,6 +1857,27 @@ impl GridSums {
         Self { side, sums }
     }
 
+    /// The grid of `side` from (`x0`, `z0`) up as `mask` marks it, read a row at a time;
+    /// nothing is marked without a mask.
+    fn of_mask(
+        side: usize,
+        x0: i32,
+        z0: i32,
+        mask: Option<&crate::floodfill_cache::CoordinateBitmap>,
+    ) -> Self {
+        let words = side.div_ceil(32);
+        let mut rows = vec![0u32; side * words];
+        if let Some(mask) = mask {
+            for (dz, row) in rows.chunks_mut(words).enumerate() {
+                for (k, word) in row.iter_mut().enumerate() {
+                    let n = (side - 32 * k).min(32) as u32;
+                    *word = mask.row_bits(x0 + 32 * k as i32, z0 + dz as i32, n);
+                }
+            }
+        }
+        Self::new(side, |x, z| (rows[z * words + x / 32] >> (x % 32)) & 1 != 0)
+    }
+
     /// Whether any cell of the inclusive square of `r` around (x, z) is set.
     fn any_around(&self, x: usize, z: usize, r: usize) -> bool {
         let w = self.side + 1;
@@ -1878,54 +1899,56 @@ fn garden_columns(
     use crate::world_editor::GroundMark;
     let dwellings = editor.ground_marks(GroundMark::Dwelling)?;
     let tall = editor.ground_marks(GroundMark::Tall);
+    let houses = editor.ground_marks(GroundMark::House);
     let land = editor.garden_land();
     let margin = reach.street.max(reach.path).max(reach.wall);
     let side = (16 + 2 * margin) as usize;
     let (x0, z0) = (chunk_x << 4, chunk_z << 4);
-    let at = |dx: usize, dz: usize| (x0 - margin + dx as i32, z0 - margin + dz as i32);
-    // Without the shared street mask (a test editor) all paving keeps the street's margin.
-    let streets = GridSums::new(side, |dx, dz| {
-        let (x, z) = at(dx, dz);
-        match land {
-            Some(land) => land.streets.contains(x, z),
-            None => editor.surface_is_sealed(x, z),
-        }
-    });
-    let sealed = GridSums::new(side, |dx, dz| {
-        let (x, z) = at(dx, dz);
-        editor.surface_is_sealed(x, z)
-    });
-    let built = GridSums::new(side, |dx, dz| {
-        let (x, z) = at(dx, dz);
-        footprints.contains(x, z)
-    });
-    let mut out = Box::new([false; 256]);
-    let mut any = false;
-    for cz in (0..16).step_by(4) {
-        for cx in (0..16).step_by(4) {
+    // The chunk's 4 x 4 cells near a low dwelling and off tall buildings and paved grounds,
+    // found before the masks round the chunk are read: most chunks have none.
+    let open: Vec<(i32, i32)> = (0..16)
+        .step_by(4)
+        .flat_map(|cz| (0..16).step_by(4).map(move |cx| (cx, cz)))
+        .filter(|&(cx, cz)| {
             let (x, z) = (x0 + cx, z0 + cz);
             let wx = seam_window(CoarseMask::cell_index(x), reach.cells);
             let wz = seam_window(CoarseMask::cell_index(z), reach.cells);
-            if !dwellings.any_in(wx, wz)
-                || tall.is_some_and(|m| m.any_in(wx, wz))
-                || land.is_some_and(|l| l.commercial.contains(x, z))
-            {
-                continue;
-            }
-            for lz in cz..cz + 4 {
-                for lx in cx..cx + 4 {
-                    let (gx, gz) = ((lx + margin) as usize, (lz + margin) as usize);
-                    if built.any_around(gx, gz, 0) {
-                        continue;
-                    }
-                    let paved_near = streets.any_around(gx, gz, reach.street as usize)
-                        || sealed.any_around(gx, gz, reach.path as usize);
-                    let patio = built.any_around(gx, gz, reach.wall as usize)
-                        && ground_noise(x0 + lx, z0 + lz, 9, SALT_PATIO) < 0.5;
-                    if !paved_near && !patio {
-                        out[(lz * 16 + lx) as usize] = true;
-                        any = true;
-                    }
+            // School and hospital grounds stay paved but round a house mapped there.
+            dwellings.any_in(wx, wz)
+                && !tall.is_some_and(|m| m.any_in(wx, wz))
+                && !(land.is_some_and(|l| l.grounds.contains(x, z))
+                    && !houses.is_some_and(|m| m.any_in(wx, wz)))
+        })
+        .collect();
+    if open.is_empty() {
+        return None;
+    }
+    let (gx0, gz0) = (x0 - margin, z0 - margin);
+    // Without the shared street mask (a test editor) all paving keeps the street's margin.
+    let streets = GridSums::of_mask(
+        side,
+        gx0,
+        gz0,
+        land.map_or(editor.sealed_surface(), |land| Some(&land.streets)),
+    );
+    let sealed = GridSums::of_mask(side, gx0, gz0, editor.sealed_surface());
+    let built = GridSums::of_mask(side, gx0, gz0, Some(footprints));
+    let mut out = Box::new([false; 256]);
+    let mut any = false;
+    for (cx, cz) in open {
+        for lz in cz..cz + 4 {
+            for lx in cx..cx + 4 {
+                let (gx, gz) = ((lx + margin) as usize, (lz + margin) as usize);
+                if built.any_around(gx, gz, 0) {
+                    continue;
+                }
+                let paved_near = streets.any_around(gx, gz, reach.street as usize)
+                    || sealed.any_around(gx, gz, reach.path as usize);
+                let patio = built.any_around(gx, gz, reach.wall as usize)
+                    && ground_noise(x0 + lx, z0 + lz, 9, SALT_PATIO) < 0.5;
+                if !paved_near && !patio {
+                    out[(lz * 16 + lx) as usize] = true;
+                    any = true;
                 }
             }
         }
@@ -2250,8 +2273,11 @@ mod tests {
         for &(x, z) in streets {
             street_mask.set(x, z);
         }
+        let (grounds, residential) =
+            crate::element_processing::landuse::garden_areas(elements, bbox);
         editor.set_garden_land(std::sync::Arc::new(crate::world_editor::GardenLand {
-            commercial: crate::element_processing::landuse::commercial_land(elements, bbox),
+            grounds,
+            residential,
             streets: street_mask,
         }));
     }
@@ -2346,6 +2372,49 @@ mod tests {
         }
         let g = garden_columns(&editor, &footprints, reach, 0, 0).expect("a garden");
         assert!(!g[14 * 16 + 4] && g[14 * 16 + 9]);
+    }
+
+    /// School grounds stay paved round a dwelling, but a house mapped there, a
+    /// caretaker's or a rectory, keeps its garden; ground away from it stays paved.
+    #[test]
+    fn a_house_in_school_grounds_keeps_its_garden() {
+        use crate::osm_parser::ProcessedElement;
+        use crate::world_editor::GroundMark;
+        let bbox = XZBBox::rect_from_min_max(0, 0, 127, 127).unwrap();
+        let mut footprints = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
+        let school = [ProcessedElement::Way(landuse_way(
+            1,
+            "education",
+            (0, 0),
+            (127, 127),
+        ))];
+        let reach = GardenReach::at(1.0);
+        let garden = |house: bool, footprints: &crate::floodfill_cache::CoordinateBitmap| {
+            let mut editor = garden_editor(&bbox, &[]);
+            with_garden_land(&mut editor, &bbox, &school, &[]);
+            for x in 4..12 {
+                for z in 6..12 {
+                    editor.mark_ground(GroundMark::Dwelling, x, z);
+                    if house {
+                        editor.mark_ground(GroundMark::House, x, z);
+                    }
+                }
+            }
+            let near = garden_columns(&editor, footprints, reach, 0, 0);
+            let far = garden_columns(&editor, footprints, reach, 4, 4);
+            (near, far)
+        };
+        for x in 4..12 {
+            for z in 6..12 {
+                footprints.set(x, z);
+            }
+        }
+        let (near, _) = garden(false, &footprints);
+        assert!(near.is_none(), "a plain dwelling's grounds stay paved");
+        let (near, far) = garden(true, &footprints);
+        let near = near.expect("the house keeps its garden");
+        assert!(near[14 * 16 + 8], "behind the house");
+        assert!(far.is_none(), "school ground away from it stays paved");
     }
 
     /// The reaches are lengths, so they follow the scale at any scale, and the dwelling

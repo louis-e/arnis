@@ -62,12 +62,47 @@ const IGNORED_PREFIXES: &[&str] = &[
     "check_date:",
 ];
 
+/// The prefix of a Flemish GRB building (`Gbg/`) or annex (`Gba/`) in a
+/// `source:geometry:ref`: an outline surveyed at its walls.
+pub(crate) fn grb_prefix(value: &str) -> Option<&'static str> {
+    ["Gbg/", "Gba/"]
+        .into_iter()
+        .find(|p| value.trim_start().starts_with(p))
+}
+
 fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
     // start_date is otherwise filtered, but on buildings the construction year picks the facade style.
     let keep_start_date = tags.contains_key("building") || tags.contains_key("building:part");
     tags.retain(|k, v| {
         if k == "start_date" {
             return keep_start_date;
+        }
+        // A building's outline source tells a surveyed wall line (a cadastre,
+        // the Dutch BAG) from a roof traced from the air.
+        if keep_start_date
+            && matches!(
+                k.as_str(),
+                "source" | "source:geometry" | "source:outline" | "ref:bag"
+            )
+        {
+            return true;
+        }
+        // So does a Czech RUIAN or Norwegian cadastre building number, of
+        // which only the key is read.
+        if keep_start_date && matches!(k.as_str(), "ref:ruian:building" | "ref:bygningsnr") {
+            v.clear();
+            return true;
+        }
+        // And a Flemish GRB survey object (`Gbg/`, `Gba/`), of which only
+        // that prefix is read.
+        if keep_start_date && k == "source:geometry:ref" {
+            return match grb_prefix(v) {
+                Some(prefix) => {
+                    *v = prefix.to_string();
+                    true
+                }
+                None => false,
+            };
         }
         // The house number feeds the door plate; the rest of addr:* stays out.
         if k == "addr:housenumber" {
@@ -1103,7 +1138,7 @@ pub fn parse_osm_data(
         &mut part_groups,
         &mut housing_parts,
     );
-    inherit_masonry_facade_tags(&mut data.ways, &data.relations, &part_groups);
+    inherit_facade_tags(&mut data.ways, &data.relations, &part_groups);
 
     let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
         FnvHashMap::with_capacity_and_hasher(data.nodes.len(), Default::default());
@@ -1671,8 +1706,9 @@ pub(crate) fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
 /// its building: the mapper described the brick, stone or render of the whole
 /// building once, on its outline or relation, and the parts are that
 /// building. Glass, metal and the like stay with the outline, where the
-/// group's style hint already carries them.
-fn inherit_masonry_facade_tags(
+/// group's style hint already carries them; a glass building's colour, its
+/// tint, still reaches the parts mapped as glass that name none.
+fn inherit_facade_tags(
     ways: &mut [OsmElement],
     relations: &[OsmElement],
     part_groups: &PartGroups,
@@ -1711,6 +1747,21 @@ fn inherit_masonry_facade_tags(
             .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
             .collect()
     };
+    const COLOUR_KEYS: [&str; 2] = ["building:colour", "colour"];
+    let material_of = |tags: &HashMap<String, String>| {
+        tags.get("building:material")
+            .or_else(|| tags.get("building:facade:material"))
+            .or_else(|| tags.get("facade:material"))
+            .map(|m| norm_tag(m))
+    };
+    let glass = |m: Option<&str>| matches!(m, Some("glass" | "mirror"));
+    let tint_of = |tags: &HashMap<String, String>| -> Option<Vec<(String, String)>> {
+        let tint: Vec<(String, String)> = COLOUR_KEYS
+            .iter()
+            .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
+            .collect();
+        (glass(material_of(tags).as_deref()) && !tint.is_empty()).then_some(tint)
+    };
     if part_groups.is_empty() {
         return;
     }
@@ -1721,6 +1772,7 @@ fn inherit_masonry_facade_tags(
     // Facade of each group's building, keyed like the groups: an outline way
     // by its id, a building relation by its salted id.
     let mut facade: HashMap<u64, Vec<(String, String)>> = HashMap::new();
+    let mut tint: HashMap<u64, Vec<(String, String)>> = HashMap::new();
     let mut relation_outlines: HashMap<u64, u64> = HashMap::new();
     for rel in relations {
         let Some(tags) = &rel.tags else { continue };
@@ -1732,6 +1784,9 @@ fn inherit_masonry_facade_tags(
             facade.insert(key, facade_of(tags));
             continue;
         }
+        if let Some(t) = tint_of(tags) {
+            tint.insert(key, t);
+        }
         for m in &rel.members {
             let role = m.role.trim();
             if m.r#type == "way"
@@ -1742,30 +1797,41 @@ fn inherit_masonry_facade_tags(
         }
     }
     for w in ways.iter() {
-        let Some(tags) = w.tags.as_ref().filter(|t| masonry(t)) else {
+        let Some(tags) = w.tags.as_ref() else {
             continue;
         };
-        if groups.contains(&w.id) {
-            facade.insert(w.id, facade_of(tags));
+        let key = if groups.contains(&w.id) {
+            w.id
         } else if let Some(&key) = relation_outlines.get(&w.id) {
+            key
+        } else {
+            continue;
+        };
+        if masonry(tags) {
             facade.entry(key).or_insert_with(|| facade_of(tags));
+        } else if let Some(t) = tint_of(tags) {
+            tint.entry(key).or_insert(t);
         }
     }
-    if facade.is_empty() {
+    if facade.is_empty() && tint.is_empty() {
         return;
     }
     for w in ways.iter_mut() {
-        let Some(inherited) = part_groups
-            .get(&w.id)
-            .and_then(|&seed| facade.get(&seed_without_hint(seed)))
-        else {
+        let Some(group) = part_groups.get(&w.id).map(|&seed| seed_without_hint(seed)) else {
             continue;
         };
         let tags = w.tags.get_or_insert_with(HashMap::new);
-        if FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
-            continue;
+        if let Some(inherited) = facade.get(&group) {
+            if !FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
+                tags.extend(inherited.iter().cloned());
+            }
+        } else if let Some(inherited) = tint.get(&group) {
+            if !COLOUR_KEYS.iter().any(|k| tags.contains_key(*k))
+                && glass(material_of(tags).as_deref())
+            {
+                tags.extend(inherited.iter().cloned());
+            }
         }
-        tags.extend(inherited.iter().cloned());
     }
 }
 
@@ -3417,7 +3483,7 @@ mod outline_suppression_tests {
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
         let mut groups = PartGroups::new();
         compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
-        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        inherit_facade_tags(&mut ways, &[], &groups);
         let part = ways[1].tags.as_ref().unwrap();
         assert_eq!(
             part.get("building:material").map(String::as_str),
@@ -3440,12 +3506,51 @@ mod outline_suppression_tests {
             glass,
             tagged(square_way(200, 2000, 0.5).0, "building:part", "yes"),
         ];
-        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        inherit_facade_tags(&mut ways, &[], &groups);
         assert!(!ways[1]
             .tags
             .as_ref()
             .unwrap()
             .contains_key("building:colour"));
+    }
+
+    #[test]
+    fn glass_parts_take_the_tint_of_their_glass_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let (q, qn) = square_way(300, 3000, 0.3);
+        let outline = with_tag(
+            tagged(o, "building", "office"),
+            "building:material",
+            "glass",
+        );
+        let outline = with_tag(outline, "building:colour", "#FFFFFF");
+        let part = with_tag(
+            tagged(p, "building:part", "yes"),
+            "building:material",
+            "glass",
+        );
+        let own = with_tag(
+            tagged(q, "building:part", "yes"),
+            "building:material",
+            "glass",
+        );
+        let own = with_tag(own, "building:colour", "black");
+        let mut ways = vec![outline, part, own];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        inherit_facade_tags(&mut ways, &[], &groups);
+        let colour = |i: usize| {
+            ways[i]
+                .tags
+                .as_ref()
+                .unwrap()
+                .get("building:colour")
+                .cloned()
+        };
+        assert_eq!(colour(1).as_deref(), Some("#FFFFFF"));
+        assert_eq!(colour(2).as_deref(), Some("black"));
     }
 
     // The parts of a block of flats carry the housing mark; it leaves the
@@ -4594,6 +4699,55 @@ mod lifecycle_tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn buildings_keep_the_source_of_their_outline() {
+        let kept = filter_tags(tags(&[
+            ("building", "yes"),
+            ("source", "cadastre-dgi-fr"),
+            ("ref:bag", "363100012345678"),
+            ("source:date", "2015"),
+        ]));
+        assert_eq!(
+            kept.get("source").map(String::as_str),
+            Some("cadastre-dgi-fr")
+        );
+        assert!(kept.contains_key("ref:bag"));
+        assert!(!kept.contains_key("source:date"));
+        // Cadastre building numbers keep their key alone, a GRB reference its
+        // prefix alone, and neither survives off a building.
+        let prague = filter_tags(tags(&[
+            ("building", "yes"),
+            ("ref:ruian:building", "21642028"),
+            ("ref:ruian:addr", "123"),
+        ]));
+        assert_eq!(
+            prague.get("ref:ruian:building").map(String::as_str),
+            Some("")
+        );
+        assert!(!prague.contains_key("ref:ruian:addr"));
+        let oslo = filter_tags(tags(&[
+            ("building", "house"),
+            ("ref:bygningsnr", "80012345"),
+        ]));
+        assert_eq!(oslo.get("ref:bygningsnr").map(String::as_str), Some(""));
+        let ghent = filter_tags(tags(&[
+            ("building", "house"),
+            ("source:geometry:ref", "Gbg/1234567"),
+            ("source:geometry:date", "2015-10-01"),
+        ]));
+        assert_eq!(
+            ghent.get("source:geometry:ref").map(String::as_str),
+            Some("Gbg/")
+        );
+        assert!(!ghent.contains_key("source:geometry:date"));
+        let other = filter_tags(tags(&[("building", "yes"), ("source:geometry:ref", "abc")]));
+        assert!(!other.contains_key("source:geometry:ref"));
+        let road = filter_tags(tags(&[("highway", "service"), ("ref:bygningsnr", "1")]));
+        assert!(!road.contains_key("ref:bygningsnr"));
+        let road = filter_tags(tags(&[("highway", "residential"), ("source", "Bing")]));
+        assert!(!road.contains_key("source"));
     }
 
     #[test]

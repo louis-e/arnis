@@ -289,6 +289,7 @@ fn process_element(
     part_groups: &PartGroups,
     housing_relation_parts: &HousingRelationParts,
     group_members: &FnvHashMap<u64, Vec<u64>>,
+    neighbours: &buildings::Neighbours,
     still_surfaces: &water_areas::StillWaterSurfaces,
     interior_uses: &InteriorUseIndex,
     barrier_clearance: &barriers::RoadClearance,
@@ -363,6 +364,8 @@ fn process_element(
                     building_footprints,
                     group_members,
                     housing_relation_parts,
+                    neighbour_heights: &neighbours.heights,
+                    inset_plan: &neighbours.steps,
                     interior_uses,
                 };
                 let anchor =
@@ -518,6 +521,7 @@ fn process_element(
                         editor,
                         way,
                         waterways::ChannelShape {
+                            scale: args.scale,
                             width_cap: args.water.water_detail.channel_width_cap(args.scale),
                             roads_at_grade: big_water_field.roads_at_grade(),
                         },
@@ -700,6 +704,8 @@ fn process_element(
                     building_footprints,
                     group_members,
                     housing_relation_parts,
+                    neighbour_heights: &neighbours.heights,
+                    inset_plan: &neighbours.steps,
                     interior_uses,
                 };
                 buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
@@ -1335,6 +1341,7 @@ pub fn generate_world_with_options(
         &clip_bbox,
         args.scale,
         waterways::ChannelShape {
+            scale: args.scale,
             width_cap: args.water.water_detail.channel_width_cap(args.scale),
             roads_at_grade: big_water_field.roads_at_grade(),
         },
@@ -1437,10 +1444,10 @@ pub fn generate_world_with_options(
     // Amenity processors use this for O(1) nearest-road-block lookups. The carriageways
     // among them come in the same pass: trees keep their trunks out of them, mapped
     // street trees included, and leave more headroom over them than over a footway.
-    // Alongside, each on a thread of its own, what the gardens read besides the marks:
-    // commercial land, which is never filled while elements are placed, and the streets and
-    // car parks that keep paving beside them, which read neither the kerb strips nor anything
-    // set from the road masks. And what the kerb strips read besides the masks: the ways they
+    // Alongside, each on a thread of its own, what the gardens read besides the marks: the
+    // grounds that stay paved and residential land, which are never filled while elements
+    // are placed, and the streets, squares and car parks that keep paving beside them, which
+    // read neither the kerb strips nor anything set from the road masks. And what the kerb strips read besides the masks: the ways they
     // lie between, stamped from their tags, and what they must not pave over.
     let (road_coords, (garden_land, kerb_ways, kerb_blockers)) = rayon::join(
         || {
@@ -1455,18 +1462,27 @@ pub fn generate_world_with_options(
         },
         || {
             let (garden_land, (kerb_ways, kerb_blockers)) = rayon::join(
-                || crate::world_editor::GardenLand {
-                    commercial: crate::element_processing::landuse::commercial_land(
-                        &elements, &xzbbox,
-                    ),
-                    streets: highways::collect_garden_streets(
+                || {
+                    let (grounds, residential) =
+                        crate::element_processing::landuse::garden_areas(&elements, &xzbbox);
+                    let mut streets = highways::collect_garden_streets(
                         &elements,
                         &editor,
                         &clip_bbox,
                         args.scale,
                         args.water.water_detail,
                         |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
-                    ),
+                    );
+                    crate::element_processing::landuse::mark_paved_areas(
+                        &elements,
+                        &clip_bbox,
+                        &mut streets,
+                    );
+                    crate::world_editor::GardenLand {
+                        grounds,
+                        residential,
+                        streets,
+                    }
                 },
                 || {
                     rayon::join(
@@ -1547,6 +1563,7 @@ pub fn generate_world_with_options(
             crate::floodfill_cache::collect_tree_keep_clear(
                 &elements,
                 &xzbbox,
+                args.scale,
                 args.water.water_detail.channel_width_cap(args.scale),
                 1,
             )
@@ -1604,6 +1621,26 @@ pub fn generate_world_with_options(
         }
         map
     };
+
+    let started = std::time::Instant::now();
+    let heights = buildings::tagged_neighbour_heights(&elements, args.scale);
+    let heights_time = started.elapsed();
+    let started = std::time::Instant::now();
+    let steps = buildings::plan_attached_steps(
+        &elements,
+        &flood_fill_cache,
+        &building_footprints,
+        args.scale,
+    );
+    let steps_time = started.elapsed();
+    for (label, time) in [
+        ("neighbour_heights", heights_time),
+        ("attached_steps", steps_time),
+    ] {
+        bench.report(label, time);
+        bench.exclude(time);
+    }
+    let neighbours = buildings::Neighbours { heights, steps };
 
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
@@ -2277,6 +2314,7 @@ pub fn generate_world_with_options(
                     &part_groups,
                     &housing_parts,
                     &group_members,
+                    &neighbours,
                     &still_surfaces,
                     &interior_uses,
                     &barrier_clearance,
@@ -2722,6 +2760,7 @@ pub fn generate_world_with_options(
                 &part_groups,
                 &housing_parts,
                 &group_members,
+                &neighbours,
                 &still_surfaces,
                 &interior_uses,
                 &barrier_clearance,

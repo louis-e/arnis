@@ -3663,6 +3663,7 @@ fn gui_start_generation(
                     ground.apply_osm_water_override(
                         &parsed_elements,
                         &xzbbox,
+                        args.scale,
                         args.water.water_detail.channel_width_cap(args.scale),
                     );
                     overture::drop_footprints_in_water(

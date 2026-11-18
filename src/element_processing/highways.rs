@@ -4225,8 +4225,10 @@ pub(crate) fn is_mapped_path(way: &ProcessedWay, highway_type: &str) -> bool {
     !is_carriageway(highway_type) && alongside && at_grade
 }
 
-/// Where a garden keeps a few metres of paving: the carriageways as the renderer stamps
-/// them, less driveways, which a garden comes up to like a path, and the surface car parks.
+/// Where a garden keeps a few metres of paving: the carriageways and pedestrian streets
+/// as the renderer stamps them, less driveways, which a garden comes up to like a path,
+/// and the surface car parks. Squares and other paved areas come from
+/// `landuse::mark_paved_areas`.
 pub fn collect_garden_streets(
     elements: &[ProcessedElement],
     editor: &WorldEditor,
@@ -4256,6 +4258,23 @@ pub fn collect_garden_streets(
                 streets.set(x, z);
             }
         },
+        |_, _| {},
+    );
+    // A pedestrian street is a square drawn along a line: shop fronts meet it as they
+    // meet a street.
+    stamp_highway_surfaces(
+        elements,
+        Some(editor),
+        scale,
+        water_detail,
+        &none,
+        Some(&none),
+        |element| {
+            matches!(element, ProcessedElement::Way(w)
+                if w.tags.get("highway").map(String::as_str) == Some("pedestrian"))
+        },
+        false,
+        |_, x, z| streets.set(x, z),
         |_, _| {},
     );
     for element in elements {

@@ -100,6 +100,10 @@ pub struct BuildingContext<'a> {
     pub group_members: &'a FnvHashMap<u64, Vec<u64>>,
     /// building:part relations of a housing block, which take its storey height.
     pub housing_relation_parts: &'a crate::osm_parser::HousingRelationParts,
+    /// Untagged buildings and the wall height of the tagged ones they share a wall with.
+    pub neighbour_heights: &'a crate::element_processing::buildings::NeighbourHeights,
+    /// Which walls of attached buildings step in under the eave.
+    pub inset_plan: &'a crate::element_processing::buildings::InsetPlan,
     /// Tenants and surrounding areas per building, for interiors.
     pub interior_uses: &'a InteriorUseIndex,
 }
@@ -209,11 +213,24 @@ pub fn compute_facade_plan(
     scale: f64,
     own_cells: &FnvHashSet<(i32, i32)>,
 ) -> FacadePlan {
+    compute_stepped_facade_plan(element, ctx, scale, own_cells, 0)
+}
+
+/// `compute_facade_plan` for walls stepped `inset` blocks in from the
+/// outline under an eave: they reach the streets and turn the corners the
+/// outline's walls would, so a shopfront or a corner entrance stays.
+pub fn compute_stepped_facade_plan(
+    element: &ProcessedWay,
+    ctx: &BuildingContext<'_>,
+    scale: f64,
+    own_cells: &FnvHashSet<(i32, i32)>,
+    inset: i32,
+) -> FacadePlan {
     if element.nodes.len() < 3 {
         return FacadePlan::empty();
     }
     let outward = outward_side(&element.nodes);
-    let setback_max = street_setback_max(scale);
+    let setback_max = street_setback_max(scale) + inset;
 
     let mut segments: Vec<Option<SegmentFacade>> = Vec::new();
     let mut party_columns: FnvHashSet<(i32, i32)> = FnvHashSet::default();
@@ -355,7 +372,7 @@ pub fn compute_facade_plan(
         }
     }
 
-    let corner = detect_street_corner(element, &segments, own_cells, ctx, scale);
+    let corner = detect_street_corner(element, &segments, own_cells, ctx, scale, inset);
 
     FacadePlan {
         segments,
@@ -376,8 +393,9 @@ fn detect_street_corner(
     own_cells: &FnvHashSet<(i32, i32)>,
     ctx: &BuildingContext<'_>,
     scale: f64,
+    inset: i32,
 ) -> Option<CornerPlan> {
-    let min_len = corner_min_seg_len(scale);
+    let min_len = corner_min_seg_len(scale) - 2 * inset;
     // The wrap pair (last segment -> first) only exists on closed rings.
     let closed = match (element.nodes.first(), element.nodes.last()) {
         (Some(a), Some(b)) => a.x == b.x && a.z == b.z,
@@ -405,9 +423,10 @@ fn detect_street_corner(
         // Shared vertex is nodes[j] (end of segment i).
         let vertex_node = element.nodes.get(j)?;
         let (vx, vz) = (vertex_node.x, vertex_node.z);
-        // Convexity: the diagonal outward cell is outside the building.
-        let dx = vx + a.normal.0 + b.normal.0;
-        let dz = vz + a.normal.1 + b.normal.1;
+        // Convexity: the diagonal outward cell is outside the building, past
+        // the eave strip of stepped walls.
+        let dx = vx + (a.normal.0 + b.normal.0) * (1 + inset);
+        let dz = vz + (a.normal.1 + b.normal.1) * (1 + inset);
         if own_cells.contains(&(dx, dz)) || ctx.building_footprints.contains(dx, dz) {
             continue;
         }
@@ -474,6 +493,8 @@ mod tests {
                 building_footprints: footprints,
                 group_members: &self.groups,
                 housing_relation_parts: &self.housing,
+                neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+                inset_plan: crate::element_processing::buildings::no_inset_plan(),
                 interior_uses: InteriorUseIndex::empty(),
             }
         }
@@ -559,5 +580,29 @@ mod tests {
         }
         let plan = compute_facade_plan(&way, &fx.ctx(&opposite, &footprints), 1.0, &own);
         assert!(plan.corner.is_none());
+    }
+
+    // Walls stepped a block in under an eave keep the streets and the corner
+    // of the outline, whose strip is the building's own and in the footprints.
+    #[test]
+    fn stepped_walls_keep_the_outline_streets_and_corner() {
+        let xz = XZBBox::rect_from_xz_lengths(60.0, 60.0).unwrap();
+        // Nine blocks out from the stepped walls, eight from the outline.
+        let mut road = bitmap_with_rect(&xz, 0, 12, 59, 12);
+        for z in 0..=59 {
+            road.set(12, z);
+        }
+        let footprints = bitmap_with_rect(&xz, 20, 20, 40, 32);
+        let fx = Fixtures::new();
+        let way = rect_way(9, 21, 21, 39, 31, &[("building", "commercial")]);
+        let own = own_cells_rect(20, 20, 40, 32);
+        let ctx = fx.ctx(&road, &footprints);
+
+        // The same ring taken as walls on the outline sees no street.
+        let flat = compute_facade_plan(&way, &ctx, 1.0, &own);
+        assert!(!flat.has_any_street);
+        let stepped = compute_stepped_facade_plan(&way, &ctx, 1.0, &own, 1);
+        assert_eq!(stepped.corner.map(|c| c.vertex), Some((21, 21)));
+        assert!(stepped.has_any_street);
     }
 }
