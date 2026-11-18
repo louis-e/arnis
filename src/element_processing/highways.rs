@@ -389,27 +389,44 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     RED_CONCRETE,
 ];
 
+/// `base` followed by `extra`, as one list fixed at compile time, so a list that adds to
+/// another cannot drift from it. `N` is their length together.
+const fn joined<const N: usize>(base: &[Block], extra: &[Block]) -> [Block; N] {
+    assert!(base.len() + extra.len() == N);
+    let mut out = [AIR; N];
+    let mut i = 0;
+    while i < base.len() {
+        out[i] = base[i];
+        i += 1;
+    }
+    let mut j = 0;
+    while j < extra.len() {
+        out[base.len() + j] = extra[j];
+        j += 1;
+    }
+    out
+}
+
+/// What a way no car drives, drawn in path asphalt, must not overwrite: the road list,
+/// another path's asphalt, and the grey of a pedestrian street, driveway, crossing or access
+/// aisle, which wins over a path's asphalt whichever of the two is built first.
+const CAR_FREE_PROTECTED_SURFACES: &[Block] = &joined::<{ ROAD_PROTECTED_SURFACES.len() + 2 }>(
+    ROAD_PROTECTED_SURFACES,
+    &[POLISHED_ANDESITE, GRAY_CONCRETE],
+);
+
+/// What any other way no car drives must not overwrite: the road list and a path's asphalt.
+/// Paved, gravel and earth paths otherwise meet the grey of a driveway or crossing as they
+/// do on main.
+const WALKWAY_PROTECTED_SURFACES: &[Block] =
+    &joined::<{ ROAD_PROTECTED_SURFACES.len() + 1 }>(ROAD_PROTECTED_SURFACES, PATH_ASPHALT);
+
 /// What the parking rows of a road, outside its lanes, must not overwrite: the road list and
-/// the paving of a sidewalk mapped beside the road.
-const PARKING_ROW_PROTECTED_SURFACES: &[Block] = &[
-    BLACK_CONCRETE,
-    GRAY_CONCRETE_POWDER,
-    CYAN_TERRACOTTA,
-    WHITE_CONCRETE,
-    YELLOW_CONCRETE,
-    WARPED_STAIRS,
-    WARPED_TRAPDOOR,
-    WARPED_SLAB,
-    STRIPPED_WARPED_STEM,
-    STRIPPED_WARPED_HYPHAE,
-    SEA_LANTERN,
-    ANDESITE_WALL,
-    SMOOTH_SANDSTONE_STAIRS,
-    RED_TERRACOTTA,
-    RED_CONCRETE,
-    SMOOTH_STONE,
-    GRAY_CONCRETE,
-];
+/// the paving of a sidewalk or path mapped beside the road.
+const PARKING_ROW_PROTECTED_SURFACES: &[Block] = &joined::<{ ROAD_PROTECTED_SURFACES.len() + 3 }>(
+    ROAD_PROTECTED_SURFACES,
+    &[SMOOTH_STONE, GRAY_CONCRETE, POLISHED_ANDESITE],
+);
 
 /// What a red bicycle path or race track paint must not overwrite: the road list
 /// without the asphalt mix, so they show where a road's width runs over them
@@ -430,8 +447,27 @@ const OVER_ASPHALT_PROTECTED_SURFACES: &[Block] = &[
     RED_CONCRETE,
 ];
 
+/// What a paved sidewalk must not overwrite off the carriageway: the list above and a path's
+/// asphalt. It may pave over a driveway's grey, since a sidewalk carries on across the
+/// driveways along it, as on main.
+const SIDEWALK_PROTECTED_SURFACES: &[Block] =
+    &joined::<{ OVER_ASPHALT_PROTECTED_SURFACES.len() + 1 }>(
+        OVER_ASPHALT_PROTECTED_SURFACES,
+        &[POLISHED_ANDESITE],
+    );
+
+/// What a sidewalk drawn in path asphalt must not overwrite off the carriageway: the paved
+/// sidewalk's list and the grey of a driveway, crossing or pedestrian street, which wins
+/// over a path's asphalt whichever is built first.
+const ASPHALT_SIDEWALK_PROTECTED_SURFACES: &[Block] =
+    &joined::<{ SIDEWALK_PROTECTED_SURFACES.len() + 1 }>(
+        SIDEWALK_PROTECTED_SURFACES,
+        &[GRAY_CONCRETE],
+    );
+
 /// Blocks a highway way is surfaced with: by type, then `surface=*`, with paved sidewalks
-/// in smooth stone and bicycle paths in red. Shared with the paint prescan.
+/// in smooth stone, bicycle paths in red, and the ways no car drives never in the road's
+/// asphalt mix. Shared with the paint prescan.
 pub(crate) fn surface_palette(
     highway_type: &str,
     tags: &HashMap<String, String>,
@@ -444,6 +480,9 @@ pub(crate) fn surface_palette(
             return red;
         }
     }
+    if let Some(paving) = car_free_paving(highway_type, tags) {
+        return paving;
+    }
     if let Some(paving) = pedestrian_paving(tags) {
         return paving;
     }
@@ -453,12 +492,84 @@ pub(crate) fn surface_palette(
     }
     match highway_type {
         "footway" | "pedestrian" | "service" | "steps" => &[GRAY_CONCRETE],
-        "path" => &[DIRT_PATH],
+        "path" | "bridleway" => &[DIRT_PATH],
         // Sand trap for runaway vehicles.
         "escape" => &[SAND],
         "raceway" => raceways::unsurfaced_palette(tags).unwrap_or(DEFAULT_ROAD_MIX),
         _ => DEFAULT_ROAD_MIX,
     }
+}
+
+/// Asphalt where no car drives: a step lighter than the road's and without its speckle, so a
+/// shared foot and cycle path reads apart from the street it runs beside.
+const PATH_ASPHALT: &[Block] = &[POLISHED_ANDESITE];
+
+/// Whether no car drives a highway of this type: footways, paths, cycle paths, bridleways,
+/// pedestrian streets and steps. Service roads, tracks and living streets carry cars.
+pub(crate) fn is_walkway(highway_type: &str) -> bool {
+    matches!(
+        highway_type,
+        "footway" | "path" | "cycleway" | "bridleway" | "pedestrian" | "steps"
+    )
+}
+
+/// A way no car drives that keeps the surface of what it belongs to: a pedestrian street,
+/// often as wide as the road it replaced, its grey, a crossing the road's surface, and an
+/// access aisle the car park's. Each paves over a path's asphalt as a road does.
+fn paves_like_road(highway_type: &str, tags: &HashMap<String, String>) -> bool {
+    let tag = |k: &str| tags.get(k).map(String::as_str);
+    highway_type == "pedestrian"
+        || tag("crossing").is_some_and(|v| v != "no")
+        || ["footway", "cycleway", "path"]
+            .iter()
+            .any(|k| tag(k) == Some("crossing"))
+        || tag("footway") == Some("access_aisle")
+}
+
+/// How a hard `surface=*` is laid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HardSurface {
+    Asphalt,
+    /// Paving stones, sett or concrete.
+    Paving,
+}
+
+fn hard_surface(surface: &str) -> Option<HardSurface> {
+    match surface {
+        "asphalt" | "chipseal" | "bitmac" => Some(HardSurface::Asphalt),
+        "concrete" | "concrete:plates" | "concrete:lanes" | "paving_stones" | "sett" | "paved"
+        | "cement" => Some(HardSurface::Paving),
+        _ => None,
+    }
+}
+
+/// The surface of a way no car drives, a footway, path, cycle path, bridleway or steps,
+/// where it is hard-surfaced: `PATH_ASPHALT` for asphalt, and a sidewalk's paving for paving
+/// stones, sett and concrete. With no surface tagged, a cycle path, footway or steps is
+/// asphalt, though a sidewalk stays paved. The ways that pave like a road and squares keep
+/// their own surfaces; anything else is left to the rest of `surface_palette`.
+fn car_free_paving(highway_type: &str, tags: &HashMap<String, String>) -> Option<&'static [Block]> {
+    let tag = |k: &str| tags.get(k).map(String::as_str);
+    if !is_walkway(highway_type)
+        || paves_like_road(highway_type, tags)
+        || tag("area") == Some("yes")
+    {
+        return None;
+    }
+    let surface = match tag("surface") {
+        Some(surface) => surface,
+        None if highway_type == "cycleway" => "asphalt",
+        None if matches!(highway_type, "footway" | "steps")
+            && tag("footway") != Some("sidewalk") =>
+        {
+            "asphalt"
+        }
+        None => return None,
+    };
+    Some(match hard_surface(surface)? {
+        HardSurface::Asphalt => PATH_ASPHALT,
+        HardSurface::Paving => &[SMOOTH_STONE],
+    })
 }
 
 /// A hard-surfaced footway, pedestrian street or square never takes the road's asphalt mix,
@@ -474,12 +585,10 @@ fn pedestrian_paving(tags: &HashMap<String, String>) -> Option<&'static [Block]>
         None if tags.get("footway").map(String::as_str) == Some("sidewalk") => "paved",
         None => return None,
     };
-    match surface {
-        "concrete" | "concrete:plates" | "concrete:lanes" | "paving_stones" | "sett" | "paved"
-        | "cement" => Some(&[SMOOTH_STONE]),
-        "asphalt" | "chipseal" | "bitmac" => Some(&[GRAY_CONCRETE]),
-        _ => None,
-    }
+    Some(match hard_surface(surface)? {
+        HardSurface::Paving => &[SMOOTH_STONE],
+        HardSurface::Asphalt => &[GRAY_CONCRETE],
+    })
 }
 
 fn is_pedestrian_way_tags(tags: &HashMap<String, String>) -> bool {
@@ -1209,15 +1318,8 @@ pub fn generate_highway_tunnel_shell(
         }
     }
 
-    let default_palette: &'static [Block] = match highway_type.as_str() {
-        "footway" | "pedestrian" | "service" | "steps" => &[GRAY_CONCRETE],
-        "path" => &[DIRT_PATH],
-        _ => DEFAULT_ROAD_MIX,
-    };
-    let palette = (highway_type == "cycleway")
-        .then(|| cycleway_palette(&way.tags))
-        .flatten()
-        .unwrap_or_else(|| get_blocks_for_surface_way(way, default_palette));
+    // As above ground.
+    let palette = surface_palette(highway_type, &way.tags);
     let faces = tunnel_portal_faces(&pts, internal_endpoints);
 
     for i in 0..n {
@@ -1369,6 +1471,8 @@ pub fn carve_highway_tunnel_interior(
         LIGHT_GRAY_CONCRETE,
         WHITE_CONCRETE,
         YELLOW_CONCRETE,
+        POLISHED_ANDESITE,
+        SMOOTH_STONE,
         GRASS_BLOCK,
         DIRT,
         COARSE_DIRT,
@@ -1931,12 +2035,25 @@ fn generate_highways_internal(
             let kerb_strips = editor.kerb_strips();
             let strip = kerb_strips.as_ref().map_or(&[][..], |k| k.of(way.id));
             let mut levels: FnvHashMap<(i32, i32), (i32, bool)> = FnvHashMap::default();
-            let surface_protect =
-                if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
-                    OVER_ASPHALT_PROTECTED_SURFACES
-                } else {
-                    ROAD_PROTECTED_SURFACES
-                };
+            let paves_like_a_road = paves_like_road(highway_type, &way.tags);
+            let surface_protect = if block_types == PATH_ASPHALT {
+                CAR_FREE_PROTECTED_SURFACES
+            } else if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
+                OVER_ASPHALT_PROTECTED_SURFACES
+            } else if is_walkway(highway_type) && !paves_like_a_road {
+                WALKWAY_PROTECTED_SURFACES
+            } else {
+                ROAD_PROTECTED_SURFACES
+            };
+            // Off the lanes a sidewalk stops at a path's asphalt, and in path asphalt at the
+            // grey too; a crossing paves over both.
+            let sidewalk_protect = if paves_like_a_road {
+                OVER_ASPHALT_PROTECTED_SURFACES
+            } else if block_types == PATH_ASPHALT {
+                ASPHALT_SIDEWALK_PROTECTED_SURFACES
+            } else {
+                SIDEWALK_PROTECTED_SURFACES
+            };
             // A sidewalk, or a crossing out to the lanes, is drawn over a road's parking row
             // though not over its lanes, so the two meet at the kerb whichever is built first.
             let is_sidewalk = matches!(
@@ -2500,7 +2617,7 @@ fn generate_highways_internal(
                                     } else if parking_row {
                                         PARKING_ROW_PROTECTED_SURFACES
                                     } else if is_sidewalk && !editor.on_carriageway(set_x, set_z) {
-                                        OVER_ASPHALT_PROTECTED_SURFACES
+                                        sidewalk_protect
                                     } else {
                                         surface_protect
                                     };
@@ -3057,7 +3174,7 @@ fn add_highway_support_pillar(editor: &mut WorldEditor, x: i32, highway_y: i32, 
     }
 }
 
-/// Generates a siding using stone brick slabs
+/// Generates a siding using stone brick slabs, kept off road surfaces and a path's asphalt
 pub fn generate_siding(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -3085,12 +3202,12 @@ pub fn generate_siding(
                         bx,
                         deck_y,
                         bz,
-                        Some(ROAD_PROTECTED_SURFACES),
+                        Some(WALKWAY_PROTECTED_SURFACES),
                         None,
                     ) {
                         editor.set_block_absolute(siding_block, bx, deck_y + 1, bz, None, None);
                     }
-                } else if !editor.check_for_block(bx, 0, bz, Some(ROAD_PROTECTED_SURFACES)) {
+                } else if !editor.check_for_block(bx, 0, bz, Some(WALKWAY_PROTECTED_SURFACES)) {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
             }
@@ -3845,19 +3962,8 @@ pub fn collect_road_surface_coords(
 
 /// True for highway types that carry vehicles rather than people on foot, bike or horse.
 pub(crate) fn is_carriageway(highway_type: &str) -> bool {
-    !matches!(
-        highway_type,
-        "footway"
-            | "path"
-            | "steps"
-            | "pedestrian"
-            | "cycleway"
-            | "bridleway"
-            | "corridor"
-            | "track"
-            | "elevator"
-            | "platform"
-    )
+    !(is_walkway(highway_type)
+        || matches!(highway_type, "corridor" | "track" | "elevator" | "platform"))
 }
 
 /// The type of a highway way the renderer stamps as a surface; tunnels still need
@@ -5229,12 +5335,16 @@ mod tests {
             (
                 "footway",
                 &[("footway", "sidewalk"), ("surface", "asphalt")][..],
-                GRAY_CONCRETE,
+                POLISHED_ANDESITE,
             ),
+            // A pedestrian street keeps its grey: some are a former road's whole width.
             ("pedestrian", &[("surface", "asphalt")], GRAY_CONCRETE),
+            ("pedestrian", &[], GRAY_CONCRETE),
             ("footway", &[("surface", "paved")], SMOOTH_STONE),
             ("pedestrian", &[("surface", "sett")], SMOOTH_STONE),
-            ("footway", &[], GRAY_CONCRETE),
+            // A footway or steps with no surface tagged are asphalt, as a park's paths are.
+            ("footway", &[], POLISHED_ANDESITE),
+            ("steps", &[], POLISHED_ANDESITE),
             // A sidewalk with no surface tagged is paved.
             ("footway", &[("footway", "sidewalk")], SMOOTH_STONE),
             (
@@ -5254,6 +5364,117 @@ mod tests {
             ("surface", "paving_stones"),
         ]);
         assert_eq!(pedestrian_paving(&square), Some(&[SMOOTH_STONE][..]));
+    }
+
+    #[test]
+    fn a_way_no_car_drives_never_takes_the_road_mix() {
+        let tags = |kv: &[(&str, &str)]| -> HashMap<String, String> {
+            kv.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        // A shared foot and cycle path beside a street, as in Erding.
+        let shared = [
+            ("foot", "designated"),
+            ("bicycle", "designated"),
+            ("segregated", "no"),
+            ("surface", "asphalt"),
+        ];
+        assert_eq!(surface_palette("path", &tags(&shared)), PATH_ASPHALT);
+        for (highway, kv, want) in [
+            ("bridleway", &[("surface", "asphalt")][..], PATH_ASPHALT),
+            ("steps", &[("surface", "asphalt")], PATH_ASPHALT),
+            ("path", &[("surface", "paving_stones")], &[SMOOTH_STONE]),
+            ("path", &[("surface", "concrete")], &[SMOOTH_STONE]),
+            (
+                "cycleway",
+                &[("surface", "concrete:plates")],
+                crate::element_processing::surfaces::CYCLEWAY_MIX,
+            ),
+            // A cycle path that is not red, with its surface tagged or not.
+            (
+                "cycleway",
+                &[("surface", "asphalt"), ("surface:colour", "grey")],
+                PATH_ASPHALT,
+            ),
+            ("cycleway", &[("colour", "grey")], PATH_ASPHALT),
+            // Unpaved, or not tagged, as before; a bridleway not tagged is no road.
+            ("path", &[("surface", "gravel")], &[GRAVEL]),
+            ("path", &[], &[DIRT_PATH]),
+            ("bridleway", &[], &[DIRT_PATH]),
+            // Where it crosses a road the road keeps its surface.
+            (
+                "path",
+                &[("surface", "asphalt"), ("crossing", "unmarked")],
+                DEFAULT_ROAD_MIX,
+            ),
+            (
+                "path",
+                &[("surface", "asphalt"), ("crossing", "no")],
+                PATH_ASPHALT,
+            ),
+            (
+                "cycleway",
+                &[
+                    ("surface", "asphalt"),
+                    ("cycleway", "crossing"),
+                    ("colour", "grey"),
+                ],
+                DEFAULT_ROAD_MIX,
+            ),
+            (
+                "footway",
+                &[("surface", "asphalt"), ("footway", "crossing")],
+                &[GRAY_CONCRETE],
+            ),
+            // An access aisle beside a parking stall is the car park's asphalt.
+            (
+                "footway",
+                &[("surface", "asphalt"), ("footway", "access_aisle")],
+                &[GRAY_CONCRETE],
+            ),
+            // Ways cars may drive keep the road's asphalt.
+            ("service", &[("surface", "asphalt")], DEFAULT_ROAD_MIX),
+            ("track", &[("surface", "asphalt")], DEFAULT_ROAD_MIX),
+            ("living_street", &[("surface", "asphalt")], DEFAULT_ROAD_MIX),
+        ] {
+            let mut tags = tags(kv);
+            tags.insert("highway".into(), highway.into());
+            assert_eq!(surface_palette(highway, &tags), want, "{highway} {kv:?}");
+        }
+    }
+
+    #[test]
+    fn grey_wins_over_a_paths_asphalt_whichever_is_built_first() {
+        let tags = |kv: &[(&str, &str)]| -> HashMap<String, String> {
+            kv.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        // A path's asphalt keeps out of the grey; the grey ways pave over the asphalt.
+        assert!(CAR_FREE_PROTECTED_SURFACES.contains(&GRAY_CONCRETE));
+        // A sidewalk carries on across a driveway, as on main.
+        assert!(!SIDEWALK_PROTECTED_SURFACES.contains(&GRAY_CONCRETE));
+        assert!(SIDEWALK_PROTECTED_SURFACES.contains(&POLISHED_ANDESITE));
+        for list in [ROAD_PROTECTED_SURFACES, OVER_ASPHALT_PROTECTED_SURFACES] {
+            assert!(!list.contains(&POLISHED_ANDESITE));
+        }
+        for (highway, kv) in [
+            ("pedestrian", &[][..]),
+            ("footway", &[("footway", "crossing")]),
+            ("path", &[("crossing", "unmarked")]),
+            ("footway", &[("footway", "access_aisle")]),
+        ] {
+            assert!(paves_like_road(highway, &tags(kv)), "{highway} {kv:?}");
+        }
+        for (highway, kv) in [
+            ("footway", &[][..]),
+            ("footway", &[("footway", "sidewalk")]),
+            ("path", &[("surface", "asphalt")]),
+            ("steps", &[]),
+        ] {
+            assert!(!paves_like_road(highway, &tags(kv)), "{highway} {kv:?}");
+        }
     }
 
     #[test]

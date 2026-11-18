@@ -64,10 +64,7 @@ const RAIL_SIDE_BY_SIDE_DISTANCE: f32 =
     (2 * railways::RAIL_DECK_HALF_WIDTH + 1 + railways::RAIL_DECK_GAP_FILL) as f32 + 0.5;
 
 pub(crate) fn is_non_vehicular_bridge_highway(highway: &str) -> bool {
-    matches!(
-        highway,
-        "footway" | "pedestrian" | "path" | "cycleway" | "bridleway" | "steps"
-    )
+    super::highways::is_walkway(highway)
 }
 
 #[derive(Clone)]

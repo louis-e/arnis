@@ -4,7 +4,7 @@
 
 use crate::block_definitions::{COBBLESTONE_WALL, IRON_BARS};
 use crate::element_processing::cars::drivable;
-use crate::element_processing::highways::highway_block_range;
+use crate::element_processing::highways::{highway_block_range, is_walkway};
 use crate::element_processing::road_markings::oneway_sign;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -835,12 +835,7 @@ fn walkways(elements: &[ProcessedElement], signals: impl Iterator<Item = (i32, i
         let ProcessedElement::Way(way) = element else {
             continue;
         };
-        let walkway = way.tags.get("highway").is_some_and(|h| {
-            matches!(
-                h.as_str(),
-                "footway" | "path" | "cycleway" | "pedestrian" | "steps" | "bridleway"
-            )
-        });
+        let walkway = way.tags.get("highway").is_some_and(|h| is_walkway(h));
         if !walkway {
             continue;
         }
