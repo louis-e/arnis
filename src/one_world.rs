@@ -354,6 +354,18 @@ impl Manifest {
             .map_err(|e| format!("Failed to write {}: {e}", path.display()))
     }
 
+    /// The build range every area of the world is cut to.
+    pub fn y_range(&self) -> (i32, i32) {
+        if self.disable_height_limit {
+            crate::world_utils::TALL_DATAPACK_FULL_RANGE
+        } else {
+            (
+                crate::world_editor::DEFAULT_MIN_Y,
+                crate::world_editor::DEFAULT_MAX_Y,
+            )
+        }
+    }
+
     /// The areas' union as `[south, west, north, east]` in degrees; none without areas.
     pub fn bounds(&self) -> Option<[f64; 4]> {
         let mut it = self.areas.iter();
@@ -827,16 +839,18 @@ fn resolve(
     });
     args.projection = crate::projection::ProjectionKind::WebMercator;
     args.bbox = Some(llbbox);
-    // Voxy and DH rebuild their LOD databases from the regions of one run, and
-    // both facade sources replace the world's resource pack on every run.
-    if args.voxy_lod {
-        println!("Note: the Voxy LOD cache is off in One World mode.");
-        args.voxy_lod = false;
+    // The world is brought up to the run's light and LOD settings once a run or job is done.
+    // A piece leaves that to its job, and Live keeps no LOD caches.
+    if args.voxy_lod || args.dh_lod {
+        if unit.is_some() || args.live.tile {
+            args.bake_lighting = true;
+            args.voxy_lod = false;
+            args.dh_lod = false;
+        } else {
+            println!("Note: One World rebuilds its LOD caches over every area after this run.");
+        }
     }
-    if args.dh_lod {
-        println!("Note: the Distant Horizons LOD cache is off in One World mode.");
-        args.dh_lod = false;
-    }
+    // Both facade sources replace the world's resource pack on every run.
     if args.mapillary_facade_mode.places_displays() && args.mapillary_facades_wanted() {
         println!("Note: One World builds Mapillary facades as blocks; photo panels are off.");
         args.mapillary_facade_mode = crate::args::FacadeMode::Blocks;
@@ -1187,7 +1201,13 @@ fn drop_chunks(path: &Path, chunks: &[(usize, usize)]) -> Result<(), String> {
 /// and the job counts them as not built. A region file goes whole only when the cells hold all
 /// of it; a chunk another area or ground outside the cells shares is kept. Refused for a job
 /// the world does not know, and while a job or Minecraft has it.
-pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<RemoveReport, String> {
+/// With `redraw_lods`, the LOD caches the world has are rebuilt without the removed land.
+pub fn remove_cells(
+    world_dir: &Path,
+    job: &str,
+    cells: &[u32],
+    redraw_lods: bool,
+) -> Result<RemoveReport, String> {
     if crate::scale::runs_on(world_dir) {
         return Err("A job is building this world; stop it first.".to_string());
     }
@@ -1299,7 +1319,181 @@ pub fn remove_cells(world_dir: &Path, job: &str, cells: &[u32]) -> Result<Remove
     }
     report.trimmed = trimmed;
     report.kept = shared;
+    if redraw_lods && !report.removed.is_empty() {
+        let caches = Upkeep {
+            light: false,
+            voxy: crate::voxy::has_cache(world_dir),
+            dh: crate::distant_horizons::has_cache(world_dir),
+        };
+        if caches.any() {
+            refresh(world_dir, caches, false);
+        }
+    }
     Ok(report)
+}
+
+/// What a One World keeps over all its areas once a run or job is done: light in every chunk
+/// Arnis wrote, and the LOD caches, whose coarse levels span the regions areas share.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Upkeep {
+    pub light: bool,
+    pub voxy: bool,
+    pub dh: bool,
+}
+
+impl Upkeep {
+    /// The LOD caches imply baked light, as they do for a single world.
+    pub fn of(args: &Args) -> Self {
+        Self {
+            light: args.bake_lighting || args.voxy_lod || args.dh_lod,
+            voxy: args.voxy_lod,
+            dh: args.dh_lod,
+        }
+    }
+
+    pub fn any(&self) -> bool {
+        self.light || self.voxy || self.dh
+    }
+}
+
+/// Brings the whole world up to `upkeep`, one line per part. The caller holds the world's lock.
+/// `in_run` puts each step on the status line, which the run's end then replaces.
+pub fn upkeep(world_dir: &Path, upkeep: Upkeep, in_run: bool) -> Vec<Result<String, String>> {
+    let mut out = Vec::new();
+    let skipped = |regions: u64, chunks: u64| {
+        if regions + chunks > 0 {
+            format!(
+                " Skipped {regions} unreadable region file(s) and {chunks} unreadable chunk(s)."
+            )
+        } else {
+            String::new()
+        }
+    };
+    let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+    let say = |message: &str| {
+        if in_run {
+            crate::progress::emit_gui_progress_update(crate::progress::MESSAGE_ONLY, message);
+        }
+    };
+    // Stop ends a run or job at once; what is still to build keeps its old state. Outside a run
+    // nothing can press it, and a Stop left from a job must not cut a Remove's redraw short.
+    let stop = || in_run && crate::scale::STOP.load(std::sync::atomic::Ordering::Acquire);
+    // Not a failure, so no warning.
+    let stopped = |what: &str| Ok(format!("Stopped: {what} was left as it was."));
+    if upkeep.light {
+        say("Baking light into the older areas...");
+        match crate::saved_chunks::bake_unlit(world_dir, &stop) {
+            Ok(b) => {
+                if b.chunks + b.skipped > 0 || b.failed.is_empty() {
+                    out.push(Ok(if b.chunks + b.skipped == 0 {
+                        "Lighting: every area is baked.".to_string()
+                    } else {
+                        format!(
+                            "Lighting: baked into {} chunk(s) of {} region(s) built without it.{}",
+                            b.chunks,
+                            b.regions,
+                            if b.skipped > 0 {
+                                format!(" {} chunk(s) could not be lit.", b.skipped)
+                            } else {
+                                String::new()
+                            }
+                        )
+                    }));
+                }
+                if !b.failed.is_empty() {
+                    out.push(Err(format!(
+                        "Lighting: {} region(s) could not be baked ({}).",
+                        b.failed.len(),
+                        b.failed[0]
+                    )));
+                }
+                if stop() {
+                    out.push(stopped("the rest of the lighting"));
+                }
+            }
+            Err(e) => out.push(Err(format!("Failed to bake the lighting: {e}"))),
+        }
+    }
+    if upkeep.voxy && stop() {
+        out.push(stopped("the Voxy LOD cache"));
+    } else if upkeep.voxy {
+        say("Building the Voxy LOD cache...");
+        let started = std::time::Instant::now();
+        out.push(match crate::voxy::from_existing(world_dir, &stop) {
+            Ok(s) => Ok(format!(
+                "Voxy LOD: {} sections, {:.1} MB, over every area ({:.0} s).{}",
+                s.sections,
+                mb(s.bytes),
+                started.elapsed().as_secs_f64(),
+                skipped(s.skipped_regions, s.skipped_chunks)
+            )),
+            Err(_) if stop() => stopped("the Voxy LOD cache"),
+            Err(e) => Err(format!("Failed to build the Voxy LOD cache: {e}")),
+        });
+    }
+    if upkeep.dh && stop() {
+        out.push(stopped("the Distant Horizons LOD cache"));
+    } else if upkeep.dh {
+        say("Building the Distant Horizons LOD cache...");
+        let started = std::time::Instant::now();
+        let built = match Manifest::load(world_dir) {
+            Ok(Some(m)) => crate::distant_horizons::from_existing(world_dir, m.y_range(), &stop)
+                .map_err(|e| e.to_string()),
+            Ok(None) => Err(format!("{} is not a One World.", world_dir.display())),
+            Err(e) => Err(e),
+        };
+        match built {
+            Ok(s) => {
+                out.push(Ok(format!(
+                    "Distant Horizons LOD: {} sections, {:.1} MB, over every area ({:.0} s).{}",
+                    s.sections,
+                    mb(s.bytes),
+                    started.elapsed().as_secs_f64(),
+                    skipped(s.skipped_regions, s.skipped_chunks)
+                )));
+                if let Some(e) = s.dimensions_error {
+                    out.push(Err(format!(
+                        "The Distant Horizons LOD cache was not placed for Minecraft 26.1+: {e}"
+                    )));
+                }
+            }
+            Err(_) if stop() => out.push(stopped("the Distant Horizons LOD cache")),
+            Err(e) => out.push(Err(format!(
+                "Failed to build the Distant Horizons LOD cache: {e}"
+            ))),
+        }
+    }
+    out
+}
+
+/// `upkeep` after a run changed the world: a failure costs only light or distant terrain, so it
+/// warns instead of failing what is already written.
+pub fn refresh(world_dir: &Path, upkeep: Upkeep, in_run: bool) {
+    for line in self::upkeep(world_dir, upkeep, in_run) {
+        match line {
+            Ok(line) => println!("  {line}"),
+            Err(e) => {
+                eprintln!("Warning: {e}");
+                #[cfg(feature = "gui")]
+                crate::telemetry::send_log(crate::telemetry::LogLevel::Warning, &e);
+            }
+        }
+    }
+}
+
+/// After a run wrote an area: the whole world up to the run's light and LOD settings, once the
+/// run's own data is gone. A piece leaves that to its job, and a Live tile to nobody.
+pub fn after_run(args: &Args) {
+    let Some(run) = args.one_world_run.as_ref() else {
+        return;
+    };
+    if run.unit.is_some() || args.live.tile || args.prewarm || !args.java() {
+        return;
+    }
+    let upkeep = Upkeep::of(args);
+    if upkeep.any() {
+        refresh(&run.world_dir, upkeep, true);
+    }
 }
 
 fn unix_now() -> u64 {
@@ -1438,16 +1632,16 @@ mod tests {
 
         // Refused while the world is locked.
         let held = SessionLock::acquire(world).unwrap();
-        let err = remove_cells(world, "J", &[4, 0]).unwrap_err();
+        let err = remove_cells(world, "J", &[4, 0], false).unwrap_err();
         assert!(err.contains("in use"), "{err}");
         drop(held);
 
         // Another job's cells by the same indexes are never touched.
-        let err = remove_cells(world, "K", &[4, 0]).unwrap_err();
+        let err = remove_cells(world, "K", &[4, 0], false).unwrap_err();
         assert!(err.contains("does not have"), "{err}");
         assert_eq!(Manifest::load(world).unwrap().unwrap().areas.len(), 10);
 
-        let report = remove_cells(world, "J", &[4, 0, 0, 12]).unwrap();
+        let report = remove_cells(world, "J", &[4, 0, 0, 12], false).unwrap();
         assert_eq!(report.job, "J");
         assert_eq!(report.removed, [0, 4]);
         assert_eq!(report.not_built, [12]);
@@ -1635,6 +1829,30 @@ mod tests {
         let ratio = crate::world_utils::blocks_km2(&args, &s.llbbox) / ground;
         let want = (1.295f64.to_radians().cos() / 59.915f64.to_radians().cos()).powi(2);
         assert!((ratio / want - 1.0).abs() < 0.05, "{ratio} vs {want}");
+    }
+
+    /// A run keeps its LOD settings for the rebuild after it; a Live tile leaves them to the
+    /// session and bakes its light instead.
+    #[test]
+    fn runs_keep_their_lod_settings_and_tiles_leave_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = dir.path().join("w");
+        let req = LLBBox::from_str(MUNICH).unwrap();
+        let mut run = args_for(MUNICH, &["--voxy-lod", "--dh-lod"]);
+        drop(prepare(&world, &req, &mut run).unwrap());
+        assert!(run.voxy_lod && run.dh_lod);
+        let all = Upkeep {
+            light: true,
+            voxy: true,
+            dh: true,
+        };
+        assert_eq!(Upkeep::of(&run), all);
+
+        let mut tile = args_for(MUNICH, &["--voxy-lod", "--live-tile"]);
+        drop(prepare(&world, &req, &mut tile).unwrap());
+        assert!(!tile.voxy_lod && !tile.dh_lod && tile.bake_lighting);
+        assert_eq!(Upkeep::of(&args_for(MUNICH, &[])), Upkeep::default());
+        assert!(!Upkeep::default().any());
     }
 
     #[test]

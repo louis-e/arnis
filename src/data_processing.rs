@@ -1072,10 +1072,11 @@ pub fn generate_world_with_options(
     };
     // Voxy and DH render from stored light, so an unlit LOD cache would be a
     // black horizon. The toggles imply baked lighting rather than silently
-    // producing that.
-    let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
-    let wants_dh = args.dh_lod && world_format == WorldFormat::JavaAnvil;
-    editor.set_bake_lighting(args.bake_lighting || wants_voxy || wants_dh);
+    // producing that. A One World builds its caches from every region after the run.
+    let java = world_format == WorldFormat::JavaAnvil;
+    let wants_voxy = args.voxy_lod && java && one_world.is_none();
+    let wants_dh = args.dh_lod && java && one_world.is_none();
+    editor.set_bake_lighting(args.bake_lighting || (java && (args.voxy_lod || args.dh_lod)));
     let void_world =
         world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
     editor.set_void_world(void_world);
@@ -1174,7 +1175,6 @@ pub fn generate_world_with_options(
     // Mapillary side still decides for itself whether to collect anything: its
     // `collect` also asks the facade store, which is off unless the export
     // asked for the photos mode.
-    let java = world_format == WorldFormat::JavaAnvil;
     // The atlas the panels are budgeted against, before anything measures one.
     // Both sources read it, so it is set whichever of them is running.
     crate::mapillary::atlas::set_atlas_side(args.facade_detail.atlas_side());

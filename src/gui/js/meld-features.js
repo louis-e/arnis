@@ -621,7 +621,8 @@ export async function cellAction(action, cells, deps = {}) {
       // Rebuild removes the land first: only when the run after it builds these cells again.
       if (action === 'rebuild' && !runs()) return say(t('cell_ignored', '{n} could not be changed.', { n: list.length }));
       const [command, args] = globalThis.arnisCells.calls('remove', list, worldPath(), job())[0];
-      const report = await invoke(command, args);
+      // Remove redraws the world's LOD caches without the land; Rebuild leaves that to its run.
+      const report = await invoke(command, { ...args, redrawLods: action === 'remove' });
       say(removedLine(report), false);
       after(list, action === 'rebuild');
     }
@@ -1376,7 +1377,7 @@ export async function resumeJob(job, rebuild, { select = selectBounds, current, 
 // job data from the engine) only Open and Expand are offered.
 // `busy()`: a run is under way, so no world is picked, renamed or run. `canRun()`: Resume and
 // Rebuild can start a run here (not in Live).
-export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null }) {
+export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null, upkeep = null }) {
   const list = el('projects-list');
   let view = readView();
   const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
@@ -1404,6 +1405,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   // A thumbnail is asked for when its card scrolls into view; no image leaves the placeholder.
   const thumbs = new Map();
   const loaders = new Map();
+  // Light & LODs: the worlds it runs on, and its last answer per world, which redraws keep.
+  const upkeeping = new Set();
+  const upkeepNotes = new Map();
   const seen = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
@@ -1648,7 +1652,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       if (w.locked) kids.push(text('projects-meta is-warn', t('projects_in_use', 'In use')));
       // One World needs Java on Earth; a run holds every world.
       const off = !available();
-      const held = Boolean(w.locked || off || busy());
+      const worldPath = w.world_path || `${savePath()}/${w.name}`;
+      const held = Boolean(w.locked || off || busy() || upkeeping.has(worldPath));
       const job = resume ? projectJob(w) : null;
       const acts = [];
       if (job && job.total > 0) {
@@ -1679,8 +1684,34 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       acts.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
       acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
       if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position.'); });
+      if (upkeep) {
+        const running = upkeeping.has(worldPath);
+        const up = button('projects_upkeep', 'Light & LODs', held, async () => {
+          const want = upkeep();
+          if (!(want.light || want.voxy || want.dh)) {
+            const names = [t('bake_lighting', 'Bake lighting'), t('voxy_lod', 'Pre-generate Voxy LOD'), t('dh_lod', 'Pre-generate Distant Horizons LOD')];
+            const text = `${t('projects_upkeep_none', 'Nothing to do yet. Turn on one of these first:')} ${names.join(', ')}`;
+            upkeepNotes.set(worldPath, { error: true, text });
+            return refresh();
+          }
+          upkeeping.add(worldPath);
+          upkeepNotes.delete(worldPath);
+          refresh();
+          try {
+            const lines = await invoke('gui_one_world_upkeep', { worldPath, ...want });
+            upkeepNotes.set(worldPath, { error: false, text: (lines || []).join(' ') });
+          } catch (e) {
+            upkeepNotes.set(worldPath, { error: true, text: String((e && e.message) || e) });
+          }
+          upkeeping.delete(worldPath);
+          await refresh();
+        });
+        if (running) up.textContent = t('run_state_running', 'Running');
+        up.title = t('projects_upkeep_tip', 'Bakes light into the areas built without it and builds the Voxy and Distant Horizons LOD caches over every area, as Bake lighting and the Pre-generate LOD settings ask. Nothing is generated.');
+        acts.push(up);
+      }
       // Held like Rebuild; the world goes to the system trash, where it can still be restored.
-      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy()), () => {});
+      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy() || upkeeping.has(worldPath)), () => {});
       del.classList.add('projects-hold', 'projects-delete');
       del.title = t('projects_delete_tip', 'Hold to move this world to the trash. It can be restored from there.');
       globalThis.arnisHold(del, async () => {
@@ -1702,6 +1733,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       actions.className = 'projects-actions';
       actions.append(...acts);
       row.append(...kids, actions);
+      const note = upkeepNotes.get(worldPath);
+      if (note) row.append(note.error ? errorLine(note.text) : text('projects-meta', note.text));
       return row;
     });
     if (!rows.length) rows.push(text('projects-empty', t('projects_empty', 'No worlds yet. Build one with One World on.')));

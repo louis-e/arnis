@@ -238,6 +238,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_stop_generation,
             gui_cells_control,
             gui_cells_remove,
+            gui_one_world_upkeep,
             gui_get_version,
             gui_get_update_info,
             gui_get_platform,
@@ -2682,12 +2683,47 @@ fn gui_cells_remove(
     world_path: String,
     cells: Vec<u32>,
     job: String,
+    redraw_lods: Option<bool>,
 ) -> Result<crate::one_world::RemoveReport, String> {
     let world = PathBuf::from(world_path);
     if live_plays(&world) {
         return Err("Live mode is playing this world. Stop it first.".to_string());
     }
-    crate::one_world::remove_cells(&world, &job, &cells)
+    crate::one_world::remove_cells(&world, &job, &cells, redraw_lods.unwrap_or(false))
+}
+
+/// Projects: bakes light into a One World's older areas and builds its LOD caches, as the
+/// settings ask, without generating anything. One line per part.
+#[tauri::command(async)]
+fn gui_one_world_upkeep(
+    world_path: String,
+    light: bool,
+    voxy: bool,
+    dh: bool,
+) -> Result<Vec<String>, String> {
+    let world = PathBuf::from(world_path);
+    if live_plays(&world) {
+        return Err("Live mode is playing this world. Stop it first.".to_string());
+    }
+    if crate::scale::runs_on(&world) {
+        return Err("A job is building this world; stop it first.".to_string());
+    }
+    let _lock = crate::world_utils::SessionLock::acquire(&world).map_err(|_| {
+        "The world is in use (open in Minecraft, or another run writes it); close it first."
+            .to_string()
+    })?;
+    if crate::one_world::Manifest::load(&world)?.is_none() {
+        return Err("Not a One World.".to_string());
+    }
+    let upkeep = crate::one_world::Upkeep { light, voxy, dh };
+    let lines = crate::one_world::upkeep(&world, upkeep, false);
+    let failed = lines.iter().any(Result::is_err);
+    let text: Vec<String> = lines.into_iter().map(|l| l.unwrap_or_else(|e| e)).collect();
+    // On a failure the row still shows what finished, not only the error.
+    if failed {
+        return Err(text.join(" "));
+    }
+    Ok(text)
 }
 
 // Everything before the `spawn` below - the spawn point written into level.dat -
@@ -3193,6 +3229,8 @@ fn gui_start_generation(
                 capabilities: false,
                 map_item_only: false,
                 dh_lod_only: false,
+                voxy_lod_only: false,
+                bake_lighting_only: false,
                 climate_map: None,
                 export_tree_packs: None,
                 loot_table: None,
@@ -3515,6 +3553,7 @@ fn gui_start_generation(
                     emit_gui_error(&e);
                     return Err(e);
                 }
+                crate::one_world::after_run(&args);
                 if let Some(g) = cleanup_guard.as_mut() {
                     g.disarm();
                 }
@@ -3734,6 +3773,7 @@ fn gui_start_generation(
                         emit_gui_error(&e);
                         return Err(e);
                     }
+                    crate::one_world::after_run(&args);
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
                     }
