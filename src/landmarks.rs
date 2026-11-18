@@ -237,6 +237,26 @@ const LANDMARKS: &[Landmark] = &[
         reach_m: 92,
         height: 53,
     },
+    Landmark {
+        name: "Elbphilharmonie",
+        qid: "Q673223",
+        osm_ids: &[("way", 24_981_342)],
+        model: Source::Built(crate::structures::elbphilharmonie::build),
+        // Middle of the mapped outline's bounding box, which the model is built on.
+        lat: 53.541_250_6,
+        lon: 9.984_103_2,
+        anchor_x: 60.0,
+        anchor_z: 44.5,
+        ground_y: crate::structures::elbphilharmonie::GROUND,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // The warehouse and its parts, short of the ticket pavilion east of it.
+        suppress_half_x: 57.5,
+        suppress_half_z: 41.5,
+        reach_m: 72,
+        height: 100,
+    },
 ];
 
 /// A landmark resolved to a spot in this world.

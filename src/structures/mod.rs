@@ -4,6 +4,7 @@ pub mod boat;
 pub mod brandenburger_tor;
 pub mod car;
 pub mod crane;
+pub mod elbphilharmonie;
 pub mod elizabeth_tower;
 pub mod excavator;
 pub mod fountain;
