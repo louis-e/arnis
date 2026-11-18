@@ -61,6 +61,8 @@ pub struct ProjectionSpec {
     /// Blocks of geometry kept past the world edge when clipping, so elements
     /// crossing it are built whole.
     pub clip_pad: i32,
+    /// The parser leaves 3D model footprints as mapped: a One World that places models.
+    pub model_footprints: bool,
 }
 
 impl ProjectionSpec {
@@ -71,6 +73,7 @@ impl ProjectionSpec {
             origin: None,
             scale,
             clip_pad: 0,
+            model_footprints: false,
         }
     }
 
@@ -81,12 +84,14 @@ impl ProjectionSpec {
                 origin: Some((run.origin_lat, run.origin_lon)),
                 scale: args.scale,
                 clip_pad: crate::one_world::CLIP_PAD_BLOCKS,
+                model_footprints: args.use_3d,
             },
             None => Self {
                 kind: args.projection,
                 origin: None,
                 scale: args.scale,
                 clip_pad: 0,
+                model_footprints: false,
             },
         }
     }
@@ -302,6 +307,7 @@ mod tests {
             origin: Some((-33.8688, 151.2093)),
             scale: 0.7,
             clip_pad: 0,
+            model_footprints: false,
         };
         let (_, again) = spec.transformer(&eff).unwrap();
         assert_eq!(
@@ -370,6 +376,7 @@ mod tests {
             origin: Some((0.0, 0.0)),
             scale: 1.0,
             clip_pad: 64,
+            model_footprints: false,
         };
         let rect = XZBBox::rect_from_min_max(-160, 0, 159, 319).unwrap();
         let clip = spec.clip_bbox(&rect);
