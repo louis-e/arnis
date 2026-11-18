@@ -2133,29 +2133,34 @@ fn generate_highways_internal(
             let crossing_paint = markings.crossing_way_paint(way);
             let crossing_clips = crossing_paint.and(markings.crossing_clips(way.id));
             // Surface of the carriageway under a crossing cell; None off the road, and
-            // everywhere for a crossing that shares no node with a road.
+            // everywhere for a crossing that shares no node with a road. Every stamp along
+            // the crossing asks about the cells it covers, so each answer is kept.
+            let carriageway_memo = std::cell::RefCell::new(CellMemo::default());
             let carriageway_at = |editor: &WorldEditor, cx: i32, cz: i32| {
-                crossing_clips?
-                    .iter()
-                    .find(|c| {
-                        c.contains(cx, cz)
-                            && !(c.past_core(cx, cz)
-                                && c.core().is_some_and(|core| {
-                                    let (ox, oz) = c.nearest_centre(cx, cz).unwrap_or((cx, cz));
-                                    cut_outward(core, cx - ox, cz - oz, |dx, dz| {
-                                        cut_beside(
-                                            |sx, sz| c.in_core(core, sx, sz),
-                                            walls,
-                                            Some(editor),
-                                            |px, pz| editor.on_mapped_path(px, pz),
-                                            c.verges(),
-                                            ox + dx,
-                                            oz + dz,
-                                        )
-                                    })
-                                }))
-                    })
-                    .map(|c| c.palette())
+                let clips = crossing_clips?;
+                carriageway_memo.borrow_mut().get_or(cx, cz, || {
+                    clips
+                        .iter()
+                        .find(|c| {
+                            c.contains(cx, cz)
+                                && !(c.past_core(cx, cz)
+                                    && c.core().is_some_and(|core| {
+                                        let (ox, oz) = c.nearest_centre(cx, cz).unwrap_or((cx, cz));
+                                        cut_outward(core, cx - ox, cz - oz, |dx, dz| {
+                                            cut_beside(
+                                                |sx, sz| c.in_core(core, sx, sz),
+                                                walls,
+                                                Some(editor),
+                                                |px, pz| editor.on_mapped_path(px, pz),
+                                                c.verges(),
+                                                ox + dx,
+                                                oz + dz,
+                                            )
+                                        })
+                                    }))
+                        })
+                        .map(|c| c.palette())
+                })
             };
 
             // One surface level per centerline cell; bridges and ramps carry their own.
@@ -4045,9 +4050,10 @@ pub(crate) fn cut_beside(
         })
 }
 
-/// What `cut_beside` answered for the cells of one way lately: a small cache with a slot per
-/// cell of a square `SIDE` across, laid over the world like tiles, so the cells round the
-/// stamp being laid never share one. A cell it lost is only worked out again.
+/// What a question that depends on the cell alone, such as whether `cut_beside` cuts it,
+/// answered for the cells of one way lately: a small cache with a slot per cell of a square
+/// `SIDE` across, laid over the world like tiles, so the cells round the stamp being laid
+/// never share one. A cell it lost is only worked out again.
 struct CellMemo<T> {
     slots: Vec<(i32, i32, T)>,
 }
