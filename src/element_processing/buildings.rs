@@ -7928,6 +7928,10 @@ fn generate_roof_only_structure(
 /// Footprints this small are pillars: no windows, no doors.
 const THIN_RING_MAX_CELLS: usize = 4;
 
+/// Least share of its bounding box a tower or short stretch of wall fills; a long wall
+/// mapped on the slant fills less.
+const COMPACT_FILL: f64 = 0.4;
+
 /// Cells on a closed ring's edges, for footprints the flood fill leaves
 /// empty because no lattice cell lies strictly inside them.
 fn thin_ring_cells(nodes: &[ProcessedNode]) -> Vec<(i32, i32)> {
@@ -14791,19 +14795,9 @@ pub fn generate_buildings(
             })
         },
     };
-    let fortification = fortifications::kind(&element.tags);
-    if min_level_offset == 0
-        && fortification.is_none()
-        && has_garden_grounds(category, &element.tags, storeys, home)
-    {
-        let house = mapped_as_house(&element.tags);
-        for &(x, z) in &cached_floor_area {
-            editor.mark_ground(crate::world_editor::GroundMark::Dwelling, x, z);
-            if house {
-                editor.mark_ground(crate::world_editor::GroundMark::House, x, z);
-            }
-        }
-    }
+    // Marked once it is known to stay a building, not a town wall or gate.
+    let garden_grounds =
+        min_level_offset == 0 && has_garden_grounds(category, &element.tags, storeys, home);
 
     // Street/neighbor classification: party walls, fronting streets, corner.
     // Sibling part cells: exempt from party-wall detection and kept clear of
@@ -14972,16 +14966,27 @@ pub fn generate_buildings(
         BuildingCondition::Disused | BuildingCondition::Normal => {}
     }
 
-    // A town wall or gate is solid masonry, with nothing of a house about it.
-    if let Some(kind) = fortification {
-        let gate = kind == fortifications::Kind::Gate;
+    // A town wall or gate is solid masonry, with nothing of a house about it; a gate or
+    // tower the region gives a pitched roof stays a building under it.
+    let kind = fortifications::kind(&element.tags);
+    let pitched = style.generate_roof && style.roof_type != RoofType::Flat;
+    let is_wall = element.tags.get("building").map(String::as_str) == Some("wall");
+    let gate = kind == Some(fortifications::Kind::Gate);
+    let road_through = |(x, z): &(i32, i32)| gate && ctx.road_mask.contains(*x, *z);
+    if let Some(kind) = kind.filter(|_| is_wall || !pitched) {
         let passages = cached_floor_area
             .iter()
             .copied()
-            .filter(|&(x, z)| {
-                building_passages.contains(x, z) || (gate && ctx.road_mask.contains(x, z))
-            })
+            .filter(|c| building_passages.contains(c.0, c.1) || road_through(c))
             .collect();
+        // A tower or short stretch has a level top; a long wall follows the ground.
+        let (w, l) = (
+            bounds.max_x - bounds.min_x + 1,
+            bounds.max_z - bounds.min_z + 1,
+        );
+        let compact = w.max(l) <= 2 * w.min(l)
+            && cached_footprint_size as f64 >= COMPACT_FILL * f64::from(w * l);
+        let level = gate || compact || min_level_offset > 0;
         fortifications::generate(
             editor,
             &fortifications::Mass {
@@ -14992,15 +14997,48 @@ pub fn generate_buildings(
                     wall_block
                 },
                 height: effective_building_height,
-                base: (gate || min_level_offset > 0).then_some(start_y_offset + abs_terrain_offset),
+                base: level.then_some(start_y_offset + abs_terrain_offset),
                 raised: min_level_offset > 0,
                 crenellated: fortifications::crenellated(&element.tags, kind),
                 passages,
+                footings: FnvHashMap::default(),
+                abutting: &|x, z| ctx.building_footprints.contains(x, z),
                 scale: scale_factor,
             },
         );
         return None;
     }
+    if garden_grounds {
+        let house = mapped_as_house(&element.tags);
+        for &(x, z) in &cached_floor_area {
+            editor.mark_ground(crate::world_editor::GroundMark::Dwelling, x, z);
+            if house {
+                editor.mark_ground(crate::world_editor::GroundMark::House, x, z);
+            }
+        }
+    }
+    // A gate kept as a building still lets the road through.
+    let gate_passages = cached_floor_area
+        .iter()
+        .any(road_through)
+        .then(|| {
+            let (x0, z0, x1, z1) = cached_floor_area.iter().fold(
+                (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
+                |(x0, z0, x1, z1), &(x, z)| (x0.min(x), z0.min(z), x1.max(x), z1.max(z)),
+            );
+            crate::coordinate_system::cartesian::XZBBox::rect_from_min_max(x0, z0, x1, z1).ok()
+        })
+        .flatten()
+        .map(|cells| {
+            let mut through = CoordinateBitmap::new(&cells);
+            for &(x, z) in &cached_floor_area {
+                if building_passages.contains(x, z) || road_through(&(x, z)) {
+                    through.set(x, z);
+                }
+            }
+            through
+        });
+    let building_passages = gate_passages.as_ref().unwrap_or(building_passages);
 
     // Decided on the walls as mapped, before a roof's rise comes off them.
     let low_pitch_roof = takes_low_pitch_roof(
