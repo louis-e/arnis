@@ -3698,8 +3698,10 @@ pub fn collect_road_and_carriageway_coords(
     (roads, carriageways)
 }
 
-/// Where a garden keeps a few metres of paving: the carriageways as the renderer stamps
-/// them, less driveways, which a garden comes up to like a path, and the surface car parks.
+/// Where a garden keeps a few metres of paving: the carriageways and pedestrian streets
+/// as the renderer stamps them, less driveways, which a garden comes up to like a path,
+/// and the surface car parks. Squares and other paved areas come from
+/// `landuse::mark_paved_areas`.
 pub fn collect_garden_streets(
     elements: &[ProcessedElement],
     editor: &WorldEditor,
@@ -3723,6 +3725,19 @@ pub fn collect_garden_streets(
                 streets.set(x, z);
             }
         },
+    );
+    // A pedestrian street is a square drawn along a line: shop fronts meet it as they
+    // meet a street.
+    stamp_highway_surfaces(
+        elements,
+        Some(editor),
+        scale,
+        water_detail,
+        |element| {
+            matches!(element, ProcessedElement::Way(w)
+                if w.tags.get("highway").map(String::as_str) == Some("pedestrian"))
+        },
+        |_, x, z| streets.set(x, z),
     );
     for element in elements {
         let ProcessedElement::Way(way) = element else {

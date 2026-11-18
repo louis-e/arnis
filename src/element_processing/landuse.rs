@@ -206,7 +206,7 @@ fn landuse_area(
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     let plants_here = crate::element_processing::natural::piece_plants_at(args);
     let woods_by_cell = crate::element_processing::natural::woods_by_cell(args);
-    // Commercial and retail land is marked from the element list (`commercial_land`).
+    // Commercial land and the like are marked from the element list (`garden_areas`).
     let wild = matches!(landuse_tag.as_str(), "forest" | "meadow");
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
@@ -663,27 +663,22 @@ pub fn generate_place(
     }
 }
 
-/// Commercial and retail land, ways and multipolygons, on the gardens' coarse grid: its
-/// open ground stays paved. From the element list, since commercial land leaves its
-/// ground to the land cover and is never filled while elements are placed.
-pub fn commercial_land(
+/// Calls `span(x0, x1, z)` for the filled row spans inside `bbox` of every closed way and
+/// multipolygon whose tags `pick` takes, holes left out. `pick` is told whether it is
+/// looking at a relation.
+fn area_spans(
     elements: &[crate::osm_parser::ProcessedElement],
-    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
-) -> crate::floodfill_cache::CoarseMask {
+    bbox: &crate::coordinate_system::cartesian::XZBBox,
+    pick: impl Fn(&std::collections::HashMap<String, String>, bool) -> bool,
+    mut span: impl FnMut(i32, i32, i32),
+) {
     use crate::coordinate_system::cartesian::XZPoint;
     use crate::osm_parser::{ProcessedElement, ProcessedNode};
-    let commercial = |tags: &std::collections::HashMap<String, String>| {
-        matches!(
-            tags.get("landuse").map(String::as_str),
-            Some("commercial" | "retail")
-        )
-    };
     let ring = |nodes: &[ProcessedNode]| -> Option<Vec<XZPoint>> {
         let (first, last) = (nodes.first()?, nodes.last()?);
         (nodes.len() >= 4 && first.x == last.x && first.z == last.z)
             .then(|| nodes.iter().map(ProcessedNode::xz).collect())
     };
-    let mut mask = crate::floodfill_cache::CoarseMask::new(xzbbox);
     let mut fill = |outers: Vec<Vec<XZPoint>>, inners: Vec<Vec<XZPoint>>| {
         let Some((z0, z1)) = outers
             .iter()
@@ -695,20 +690,20 @@ pub fn commercial_land(
             return;
         };
         let edges = crate::element_processing::water_areas::PolygonEdges::new(&outers, &inners);
-        for z in z0.max(xzbbox.min_z())..=z1.min(xzbbox.max_z()) {
-            for (x0, x1) in edges.row_spans(z, xzbbox.min_x(), xzbbox.max_x()) {
-                mask.set_span(x0, x1, z);
+        for z in z0.max(bbox.min_z())..=z1.min(bbox.max_z()) {
+            for (x0, x1) in edges.row_spans(z, bbox.min_x(), bbox.max_x()) {
+                span(x0, x1, z);
             }
         }
     };
     for element in elements {
         match element {
-            ProcessedElement::Way(way) if commercial(&way.tags) => {
+            ProcessedElement::Way(way) if pick(&way.tags, false) => {
                 if let Some(r) = ring(&way.nodes) {
                     fill(vec![r], Vec::new());
                 }
             }
-            ProcessedElement::Relation(rel) if commercial(&rel.tags) => {
+            ProcessedElement::Relation(rel) if pick(&rel.tags, true) => {
                 let (mut outers, mut inners) = (Vec::new(), Vec::new());
                 for m in &rel.members {
                     match m.role {
@@ -728,11 +723,76 @@ pub fn commercial_land(
             _ => {}
         }
     }
-    mask
+}
+
+/// Land whose open ground stays paved whatever stands near it: commercial and retail land,
+/// and the grounds of schools, hospitals and town halls. Not church land, where the
+/// churches are no homes but a rectory or a seminary's houses stand in green, nor a
+/// kindergarten's, which is a play garden.
+fn keeps_no_gardens(tags: &std::collections::HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("landuse").map(String::as_str),
+        Some("commercial" | "retail" | "education")
+    ) || matches!(
+        tags.get("amenity").map(String::as_str),
+        Some("school" | "college" | "university" | "hospital" | "clinic" | "townhall")
+    )
+}
+
+/// What the gardens read of the land, from the element list on their coarse grid: the
+/// grounds that stay paved (`keeps_no_gardens`), and residential land. Ways and
+/// multipolygons, holes left out. From the element list, since most of this land leaves its
+/// ground to the land cover and is never filled while elements are placed.
+pub fn garden_areas(
+    elements: &[crate::osm_parser::ProcessedElement],
+    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
+) -> (
+    crate::floodfill_cache::CoarseMask,
+    crate::floodfill_cache::CoarseMask,
+) {
+    let mut grounds = crate::floodfill_cache::CoarseMask::new(xzbbox);
+    area_spans(
+        elements,
+        xzbbox,
+        |tags, _| keeps_no_gardens(tags),
+        |x0, x1, z| grounds.set_span(x0, x1, z),
+    );
+    let mut residential = crate::floodfill_cache::CoarseMask::new(xzbbox);
+    area_spans(
+        elements,
+        xzbbox,
+        |tags, _| tags.get("landuse").map(String::as_str) == Some("residential"),
+        |x0, x1, z| residential.set_span(x0, x1, z),
+    );
+    (grounds, residential)
+}
+
+/// Marks the paved areas a garden keeps a street's margin from: squares, pedestrian areas,
+/// `area:highway` surfaces, marketplaces, and car parks mapped as multipolygons (those
+/// mapped as ways come in with their fills, `highways::collect_garden_streets`). Many of
+/// these paint no ground of their own, so their land would read as open.
+pub fn mark_paved_areas(
+    elements: &[crate::osm_parser::ProcessedElement],
+    bbox: &crate::coordinate_system::cartesian::XZBBox,
+    streets: &mut crate::floodfill_cache::CoordinateBitmap,
+) {
+    let paved = |tags: &std::collections::HashMap<String, String>, relation: bool| {
+        tags.contains_key("area:highway")
+            || tags.get("place").map(String::as_str) == Some("square")
+            || tags.get("amenity").map(String::as_str) == Some("marketplace")
+            || (relation && super::highways::is_surface_car_park(tags))
+            || (tags.contains_key("highway")
+                && (relation || tags.get("area").map(String::as_str) == Some("yes")))
+    };
+    area_spans(elements, bbox, paved, |x0, x1, z| {
+        for x in x0..=x1 {
+            streets.set(x, z);
+        }
+    });
 }
 
 #[cfg(test)]
-mod commercial_land_tests {
+mod garden_areas_tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::osm_parser::{ProcessedElement, ProcessedMember, ProcessedNode};
@@ -765,7 +825,7 @@ mod commercial_land_tests {
 
     /// Commercial land paints no ground and is never filled while elements are placed,
     /// so it is marked from the element list: ways and multipolygons, holes left out,
-    /// retail as well, and nothing else.
+    /// retail as well. Residential land comes in its own mask.
     #[test]
     fn commercial_and_retail_land_is_marked_from_the_element_list() {
         let bbox = XZBBox::rect_from_min_max(0, 0, 199, 199).unwrap();
@@ -803,12 +863,112 @@ mod commercial_land_tests {
         assert!(!crate::element_processing::landuse_paints_ground(
             elements[0].tags()
         ));
-        let mask = commercial_land(&elements, &bbox);
+        let (mask, residential) = garden_areas(&elements, &bbox);
         assert!(mask.contains(25, 25) && mask.contains(70, 20));
         assert!(!mask.contains(115, 25), "residential");
+        assert!(residential.contains(115, 25) && !residential.contains(25, 25));
         assert!(mask.contains(20, 110) && mask.contains(85, 175));
         assert!(!mask.contains(50, 140), "the hole");
         assert!(!mask.contains(150, 150));
+    }
+
+    /// School and hospital grounds stay paved like commercial land, mapped as landuse or as
+    /// the amenity's own area; church land, kindergartens and parks do not.
+    #[test]
+    fn school_and_hospital_grounds_keep_no_gardens() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 199, 99).unwrap();
+        let elements = vec![
+            ProcessedElement::Way(tagged(square(1, (0, 0), (20, 20)), "landuse", "education")),
+            ProcessedElement::Way(tagged(square(2, (30, 0), (50, 20)), "landuse", "retail")),
+            ProcessedElement::Way(tagged(square(3, (60, 0), (80, 20)), "amenity", "school")),
+            ProcessedElement::Way(tagged(square(4, (90, 0), (110, 20)), "amenity", "hospital")),
+            ProcessedElement::Way(tagged(square(5, (120, 0), (140, 20)), "amenity", "clinic")),
+            ProcessedElement::Way(tagged(
+                square(6, (150, 0), (170, 20)),
+                "amenity",
+                "townhall",
+            )),
+            ProcessedElement::Way(tagged(square(7, (0, 50), (20, 70)), "amenity", "cafe")),
+            ProcessedElement::Way(tagged(square(8, (30, 50), (50, 70)), "leisure", "park")),
+            ProcessedElement::Way(tagged(
+                square(9, (60, 50), (80, 70)),
+                "landuse",
+                "religious",
+            )),
+            ProcessedElement::Way(tagged(
+                square(10, (90, 50), (110, 70)),
+                "amenity",
+                "kindergarten",
+            )),
+        ];
+        let (grounds, _) = garden_areas(&elements, &bbox);
+        for x in [10, 40, 70, 100, 130, 160] {
+            assert!(grounds.contains(x, 10), "x={x}");
+        }
+        assert!(!grounds.contains(10, 60) && !grounds.contains(40, 60));
+        assert!(!grounds.contains(70, 60), "church land");
+        assert!(!grounds.contains(100, 60), "a kindergarten");
+    }
+
+    /// Squares, pedestrian areas and car parks mapped as multipolygons paint no ground of
+    /// their own, so they are marked as paving from the element list, with `area:highway`
+    /// surfaces and pedestrian areas mapped as ways. A footway or a lawn is not.
+    #[test]
+    fn squares_and_pedestrian_areas_are_paved_for_the_gardens() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 199, 99).unwrap();
+        let relation = |id: u64, pairs: &[(&str, &str)], outer: ProcessedWay| {
+            let mut tags: HashMap<String, String> = pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            tags.insert("type".to_string(), "multipolygon".to_string());
+            ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+                id,
+                tags,
+                members: vec![ProcessedMember {
+                    role: ProcessedMemberRole::Outer,
+                    way: std::sync::Arc::new(outer),
+                }],
+            })
+        };
+        let elements = vec![
+            relation(
+                10,
+                &[("place", "square"), ("highway", "pedestrian")],
+                square(1, (0, 0), (20, 20)),
+            ),
+            relation(11, &[("amenity", "parking")], square(2, (30, 0), (50, 20))),
+            relation(
+                12,
+                &[("amenity", "parking"), ("parking", "underground")],
+                square(3, (60, 0), (80, 20)),
+            ),
+            ProcessedElement::Way(tagged(
+                square(4, (90, 0), (110, 20)),
+                "area:highway",
+                "pedestrian",
+            )),
+            ProcessedElement::Way(tagged(
+                tagged(square(5, (120, 0), (140, 20)), "highway", "pedestrian"),
+                "area",
+                "yes",
+            )),
+            ProcessedElement::Way(tagged(square(6, (150, 0), (170, 20)), "highway", "footway")),
+            ProcessedElement::Way(tagged(square(7, (0, 50), (20, 70)), "landuse", "grass")),
+            ProcessedElement::Way(tagged(
+                square(8, (30, 50), (50, 70)),
+                "amenity",
+                "marketplace",
+            )),
+        ];
+        let mut streets = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
+        mark_paved_areas(&elements, &bbox, &mut streets);
+        for (x, z) in [(10, 10), (40, 10), (100, 10), (130, 10), (40, 60)] {
+            assert!(streets.contains(x, z), "({x}, {z})");
+        }
+        assert!(!streets.contains(70, 10), "an underground car park");
+        assert!(!streets.contains(160, 10), "a footway's ring is a line");
+        assert!(!streets.contains(10, 60), "a lawn");
     }
 }
 

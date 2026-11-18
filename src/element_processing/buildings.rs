@@ -13776,14 +13776,18 @@ pub fn generate_buildings(
         region,
     );
     let preset = BuildingStylePreset::for_category(category);
-    if has_garden_grounds(
-        category,
-        &element.tags,
-        storeys,
-        cached_footprint_size,
-        scale_factor,
-    ) && min_level_offset == 0
-    {
+    let home = Home {
+        part_of_housing: housing_group,
+        footprint_m2: cached_footprint_size as f64 / (scale_factor * scale_factor),
+        on_residential_land: || {
+            editor.garden_land().is_some_and(|land| {
+                cached_floor_area
+                    .iter()
+                    .any(|&(x, z)| land.residential.contains(x, z))
+            })
+        },
+    };
+    if min_level_offset == 0 && has_garden_grounds(category, &element.tags, storeys, home) {
         for &(x, z) in &cached_floor_area {
             editor.mark_ground(crate::world_editor::GroundMark::Dwelling, x, z);
         }
@@ -16117,7 +16121,7 @@ fn mark_tall(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
 }
 
 /// `building` values that are no home whatever their size: stations, sheds of trades,
-/// halls, and the structures of utilities.
+/// halls, civic buildings, and the structures of utilities.
 const NOT_HOMES: &[&str] = &[
     "train_station",
     "transportation",
@@ -16136,6 +16140,7 @@ const NOT_HOMES: &[&str] = &[
     "police",
     "military",
     "boathouse",
+    "houseboat",
     "gatehouse",
     "roof",
     "container",
@@ -16144,16 +16149,46 @@ const NOT_HOMES: &[&str] = &[
     "water_tower",
     "silo",
     "storage_tank",
+    "museum",
+    "townhall",
+    "library",
+    "community_centre",
+    "monastery",
 ];
+
+/// Largest a plain building stands, in m², to count as a house off residential land.
+const HOUSE_FOOTPRINT_M2: f64 = 250.0;
+
+/// What a building's surroundings say about it being a home.
+struct Home<F: FnOnce() -> bool> {
+    /// A part of a building of a housing type (`residential_group_from_seed`).
+    part_of_housing: bool,
+    /// Footprint in m².
+    footprint_m2: f64,
+    /// Whether the footprint reaches residential land; asked only of plain buildings.
+    on_residential_land: F,
+}
 
 /// Whether a building is someone's home, whose grounds are a garden: a house or block of
 /// flats, a farmhouse (not its barns), a listed house, or a plain building with no other
-/// use mapped on it.
-fn is_home(category: BuildingCategory, tags: &HashMap<String, String>) -> bool {
+/// use mapped on it that stands on residential land or is the size of a house. A part is
+/// one where its building is housing or it is mapped as a home itself. A footprint only
+/// Overture knows is one where Overture calls it a house or flats, or a plain one of a
+/// house's size on residential land: its classes are coarse, a barn comes as a farm. Nothing
+/// with a shop, office, restaurant or other use mapped on it is.
+fn is_home(
+    category: BuildingCategory,
+    tags: &HashMap<String, String>,
+    home: Home<impl FnOnce() -> bool>,
+) -> bool {
     let building = tags
         .get("building")
         .or_else(|| tags.get("building:part"))
         .map_or("yes", String::as_str);
+    let mapped_home = matches!(
+        BuildingCategory::from_building_type(building),
+        BuildingCategory::House | BuildingCategory::Residential
+    );
     let other_use = [
         "shop",
         "office",
@@ -16167,19 +16202,32 @@ fn is_home(category: BuildingCategory, tags: &HashMap<String, String>) -> bool {
     .any(|k| tags.contains_key(*k))
         || tags
             .get("tourism")
-            .is_some_and(|t| !matches!(t.as_str(), "guest_house" | "chalet" | "apartment"));
+            .is_some_and(|t| !matches!(t.as_str(), "guest_house" | "chalet" | "apartment"))
+        || tags
+            .get("building:use")
+            .is_some_and(|u| !matches!(u.as_str(), "residential" | "apartments" | "house"));
+    if other_use {
+        return false;
+    }
+    if !tags.contains_key("building") && tags.contains_key("building:part") {
+        return home.part_of_housing || mapped_home;
+    }
+    if tags.get("source").map(String::as_str) == Some("overture_maps") {
+        return mapped_home
+            || (building == "yes"
+                && home.footprint_m2 <= HOUSE_FOOTPRINT_M2
+                && (home.on_residential_land)());
+    }
     match category {
         BuildingCategory::House | BuildingCategory::Residential => true,
         BuildingCategory::Farm => building == "farm",
-        BuildingCategory::Historic => {
-            !other_use
-                && (building == "farm"
-                    || matches!(
-                        BuildingCategory::from_building_type(building),
-                        BuildingCategory::House | BuildingCategory::Residential
-                    ))
+        BuildingCategory::Historic => building == "farm" || mapped_home,
+        BuildingCategory::Default => {
+            !NOT_HOMES.contains(&building)
+                && (home.footprint_m2 <= HOUSE_FOOTPRINT_M2
+                    || tags.contains_key("building:use")
+                    || (home.on_residential_land)())
         }
-        BuildingCategory::Default => !NOT_HOMES.contains(&building) && !other_use,
         _ => false,
     }
 }
@@ -16189,12 +16237,9 @@ fn has_garden_grounds(
     category: BuildingCategory,
     tags: &HashMap<String, String>,
     storeys: f64,
-    footprint_cells: usize,
-    scale_factor: f64,
+    home: Home<impl FnOnce() -> bool>,
 ) -> bool {
-    is_home(category, tags)
-        && storeys < TALL_STOREYS
-        && (footprint_cells as f64) <= 800.0 * scale_factor * scale_factor
+    storeys < TALL_STOREYS && home.footprint_m2 <= 800.0 && is_home(category, tags, home)
 }
 
 fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
@@ -20629,8 +20674,13 @@ mod style_tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect()
         };
+        let home_on = |footprint_m2: f64, residential: bool, part_of_housing: bool| Home {
+            part_of_housing,
+            footprint_m2,
+            on_residential_land: move || residential,
+        };
         let home = |category, pairs: &[(&str, &str)]| {
-            has_garden_grounds(category, &tags(pairs), 3.0, 300, 1.0)
+            has_garden_grounds(category, &tags(pairs), 3.0, home_on(200.0, false, false))
         };
         for (category, building) in [
             (House, "house"),
@@ -20643,8 +20693,8 @@ mod style_tests {
         ] {
             assert!(home(category, &[("building", building)]), "{building}");
         }
-        // Barns, garages, shops and halls mark no garden, nor does a plain building
-        // with a shop or a station in it.
+        // Barns, garages, shops, halls and civic buildings mark no garden, nor does a
+        // house or plain building with a shop, a restaurant or an office use in it.
         for (category, building) in [
             (Farm, "barn"),
             (Commercial, "retail"),
@@ -20657,6 +20707,12 @@ mod style_tests {
             (Default, "train_station"),
             (Default, "service"),
             (Default, "sports_hall"),
+            (Default, "museum"),
+            (Default, "townhall"),
+            (Default, "library"),
+            (Default, "community_centre"),
+            (Default, "monastery"),
+            (Default, "houseboat"),
             (Historic, "castle"),
             (Historic, "yes"),
         ] {
@@ -20664,18 +20720,117 @@ mod style_tests {
         }
         assert!(!home(Default, &[("building", "yes"), ("shop", "bakery")]));
         assert!(!home(Default, &[("building", "yes"), ("amenity", "pub")]));
+        assert!(!home(
+            House,
+            &[("building", "terrace"), ("amenity", "restaurant")]
+        ));
+        assert!(!home(
+            Default,
+            &[("building", "yes"), ("building:use", "commercial")]
+        ));
+        assert!(home(
+            Default,
+            &[("building", "yes"), ("building:use", "residential")]
+        ));
         assert!(home(
             Default,
             &[("building", "yes"), ("tourism", "guest_house")]
         ));
+        // A plain building larger than a house is a home on residential land only.
+        let plain = tags(&[("building", "yes")]);
+        assert!(!has_garden_grounds(
+            Default,
+            &plain,
+            3.0,
+            home_on(400.0, false, false)
+        ));
+        assert!(has_garden_grounds(
+            Default,
+            &plain,
+            3.0,
+            home_on(400.0, true, false)
+        ));
+        // A part counts with its building: a part of a school is none, a part of flats or
+        // a part mapped as a house is.
+        let part = tags(&[("building:part", "yes")]);
+        assert!(!has_garden_grounds(
+            Default,
+            &part,
+            3.0,
+            home_on(100.0, true, false)
+        ));
+        assert!(has_garden_grounds(
+            Default,
+            &part,
+            3.0,
+            home_on(100.0, false, true)
+        ));
+        let house_part = tags(&[("building:part", "house")]);
+        assert!(has_garden_grounds(
+            House,
+            &house_part,
+            3.0,
+            home_on(100.0, false, false)
+        ));
+        // A footprint only Overture knows is a home where Overture calls it one, or a plain
+        // one of a house's size on residential land; never a barn it calls a farm.
+        let overture = |b: &str| tags(&[("building", b), ("source", "overture_maps")]);
+        assert!(!has_garden_grounds(
+            Default,
+            &overture("yes"),
+            2.0,
+            home_on(100.0, false, false)
+        ));
+        assert!(!has_garden_grounds(
+            Default,
+            &overture("yes"),
+            2.0,
+            home_on(300.0, true, false)
+        ));
+        assert!(has_garden_grounds(
+            House,
+            &overture("house"),
+            2.0,
+            home_on(100.0, true, false)
+        ));
+        assert!(has_garden_grounds(
+            Default,
+            &overture("yes"),
+            2.0,
+            home_on(100.0, true, false)
+        ));
+        assert!(!has_garden_grounds(
+            Farm,
+            &overture("farm"),
+            2.0,
+            home_on(100.0, true, false)
+        ));
         // Five storeys or a block of flats' footprint is no house with a garden.
         let house = tags(&[("building", "house")]);
-        assert!(!has_garden_grounds(Residential, &house, 5.0, 300, 1.0));
-        assert!(!has_garden_grounds(Residential, &house, 4.0, 2000, 1.0));
-        // At half scale the footprint limit shrinks with the world, the storeys do not.
-        assert!(has_garden_grounds(House, &house, 4.0, 190, 0.5));
-        assert!(!has_garden_grounds(House, &house, 5.0, 190, 0.5));
-        assert!(!has_garden_grounds(House, &house, 4.0, 210, 0.5));
+        assert!(!has_garden_grounds(
+            Residential,
+            &house,
+            5.0,
+            home_on(300.0, true, false)
+        ));
+        assert!(!has_garden_grounds(
+            Residential,
+            &house,
+            4.0,
+            home_on(2000.0, true, false)
+        ));
+        assert!(has_garden_grounds(
+            House,
+            &house,
+            4.0,
+            home_on(760.0, false, false)
+        ));
+        assert!(!has_garden_grounds(
+            House,
+            &house,
+            4.0,
+            home_on(840.0, false, false)
+        ));
     }
 
     /// Storeys come from the tags at any scale, so a five-storey block is tall at half
