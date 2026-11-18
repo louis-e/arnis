@@ -976,7 +976,7 @@ pub fn generate_world_with_options(
     args: &Args,
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
-    part_groups: PartGroups,
+    mut part_groups: PartGroups,
     housing_parts: HousingRelationParts,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
@@ -1711,10 +1711,16 @@ pub fn generate_world_with_options(
     ));
     editor.set_stations(Arc::clone(&stations));
     let mut station_voids: Vec<stations::StationVoid> = Vec::new();
-    // The rest of a station building whose parts include a shed the station draws.
+    // The rest of a station building whose parts include a shed the station draws, styled
+    // like its parts.
     let station_buildings =
         stations.station_buildings(&elements, &outline_suppression, args.timeout.as_ref());
-    elements.extend(station_buildings);
+    for (piece, part) in station_buildings {
+        if let Some(seed) = part.and_then(|p| part_groups.get(&p).copied()) {
+            part_groups.insert(piece.id(), seed);
+        }
+        elements.push(piece);
+    }
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
     let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
