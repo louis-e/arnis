@@ -350,10 +350,15 @@ fn hides_parts(hint: &OsmAttributeHint, tags: &HashMap<String, String>) -> bool 
     else {
         return false;
     };
-    let top = hint
-        .height_m
-        .or(hint.num_floors.map(|f| f64::from(f) * 3.0));
-    top.is_some_and(|t| t >= 0.9 * parts)
+    // As tall as the generator would stand it on the hint.
+    let built = crate::element_processing::buildings::mapped_walls_m(
+        tags,
+        crate::element_processing::buildings::HeightHint {
+            height_m: hint.height_m,
+            levels: hint.num_floors.map(f64::from),
+        },
+    );
+    built.is_some_and(|(walls, _)| walls >= 0.9 * parts)
 }
 
 /// Writes `hint` onto a building's tags unless OSM already has a vertical tag.
@@ -2743,6 +2748,27 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
         })
+    }
+
+    #[test]
+    fn a_hint_as_tall_as_the_parts_beside_it_is_refused() {
+        // The Westin Bonaventure: towers of 117 m beside an outline Overture puts at 28 floors.
+        let outline = || -> HashMap<String, String> {
+            [
+                ("building", "office"),
+                (crate::osm_parser::PARTS_TOP_TAG, "117.4"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+        };
+        let floors = |n| OsmAttributeHint {
+            height_m: None,
+            num_floors: Some(n),
+        };
+        // Built at four metres a storey on a raised ground floor, 28 floors make 114 m.
+        assert!(!fill_tags(&floors(28), &mut outline()));
+        assert!(fill_tags(&floors(20), &mut outline()));
     }
 
     #[test]
