@@ -495,6 +495,7 @@ fn process_element(
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    road_mask,
                 );
             } else if way.tags.contains_key("barrier") {
                 barriers::generate_barriers(
@@ -751,6 +752,7 @@ fn process_element(
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    road_mask,
                 );
             }
             Some(RelationArea::Golf) => {

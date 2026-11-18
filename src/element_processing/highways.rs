@@ -447,13 +447,22 @@ const OVER_ASPHALT_PROTECTED_SURFACES: &[Block] = &[
     RED_CONCRETE,
 ];
 
-/// What a sidewalk must not overwrite off the carriageway: the list above and a path's
-/// asphalt. Unlike other footways it may pave over a driveway's grey, since a sidewalk
-/// carries on across the driveways along it.
+/// What a paved sidewalk must not overwrite off the carriageway: the list above and a path's
+/// asphalt. It may pave over a driveway's grey, since a sidewalk carries on across the
+/// driveways along it, as on main.
 const SIDEWALK_PROTECTED_SURFACES: &[Block] =
     &joined::<{ OVER_ASPHALT_PROTECTED_SURFACES.len() + 1 }>(
         OVER_ASPHALT_PROTECTED_SURFACES,
         &[POLISHED_ANDESITE],
+    );
+
+/// What a sidewalk drawn in path asphalt must not overwrite off the carriageway: the paved
+/// sidewalk's list and the grey of a driveway, crossing or pedestrian street, which wins
+/// over a path's asphalt whichever is built first.
+const ASPHALT_SIDEWALK_PROTECTED_SURFACES: &[Block] =
+    &joined::<{ SIDEWALK_PROTECTED_SURFACES.len() + 1 }>(
+        SIDEWALK_PROTECTED_SURFACES,
+        &[GRAY_CONCRETE],
     );
 
 /// Blocks a highway way is surfaced with: by type, then `surface=*`, with paved sidewalks
@@ -510,7 +519,7 @@ pub(crate) fn is_walkway(highway_type: &str) -> bool {
 fn paves_like_road(highway_type: &str, tags: &HashMap<String, String>) -> bool {
     let tag = |k: &str| tags.get(k).map(String::as_str);
     highway_type == "pedestrian"
-        || tags.contains_key("crossing")
+        || tag("crossing").is_some_and(|v| v != "no")
         || ["footway", "cycleway", "path"]
             .iter()
             .any(|k| tag(k) == Some("crossing"))
@@ -2026,22 +2035,22 @@ fn generate_highways_internal(
             let kerb_strips = editor.kerb_strips();
             let strip = kerb_strips.as_ref().map_or(&[][..], |k| k.of(way.id));
             let mut levels: FnvHashMap<(i32, i32), (i32, bool)> = FnvHashMap::default();
-            let surface_protect =
-                if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
-                    OVER_ASPHALT_PROTECTED_SURFACES
-                } else if is_walkway(highway_type) && !paves_like_road(highway_type, &way.tags) {
-                    if block_types == PATH_ASPHALT {
-                        CAR_FREE_PROTECTED_SURFACES
-                    } else {
-                        WALKWAY_PROTECTED_SURFACES
-                    }
-                } else {
-                    ROAD_PROTECTED_SURFACES
-                };
-            // Off the lanes a sidewalk stops at a path's asphalt and the grey; a crossing paves
-            // over both.
-            let sidewalk_protect = if paves_like_road(highway_type, &way.tags) {
+            let paves_like_a_road = paves_like_road(highway_type, &way.tags);
+            let surface_protect = if block_types == PATH_ASPHALT {
+                CAR_FREE_PROTECTED_SURFACES
+            } else if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
                 OVER_ASPHALT_PROTECTED_SURFACES
+            } else if is_walkway(highway_type) && !paves_like_a_road {
+                WALKWAY_PROTECTED_SURFACES
+            } else {
+                ROAD_PROTECTED_SURFACES
+            };
+            // Off the lanes a sidewalk stops at a path's asphalt, and in path asphalt at the
+            // grey too; a crossing paves over both.
+            let sidewalk_protect = if paves_like_a_road {
+                OVER_ASPHALT_PROTECTED_SURFACES
+            } else if block_types == PATH_ASPHALT {
+                ASPHALT_SIDEWALK_PROTECTED_SURFACES
             } else {
                 SIDEWALK_PROTECTED_SURFACES
             };
@@ -3171,7 +3180,6 @@ pub fn generate_siding(
     element: &ProcessedWay,
     bridge_surface: &BridgeSurfaceMap,
 ) {
-    const KEEP_OFF: &[Block] = WALKWAY_PROTECTED_SURFACES;
     let mut previous_node: Option<XZPoint> = None;
     let siding_block: Block = STONE_BRICK_SLAB;
 
@@ -3190,10 +3198,16 @@ pub fn generate_siding(
 
             for (bx, _, bz) in bresenham_points {
                 if let Some(deck_y) = bridge_surface.deck_y_at(bx, bz) {
-                    if !editor.check_for_block_absolute(bx, deck_y, bz, Some(KEEP_OFF), None) {
+                    if !editor.check_for_block_absolute(
+                        bx,
+                        deck_y,
+                        bz,
+                        Some(WALKWAY_PROTECTED_SURFACES),
+                        None,
+                    ) {
                         editor.set_block_absolute(siding_block, bx, deck_y + 1, bz, None, None);
                     }
-                } else if !editor.check_for_block(bx, 0, bz, Some(KEEP_OFF)) {
+                } else if !editor.check_for_block(bx, 0, bz, Some(WALKWAY_PROTECTED_SURFACES)) {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
             }
@@ -5393,6 +5407,11 @@ mod tests {
                 "path",
                 &[("surface", "asphalt"), ("crossing", "unmarked")],
                 DEFAULT_ROAD_MIX,
+            ),
+            (
+                "path",
+                &[("surface", "asphalt"), ("crossing", "no")],
+                PATH_ASPHALT,
             ),
             (
                 "cycleway",

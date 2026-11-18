@@ -8,7 +8,7 @@ use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{
     edge_in_hole, in_hole, is_oversized_ring, without_holes, BuildingFootprintBitmap,
-    FloodFillCache, Holes, InnerRings,
+    CoordinateBitmap, FloodFillCache, Holes, InnerRings,
 };
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -22,6 +22,7 @@ pub fn generate_leisure(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+    road_mask: &CoordinateBitmap,
 ) {
     leisure_area(
         editor,
@@ -30,11 +31,13 @@ pub fn generate_leisure(
         flood_fill_cache,
         building_footprints,
         bridge_surface,
+        road_mask,
         None,
     );
 }
 
 /// A leisure area less the cells of `holes`.
+#[allow(clippy::too_many_arguments)]
 fn leisure_area(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -42,6 +45,7 @@ fn leisure_area(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+    road_mask: &CoordinateBitmap,
     holes: Option<&Holes>,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
@@ -107,9 +111,9 @@ fn leisure_area(
                     if edge_in_hole(holes, bx, bz) {
                         continue;
                     }
-                    // On a path or other paving the edge goes only where the fill would, so a
-                    // path it runs along stays whole.
-                    let over: &[Block] = if editor.surface_is_sealed(bx, bz) {
+                    // On a mapped road or path the edge goes only over grass, so a path it runs
+                    // along stays whole; on a plaza or schoolyard a pitch still shows.
+                    let over: &[Block] = if road_mask.contains(bx, bz) {
                         &[GRASS_BLOCK]
                     } else {
                         &[
@@ -285,6 +289,7 @@ pub fn generate_leisure_from_relation(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+    road_mask: &CoordinateBitmap,
 ) {
     if relation_is_area(&rel.tags) {
         // Process each outer member way individually using cached flood fill.
@@ -308,6 +313,7 @@ pub fn generate_leisure_from_relation(
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    road_mask,
                     holes.as_ref(),
                 );
             }
