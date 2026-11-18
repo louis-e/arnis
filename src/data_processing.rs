@@ -349,6 +349,10 @@ fn process_element(
                         args.timeout.as_ref(),
                     );
                 }
+            } else if (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
+                && editor.stations().is_some_and(|s| s.draws_building(way.id))
+            {
+                // A canopy or train shed over platforms, drawn with its station.
             } else if args.mode == GenerationMode::Blueprint
                 && (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
             {
@@ -994,7 +998,7 @@ pub fn generate_world_with_options(
     args: &Args,
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
-    part_groups: PartGroups,
+    mut part_groups: PartGroups,
     housing_parts: HousingRelationParts,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
@@ -1713,6 +1717,26 @@ pub fn generate_world_with_options(
         args.scale,
     );
 
+    // Resolved before the 3D archetypes so they never claim a landmark's element.
+    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+    // 3D model pipeline pre-scan: elements rendered as 3D models instead of
+    // voxels are recorded here and skipped by the element loop below.
+    let models_3d_pipeline = args.use_3d.then(|| {
+        crate::models_3d::Models3dPipeline::prescan(&elements, args, landmarks.suppressed())
+    });
+    // What the stations leave alone: landmarks, models and outlines their parts replace.
+    let station_taken: HashSet<(&'static str, u64)> = landmarks
+        .suppressed()
+        .iter()
+        .chain(models_3d_pipeline.iter().flat_map(|p| p.suppressed()))
+        .copied()
+        .collect();
+    let station_skips: HashSet<(&'static str, u64)> = station_taken
+        .iter()
+        .chain(&outline_suppression)
+        .copied()
+        .collect();
+
     // Platforms and halls, laid out before any track so the tracks can keep level with them.
     let stations = Arc::new(stations::StationIndex::build(
         &elements,
@@ -1727,13 +1751,26 @@ pub fn generate_world_with_options(
             scale: args.scale,
             timeout: args.timeout.as_ref(),
             underground: args.mode != GenerationMode::Blueprint,
+            roofs: args.mode != GenerationMode::Blueprint,
+            skips: &station_skips,
         },
     ));
     editor.set_stations(Arc::clone(&stations));
     let mut station_voids: Vec<stations::StationVoid> = Vec::new();
-
-    // Resolved before the 3D archetypes so they never claim a landmark's element.
-    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+    // The rest of a station building whose parts include a shed the station draws, styled
+    // like its parts.
+    let station_buildings = stations.station_buildings(
+        &elements,
+        &outline_suppression,
+        &station_taken,
+        args.timeout.as_ref(),
+    );
+    for (piece, part) in station_buildings {
+        if let Some(seed) = part.and_then(|p| part_groups.get(&p).copied()) {
+            part_groups.insert(piece.id(), seed);
+        }
+        elements.push(piece);
+    }
 
     // The trains are planned before the cars, which wait at the level crossings they close.
     let planned_trains = extras.cars.then(|| {
@@ -1982,11 +2019,6 @@ pub fn generate_world_with_options(
             .any(|&[x0, z0, x1, z1]| x >= x0 && x <= x1 && z >= z0 && z <= z1)
     });
 
-    // 3D model pipeline pre-scan: elements rendered as 3D models instead of
-    // voxels are recorded here and skipped by the element loop below.
-    let models_3d_pipeline = args.use_3d.then(|| {
-        crate::models_3d::Models3dPipeline::prescan(&elements, args, landmarks.suppressed())
-    });
     // Offline, a model the cache lacks stops the run here instead of after the build.
     if crate::net::offline() {
         if let Some(p) = &models_3d_pipeline {
