@@ -26,12 +26,9 @@ const USER_OVERRIDES: [&str; 3] = [
 /// a crash after this is not the renderer's, and starts nothing again.
 const STARTUP: Duration = Duration::from_secs(15);
 
-/// What the child exits with when the window failed on EGL with an error, not an abort.
+/// What the child exits with when the window failed on EGL with an error, not an abort, or
+/// its web process crashed while starting. It counts as a failed renderer whenever it comes.
 pub const EGL_FAILED_EXIT: i32 = 86;
-
-/// `STARTUP` as the child counts it, shorter since the launcher's runs from the spawn.
-const WEB_PROCESS_STARTUP: Duration = Duration::from_secs(12);
-const _: () = assert!(WEB_PROCESS_STARTUP.as_secs() < STARTUP.as_secs());
 
 /// What a child dies of when WebKit or Mesa gives up natively. A Rust panic exits with 101
 /// instead, and a stop the user asked for (SIGINT, SIGTERM) is none of these.
@@ -124,7 +121,8 @@ pub fn watch_web_process(window: &tauri::WebviewWindow) {
             .connect_web_process_terminated(move |_, reason| {
                 if web_process_failed_start(reason, begun.elapsed()) {
                     eprintln!("Error: the window's web process crashed while starting.");
-                    std::process::exit(EGL_FAILED_EXIT);
+                    // Not `exit`: its atexit handlers could hang inside the running main loop.
+                    unsafe { libc::_exit(EGL_FAILED_EXIT) };
                 }
             });
     });
@@ -138,7 +136,7 @@ fn web_process_failed_start(
     reason: webkit2gtk::WebProcessTerminationReason,
     since_start: Duration,
 ) -> bool {
-    reason == webkit2gtk::WebProcessTerminationReason::Crashed && since_start < WEB_PROCESS_STARTUP
+    reason == webkit2gtk::WebProcessTerminationReason::Crashed && since_start < STARTUP
 }
 
 /// Runs the GUI in a child process and returns the exit code to leave with, or `None`
@@ -169,6 +167,12 @@ pub fn supervise() -> Option<i32> {
         match run_child(cmd, STARTUP, started) {
             Ok(Outcome::Exited(code)) => return Some(code),
             Ok(Outcome::Failed) => {
+                // A child that failed after `STARTUP` was remembered as working.
+                if let Some(path) = memory.as_deref() {
+                    if read_remembered(path) == Some(renderer) {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
                 if let Some(next) = order.get(i + 1) {
                     eprintln!(
                         "Warning: the window could not start with the {} renderer, trying {}.",
@@ -227,7 +231,7 @@ fn remember(path: &Path, renderer: Renderer) {
 #[derive(Debug, PartialEq, Eq)]
 enum Outcome {
     Exited(i32),
-    /// The window never came up: the child crashed or reported EGL failing within `STARTUP`.
+    /// The window never came up: the child crashed within `STARTUP`, or reported EGL failing.
     Failed,
 }
 
@@ -255,7 +259,7 @@ fn run_child(
         };
         if let Some(status) = status {
             let early = begun.elapsed() < startup;
-            if early && failed_to_start(status) {
+            if failed_to_start(status, early) {
                 return Ok(Outcome::Failed);
             }
             if status.success() || !early {
@@ -270,6 +274,7 @@ fn run_child(
                 started();
             }
             return match child.wait() {
+                Ok(status) if failed_to_start(status, false) => Ok(Outcome::Failed),
                 Ok(status) => Ok(Outcome::Exited(exit_code(status))),
                 Err(e) => lost(e),
             };
@@ -278,11 +283,12 @@ fn run_child(
     }
 }
 
-fn failed_to_start(status: ExitStatus) -> bool {
+fn failed_to_start(status: ExitStatus, early: bool) -> bool {
     status.code() == Some(EGL_FAILED_EXIT)
-        || status
-            .signal()
-            .is_some_and(|signal| CRASH_SIGNALS.contains(&signal))
+        || (early
+            && status
+                .signal()
+                .is_some_and(|signal| CRASH_SIGNALS.contains(&signal)))
 }
 
 /// The child's exit code, or the shell's 128 plus the signal that ended it.
@@ -340,16 +346,21 @@ mod tests {
         assert!(started.get(), "remembered once it outlived the start");
     }
 
+    #[test]
+    fn an_egl_failure_the_child_reports_late_is_still_the_renderers() {
+        // A slow start can put the child's own window past the launcher's.
+        let (outcome, started) = run("sleep 1; exit 86", Duration::from_millis(200));
+        assert_eq!(outcome, Outcome::Failed);
+        assert!(started);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn only_a_web_process_crash_while_starting_fails_the_renderer() {
         use webkit2gtk::WebProcessTerminationReason as Reason;
         let early = Duration::from_secs(3);
         assert!(web_process_failed_start(Reason::Crashed, early));
-        assert!(!web_process_failed_start(
-            Reason::Crashed,
-            WEB_PROCESS_STARTUP
-        ));
+        assert!(!web_process_failed_start(Reason::Crashed, STARTUP));
         assert!(!web_process_failed_start(
             Reason::ExceededMemoryLimit,
             early
