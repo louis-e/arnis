@@ -6963,12 +6963,18 @@ fn walls_running_on(ways: &[&ProcessedWay]) -> Vec<WallRun> {
         .collect();
     index.sort_unstable();
     index.dedup();
-    let ids_of = |w: &ProcessedWay| {
-        let mut ids: Vec<u64> = w.nodes.iter().map(|n| n.id).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        ids
-    };
+    // Each ring's node ids, sorted, made once for the rings that share one.
+    let mut ids: FnvHashMap<u32, Vec<u64>> = FnvHashMap::default();
+    for group in index.chunk_by(|a, b| a.0 == b.0).filter(|g| g.len() >= 2) {
+        for &(_, w) in group {
+            ids.entry(w).or_insert_with(|| {
+                let mut v: Vec<u64> = ways[w as usize].nodes.iter().map(|n| n.id).collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            });
+        }
+    }
     // The edges at each place a ring passes a node, leaving it: (edge, direction).
     let edges_at = |w: &ProcessedWay, id: u64| -> Vec<(usize, (f64, f64))> {
         let n = w.nodes.len() - 1;
@@ -6994,7 +7000,7 @@ fn walls_running_on(ways: &[&ProcessedWay]) -> Vec<WallRun> {
         for (i, &(_, a)) in group.iter().enumerate() {
             for &(_, b) in &group[i + 1..] {
                 let (wa, wb) = (ways[a as usize], ways[b as usize]);
-                let (ids_a, ids_b) = (ids_of(wa), ids_of(wb));
+                let (ids_a, ids_b) = (&ids[&a], &ids[&b]);
                 // An edge both ends of which the other ring has: the party wall.
                 let party = |w: &ProcessedWay, edge: usize, other: &[u64]| {
                     [&w.nodes[edge], &w.nodes[edge + 1]]
@@ -7002,11 +7008,11 @@ fn walls_running_on(ways: &[&ProcessedWay]) -> Vec<WallRun> {
                         .all(|n| other.binary_search(&n.id).is_ok())
                 };
                 for (ea, da) in edges_at(wa, id) {
-                    if party(wa, ea, &ids_b) {
+                    if party(wa, ea, ids_b) {
                         continue;
                     }
                     for &(eb, db) in &edges_at(wb, id) {
-                        if !party(wb, eb, &ids_a) && da.0 * db.0 + da.1 * db.1 < IN_LINE {
+                        if !party(wb, eb, ids_a) && da.0 * db.0 + da.1 * db.1 < IN_LINE {
                             runs.push(((a as usize, ea), (b as usize, eb)));
                         }
                     }
@@ -7079,7 +7085,8 @@ pub fn plan_attached_steps(
         .map(|m| decide(m, &off[m]))
         .collect();
     // An edge that steps against one that stays is kept; flags only ever
-    // turn off, so this settles.
+    // turn off, so this settles. Each round's changed buildings decide anew
+    // side by side.
     loop {
         let mut changed: Vec<usize> = Vec::new();
         for &((a, ea), (b, eb)) in &runs {
@@ -7102,8 +7109,10 @@ pub fn plan_attached_steps(
         }
         changed.sort_unstable();
         changed.dedup();
-        for m in changed {
-            steps[m] = decide(m, &off[m]);
+        let again: Vec<Option<Vec<bool>>> =
+            changed.par_iter().map(|&m| decide(m, &off[m])).collect();
+        for (m, step) in changed.into_iter().zip(again) {
+            steps[m] = step;
         }
     }
     for (m, step) in steps.into_iter().enumerate() {
