@@ -1289,13 +1289,13 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         part_groups,
         housing_parts,
     ) {
-        Ok(_) => {
+        Ok(saved_path) => {
             one_world::after_run(&args);
             if args.bedrock {
                 println!(
                     "{} Bedrock world saved to: {}",
                     "Done!".green().bold(),
-                    generation_path.display()
+                    saved_path.display()
                 );
             }
 

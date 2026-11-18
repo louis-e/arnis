@@ -243,6 +243,7 @@ dependencies = [
  "tokio",
  "trash",
  "twox-hash 2.1.2",
+ "webkit2gtk",
  "weezl",
  "windows 0.62.2",
  "zip",

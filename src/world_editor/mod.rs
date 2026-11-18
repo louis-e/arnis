@@ -3431,13 +3431,14 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
-    /// Saves all changes made to the world by writing to the appropriate format.
+    /// Saves all changes made to the world by writing to the appropriate format, and returns
+    /// where it went: the path asked for, or a Bedrock archive saved beside it.
     ///
     /// Returns `Err` on I/O failure so callers can abort the generation pipeline
     /// cleanly. A user-facing error message is also emitted via `emit_gui_error`
     /// before returning so the GUI is notified regardless of how the caller handles
     /// the `Result`.
-    pub fn save(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn save(&mut self) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         println!(
             "Generating world for: {}",
             match self.format {
@@ -3472,7 +3473,7 @@ impl<'a> WorldEditor<'a> {
                 self.finish_voxy();
                 self.finish_dh();
             }
-            WorldFormat::BedrockMcWorld => self.save_bedrock()?,
+            WorldFormat::BedrockMcWorld => return self.save_bedrock(),
             WorldFormat::LuantiWorld => {
                 if let Err(e) = luanti::save_luanti_world(
                     &self.world,
@@ -3508,7 +3509,7 @@ impl<'a> WorldEditor<'a> {
             }
         }
 
-        Ok(())
+        Ok(self.world_dir.clone())
     }
 
     /// Seal the voxy LOD database. A failure here costs the user nothing but
@@ -3563,22 +3564,37 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
-    fn save_bedrock(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// Returns the archive written: beside the one asked for when that could not be replaced.
+    fn save_bedrock(&mut self) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         println!("{} Saving Bedrock world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving Bedrock world...");
 
-        if let Err(error) = self.save_bedrock_internal() {
-            // The GUI shows this again and cuts it at 35 characters, so the cause leads.
-            let user_msg = format!("Bedrock save: {} ({error})", error.reason());
-            eprintln!("{user_msg}");
-            #[cfg(feature = "gui")]
-            emit_gui_error(&user_msg);
-            return Err(user_msg.into());
+        match self.save_bedrock_internal() {
+            Ok(archive) => {
+                if archive != self.world_dir {
+                    let msg = format!(
+                        "'{}' could not be replaced, so the world was saved as '{}'.",
+                        self.world_dir.display(),
+                        archive.display()
+                    );
+                    eprintln!("Warning: {msg}");
+                    #[cfg(feature = "gui")]
+                    send_log(LogLevel::Warning, &msg);
+                }
+                Ok(archive)
+            }
+            Err(error) => {
+                // The GUI shows this again and cuts it at 35 characters, so the cause leads.
+                let user_msg = format!("Bedrock save: {} ({error})", error.reason());
+                eprintln!("{user_msg}");
+                #[cfg(feature = "gui")]
+                emit_gui_error(&user_msg);
+                Err(user_msg.into())
+            }
         }
-        Ok(())
     }
 
-    fn save_bedrock_internal(&mut self) -> Result<(), BedrockSaveError> {
+    fn save_bedrock_internal(&mut self) -> Result<PathBuf, BedrockSaveError> {
         // Use the stored level name if available, otherwise extract from path
         let level_name = self.bedrock_level_name.clone().unwrap_or_else(|| {
             self.world_dir
