@@ -110,7 +110,7 @@ pub struct Args {
     pub tall_range: Option<(i32, i32)>,
 
     /// Ground level to use in the Minecraft world
-    #[arg(long, default_value_t = -62, allow_hyphen_values = true)]
+    #[arg(long, default_value_t = DEFAULT_GROUND_LEVEL, allow_hyphen_values = true)]
     pub ground_level: i32,
 
     /// What to generate, mirroring the GUI's generation mode dropdown:
@@ -1599,6 +1599,9 @@ impl GameMode {
     }
 }
 
+/// `--ground-level` when it is not given: two blocks above vanilla's bedrock.
+pub const DEFAULT_GROUND_LEVEL: i32 = -62;
+
 /// Lowest ground a world with disasters is built on. The default puts the lowest ground two
 /// blocks above bedrock, which leaves sinkholes and cracks nothing to open into.
 pub const DISASTER_GROUND_LEVEL: i32 = -40;
@@ -2147,14 +2150,19 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("Rotation angle must be between -90 and 90 degrees.".to_string());
     }
 
+    validate_ground_level(args, "--ground-level")
+}
+
+/// Checks the ground level for the world the run builds, naming it as `name`; the window
+/// skips `validate_args`.
+pub fn validate_ground_level(args: &Args, name: &str) -> Result<(), String> {
     let (floor, ceiling) = ground_level_bounds(args);
     if args.ground_level < floor || args.ground_level > ceiling {
         return Err(format!(
-            "--ground-level must be between {floor} and {ceiling} for this world format (got {}).",
+            "{name} must be between {floor} and {ceiling} for this world format (got {}).",
             args.ground_level
         ));
     }
-
     Ok(())
 }
 
