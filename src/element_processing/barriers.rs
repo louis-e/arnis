@@ -275,7 +275,7 @@ fn generate_town_wall(
     let mut cells: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     let mut posts: FnvHashSet<(i32, i32)> = FnvHashSet::default();
     let mut passages: FnvHashSet<(i32, i32)> = FnvHashSet::default();
-    let mut stamp = |set: &mut FnvHashSet<(i32, i32)>, (x, z): (i32, i32)| {
+    let stamp = |set: &mut FnvHashSet<(i32, i32)>, (x, z): (i32, i32)| {
         for dx in -reach..=reach {
             for dz in -reach..=reach {
                 set.insert((x + dx, z + dz));

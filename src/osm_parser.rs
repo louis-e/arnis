@@ -4362,11 +4362,11 @@ mod outline_suppression_tests {
         (way, nodes)
     }
 
+    /// A part's corners and tags.
+    type PartSpec<'a> = ([f64; 4], &'a [(&'a str, &'a str)]);
+
     // The outline's tags after the outlines are lowered under the given parts.
-    fn lowered(
-        outline: &[(&str, &str)],
-        parts: &[([f64; 4], &[(&str, &str)])],
-    ) -> HashMap<String, String> {
+    fn lowered(outline: &[(&str, &str)], parts: &[PartSpec]) -> HashMap<String, String> {
         let (way, mut nodes) = boxed(1, [0.0, 0.0, 0.001, 0.001], outline);
         let mut ways = vec![way];
         for (i, (corners, tags)) in parts.iter().enumerate() {
