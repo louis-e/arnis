@@ -1234,18 +1234,16 @@ pub fn parse_osm_data(
         // A field's plots come from the way as mapped, not the part the area kept, so every
         // piece of a One World agrees on them. So do a 3D model's place and size, and whether
         // a building the area cuts stands in its footprint; a plain run keeps what it has.
-        let field_frame = (is_closed_ring(&nodes)
-            && crate::element_processing::field_texture::is_field(&tags))
-        .then(|| crate::element_processing::field_texture::frame_tag(&nodes))
-        .flatten();
-        let model_footprint = (projection.clip_pad > 0
-            && (crate::models_3d::may_replace(&tags)
-                || (crate::models_3d::may_be_hidden(&tags)
-                    && nodes
-                        .iter()
-                        .any(|n| !clip_bbox.contains(&XZPoint::new(n.x, n.z))))))
-        .then(|| crate::models_3d::footprint_tag(nodes.iter()))
-        .flatten();
+        let field =
+            is_closed_ring(&nodes) && crate::element_processing::field_texture::is_field(&tags);
+        let cut_building = projection.model_footprints
+            && crate::models_3d::may_be_hidden(&tags)
+            && nodes
+                .iter()
+                .any(|n| !clip_bbox.contains(&XZPoint::new(n.x, n.z)));
+        let model = projection.model_footprints
+            && (cut_building || tags.contains_key("wikidata") || tags.contains_key("3dmr"));
+        let whole = (field || model).then(|| nodes.clone());
         if tags.get("service").map(String::as_str) == Some("parking_aisle")
             && tags.contains_key("highway")
         {
@@ -1290,8 +1288,17 @@ pub fn parse_osm_data(
             tags,
             nodes: clipped_nodes,
         };
-        processed.tags.extend(field_frame);
-        processed.tags.extend(model_footprint);
+        if let Some(whole) = whole {
+            if field {
+                let frame = crate::element_processing::field_texture::frame_tag(&whole);
+                processed.tags.extend(frame);
+            }
+            if model && (cut_building || crate::models_3d::may_replace(&processed.tags)) {
+                processed
+                    .tags
+                    .extend(crate::models_3d::footprint_tag(whole.iter()));
+            }
+        }
 
         processed_elements.push(ProcessedElement::Way(processed));
     }
@@ -1380,7 +1387,7 @@ pub fn parse_osm_data(
                     &ways_map,
                 ));
                 let mut tags = tags.clone();
-                if projection.clip_pad > 0 && crate::models_3d::may_replace(&tags) {
+                if projection.model_footprints && crate::models_3d::may_replace(&tags) {
                     let whole = whole_area_rings(element.id, &element.members, &roles, &ways_map);
                     tags.extend(crate::models_3d::footprint_tag(
                         whole.iter().flat_map(|m| m.way.nodes.iter()),
@@ -1455,7 +1462,7 @@ pub fn parse_osm_data(
                 &ways_map,
             ));
             let mut tags = tags.clone();
-            if projection.clip_pad > 0 && crate::models_3d::may_replace(&tags) {
+            if projection.model_footprints && crate::models_3d::may_replace(&tags) {
                 let whole = element
                     .members
                     .iter()
@@ -3056,7 +3063,9 @@ fn assemble_area_rings(
     assembled
 }
 
-/// The rings `assemble_area_rings` joins, as mapped: nothing clipped and none left out.
+/// The rings `assemble_area_rings` joins, unclipped and kept whether or not they reach the
+/// world; pieces that do not close are still left out. A relation whose rings are whole ways
+/// takes its footprint from those ways instead.
 fn whole_area_rings(
     relation_id: u64,
     members: &[OsmMember],
@@ -3073,6 +3082,9 @@ fn whole_area_rings(
             (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
             |(a, b, c, d), n| (a.min(n.x), b.min(n.z), c.max(n.x), d.max(n.z)),
         );
+    if x0 > x1 {
+        return Vec::new();
+    }
     match XZBBox::rect_from_min_max(x0, z0, x1, z1) {
         Ok(bounds) => assemble_area_rings(
             relation_id,
@@ -4576,6 +4588,7 @@ mod osm_xml_tests {
             origin: Some((48.0, 11.0)),
             scale: 1.0,
             clip_pad: crate::one_world::CLIP_PAD_BLOCKS,
+            model_footprints: true,
         };
         let area = |bbox: LLBBox| parse_osm_data(parse(ACROSS_THE_SEAM).0, bbox, false, &spec).0;
         let west = area(LLBBox::new(47.995, 10.99, 48.005, 11.0).unwrap());
@@ -4621,14 +4634,40 @@ mod osm_xml_tests {
                 })
                 .unwrap()
         };
-        for id in [50, 51] {
-            let frame = |elements: &[ProcessedElement]| {
+        // A multipolygon field's outer ring is laid out as landuse lays it out: under its own
+        // id, with the relation's tags and the ring's frame.
+        for (id, ring) in [(50, 42), (51, assembled_ring_id(51, false, 0))] {
+            let field = |elements: &[ProcessedElement]| {
                 let r = relation(elements, id);
                 assert_eq!(r.members.len(), 1, "{id}");
-                r.members[0].way.tags.get(FRAME_TAG).cloned()
+                let member = &r.members[0].way;
+                assert_eq!(member.id, ring, "{id}");
+                let mut tags = r.tags.clone();
+                tags.extend(
+                    member
+                        .tags
+                        .get_key_value(FRAME_TAG)
+                        .map(|(k, v)| (k.clone(), v.clone())),
+                );
+                assert!(tags.contains_key(FRAME_TAG), "{id}");
+                let way = ProcessedWay {
+                    id: member.id,
+                    nodes: member.nodes.clone(),
+                    tags,
+                };
+                let zs = member.nodes.iter().map(|n| n.z);
+                let span = zs.clone().min().unwrap()..=zs.max().unwrap();
+                (
+                    FieldLayout::of_way(FieldPreset::Patchwork, 1.0, &way).unwrap(),
+                    span,
+                )
             };
-            assert!(frame(&west).is_some(), "{id}");
-            assert_eq!(frame(&west), frame(&east), "{id}");
+            let ((a, span), (b, _)) = (field(&west), field(&east));
+            for x in (-120..=120).step_by(4) {
+                for z in span.clone().step_by(4) {
+                    assert_eq!(a.plot_at(x, z), b.plot_at(x, z), "{id} ({x}, {z})");
+                }
+            }
         }
         let (a, b) = (relation(&west, 52), relation(&east, 52));
         assert_ne!(a.members[0].way.nodes, b.members[0].way.nodes);
