@@ -14787,6 +14787,24 @@ pub fn generate_buildings(
         }
     }
 
+    if super::mobile_homes::claims(&element.tags)
+        && min_level_offset == 0
+        && hole_points.is_empty()
+        && super::mobile_homes::generate(
+            editor,
+            element,
+            &cached_floor_area,
+            start_y_offset + abs_terrain_offset,
+            args,
+            super::mobile_homes::Surroundings {
+                road_mask: ctx.road_mask,
+                footprints: ctx.building_footprints,
+            },
+        )
+    {
+        return None;
+    }
+
     // Street/neighbor classification: party walls, fronting streets, corner.
     // Sibling part cells: exempt from party-wall detection and kept clear of
     // part facade depth. Membership check guards against id collisions.

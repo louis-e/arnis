@@ -1391,6 +1391,7 @@ pub fn generate_world_with_options(
     cemetery::prepare(&mut elements, sign_region);
     camp_sites::prepare(&mut elements);
     allotments::prepare(&mut elements, args.scale);
+    mobile_homes::prepare(&mut elements, args.scale);
     // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 

@@ -37,6 +37,7 @@ pub mod landuse;
 pub mod leisure;
 pub mod level_crossings;
 pub mod man_made;
+pub mod mobile_homes;
 pub mod natural;
 pub mod parking_garage;
 pub mod parking_lots;
