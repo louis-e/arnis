@@ -1478,7 +1478,7 @@ fn play(
     let mut lan = cfg.lan.then(|| lan::Lan::bind(preferred)).transpose()?;
     let port = server::free_port(if lan.is_some() { None } else { preferred });
     let join_port = lan.as_ref().map_or(port, lan::Lan::port);
-    let rcon_port = server::free_port(None);
+    let rcon_port = server::free_port_besides(port);
     let password = random_password();
     live.journal.rcon_port = Some(rcon_port);
     live.journal.rcon_password = Some(password.clone());
@@ -1605,6 +1605,8 @@ fn play(
     reporter.update(|s| {
         s.phase = "stopping".to_string();
         s.players.clear();
+        s.lan = false;
+        s.lan_address = None;
     });
     reporter.say("stopping", "Stopping the server and saving the world", None);
     for c in [
@@ -1617,12 +1619,7 @@ fn play(
         let _ = rcon.cmd(&c);
     }
     server.stop(Some(&mut rcon), Duration::from_secs(120));
-    if lan.take().is_some() {
-        reporter.update(|s| {
-            s.lan = false;
-            s.lan_address = None;
-        });
-    }
+    drop(lan);
     // A server that went down on its own saved the border it had.
     leave_border(&world_dir);
     live.journal.border_set = false;

@@ -79,6 +79,12 @@ pub fn free_port(preferred: Option<u16>) -> u16 {
         .unwrap_or(25565)
 }
 
+/// A free port other than `taken`, which is held meanwhile so the system cannot hand it out twice.
+pub fn free_port_besides(taken: u16) -> u16 {
+    let _held = TcpListener::bind((Ipv4Addr::LOCALHOST, taken));
+    free_port(None)
+}
+
 /// Free on loopback and nothing answering there. Only loopback is probed: listening on
 /// every interface, even for a moment, asks for a firewall exception on Windows.
 pub(super) fn port_free(port: u16) -> bool {
@@ -100,7 +106,7 @@ fn write_properties(dir: &Path, l: &Launch) -> Result<(), String> {
         ("level-name", l.world_name.to_string()),
         ("motd", motd(l.world_name)),
         ("online-mode", "true".to_string()),
-        // 26.x servers default to a whitelist; this one only listens on localhost.
+        // 26.x servers default to a whitelist; Live has none, like the game's own Open to LAN.
         ("white-list", "false".to_string()),
         ("enforce-whitelist", "false".to_string()),
         ("enable-rcon", "true".to_string()),
@@ -354,6 +360,14 @@ pub fn detach(cmd: &mut Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_second_port_differs_from_the_first() {
+        for _ in 0..50 {
+            let game = free_port(None);
+            assert_ne!(free_port_besides(game), game);
+        }
+    }
 
     #[test]
     fn eula_is_read_and_written() {
