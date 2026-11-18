@@ -176,6 +176,27 @@ const LANDMARKS: &[Landmark] = &[
         reach_m: 13,
         height: 96,
     },
+    Landmark {
+        name: "Sydney Opera House",
+        qid: "Q45178",
+        osm_ids: &[("relation", 9_596_872)],
+        model: Source::Built(crate::structures::sydney_opera_house::build),
+        // Built on the mapped outline, shell parts and harbour edge; anchored mid-podium.
+        lat: -33.857_024_6,
+        lon: 151.215_191_8,
+        anchor_x: 90.0,
+        anchor_z: 105.0,
+        // The broadwalk sits on the ground, the seawall below it.
+        ground_y: crate::structures::sydney_opera_house::GROUND,
+        ground_offset: -1,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // The podium and its shells, not the forecourt buildings.
+        suppress_half_x: 72.0,
+        suppress_half_z: 102.0,
+        reach_m: 155,
+        height: 64,
+    },
 ];
 
 /// A landmark resolved to a spot in this world.
