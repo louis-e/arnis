@@ -5,7 +5,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 
 globalThis.document = { querySelector: () => null, addEventListener() {}, getElementById: () => null };
-globalThis.window = { addEventListener() {}, localization: { region_download_fallback: 'Notice', job_settings_changed: 'Changed: {names}' } };
+globalThis.window = { addEventListener() {}, localization: { region_download_fallback: 'Notice', job_settings_changed: 'Changed: {names}', lidar_over_limit: 'Over: {mb} of {limit}' } };
 const { progressText, holdsNotice } = await import('../../src/gui/js/meld-features.js');
 
 const full = 'Error! Could not reach the server after 3 tries: connection refused';
@@ -17,6 +17,10 @@ assert.ok(n.notice);
 const c = progressText({ message: 'Settings changed since this job started: --river-bed, --winter' });
 assert.equal(c.text, 'Changed: --river-bed, --winter', 'a resume with other settings names them');
 assert.ok(c.notice);
+
+const o = progressText({ message: 'laser_over_limit: 880 500' });
+assert.equal(o.text, 'Over: 880 of 500', 'laser data over the limit says both sizes');
+assert.ok(o.notice && o.log === o.text);
 
 assert.equal(progressText({ message: 'Building pieces... 23/100 done' }).text, 'Building cells… 23/100', 'the title counts cells');
 assert.equal(progressText({ message: 'Building pieces... 23/100 done. Paused.' }).text, 'Building cells… 23/100 Paused.', 'paused, in the same words');
@@ -33,5 +37,6 @@ for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.json') && f !== '
   const loc = JSON.parse(fs.readFileSync(new URL(f, dir), 'utf8'));
   assert.ok(loc.region_download_fallback, `${f} lacks region_download_fallback`);
   assert.ok(loc.job_settings_changed?.includes('{names}'), `${f} lacks job_settings_changed`);
+  assert.ok(loc.lidar_over_limit?.includes('{mb}') && loc.lidar_over_limit.includes('{limit}'), `${f} lacks lidar_over_limit`);
 }
 console.log('progress-text: ok');

@@ -263,6 +263,33 @@ impl MappedTrunks {
         self.typical_height_m
     }
 
+    /// Whether a trunk that `stands` says will stand lies within `reach` blocks of (x, z)
+    /// along both axes; `reach` is at most the crown radius.
+    pub fn trunk_within(
+        &self,
+        x: i32,
+        z: i32,
+        reach: i32,
+        stands: impl Fn(i32, i32) -> bool,
+    ) -> bool {
+        let r = self.radius;
+        let (cx, cz) = (x.div_euclid(r), z.div_euclid(r));
+        (cx - 1..=cx + 1).any(|gx| {
+            let start = self.trunks.partition_point(|t| (t.0, t.1) < (gx, cz - 1));
+            self.trunks[start..]
+                .iter()
+                .take_while(|t| (t.0, t.1) <= (gx, cz + 1))
+                .any(|&(_, _, tx, tz)| {
+                    (tx - x).abs() <= reach && (tz - z).abs() <= reach && stands(tx, tz)
+                })
+        })
+    }
+
+    /// Where each mapped trunk stands.
+    pub fn positions(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
+        self.trunks.iter().map(|&(_, _, x, z)| (x, z))
+    }
+
     pub fn under_crown(&self, x: i32, z: i32) -> bool {
         if self.trunks.is_empty() {
             return false;

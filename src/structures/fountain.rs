@@ -29,6 +29,38 @@ fn variants() -> &'static [Option<StructureSchematic>; 4] {
     })
 }
 
+/// How far the model [`place`] stamps for a fountain of `area_cells` may reach
+/// from where it stands, in blocks: the large one's reach for a large area, else
+/// the farthest of the small ones.
+pub fn reach(area_cells: usize) -> i32 {
+    let variants = variants();
+    let small = variants[..3].iter().flatten().map(|s| s.max_extent).max();
+    let large = variants[3].as_ref().map(|s| s.max_extent);
+    let reach = if area_cells >= LARGE_FOUNTAIN_CELLS {
+        large.or(small)
+    } else {
+        small
+    };
+    reach.unwrap_or(0)
+}
+
+/// Where a fountain mapped as an area is stamped: the filled cell nearest the
+/// middle of its cells, so a concave one still gets it inside.
+pub fn anchor(cells: &[(i32, i32)]) -> Option<(i32, i32)> {
+    if cells.is_empty() {
+        return None;
+    }
+    let (sum_x, sum_z) = cells.iter().fold((0i64, 0i64), |(sx, sz), &(x, z)| {
+        (sx + x as i64, sz + z as i64)
+    });
+    let n = cells.len() as i64;
+    let (cx0, cz0) = ((sum_x / n) as i32, (sum_z / n) as i32);
+    cells.iter().copied().min_by_key(|&(x, z)| {
+        let (dx, dz) = ((x - cx0) as i64, (z - cz0) as i64);
+        dx * dx + dz * dz
+    })
+}
+
 /// Stamp a fountain at (x, z); `area_cells` is footprint size (0 for a node), large areas get fountain 4 else a random small one (1-3).
 pub fn place(editor: &mut WorldEditor, x: i32, z: i32, area_cells: usize) {
     if !editor.place_prop(super::Prop::Fountain) {

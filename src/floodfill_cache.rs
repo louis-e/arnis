@@ -238,6 +238,22 @@ impl CoordinateBitmap {
             .is_some_and(|i| (self.bits[i / 8] >> (i % 8)) & 1 == 0)
     }
 
+    /// Whether any coordinate in the rectangle from (`min_x`, `min_z`) to
+    /// (`max_x`, `max_z`) is set; the part outside the bitmap counts as unset.
+    pub fn any_in(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> bool {
+        if self.count == 0 {
+            return false;
+        }
+        let last_x = i64::from(self.min_x) + self.width as i64 - 1;
+        let last_z = i64::from(self.min_z) + self.height as i64 - 1;
+        let (x0, z0) = (min_x.max(self.min_x), min_z.max(self.min_z));
+        let (x1, z1) = (i64::from(max_x).min(last_x), i64::from(max_z).min(last_z));
+        if i64::from(x0) > x1 || i64::from(z0) > z1 {
+            return false;
+        }
+        self.count_in_range(x0, z0, x1 as i32, z1 as i32).0 > 0
+    }
+
     /// Returns true if no coordinates are marked.
     #[must_use]
     #[allow(dead_code)]
@@ -491,7 +507,11 @@ fn is_sealed_surface_way(way: &ProcessedWay) -> bool {
         }
     }
     if let Some(v) = way.tags.get("amenity") {
-        if SEALED_AMENITY.contains(&v.as_str()) {
+        // A garage or an underground lot leaves the ground it is mapped over as it is.
+        if SEALED_AMENITY.contains(&v.as_str())
+            && (v != "parking"
+                || crate::element_processing::parking_lots::is_surface_lot(&way.tags))
+        {
             return true;
         }
     }
@@ -562,6 +582,25 @@ enum CachedFill {
 struct WayFill {
     ring: Box<[(i32, i32)]>,
     fill: Mutex<CachedFill>,
+}
+
+/// Which elements a pass keeps, by their tags.
+type TagFilter = fn(&std::collections::HashMap<String, String>) -> bool;
+
+/// Whether a building's walls come down to the ground: not a roof on posts, nor a part that
+/// starts above the street, which a road runs on under.
+fn walls_to_ground(tags: &std::collections::HashMap<String, String>) -> bool {
+    let raised = |key: &str| {
+        tags.get(key)
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .is_some_and(|v| v > 0.0)
+    };
+    !matches!(
+        tags.get("building").map(String::as_str),
+        Some("roof" | "carport")
+    ) && !["min_level", "building:min_level", "min_height"]
+        .iter()
+        .any(|k| raised(k))
 }
 
 /// Fills prepared per pass, so a pre-pass never holds every fill of the world at once.
@@ -882,13 +921,59 @@ impl FloodFillCache {
     /// Returns a memory-efficient bitmap of all (x, z) coordinates that are part of buildings.
     ///
     /// The bitmap uses only 1 bit per coordinate in the world bounds, compared to ~24 bytes
-    /// per entry in a HashSet, reducing memory usage by ~200x for large worlds.
+    /// per entry in a HashSet, reducing memory usage by ~200x for large worlds. A run takes
+    /// it with the wall footprints, `collect_building_and_wall_footprints`.
+    #[cfg(test)]
     pub fn collect_building_footprints(
         &self,
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
     ) -> BuildingFootprintBitmap {
+        self.collect_footprints(elements, xzbbox, |_| true, None).0
+    }
+
+    /// The footprints of the buildings whose walls come down to the ground: not a roof on
+    /// posts, nor a part that starts above the street, which a road runs on under.
+    #[cfg(test)]
+    pub fn collect_wall_footprints(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+    ) -> BuildingFootprintBitmap {
+        self.collect_footprints(elements, xzbbox, walls_to_ground, None)
+            .0
+    }
+
+    /// Every building's footprint (`collect_building_footprints`) and, apart, those of the
+    /// buildings whose walls come down to the ground (`collect_wall_footprints`), each
+    /// building filled once for both.
+    pub fn collect_building_and_wall_footprints(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+    ) -> (BuildingFootprintBitmap, BuildingFootprintBitmap) {
+        let (all, walls) =
+            self.collect_footprints(elements, xzbbox, |_| true, Some(walls_to_ground));
+        (
+            all,
+            walls.unwrap_or_else(BuildingFootprintBitmap::new_empty),
+        )
+    }
+
+    /// The footprints of the buildings `keep` lets through and, with `also`, apart, those of
+    /// the buildings it lets through.
+    fn collect_footprints(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        keep: impl Fn(&std::collections::HashMap<String, String>) -> bool,
+        also: Option<TagFilter>,
+    ) -> (BuildingFootprintBitmap, Option<BuildingFootprintBitmap>) {
         let mut footprints = BuildingFootprintBitmap::new(xzbbox);
+        let mut second = also.map(|_| BuildingFootprintBitmap::new(xzbbox));
+        let wanted = |tags: &std::collections::HashMap<String, String>| {
+            (keep(tags), also.is_some_and(|f| f(tags)))
+        };
 
         // Relations first (outer fills, courtyards clear), ways second so courtyard buildings re-mark.
         for element in elements {
@@ -897,7 +982,8 @@ impl FloodFillCache {
                     || rel.tags.contains_key("building:part")
                     || rel.tags.get("type").map(|t| t.as_str()) == Some("building"))
                     && !crate::element_processing::buildings::is_underground_building(&rel.tags);
-                if !is_building {
+                let (first, apart) = wanted(&rel.tags);
+                if !is_building || !(first || apart) {
                     continue;
                 }
                 // Each outer less the courtyards that cut it, so a keep mapped as an outer in
@@ -918,7 +1004,12 @@ impl FloodFillCache {
                     for &o in &members {
                         for (x, z) in flood_fill_area(&outers[o], None) {
                             if !courtyard.contains(x, z) {
-                                footprints.set(x, z);
+                                if first {
+                                    footprints.set(x, z);
+                                }
+                                if let Some(second) = second.as_mut().filter(|_| apart) {
+                                    second.set(x, z);
+                                }
                             }
                         }
                     }
@@ -926,7 +1017,7 @@ impl FloodFillCache {
             }
         }
 
-        let buildings: Vec<u64> = elements
+        let buildings: Vec<(u64, bool, bool)> = elements
             .iter()
             .filter_map(|element| match element {
                 ProcessedElement::Way(way)
@@ -936,7 +1027,8 @@ impl FloodFillCache {
                             &way.tags,
                         ) =>
                 {
-                    Some(way.id)
+                    let (first, apart) = wanted(&way.tags);
+                    (first || apart).then_some((way.id, first, apart))
                 }
                 _ => None,
             })
@@ -944,16 +1036,28 @@ impl FloodFillCache {
         for batch in buildings.chunks(PREPASS_BATCH) {
             let fills: Vec<Option<FloodFillResult>> = batch
                 .par_iter()
-                .map(|&id| self.transient_fill(id))
+                .map(|&(id, _, _)| self.transient_fill(id))
                 .collect();
-            for fill in fills.iter().flatten() {
-                for &(x, z) in fill.iter() {
-                    footprints.set(x, z);
+            // Each mask on a thread of its own.
+            let mark = |bits: &mut BuildingFootprintBitmap,
+                        wants: fn(&(u64, bool, bool)) -> bool| {
+                for (fill, building) in fills.iter().zip(batch) {
+                    if wants(building) {
+                        for &(x, z) in fill.iter().flat_map(|f| f.iter()) {
+                            bits.set(x, z);
+                        }
+                    }
                 }
+            };
+            match second.as_mut() {
+                Some(second) => {
+                    rayon::join(|| mark(&mut footprints, |b| b.1), || mark(second, |b| b.2));
+                }
+                None => mark(&mut footprints, |b| b.1),
             }
         }
 
-        footprints
+        (footprints, second)
     }
 
     /// Builds the sealed-surface mask: the road mask plus every cached footprint
@@ -964,6 +1068,126 @@ impl FloodFillCache {
     /// already own, so the caller can share the road mask instead of paying for a
     /// second full-world bitmap. Only fill sizes are kept between passes: each fill is made
     /// again, a bounded batch at a time, when its layer is applied.
+    /// What a strip paved between a sidewalk and its road must not pave over: every mapped
+    /// lawn, planting and paved area, and every hedge, fence and wall.
+    /// The cells of the water OSM maps as areas, block for block where the land cover's
+    /// grid is coarser: lakes, canals, docks, the water a multipolygon outlines less its
+    /// islands. Nothing below ground.
+    pub fn collect_water_areas(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+    ) -> CoordinateBitmap {
+        let below = |tags: &std::collections::HashMap<String, String>| {
+            tags.get("layer")
+                .and_then(|l| l.trim().parse::<i32>().ok())
+                .is_some_and(|l| l < 0)
+        };
+        let mut water = CoordinateBitmap::new(xzbbox);
+        let mut any = false;
+        for element in elements {
+            let ProcessedElement::Relation(rel) = element else {
+                continue;
+            };
+            if RelationArea::of(&rel.tags) != Some(RelationArea::Water) || below(&rel.tags) {
+                continue;
+            }
+            let outers = relation_rings(rel, ProcessedMemberRole::Outer, xzbbox);
+            let islands = relation_rings(rel, ProcessedMemberRole::Inner, xzbbox);
+            let mut island = CoordinateBitmap::new_empty();
+            if let Some(bounds) = points_bounds(islands.iter().flat_map(|r| r.iter().copied())) {
+                island = CoordinateBitmap::new(&bounds);
+                for ring in &islands {
+                    for (x, z) in flood_fill_area(ring, None) {
+                        island.set(x, z);
+                    }
+                }
+            }
+            for ring in &outers {
+                for (x, z) in flood_fill_area(ring, None) {
+                    if !island.contains(x, z) {
+                        water.set(x, z);
+                        any = true;
+                    }
+                }
+            }
+        }
+        let ways: Vec<u64> = elements
+            .iter()
+            .filter_map(|element| match element {
+                ProcessedElement::Way(way)
+                    if (matches!(
+                        way.tags.get("natural").map(String::as_str),
+                        Some("water" | "bay")
+                    ) || matches!(
+                        way.tags.get("waterway").map(String::as_str),
+                        Some("dock" | "riverbank")
+                    )) && !below(&way.tags)
+                        && self.contains(way.id) =>
+                {
+                    Some(way.id)
+                }
+                _ => None,
+            })
+            .collect();
+        for batch in ways.chunks(PREPASS_BATCH) {
+            let fills: Vec<Option<FloodFillResult>> = batch
+                .par_iter()
+                .map(|&id| self.transient_fill(id))
+                .collect();
+            for fill in fills.iter().flatten() {
+                for &(x, z) in fill.iter() {
+                    water.set(x, z);
+                    any = true;
+                }
+            }
+        }
+        if any {
+            water
+        } else {
+            CoordinateBitmap::new_empty()
+        }
+    }
+
+    pub fn collect_kerb_blockers(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+    ) -> CoordinateBitmap {
+        let mut bits = CoordinateBitmap::new(xzbbox);
+        // The areas' fills are made a batch at a time on every thread, as the other
+        // pre-passes make theirs.
+        let mut areas: Vec<u64> = Vec::new();
+        for element in elements {
+            let ProcessedElement::Way(w) = element else {
+                continue;
+            };
+            if w.tags
+                .get("barrier")
+                .is_some_and(|b| b != "kerb" && b != "no")
+            {
+                for pair in w.nodes.windows(2) {
+                    let (a, b) = (&pair[0], &pair[1]);
+                    for (x, _, z) in crate::bresenham::bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
+                        bits.set(x, z);
+                    }
+                }
+            } else if self.contains(w.id) && (is_sealed_surface_way(w) || is_planted_way(w)) {
+                areas.push(w.id);
+            }
+        }
+        for batch in areas.chunks(PREPASS_BATCH) {
+            let fills: Vec<Option<FloodFillResult>> = batch
+                .par_iter()
+                .map(|&id| self.transient_fill(id))
+                .collect();
+            for &(x, z) in fills.iter().flatten().flat_map(|f| f.iter()) {
+                bits.set(x, z);
+            }
+        }
+        bits
+    }
+
     pub fn collect_sealed_surfaces(
         &self,
         elements: &[ProcessedElement],
@@ -984,6 +1208,18 @@ impl FloodFillCache {
                                 turf_outers.insert(m.way.id);
                             }
                             ProcessedMemberRole::Inner => turf_holes.push(m.way.id),
+                            ProcessedMemberRole::Part => {}
+                        }
+                    }
+                }
+                // Parking lots mapped as multipolygons pave their outers like the closed ways,
+                // yielding to lawns inside; their holes, which the fill leaves out, open again
+                // as a lawn inside would.
+                if RelationArea::of(&r.tags) == Some(RelationArea::Parking) {
+                    for m in r.members.iter().filter(|m| self.contains(m.way.id)) {
+                        match m.role {
+                            ProcessedMemberRole::Outer => sealed_ids.push((m.way.id, true)),
+                            ProcessedMemberRole::Inner => planted_ids.push(m.way.id),
                             ProcessedMemberRole::Part => {}
                         }
                     }
@@ -1271,6 +1507,156 @@ fn points_bounds(mut points: impl Iterator<Item = (i32, i32)>) -> Option<XZBBox>
     XZBBox::rect_from_min_max(x0, z0, x1, z1).ok()
 }
 
+/// What of a mapped feature measured trees keep clear of.
+enum KeptWater {
+    /// Water filling the area: a swimming pool, a pond, lake or river mapped as an
+    /// area, a reservoir, covered or not.
+    Area,
+    /// A fountain, as far as its model reaches.
+    Fountain,
+    /// A stream, river or ditch drawn along its line, this many blocks either side.
+    Channel(i32),
+}
+
+fn kept_water(
+    tags: &std::collections::HashMap<String, String>,
+    scale: f64,
+    channel_width_cap: Option<i32>,
+) -> Option<KeptWater> {
+    use crate::element_processing::waterways;
+    let is = |k: &str, v: &str| tags.get(k).is_some_and(|t| t == v);
+    if is("amenity", "fountain") {
+        return Some(KeptWater::Fountain);
+    }
+    if is("leisure", "swimming_pool")
+        || is("natural", "water")
+        || tags.contains_key("water")
+        || is("landuse", "reservoir")
+        || is("man_made", "reservoir_covered")
+        || is("waterway", "riverbank")
+        || is("waterway", "dock")
+    {
+        return Some(KeptWater::Area);
+    }
+    let kind = tags.get("waterway")?;
+    (waterways::is_channel_waterway(kind) && !waterways::is_underground_waterway(tags)).then(|| {
+        // As `create_water_channel` draws it around each point of the line.
+        let width = waterways::capped_waterway_width(kind, tags, scale, channel_width_cap);
+        KeptWater::Channel(width / 2 + 1)
+    })
+}
+
+/// The columns of mapped water that measured trees keep clear of, and `margin`
+/// blocks around them: pools (the survey's own among them), ponds, lakes and
+/// rivers mapped as areas, reservoirs, covered ones too, streams and ditches as
+/// wide as they are drawn, and fountains, as far as the model stamped for each
+/// reaches. A lake's islands are not water. `None` when the area has none.
+pub fn collect_tree_keep_clear(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+    channel_width_cap: Option<i32>,
+    margin: i32,
+) -> Option<CoordinateBitmap> {
+    let mut keep = CoordinateBitmap::new(xzbbox);
+    let mut mark = |x: i32, z: i32, r: i32| {
+        for dx in -r..=r {
+            for dz in -r..=r {
+                keep.set(x + dx, z + dz);
+            }
+        }
+    };
+    let point_fountain = crate::structures::fountain::reach(0) + margin;
+    for element in elements {
+        let Some(kind) = kept_water(element.tags(), scale, channel_width_cap) else {
+            continue;
+        };
+        let fountain = matches!(kind, KeptWater::Fountain);
+        match (element, kind) {
+            (ProcessedElement::Node(n), KeptWater::Fountain) => mark(n.x, n.z, point_fountain),
+            (ProcessedElement::Node(_), _) => {}
+            (ProcessedElement::Way(w), KeptWater::Channel(half)) => {
+                let r = half + margin;
+                for pair in w.nodes.windows(2) {
+                    let (a, b) = (pair[0].xz(), pair[1].xz());
+                    // A long river runs far past the area; only what can reach it counts.
+                    if a.x.max(b.x) + r < xzbbox.min_x()
+                        || a.x.min(b.x) - r > xzbbox.max_x()
+                        || a.z.max(b.z) + r < xzbbox.min_z()
+                        || a.z.min(b.z) - r > xzbbox.max_z()
+                    {
+                        continue;
+                    }
+                    for (x, _, z) in bresenham_line(a.x, 0, a.z, b.x, 0, b.z) {
+                        mark(x, z, r);
+                    }
+                }
+            }
+            // As `generate_fountain` stamps it: at its first node, as a point.
+            (ProcessedElement::Way(w), KeptWater::Fountain) if w.nodes.len() < 3 => {
+                if let Some(n) = w.nodes.first() {
+                    mark(n.x, n.z, point_fountain);
+                }
+            }
+            (ProcessedElement::Way(w), _) => {
+                let ring = crate::clipping::clip_way_to_bbox(&w.nodes, xzbbox);
+                let coords: Vec<(i32, i32)> = ring.iter().map(|n| (n.x, n.z)).collect();
+                let cells = flood_fill_area(&coords, None);
+                if fountain {
+                    fountain_reach(&mut mark, &cells, margin);
+                }
+                for (x, z) in cells {
+                    mark(x, z, margin);
+                }
+            }
+            // A waterway relation's channels are drawn from its member ways.
+            (ProcessedElement::Relation(_), KeptWater::Channel(_)) => {}
+            (ProcessedElement::Relation(rel), _) => {
+                let outers = relation_rings(rel, ProcessedMemberRole::Outer, xzbbox);
+                let inners = relation_rings(rel, ProcessedMemberRole::Inner, xzbbox);
+                for (members, cutting) in hole_groups(&outers, &inners, |&p| p) {
+                    let holes: Vec<(i32, i32)> = cutting
+                        .iter()
+                        .flat_map(|&i| flood_fill_area(&inners[i], None))
+                        .collect();
+                    let mut island = CoordinateBitmap::new_empty();
+                    if let Some(bounds) = points_bounds(holes.iter().copied()) {
+                        island = CoordinateBitmap::new(&bounds);
+                        for &(x, z) in &holes {
+                            island.set(x, z);
+                        }
+                    }
+                    for &o in &members {
+                        let cells: Vec<(i32, i32)> = flood_fill_area(&outers[o], None)
+                            .into_iter()
+                            .filter(|&(x, z)| !island.contains(x, z))
+                            .collect();
+                        if fountain {
+                            fountain_reach(&mut mark, &cells, margin);
+                        }
+                        for (x, z) in cells {
+                            mark(x, z, margin);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (!keep.is_empty()).then_some(keep)
+}
+
+/// Marks as far as the model stamped for a fountain mapped as these cells reaches
+/// past them, from where it is stamped.
+fn fountain_reach(mark: &mut impl FnMut(i32, i32, i32), cells: &[(i32, i32)], margin: i32) {
+    if let Some((x, z)) = crate::structures::fountain::anchor(cells) {
+        mark(
+            x,
+            z,
+            crate::structures::fountain::reach(cells.len()) + margin,
+        );
+    }
+}
+
 /// A relation's merged, clipped, closed rings of one role.
 fn relation_rings(
     rel: &crate::osm_parser::ProcessedRelation,
@@ -1478,6 +1864,43 @@ mod tests {
     }
 
     #[test]
+    fn a_road_stops_at_walls_on_the_ground_and_at_water_block_for_block() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let square = |id, (x0, z0): (i32, i32), side: i32, tags: &[(&str, &str)]| {
+            let (x1, z1) = (x0 + side, z0 + side);
+            ProcessedElement::Way(tagged_way(
+                id,
+                &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)],
+                tags,
+            ))
+        };
+        let elements = vec![
+            square(1, (0, 0), 10, &[("building", "house")]),
+            square(2, (20, 0), 10, &[("building", "roof")]),
+            square(
+                3,
+                (40, 0),
+                10,
+                &[("building:part", "yes"), ("min_level", "1")],
+            ),
+            square(4, (0, 40), 20, &[("natural", "water"), ("water", "canal")]),
+            square(5, (40, 40), 20, &[("natural", "water"), ("layer", "-1")]),
+        ];
+        let cache = FloodFillCache::precompute(&elements, None);
+        let walls = cache.collect_wall_footprints(&elements, &xzbbox);
+        assert!(walls.contains(5, 5));
+        assert!(!walls.contains(25, 5), "a roof on posts");
+        assert!(!walls.contains(45, 5), "a part over the street");
+        // Every building still has its footprint for the rest.
+        let all = cache.collect_building_footprints(&elements, &xzbbox);
+        assert!(all.contains(25, 5) && all.contains(45, 5));
+        let water = cache.collect_water_areas(&elements, &xzbbox);
+        assert!(water.contains(10, 50));
+        assert!(!water.contains(50, 50), "water underground");
+        assert!(!water.contains(30, 50));
+    }
+
+    #[test]
     fn sealed_surfaces_cover_pitches_and_keep_the_roads() {
         let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
         let pitch = tagged_way(
@@ -1552,6 +1975,41 @@ mod tests {
             sealed.contains(65, 15),
             "a lawn on the fairway stays sealed"
         );
+    }
+
+    #[test]
+    fn a_lot_multipolygon_reopens_its_holes() {
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation};
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 99, 99).unwrap();
+        let ring = |id, (x0, z0): (i32, i32), side: i32| {
+            let (x1, z1) = (x0 + side, z0 + side);
+            tagged_way(id, &[(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)], &[])
+        };
+        let member = |role, way| ProcessedMember {
+            role,
+            way: Arc::new(way),
+        };
+        let lot = ProcessedRelation {
+            id: 9,
+            tags: [("type", "multipolygon"), ("amenity", "parking")]
+                .iter()
+                .map(|&(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            members: vec![
+                member(ProcessedMemberRole::Outer, ring(1, (0, 0), 80)),
+                // The supermarket standing in the lot.
+                member(ProcessedMemberRole::Inner, ring(2, (10, 10), 20)),
+            ],
+        };
+        let elements = vec![ProcessedElement::Relation(lot)];
+        let cache = FloodFillCache::precompute(&elements, None);
+        let mut roads = RoadMaskBitmap::new(&xzbbox);
+        roads.set(15, 15);
+        let sealed = cache.collect_sealed_surfaces(&elements, &roads).unwrap();
+
+        assert!(sealed.contains(50, 50), "the lot is paved");
+        assert!(!sealed.contains(20, 20), "its hole is given back");
+        assert!(sealed.contains(15, 15), "a road through the hole stays");
     }
 
     #[test]
@@ -1731,6 +2189,63 @@ mod tests {
             cache.holes_in(&island, &inners, None).is_none(),
             "an island in the lake is wood again"
         );
+    }
+
+    #[test]
+    fn trees_keep_clear_of_mapped_water_as_it_is_drawn() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 199, 199).unwrap();
+        let square = |x0, z0, x1, z1| [(x0, z0), (x1, z0), (x1, z1), (x0, z1), (x0, z0)];
+        let pool = tagged_way(1, &square(10, 10, 20, 20), &[("leisure", "swimming_pool")]);
+        let stream = tagged_way(2, &[(50, 0), (50, 100)], &[("waterway", "stream")]);
+        let culvert = tagged_way(
+            3,
+            &[(70, 0), (70, 100)],
+            &[("waterway", "stream"), ("tunnel", "culvert")],
+        );
+        let park = tagged_way(4, &square(100, 10, 120, 30), &[("leisure", "park")]);
+        let (lake, island) = (ring(5, 130, 130, 190, 190), ring(6, 150, 150, 170, 170));
+        let fountain = crate::osm_parser::ProcessedNode {
+            id: 7,
+            tags: [("amenity".to_string(), "fountain".to_string())].into(),
+            x: 100,
+            z: 160,
+        };
+        let elements = vec![
+            ProcessedElement::Way(pool),
+            ProcessedElement::Way(stream),
+            ProcessedElement::Way(culvert),
+            ProcessedElement::Way(park),
+            ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+                id: 8,
+                tags: [("natural".to_string(), "water".to_string())].into(),
+                members: [
+                    (ProcessedMemberRole::Outer, &lake),
+                    (ProcessedMemberRole::Inner, &island),
+                ]
+                .into_iter()
+                .map(|(role, way)| crate::osm_parser::ProcessedMember {
+                    role,
+                    way: Arc::new(way.clone()),
+                })
+                .collect(),
+            }),
+            ProcessedElement::Node(fountain),
+        ];
+        let keep = collect_tree_keep_clear(&elements, &xzbbox, 1.0, None, 1).unwrap();
+        assert!(keep.contains(15, 15) && !keep.contains(7, 15), "the pool");
+        // A stream is drawn 3 wide and a block either side; one more is the margin.
+        assert!(keep.contains(53, 50) && keep.contains(47, 50));
+        assert!(!keep.contains(54, 50) && !keep.contains(46, 50));
+        assert!(!keep.contains(70, 50), "a culvert is not open water");
+        assert!(!keep.contains(110, 20), "a park is not water");
+        assert!(
+            keep.contains(140, 140) && !keep.contains(160, 160),
+            "an island is land"
+        );
+        let r = crate::structures::fountain::reach(0);
+        assert!(r > 0);
+        assert!(keep.contains(100 + r + 1, 160) && !keep.contains(100 + r + 2, 160));
+        assert!(collect_tree_keep_clear(&elements[3..4], &xzbbox, 1.0, None, 1).is_none());
     }
 
     #[test]

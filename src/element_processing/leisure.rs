@@ -151,13 +151,19 @@ fn leisure_area(
                     continue;
                 }
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
+                let park = matches!(leisure_type.as_str(), "park" | "garden");
+                let (in_bounds, owned) =
+                    (park && editor.in_bounds(x, z), park && editor.owns(x, z));
+                // Grass on the column and no paving over it, read once for the lawn and
+                // the plants below.
+                let open_grass = (in_bounds || owned)
+                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    && !editor.surface_is_sealed(x, z);
                 // Only cells in this editor, halo included so the tiles agree where a
                 // patch reaches across. Woods and scrub the land cover sees in a park
                 // keep their floor.
-                let lawn = matches!(leisure_type.as_str(), "park" | "garden")
-                    && editor.in_bounds(x, z)
-                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
-                    && !editor.surface_is_sealed(x, z)
+                let lawn = in_bounds
+                    && open_grass
                     && crate::land_cover::mown_cover(editor.land_cover_class(x, z));
                 if lawn {
                     editor.mark_ground(crate::world_editor::GroundMark::Lawn, x, z);
@@ -169,11 +175,7 @@ fn leisure_area(
                 // read as grass here and only the mask tells them apart. Halo cells
                 // are left to the tile that owns them, whose own random sequence
                 // decides what grows there.
-                let plants = matches!(leisure_type.as_str(), "park" | "garden")
-                    && editor.owns(x, z)
-                    && !editor.is_lc_water(x, z)
-                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
-                    && !editor.surface_is_sealed(x, z);
+                let plants = owned && open_grass && !editor.is_lc_water(x, z);
                 if plants {
                     let random_choice: i32 = rng.random_range(0..1000);
 

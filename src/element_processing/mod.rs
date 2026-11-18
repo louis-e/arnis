@@ -32,12 +32,14 @@ pub mod greenhouses;
 pub mod highways;
 pub mod historic;
 pub mod ice_rinks;
+pub mod kerb_strips;
 pub mod landuse;
 pub mod leisure;
 pub mod level_crossings;
 pub mod man_made;
 pub mod natural;
 pub mod parking_garage;
+pub mod parking_lots;
 pub mod pedestrians;
 pub mod plane_bodies;
 pub mod plantations;
@@ -47,6 +49,7 @@ pub mod rail_track;
 pub mod railways;
 pub mod road_detail;
 pub mod road_markings;
+pub(crate) mod road_width;
 pub mod rooftops;
 pub mod ship_bodies;
 pub mod ships;
@@ -89,6 +92,8 @@ pub enum RelationArea {
     Grounds,
     ManMade,
     Pool,
+    /// Surface parking lots.
+    Parking,
 }
 
 impl RelationArea {
@@ -117,6 +122,8 @@ impl RelationArea {
             Some(Self::Leisure)
         } else if tags.contains_key("man_made") {
             Some(Self::ManMade)
+        } else if parking_lots::is_surface_lot(tags) {
+            Some(Self::Parking)
         } else {
             None
         }
@@ -127,7 +134,12 @@ impl RelationArea {
     /// groynes are areas.
     pub fn fills_members(self, tags: &HashMap<String, String>) -> bool {
         match self {
-            Self::Natural | Self::Leisure | Self::Golf | Self::Grounds | Self::Pool => true,
+            Self::Natural
+            | Self::Leisure
+            | Self::Golf
+            | Self::Grounds
+            | Self::Pool
+            | Self::Parking => true,
             Self::Landuse => landuse_paints_ground(tags),
             Self::ManMade => matches!(
                 tags.get("man_made").map(String::as_str),

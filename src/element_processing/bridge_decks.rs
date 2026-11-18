@@ -1,13 +1,14 @@
 //! Railings, gap fills, beams, lamps and piers, laid out per structure at any grid angle.
 
 use crate::block_definitions::*;
+use crate::bresenham::bresenham_line;
 use crate::element_processing::bridge_styles::BridgeStyle;
 use crate::element_processing::bridges::{
     deck_columns, grade_obstacle, is_non_vehicular_bridge_highway, way_cells, BridgeMemberInfo,
     BridgeStructureMap, BridgeSurfaceMap,
 };
 use crate::element_processing::connected_blocks::{is_connectable, place_connected};
-use crate::element_processing::highways::highway_block_range;
+use crate::element_processing::highways::{highway_block_range, in_road_stamp, stamp_radius};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
@@ -317,9 +318,10 @@ struct OpenEnd {
     reach: f32,
 }
 
-/// At-grade ways as segments in buckets, to keep railings off the roads they meet.
+/// At-grade ways as segments in buckets, to keep railings off the roads they meet: each
+/// segment's ends, how far its stamp can reach and its half-width.
 struct GradeRoads {
-    segments: Vec<(f32, f32, f32, f32, f32)>,
+    segments: Vec<(f32, f32, f32, f32, f32, i32)>,
     buckets: HashMap<(i32, i32), Vec<u32>>,
 }
 
@@ -339,7 +341,7 @@ impl GradeRoads {
             let Some((half, _, _)) = grade_obstacle(way, scale) else {
                 continue;
             };
-            let reach = half as f32 + 0.5;
+            let reach = stamp_radius(half) + 0.5;
             for pair in way.nodes.windows(2) {
                 let seg = out.segments.len() as u32;
                 out.segments.push((
@@ -348,6 +350,7 @@ impl GradeRoads {
                     pair[1].x as f32,
                     pair[1].z as f32,
                     reach,
+                    half,
                 ));
                 let r = half + 1;
                 let (x0, x1) = (pair[0].x.min(pair[1].x) - r, pair[0].x.max(pair[1].x) + r);
@@ -362,7 +365,7 @@ impl GradeRoads {
         out
     }
 
-    /// Whether (x, z) lies on an at-grade way's surface, as its square stamps lay it.
+    /// Whether (x, z) lies on an at-grade way's surface, as its disc stamps lay it.
     fn covers(&self, x: i32, z: i32) -> bool {
         let Some(list) = self
             .buckets
@@ -372,7 +375,7 @@ impl GradeRoads {
         };
         let (px, pz) = (x as f32, z as f32);
         list.iter().any(|&i| {
-            let (ax, az, bx, bz, reach) = self.segments[i as usize];
+            let (ax, az, bx, bz, reach, half) = self.segments[i as usize];
             let (dx, dz) = (bx - ax, bz - az);
             let len_sq = dx * dx + dz * dz;
             let t = if len_sq > 0.0 {
@@ -381,7 +384,11 @@ impl GradeRoads {
                 0.0
             };
             let (cx, cz) = (ax + t * dx, az + t * dz);
-            (px - cx).abs().max((pz - cz).abs()) <= reach
+            // Near enough to be, then exactly as the renderer stamps the segment's cells.
+            (px - cx).hypot(pz - cz) <= reach
+                && bresenham_line(ax as i32, 0, az as i32, bx as i32, 0, bz as i32)
+                    .into_iter()
+                    .any(|(sx, _, sz)| in_road_stamp(x - sx, z - sz, half))
         })
     }
 }
@@ -589,6 +596,9 @@ fn plan_structure(
     };
 
     // The ring of cells round the decks, each at the level of the deck beside it.
+    // Between two decks at one level the lower way id draws it, as on the deck: the
+    // map's order changes from run to run, and the drawing way decides whether its
+    // railing or another way's cable goes in first.
     let mut ring: HashMap<(i32, i32), DeckCell> = HashMap::new();
     for (&(x, z), &c) in &all {
         for dx in -1..=1 {
@@ -599,7 +609,7 @@ fn plan_structure(
                 }
                 ring.entry(n)
                     .and_modify(|r| {
-                        if c.y > r.y {
+                        if c.y > r.y || (c.y == r.y && c.way < r.way) {
                             *r = c;
                         }
                     })
@@ -1238,6 +1248,34 @@ mod tests {
             .filter(|r| (41..=43).contains(&r.1) && (20..80).contains(&r.0))
             .count();
         assert_eq!(rails_between, 0);
+    }
+
+    #[test]
+    fn where_two_decks_meet_the_lower_way_id_draws_the_railing_every_run() {
+        // A footbridge mapped as two ways end to end: the railing cells at the joint touch
+        // both decks at one level. Each plan gets its maps fresh, in a new order.
+        let tags = &[("highway", "footway"), ("bridge", "yes")];
+        let owners = || {
+            let a = way(1, tags, &[(10, 40), (50, 40)]);
+            let b = way(2, tags, &[(50, 40), (90, 40)]);
+            let (_, surface) = build(&[a, b], VALLEY, &[]);
+            let mut owners = std::collections::BTreeMap::new();
+            for id in [1, 2] {
+                for r in &surface.parts_of(id).expect("parts").rails {
+                    owners.insert((r.0, r.1), id);
+                }
+            }
+            owners
+        };
+        let first = owners();
+        let joint: Vec<_> = first.iter().filter(|(c, _)| c.0 == 51).collect();
+        assert!(!joint.is_empty(), "railings past the joint: {first:?}");
+        for (cell, &id) in joint {
+            assert_eq!(id, 1, "railing at {cell:?}");
+        }
+        for _ in 0..16 {
+            assert_eq!(owners(), first);
+        }
     }
 
     #[test]

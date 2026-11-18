@@ -460,6 +460,10 @@ struct Plan<'r> {
     handled: FnvHashSet<u64>,
     drives_on_left: bool,
     road_mask: &'r RoadMaskBitmap,
+    /// Sidewalks mapped as their own ways beside the roads, whose near edge is the kerb.
+    paths: &'r RoadMaskBitmap,
+    /// The footways, paths and crosswalks walkers follow, as `walkways` finds them.
+    walkways: Walkways,
 }
 
 impl Plan<'_> {
@@ -487,11 +491,12 @@ impl Plan<'_> {
                 node.x as f64 + 0.5 + arm.dir.0 * back as f64,
                 node.z as f64 + 0.5 + arm.dir.1 * back as f64,
             );
-            let kerb = kerb_cell(origin, side, arm.half, self.road_mask)
+            let kerb = self
+                .kerb_cell(origin, side, arm.half)
                 .or_else(|| {
                     // A bike path, tram tracks or the other carriageway often run along
                     // the road on that side; the head then stands on the other.
-                    kerb_cell(origin, (-side.0, -side.1), arm.half, self.road_mask)
+                    self.kerb_cell(origin, (-side.0, -side.1), arm.half)
                 })
                 .or_else(|| island_cell(origin, self.road_mask));
             let Some((px, pz, off)) = kerb else {
@@ -555,7 +560,7 @@ impl Plan<'_> {
                         .find_map(|&along| {
                             let from =
                                 (origin.0 + road.dir.0 * along, origin.1 + road.dir.1 * along);
-                            kerb_cell(from, side, road.half, self.road_mask)
+                            self.kerb_cell(from, side, road.half)
                         })
                         .or_else(|| {
                             let ahead = (
@@ -620,11 +625,32 @@ impl Plan<'_> {
 }
 
 impl SignalIndex {
+    #[cfg(test)]
     pub fn build(
         elements: &[ProcessedElement],
         scale: f64,
         drives_on_left: bool,
         road_mask: &RoadMaskBitmap,
+        cycling: bool,
+    ) -> Self {
+        Self::build_beside(
+            elements,
+            scale,
+            drives_on_left,
+            road_mask,
+            &RoadMaskBitmap::new_empty(),
+            cycling,
+        )
+    }
+
+    /// As `build`, with the sidewalks mapped as their own ways (`paths`): a pole stands at
+    /// the near edge of one beside the road rather than past it.
+    pub fn build_beside(
+        elements: &[ProcessedElement],
+        scale: f64,
+        drives_on_left: bool,
+        road_mask: &RoadMaskBitmap,
+        paths: &RoadMaskBitmap,
         cycling: bool,
     ) -> Self {
         let nodes = signal_nodes(elements, scale);
@@ -637,6 +663,8 @@ impl SignalIndex {
             handled: FnvHashSet::default(),
             drives_on_left,
             road_mask,
+            paths,
+            walkways: walkways(elements, nodes.values().map(|n| (n.x, n.z))),
         };
         for id in &ids {
             plan.node(*id, &nodes[id]);
@@ -733,18 +761,158 @@ pub(crate) fn kerb_side(travel: (f64, f64), drives_on_left: bool) -> (f64, f64) 
 /// How far past the road's edge a pole may stand: across a bike path or a sidewalk.
 const KERB_REACH: i32 = 6;
 
-/// The first cell off the road surface beside `origin`, and how far out it is.
+impl Plan<'_> {
+    /// Where a pole beside `origin` stands: on the near edge of a sidewalk mapped beside the
+    /// road, or a few blocks along it, where that keeps it out of the walkers' way; else, as
+    /// for a road with no sidewalk mapped, on the first cell off every road and path surface.
+    fn kerb_cell(
+        &self,
+        origin: (f64, f64),
+        side: (f64, f64),
+        half: i32,
+    ) -> Option<(i32, i32, i32)> {
+        let beyond = || {
+            kerb_cell(
+                origin,
+                side,
+                half,
+                self.road_mask,
+                &RoadMaskBitmap::new_empty(),
+            )
+        };
+        let find = |o: (f64, f64)| {
+            kerb_cell(o, side, half, self.road_mask, self.paths)
+                .filter(|&(x, z, _)| self.paths.contains(x, z))
+        };
+        let clear = |&(x, z, _): &(i32, i32, i32)| self.walkways.clear(x, z);
+        let along = (-side.1, side.0);
+        [0.0, 1.0, -1.0, 2.0, -2.0, 3.0, -3.0]
+            .into_iter()
+            .filter_map(|t: f64| find((origin.0 + along.0 * t, origin.1 + along.1 * t)))
+            .find(clear)
+            .or_else(beyond)
+    }
+}
+
+/// The footways, paths, cycle paths and crosswalks mapped as ways, which the walkers follow:
+/// the cells along their lines, their nodes, where lanes meet or bend and a post cannot be
+/// stepped round, and the crosswalks' cells.
+struct Walkways {
+    lines: FnvHashSet<(i32, i32)>,
+    nodes: FnvHashSet<(i32, i32)>,
+    crossings: FnvHashSet<(i32, i32)>,
+}
+
+impl Walkways {
+    /// Whether a post at (x, z) is out of the walkers' way: off every line, and a block or
+    /// more from every node and crosswalk.
+    fn clear(&self, x: i32, z: i32) -> bool {
+        let near = |set: &FnvHashSet<(i32, i32)>| {
+            (-1..=1).any(|dx| (-1..=1).any(|dz| set.contains(&(x + dx, z + dz))))
+        };
+        !self.lines.contains(&(x, z)) && !near(&self.nodes) && !near(&self.crossings)
+    }
+}
+
+/// How far from a signalised node, in blocks along either axis, the walkways a pole keeps
+/// clear of are gathered. A pole stands back behind the widest crossing road, a few blocks
+/// along the kerb and at most a sidewalk past it, under 30 blocks from its node; this
+/// leaves room to spare.
+const WALKWAY_REACH: i32 = 64;
+
+/// The walkways within `WALKWAY_REACH` of a signalised node at `signals`, the only ones a
+/// pole is checked against.
+fn walkways(elements: &[ProcessedElement], signals: impl Iterator<Item = (i32, i32)>) -> Walkways {
+    let mut found = Walkways {
+        lines: FnvHashSet::default(),
+        nodes: FnvHashSet::default(),
+        crossings: FnvHashSet::default(),
+    };
+    // The cells of a grid as coarse as the reach that hold a signal.
+    let cell = |v: i32| v.div_euclid(WALKWAY_REACH);
+    let signal_cells: FnvHashSet<(i32, i32)> = signals.map(|(x, z)| (cell(x), cell(z))).collect();
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        let walkway = way.tags.get("highway").is_some_and(|h| {
+            matches!(
+                h.as_str(),
+                "footway" | "path" | "cycleway" | "pedestrian" | "steps" | "bridleway"
+            )
+        });
+        if !walkway {
+            continue;
+        }
+        // Every cell of the way lies in its nodes' bounds, so a signal within reach of one
+        // lies in the grid cells those bounds, grown by the reach, touch.
+        let Some((x0, z0, x1, z1)) = way.nodes.iter().fold(None, |b, n| {
+            Some(b.map_or(
+                (n.x, n.z, n.x, n.z),
+                |(x0, z0, x1, z1): (i32, i32, i32, i32)| {
+                    (x0.min(n.x), z0.min(n.z), x1.max(n.x), z1.max(n.z))
+                },
+            ))
+        }) else {
+            continue;
+        };
+        let (cx0, cz0) = (cell(x0 - WALKWAY_REACH), cell(z0 - WALKWAY_REACH));
+        let (cx1, cz1) = (cell(x1 + WALKWAY_REACH), cell(z1 + WALKWAY_REACH));
+        if !(cz0..=cz1).any(|cz| (cx0..=cx1).any(|cx| signal_cells.contains(&(cx, cz)))) {
+            continue;
+        }
+        let crossing = ["footway", "cycleway", "path"]
+            .iter()
+            .any(|k| way.tags.get(*k).map(String::as_str) == Some("crossing"));
+        found.nodes.extend(way.nodes.iter().map(|n| (n.x, n.z)));
+        for w in way.nodes.windows(2) {
+            for (x, _, z) in crate::bresenham::bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z)
+            {
+                found.lines.insert((x, z));
+                if crossing {
+                    found.crossings.insert((x, z));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The first cell off the road surface beside `origin`, or the near edge of a sidewalk
+/// mapped beside it, and how far out it is. Where the road stops short of its kerb, as at a
+/// wall or a verge, the cell next to where it stops.
 fn kerb_cell(
     origin: (f64, f64),
     side: (f64, f64),
     half: i32,
     road_mask: &RoadMaskBitmap,
+    paths: &RoadMaskBitmap,
 ) -> Option<(i32, i32, i32)> {
-    (half + 1..=half + KERB_REACH).find_map(|off| {
-        let x = (origin.0 + side.0 * off as f64).floor() as i32;
-        let z = (origin.1 + side.1 * off as f64).floor() as i32;
-        (!road_mask.contains(x, z)).then_some((x, z, off))
-    })
+    let cell = |off: i32| {
+        (
+            (origin.0 + side.0 * off as f64).floor() as i32,
+            (origin.1 + side.1 * off as f64).floor() as i32,
+        )
+    };
+    let off = (half + 1..=half + KERB_REACH).find(|&off| {
+        let (x, z) = cell(off);
+        !road_mask.contains(x, z) || paths.contains(x, z)
+    })?;
+    let (x, z) = cell(off);
+    let off = if road_mask.contains(x, z) {
+        off
+    } else {
+        (1..off)
+            .rev()
+            .take_while(|&k| {
+                let (x, z) = cell(k);
+                !road_mask.contains(x, z)
+            })
+            .last()
+            .unwrap_or(off)
+    };
+    let (x, z) = cell(off);
+    Some((x, z, off))
 }
 
 /// In a junction paved wall to wall a head stands on the nearest traffic island, this
@@ -1101,6 +1269,78 @@ mod tests {
             mask.set(x, z);
         }
         mask
+    }
+
+    #[test]
+    fn a_pole_stands_at_the_near_edge_of_a_sidewalk_mapped_beside_the_road() {
+        // A road paved three blocks either side of z = 0, and a three-block sidewalk on its
+        // south side drawn right up to it, z = 4..=6.
+        let mask = road_mask((-30..=30).flat_map(|x| (-3..=6).map(move |z| (x, z))));
+        let paths = road_mask((-30..=30).flat_map(|x| (4..=6).map(move |z| (x, z))));
+        let origin = (0.5, 0.5);
+        // Without the sidewalk known, the pole crosses it; with it, it stands on its edge.
+        assert_eq!(
+            kerb_cell(origin, (0.0, 1.0), 3, &mask, &RoadMaskBitmap::new_empty()),
+            Some((0, 7, 7))
+        );
+        assert_eq!(
+            kerb_cell(origin, (0.0, 1.0), 3, &mask, &paths),
+            Some((0, 4, 4))
+        );
+    }
+
+    #[test]
+    fn a_pole_stands_where_the_road_stops_short_of_its_kerb() {
+        // Paved five blocks out on the north side, two on the south, as a road with its cars
+        // parked on one side, or cut back at a verge.
+        let mask = road_mask((-30..=30).flat_map(|x| (-5..=2).map(move |z| (x, z))));
+        let none = RoadMaskBitmap::new_empty();
+        assert_eq!(
+            kerb_cell((0.5, 0.5), (0.0, 1.0), 5, &mask, &none),
+            Some((0, 3, 3))
+        );
+        assert_eq!(
+            kerb_cell((0.5, 0.5), (0.0, -1.0), 5, &mask, &none),
+            Some((0, -6, 6))
+        );
+    }
+
+    #[test]
+    fn a_pole_stands_out_of_the_walkers_way() {
+        // The same road, its sidewalk mapped along z = 5, and a crosswalk along x = 0
+        // meeting it.
+        let mask = road_mask((-30..=30).flat_map(|x| (-3..=6).map(move |z| (x, z))));
+        let paths = road_mask((-30..=30).flat_map(|x| (4..=6).map(move |z| (x, z))));
+        let plan = |line_z: i32| Plan {
+            poles: Vec::new(),
+            by_node: FnvHashMap::default(),
+            handled: FnvHashSet::default(),
+            drives_on_left: false,
+            road_mask: &mask,
+            paths: &paths,
+            walkways: Walkways {
+                lines: (-30..=30)
+                    .map(|x| (x, line_z))
+                    .chain((-3..=line_z).map(|z| (0, z)))
+                    .collect(),
+                nodes: [(-30, line_z), (0, line_z), (30, line_z), (0, -3)]
+                    .into_iter()
+                    .collect(),
+                crossings: (-3..=line_z).map(|z| (0, z)).collect(),
+            },
+        };
+        // Beside the crosswalk, on the sidewalk's near edge.
+        let (x, z, _) = plan(5).kerb_cell((0.5, 0.5), (0.0, 1.0), 3).unwrap();
+        assert_eq!(z, 4, "on the sidewalk's near edge");
+        assert!(
+            (2..=3).contains(&x.abs()),
+            "beside the crosswalk: ({x}, {z})"
+        );
+        // A sidewalk whose line runs along its near edge: past it, as with none mapped.
+        assert_eq!(
+            plan(4).kerb_cell((0.5, 0.5), (0.0, 1.0), 3),
+            Some((0, 7, 7))
+        );
     }
 
     /// Two residential streets crossing at the origin, paved two blocks either side.

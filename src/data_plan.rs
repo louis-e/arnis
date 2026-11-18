@@ -219,6 +219,38 @@ pub fn plan(root: &Path, args: &Args, bbox: LLBBox) -> DataPlan {
     }
     // The canopy strip table and row blocks are not listed, so it has no item
     // (an item with total 0 says nothing); list them to add one.
+    // Laser tiles are kept as their measurements, a fraction of the download, so
+    // what is missing is estimated as a run estimates it from the cache alone:
+    // a whole file at the size its server last gave (else the source's typical
+    // size), a part read at the source's download per square kilometre, with
+    // the run's rules for zipped tiles the margin only grazes, and the photos
+    // the lawns and trees need.
+    // Left out where the run would go without laser data: an area past the
+    // size it is used for, or one whose download is past the limit.
+    if let Some(features) = args.lidar_features() {
+        let dir = root.join(crate::survey::CACHE_DIR);
+        if let Some((p, need_mb)) = crate::survey::plan_in(&dir, &bbox)
+            .map(|p| {
+                let mb = p.need_mb(&dir, features);
+                (p, mb)
+            })
+            .filter(|(p, mb)| !p.too_large() && *mb <= args.lidar_max_mb)
+        {
+            // A tile is cached when it holds every block the area wants.
+            let mut bytes = 0u64;
+            for t in p.tiles.iter().filter(|t| !p.missing.contains(t)) {
+                let f = crate::survey::laser::cache_path(&dir, &p.sheet, t.0, t.1);
+                bytes += std::fs::metadata(&f).map_or(0, |m| m.len());
+            }
+            out.items.push(Item {
+                source: "laser",
+                cached: p.tiles.len() - p.missing.len(),
+                cached_bytes: bytes,
+                total: p.tiles.len(),
+                missing_bytes: Some(u64::from(need_mb) * 1_000_000),
+            });
+        }
+    }
     if args.overture && !args.skip_objects() {
         let files = crate::overture::tile_cache_files(root, &bbox);
         out.items

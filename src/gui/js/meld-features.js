@@ -65,6 +65,13 @@ export function progressText({ message = '', detail = '' }) {
   if (message.startsWith('region_download_fallback')) {
     return { text: t('region_download_fallback', 'Region Download is not available for this selection, so Arnis used the default source.'), title: '', log: message, notice: true };
   }
+  // Sent by the engine when laser data would download more than the Download Limit
+  // (survey::OVER_LIMIT): the megabytes the area needs, then the limit.
+  const over = /^laser_over_limit: (\d+) (\d+)$/.exec(message);
+  if (over) {
+    const text = t('lidar_over_limit', 'Laser data skipped: the area needs about {mb} MB, more than the Download Limit of {limit} MB. Raise it under Settings > Advanced > Laser Data.', { mb: over[1], limit: over[2] });
+    return { text, title: '', log: text, notice: true };
+  }
   if (message.startsWith(SETTINGS_CHANGED)) {
     const names = message.slice(SETTINGS_CHANGED.length).trim();
     return { text: t('job_settings_changed', 'Settings changed since this job started: {names}. The cells still to build use the new ones.', { names }), title: '', log: message, notice: true };
@@ -1194,7 +1201,7 @@ function lines(box, rows) {
   box.hidden = false;
 }
 
-const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints' };
+const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints', laser: 'Laser scans' };
 
 // `area()` is the selected bbox; `plan()` the settings a run's plan depends on; `baking(on)` hears
 // a Download & Bake start and end.
