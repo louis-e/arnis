@@ -1,12 +1,56 @@
 //! Farmland plots: one crop per field, laid out inside its OSM outline; sizes in metres.
 
-use super::area_layout::{cell_hash, mix};
+use super::area_layout::{cell_hash, mix, Frame};
 use crate::block_definitions::*;
 use crate::ground_generation::value_noise_01;
 use crate::land_cover::coord_hash;
-use crate::osm_parser::ProcessedNode;
+use crate::osm_parser::{ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::cell::Cell;
+use std::collections::HashMap;
+
+/// Tag the parser leaves on a field: the frame of its outline as mapped, before the area's
+/// edge cuts it, as "along across along_range across_range". Every area or piece of a One
+/// World that holds part of the field lays out the same plots.
+pub(crate) const FRAME_TAG: &str = "arnis:field_frame";
+
+/// Whether an area with these tags is laid out in plots.
+pub(crate) fn is_field(tags: &HashMap<String, String>) -> bool {
+    tags.get("landuse").map(String::as_str) == Some("farmland")
+}
+
+/// `FRAME_TAG` for the field outline `nodes`, taken before the area clips it.
+pub(crate) fn frame_tag(nodes: &[ProcessedNode]) -> Option<(String, String)> {
+    let f = Frame::of(nodes)?;
+    let value = format!(
+        "{} {} {} {} {} {} {} {}",
+        f.along.0,
+        f.along.1,
+        f.across.0,
+        f.across.1,
+        f.along_range.0,
+        f.along_range.1,
+        f.across_range.0,
+        f.across_range.1
+    );
+    Some((FRAME_TAG.to_string(), value))
+}
+
+fn whole_frame(tag: &str) -> Option<Frame> {
+    let v: Vec<f64> = tag
+        .split(' ')
+        .map(|s| s.parse().ok())
+        .collect::<Option<_>>()?;
+    let [a0, a1, c0, c1, l0, l1, w0, w1] = v[..] else {
+        return None;
+    };
+    Some(Frame {
+        along: (a0, a1),
+        across: (c0, c1),
+        along_range: (l0, l1),
+        across_range: (w0, w1),
+    })
+}
 
 /// Farmland style, matching the GUI's segmented control.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
@@ -295,10 +339,25 @@ pub struct FieldLayout {
 
 impl FieldLayout {
     /// None under the classic preset.
-    pub fn new(preset: FieldPreset, scale: f64, id: u64, nodes: &[ProcessedNode]) -> Option<Self> {
+    #[cfg(test)]
+    fn new(preset: FieldPreset, scale: f64, id: u64, nodes: &[ProcessedNode]) -> Option<Self> {
         let params = preset.params()?;
+        Self::in_frame(params, scale, id, Frame::of(nodes)?)
+    }
+
+    /// The field `way`, laid out from its whole outline where the parser left `FRAME_TAG`.
+    /// None under the classic preset.
+    pub fn of_way(preset: FieldPreset, scale: f64, way: &ProcessedWay) -> Option<Self> {
+        let params = preset.params()?;
+        let frame = match way.tags.get(FRAME_TAG).and_then(|t| whole_frame(t)) {
+            Some(frame) => frame,
+            None => Frame::of(&way.nodes)?,
+        };
+        Self::in_frame(params, scale, way.id, frame)
+    }
+
+    fn in_frame(params: Params, scale: f64, id: u64, frame: Frame) -> Option<Self> {
         let scale = sane_scale(scale);
-        let frame = super::area_layout::Frame::of(nodes)?;
         let (along, across) = (frame.along, frame.across);
         let (ea, ec) = (frame.along_range, frame.across_range);
         let width = params.strip_blocks(scale, mix(id ^ 0x5717_1D7A));
@@ -498,6 +557,29 @@ mod tests {
         let (a, b) = (cuts(-180), cuts(-180 + layout.strip.ceil() as i32));
         assert!(!a.is_empty() && !b.is_empty());
         assert_ne!(a, b, "strips share their cuts");
+    }
+
+    #[test]
+    fn a_field_reads_its_frame_back_exactly() {
+        let nodes = rect(123.0, -77.0, 333.0, 777.0, 17.0);
+        let way = ProcessedWay {
+            id: 9,
+            tags: frame_tag(&nodes).into_iter().collect(),
+            nodes: nodes.clone(),
+        };
+        let tagged = FieldLayout::of_way(FieldPreset::Patchwork, 1.0, &way).unwrap();
+        let plain = FieldLayout::new(FieldPreset::Patchwork, 1.0, 9, &nodes).unwrap();
+        let frame = |l: &FieldLayout| {
+            (
+                l.along,
+                l.across,
+                l.along_min,
+                l.across_min,
+                l.strip,
+                l.length,
+            )
+        };
+        assert_eq!(frame(&tagged), frame(&plain));
     }
 
     #[test]
