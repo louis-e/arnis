@@ -197,6 +197,46 @@ const LANDMARKS: &[Landmark] = &[
         reach_m: 155,
         height: 64,
     },
+    Landmark {
+        name: "Brandenburger Tor",
+        qid: "Q82425",
+        osm_ids: &[("way", 518_071_791), ("relation", 7_288_267)],
+        model: Source::Built(crate::structures::brandenburger_tor::build),
+        // Middle of the twelve mapped columns. The model is sheared onto the gate's turn.
+        lat: 52.516_271_9,
+        lon: 13.377_702_2,
+        anchor_x: crate::structures::brandenburger_tor::GATE_X as f64 + 0.5,
+        anchor_z: crate::structures::brandenburger_tor::GATE_Z as f64 + 0.5,
+        ground_y: 0,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // Gate, colonnades and gatehouses, not Haus Sommer or Haus Liebermann beside them.
+        suppress_half_x: 30.0,
+        suppress_half_z: 38.0,
+        reach_m: 46,
+        height: 26,
+    },
+    Landmark {
+        name: "Reichstagsgebäude",
+        qid: "Q151897",
+        osm_ids: &[("relation", 2_201_742)],
+        model: Source::Built(crate::structures::reichstag::build),
+        // Middle of the dome, from the mapped outline and Berlin's surface model.
+        lat: 52.518_595_7,
+        lon: 13.376_098_4,
+        anchor_x: crate::structures::reichstag::ANCHOR.0,
+        anchor_z: crate::structures::reichstag::ANCHOR.1,
+        ground_y: 0,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // The building and its steps, not the visitor pavilions on Platz der Republik.
+        suppress_half_x: 64.0,
+        suppress_half_z: 74.0,
+        reach_m: 92,
+        height: 53,
+    },
 ];
 
 /// A landmark resolved to a spot in this world.
