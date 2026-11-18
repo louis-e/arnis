@@ -12,7 +12,9 @@ use crate::bedrock_addon::{self, Body, Fleet};
 use crate::clipping::is_invented_node_id;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::datapack::macro_coord;
-use crate::element_processing::highways::{highway_block_range, highway_default_lanes};
+use crate::element_processing::highways::{
+    highway_block_range, highway_default_lanes, highway_lane_range,
+};
 use crate::element_processing::level_crossings::{CrossingPlan, STOP_GROUP};
 use crate::element_processing::road_markings::{
     is_roundabout, oneway_sign, RoadMarkingIndex, StopLine,
@@ -612,7 +614,10 @@ pub struct CarNetwork {
 struct Piece<'a> {
     way: &'a ProcessedWay,
     nodes: &'a [ProcessedNode],
+    /// Kerb to kerb.
     half: i32,
+    /// The traffic lanes, inside any parking rows.
+    lanes: i32,
     oneway: i8,
 }
 
@@ -830,8 +835,19 @@ impl CarNetwork {
         // Where a way's lanes break for a level crossing.
         let break_at = |way: u64, node: u64| crossings.and_then(|c| c.break_at(way, node));
 
+        // How far from a node the widest lanes through it reach: parking rows left out, so
+        // cars turn on the lanes' asphalt rather than across the corner past the rows.
+        let mut lanes_reach: FnvHashMap<u64, i32> = FnvHashMap::default();
+        for (way, half, _) in &roads {
+            let lanes = highway_lane_range(&way.tags["highway"], &way.tags, scale).min(*half);
+            for n in way.nodes.iter() {
+                let reach = lanes_reach.entry(n.id).or_default();
+                *reach = (*reach).max(lanes);
+            }
+        }
         let mut pieces: Vec<Piece> = Vec::new();
         for (way, half, oneway) in &roads {
+            let lanes = highway_lane_range(&way.tags["highway"], &way.tags, scale).min(*half);
             let mut start = 0;
             for k in 1..way.nodes.len() {
                 if k == way.nodes.len() - 1
@@ -842,6 +858,7 @@ impl CarNetwork {
                         way,
                         nodes: &way.nodes[start..=k],
                         half: *half,
+                        lanes,
                         oneway: *oneway,
                     });
                     start = k;
@@ -852,7 +869,7 @@ impl CarNetwork {
         let mut lanes: Vec<Lane> = Vec::new();
         for (p, piece) in pieces.iter().enumerate() {
             let two_way = piece.oneway == 0;
-            let (along, against) = lanes_each_way(piece.way, piece.half, piece.oneway);
+            let (along, against) = lanes_each_way(piece.way, piece.lanes, piece.oneway);
             let first = lanes.len();
             for (count, backward) in [(along, false), (against, true)] {
                 let nodes: Vec<&ProcessedNode> = if backward {
@@ -867,7 +884,7 @@ impl CarNetwork {
                         reverse: None,
                         two_way,
                         backward,
-                        offset: lane_offset(piece.half, count, k, two_way),
+                        offset: lane_offset(piece.lanes, count, k, two_way),
                         count,
                     });
                 }
@@ -897,7 +914,7 @@ impl CarNetwork {
                 let path = Path::new(fitted_lane_line(
                     &lane.nodes,
                     lane.offset,
-                    lane_floor(piece.half, lane.offset, lane.count, lane.two_way),
+                    lane_floor(piece.lanes, lane.offset, lane.count, lane.two_way),
                     drives_on_left,
                     &built,
                 ));
@@ -911,10 +928,10 @@ impl CarNetwork {
                     || end.z - world.min_z() < 3
                     || world.max_z() - end.z < 3;
                 let turns_back = lane.reverse.is_some() && arms(last) <= 1 && !edge;
-                // Lanes stop short of a junction, so turning cars cut across it.
+                // Lanes stop short of a junction's lanes, so turning cars cut across it.
                 let trim = |id: u64| {
                     if junction(id) {
-                        junctions.widest(id) as f64 + 1.0
+                        lanes_reach.get(&id).copied().unwrap_or(1) as f64 + 1.0
                     } else {
                         0.0
                     }
@@ -1078,14 +1095,14 @@ impl CarNetwork {
                     stations.push((s, stop, cap));
                 }
 
-                let (points, arcs): (Vec<Waypoint>, Vec<f64>) = stations
+                let (points, arcs): (Vec<Waypoint>, Vec<f64>) = with_steps(stations, &y_at)
                     .into_iter()
-                    .map(|(s, stop, cap)| {
+                    .map(|(s, stop, cap, y)| {
                         let (x, z) = path.point_at(s);
                         (
                             Waypoint {
                                 x: (x * 10.0).round() / 10.0,
-                                y: y_at(s),
+                                y,
                                 z: (z * 10.0).round() / 10.0,
                                 stop: stop.map(|(g, _)| g),
                                 holds: stop.map_or(Holds::All, |(_, h)| h),
@@ -2146,6 +2163,50 @@ fn refine(
     }
 }
 
+/// The stations with each one's height, and a point on either side of every step the road
+/// takes between two of them, both at the step's top. A car's height follows the straight
+/// line between points, which across a step cuts into its top block: a car waiting there sat
+/// half sunk in the road. Risen to the top before the step, it stands on it.
+fn with_steps(
+    stations: Vec<(f64, Stop, Option<i32>)>,
+    y_at: &impl Fn(f64) -> f64,
+) -> Vec<(f64, Stop, Option<i32>, f64)> {
+    const PROBE: f64 = 0.25;
+    let mut out: Vec<(f64, Stop, Option<i32>, f64)> = Vec::with_capacity(stations.len());
+    for (s, stop, cap) in stations {
+        let mut y = y_at(s);
+        if let Some(&(a, ..)) = out.last() {
+            let mut prev = (a, y_at(a));
+            let mut t = a + PROBE;
+            loop {
+                let at = t.min(s);
+                let here = y_at(at);
+                if here != prev.1 {
+                    let top = here.max(prev.1);
+                    // A point put in on the way to the next station keeps to its cap, as the
+                    // cars bound for it do.
+                    match out.last_mut() {
+                        Some(last) if prev.0 - last.0 < 0.05 => last.3 = last.3.max(top),
+                        _ => out.push((prev.0, None, cap, top)),
+                    }
+                    if s - at < 0.05 {
+                        y = y.max(top);
+                    } else {
+                        out.push((at, None, cap, top));
+                    }
+                }
+                if at >= s {
+                    break;
+                }
+                prev = (at, here);
+                t += PROBE;
+            }
+        }
+        out.push((s, stop, cap, y));
+    }
+    out
+}
+
 /// The stricter of two speed caps.
 fn lower(a: Option<i32>, b: Option<i32>) -> Option<i32> {
     match (a, b) {
@@ -2912,6 +2973,45 @@ mod tests {
         }
     }
 
+    /// A car between two waypoints rides the straight line; across a step it never cuts
+    /// into the higher block, up the step or down it.
+    #[test]
+    fn a_car_never_sinks_into_a_step() {
+        for (lo, hi) in [(65.0, 66.0), (66.0, 65.0)] {
+            let y_at = |s: f64| if s < 6.3 { lo } else { hi };
+            let stations = vec![(0.0, None, None), (4.0, None, None), (10.0, None, None)];
+            let points = with_steps(stations, &y_at);
+            for pair in points.windows(2) {
+                let (a, ya, b, yb) = (pair[0].0, pair[0].3, pair[1].0, pair[1].3);
+                assert!(b > a, "{points:?}");
+                for i in 0..=20 {
+                    let s = a + (b - a) * f64::from(i) / 20.0;
+                    let line = ya + (yb - ya) * (s - a) / (b - a);
+                    assert!(
+                        line >= y_at(s) - 1e-9,
+                        "{lo}->{hi} at {s}: {line} {points:?}"
+                    );
+                }
+            }
+            // The stations themselves are kept, at the ground's height where flat.
+            assert_eq!(points.first().map(|p| p.3), Some(lo));
+            assert_eq!(points.last().map(|p| p.3), Some(hi));
+        }
+        // The points put in at a step keep to the cap of the station they lead to.
+        let y_at = |s: f64| if s < 6.3 { 65.0 } else { 66.0 };
+        let stations = vec![
+            (0.0, None, None),
+            (4.0, None, None),
+            (10.0, None, Some(300)),
+        ];
+        let points = with_steps(stations, &y_at);
+        assert!(points.len() > 3, "{points:?}");
+        for p in &points[2..] {
+            assert_eq!(p.2, Some(300), "{points:?}");
+        }
+        assert_eq!(points[1].2, None);
+    }
+
     fn node(id: u64, x: i32, z: i32, tags: &[(&str, &str)]) -> ProcessedNode {
         ProcessedNode {
             id,
@@ -3670,6 +3770,64 @@ mod tests {
         for seg in &net.segments {
             assert!(seg.next.iter().all(|t| t.crossing == (seg.next.len() == 3)));
         }
+    }
+
+    #[test]
+    fn cars_turn_across_the_lanes_not_the_corners_past_the_parking_rows() {
+        let parked = [
+            ("parking:both", "lane"),
+            ("parking:both:orientation", "perpendicular"),
+        ];
+        let elements = vec![
+            road(
+                1,
+                vec![
+                    node(1, -100, 0, &[]),
+                    node(9, 0, 0, &[]),
+                    node(2, 100, 0, &[]),
+                ],
+                &parked,
+            ),
+            road(
+                2,
+                vec![
+                    node(3, 0, -100, &[]),
+                    node(9, 0, 0, &[]),
+                    node(4, 0, 100, &[]),
+                ],
+                &parked,
+            ),
+        ];
+        let ProcessedElement::Way(way) = &elements[0] else {
+            unreachable!()
+        };
+        let lanes = highway_lane_range("residential", &way.tags, 1.0);
+        assert!(lanes + 2 < highway_block_range("residential", &way.tags, 1.0));
+        let net = CarNetwork::build(&elements, 1.0, false, false, &world(), flat, open);
+        // Each jump from a lane's end to the next lane's entry runs over one road's lanes or
+        // the other's, never over the corner between them, where the parking rows' kerbs meet.
+        let reach = lanes as f64 + 1.5;
+        let mut jumps = 0;
+        for seg in &net.segments {
+            let a = seg.points.last().unwrap();
+            for turn in &seg.next {
+                let b = &net.segments[turn.lane].points[turn.entry];
+                for k in 0..=20 {
+                    let t = k as f64 / 20.0;
+                    let (x, z) = (a.x + (b.x - a.x) * t - 0.5, a.z + (b.z - a.z) * t - 0.5);
+                    assert!(
+                        x.abs() <= reach || z.abs() <= reach,
+                        "({:.1}, {:.1}) -> ({:.1}, {:.1}) passes ({x:.1}, {z:.1})",
+                        a.x,
+                        a.z,
+                        b.x,
+                        b.z
+                    );
+                }
+                jumps += 1;
+            }
+        }
+        assert!(jumps >= 12, "{jumps}");
     }
 
     #[test]

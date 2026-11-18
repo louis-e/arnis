@@ -639,6 +639,8 @@ pub struct NodeSignHeading {
     pub dir: (f64, f64),
     /// Crossing signs face both ways along the road.
     pub both_ways: bool,
+    /// The road's half-width, kerb to kerb, its parking rows included.
+    pub kerb: i32,
 }
 
 /// Driveways and parking aisles join a street without making a junction its signs are for.
@@ -757,6 +759,7 @@ impl<'a> RoadNet<'a> {
 pub fn build_node_headings(
     elements: &[ProcessedElement],
     level: SignageLevel,
+    scale: f64,
 ) -> HashMap<u64, NodeSignHeading> {
     // Node id -> (one direction only, `direction=forward`).
     let mut signs: HashMap<u64, (bool, Option<bool>)> = HashMap::new();
@@ -823,6 +826,7 @@ pub fn build_node_headings(
                 NodeSignHeading {
                     dir,
                     both_ways: !one_way,
+                    kerb: highway_block_range(&way.tags["highway"], &way.tags, scale),
                 },
             );
         }
@@ -983,7 +987,7 @@ pub fn build_context(
     let lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
     let region = SignRegion::detect(lat, lon);
     let intersections = build_intersection_index(elements, args.scale);
-    let node_headings = build_node_headings(elements, level);
+    let node_headings = build_node_headings(elements, level, args.scale);
 
     let mut keys: BTreeSet<DecalKey> = BTreeSet::new();
     for element in elements {
@@ -1493,6 +1497,7 @@ pub fn generate_poi_signage(
 pub fn generate_parking_signage(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
+    footprints: &BuildingFootprintBitmap,
     road_mask: &RoadMaskBitmap,
 ) {
     let Some(ctx) = editor.signage() else {
@@ -1509,6 +1514,12 @@ pub fn generate_parking_signage(
     if editor.on_carriageway(x, z) || !editor.owns(x, z) {
         return;
     }
+    // A row along the street is paved with it; its post stands at the nearest cell off it.
+    let (x, z) = if road_mask.contains(x, z) {
+        nearest_post_off_road(editor, footprints, road_mask, x, z, 6).unwrap_or((x, z))
+    } else {
+        (x, z)
+    };
     let ground = editor.get_absolute_y(x, 0, z);
     let Some(head) = traffic_sign_post(editor, x, ground, z) else {
         return;
@@ -1528,6 +1539,7 @@ pub fn generate_highway_way_signage(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
     footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
 ) {
     let Some(ctx) = editor.signage() else {
         return;
@@ -1600,6 +1612,7 @@ pub fn generate_highway_way_signage(
             key,
             false,
             footprints,
+            road_mask,
         );
         return;
     }
@@ -1615,6 +1628,7 @@ pub fn generate_highway_way_signage(
             key,
             reversed,
             footprints,
+            road_mask,
         );
         if !oneway && len >= 60 {
             place_roadside_sign(
@@ -1627,6 +1641,7 @@ pub fn generate_highway_way_signage(
                 key,
                 true,
                 footprints,
+                road_mask,
             );
         }
     }
@@ -1643,6 +1658,7 @@ pub fn generate_highway_way_signage(
                 key,
                 false,
                 footprints,
+                road_mask,
             );
         } else {
             place_roadside_sign(
@@ -1655,6 +1671,7 @@ pub fn generate_highway_way_signage(
                 key,
                 true,
                 footprints,
+                road_mask,
             );
         }
     }
@@ -1671,6 +1688,7 @@ pub fn generate_highway_way_signage(
                 key,
                 false,
                 footprints,
+                road_mask,
             );
         }
         let mut pos = 250;
@@ -1685,6 +1703,7 @@ pub fn generate_highway_way_signage(
                 key,
                 false,
                 footprints,
+                road_mask,
             );
             pos += 250;
         }
@@ -1703,6 +1722,7 @@ fn place_roadside_sign(
     key: &DecalKey,
     reverse: bool,
     footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
 ) {
     if cells.len() < 3 {
         return;
@@ -1725,19 +1745,41 @@ fn place_roadside_sign(
         dx = -dx;
         dz = -dz;
     }
-    // Kerb side of the direction of travel: first free cell past the carriageway edge.
+    // Kerb side of the direction of travel: the first free cell past the carriageway edge
+    // that is off every road's paving, parking rows included, here or a few cells on along
+    // the road where a side street or its parking rows fill the kerb; or else the first
+    // free one here.
     let (px, pz) = kerb_side(ctx.region, (dx, dz));
-    let Some((sx, sz, ground)) = (0..5)
-        .map(|k| {
-            let offset = (half_width + 2 + k) as f64;
-            (
-                x + (px * offset).round() as i32,
-                z + (pz * offset).round() as i32,
-            )
+    let free_beside = |(cx, cz): (i32, i32)| -> Vec<(i32, i32, i32)> {
+        (0..5)
+            .map(|k| {
+                let offset = (half_width + 2 + k) as f64;
+                (
+                    cx + (px * offset).round() as i32,
+                    cz + (pz * offset).round() as i32,
+                )
+            })
+            .filter_map(|(sx, sz)| {
+                post_ground(editor, footprints, sx, sz, POST_SHAFT + 1).map(|g| (sx, sz, g))
+            })
+            .collect()
+    };
+    let off_road = |&(sx, sz, _): &(i32, i32, i32)| !road_mask.contains(sx, sz);
+    let here = free_beside((x, z));
+    let Some((sx, sz, ground)) = here
+        .iter()
+        .copied()
+        .find(off_road)
+        .or_else(|| {
+            [2isize, -2, 4, -4, 6, -6].into_iter().find_map(|shift| {
+                let &(cx, cz) = cells.get(idx.checked_add_signed(shift)?)?;
+                editor
+                    .owns(cx, cz)
+                    .then(|| free_beside((cx, cz)).into_iter().find(off_road))
+                    .flatten()
+            })
         })
-        .find_map(|(sx, sz)| {
-            post_ground(editor, footprints, sx, sz, POST_SHAFT + 1).map(|g| (sx, sz, g))
-        })
+        .or(here.first().copied())
     else {
         return;
     };
@@ -1850,16 +1892,14 @@ pub fn generate_highway_node_signage(
     };
     let (x, z) = (node.x, node.z);
     let heading = ctx.node_headings.get(&node.id).copied();
-    // With a known heading the post stands on the kerb that traffic keeps to.
-    let kerb = heading.and_then(|h| kerb_beside(editor, &ctx, x, z, h.dir, footprints));
+    // With a known heading the post stands past the kerb that traffic keeps to.
+    let kerb = heading.and_then(|h| kerb_beside(editor, &ctx, x, z, h, footprints));
     let (px, pz) = match kerb {
         Some(p) => p,
-        // The node sits on the carriageway; the post goes to the nearest kerb.
-        None if editor.on_carriageway(x, z) => {
-            match editor
-                .carriageway()
-                .and_then(|roads| get_nearest_non_road_block(x, z, 10, roads))
-            {
+        // The node sits on the road; the post goes to the nearest cell off it, past the
+        // parking rows as well as the lanes.
+        None if editor.on_carriageway(x, z) || road_mask.contains(x, z) => {
+            match get_nearest_non_road_block(x, z, 10, road_mask) {
                 Some(p) => p,
                 None => return,
             }
@@ -1904,20 +1944,35 @@ fn kerb_beside(
     ctx: &SignageContext,
     x: i32,
     z: i32,
-    dir: (f64, f64),
+    heading: NodeSignHeading,
     footprints: &BuildingFootprintBitmap,
 ) -> Option<(i32, i32)> {
-    let (sx, sz) = kerb_side(ctx.region, dir);
+    let (sx, sz) = kerb_side(ctx.region, heading.dir);
     let cell = |k: i32| {
         (
             x + (sx * k as f64).round() as i32,
             z + (sz * k as f64).round() as i32,
         )
     };
-    let edge = (1..=12).find(|&k| {
+    // Past the road's own kerb, its parking rows included, and off any lanes beyond; or
+    // where the road stops short of its kerb, as at a verge, next to where it stops.
+    let edge = (heading.kerb.max(0) + 1..=heading.kerb.max(0) + 12).find(|&k| {
         let (cx, cz) = cell(k);
         !editor.on_carriageway(cx, cz)
     })?;
+    let open = |k: i32| {
+        let (cx, cz) = cell(k);
+        !editor.on_carriageway(cx, cz) && !editor.surface_is_sealed(cx, cz)
+    };
+    let edge = if editor.knows_sealed_surface() && open(edge) {
+        (1..edge)
+            .rev()
+            .take_while(|&k| open(k))
+            .last()
+            .unwrap_or(edge)
+    } else {
+        edge
+    };
     (edge..edge + 4)
         .map(cell)
         .find(|&(cx, cz)| post_ground(editor, footprints, cx, cz, POST_SHAFT + 1).is_some())
@@ -1930,6 +1985,30 @@ fn kerb_side(region: SignRegion, (dx, dz): (f64, f64)) -> (f64, f64) {
     } else {
         (-dz, dx)
     }
+}
+
+/// The nearest cell to (x, z), within `reach`, that a sign post can stand on off every
+/// road's paving, its parking rows included.
+fn nearest_post_off_road(
+    editor: &WorldEditor,
+    footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
+    x: i32,
+    z: i32,
+    reach: i32,
+) -> Option<(i32, i32)> {
+    let mut near: Vec<(i32, i32)> = (-reach..=reach)
+        .flat_map(|dx| (-reach..=reach).map(move |dz| (dx, dz)))
+        .filter(|&(dx, dz)| dx * dx + dz * dz <= reach * reach)
+        .collect();
+    near.sort_by_key(|&(dx, dz)| dx * dx + dz * dz);
+    near.into_iter()
+        .map(|(dx, dz)| (x + dx, z + dz))
+        .find(|&(cx, cz)| {
+            editor.owns(cx, cz)
+                && !road_mask.contains(cx, cz)
+                && post_ground(editor, footprints, cx, cz, POST_SHAFT + 1).is_some()
+        })
 }
 
 /// Ground height at (x, z) if a post `height` blocks tall can stand there: off the
@@ -2579,7 +2658,8 @@ mod tests {
 
     #[test]
     fn stop_signs_face_traffic_heading_into_the_junction() {
-        let headings = build_node_headings(&t_junction(&[("highway", "stop")]), SignageLevel::Full);
+        let headings =
+            build_node_headings(&t_junction(&[("highway", "stop")]), SignageLevel::Full, 1.0);
         let stop = headings[&2];
         assert!(!stop.both_ways);
         assert!(
@@ -2595,6 +2675,7 @@ mod tests {
         let tagged = build_node_headings(
             &t_junction(&[("highway", "stop"), ("direction", "backward")]),
             SignageLevel::Full,
+            1.0,
         );
         assert!(tagged[&2].dir.1 < -0.9);
     }
@@ -2608,7 +2689,7 @@ mod tests {
             0,
             &[("highway", "stop")],
         )));
-        let headings = build_node_headings(&elements, SignageLevel::Full);
+        let headings = build_node_headings(&elements, SignageLevel::Full, 1.0);
         assert!(!headings.contains_key(&3));
 
         // A crossing there would take whichever road came first, so it gets none either.
@@ -2619,7 +2700,7 @@ mod tests {
             0,
             &[("highway", "crossing"), ("crossing", "zebra")],
         )));
-        let headings = build_node_headings(&elements, SignageLevel::Full);
+        let headings = build_node_headings(&elements, SignageLevel::Full, 1.0);
         assert!(!headings.contains_key(&3));
     }
 
@@ -2664,7 +2745,7 @@ mod tests {
             cross_street(7, 3, -40),
             cross_street(8, 6, 5),
         ];
-        let headings = build_node_headings(&elements, SignageLevel::Full);
+        let headings = build_node_headings(&elements, SignageLevel::Full, 1.0);
         assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
     }
 
@@ -2691,7 +2772,7 @@ mod tests {
             ),
             cross_street(5, 3, 0),
         ];
-        let headings = build_node_headings(&elements, SignageLevel::Full);
+        let headings = build_node_headings(&elements, SignageLevel::Full, 1.0);
         assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
     }
 
@@ -2715,7 +2796,7 @@ mod tests {
                 ],
             ),
         ];
-        let headings = build_node_headings(&elements, SignageLevel::Full);
+        let headings = build_node_headings(&elements, SignageLevel::Full, 1.0);
         assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
     }
 
@@ -2733,7 +2814,7 @@ mod tests {
             cross_street(5, 3, -40),
             cross_street(6, 4, 40),
         ];
-        let headings = build_node_headings(&elements, SignageLevel::Full);
+        let headings = build_node_headings(&elements, SignageLevel::Full, 1.0);
         assert!(headings[&2].dir.1 > 0.9, "{:?}", headings[&2]);
     }
 
@@ -2778,7 +2859,7 @@ mod tests {
                 ],
             ),
         ];
-        let headings = build_node_headings(&elements, SignageLevel::Full);
+        let headings = build_node_headings(&elements, SignageLevel::Full, 1.0);
         assert!(headings[&2].dir.1 < -0.9, "{:?}", headings[&2]);
     }
 
@@ -2788,10 +2869,11 @@ mod tests {
         let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
         let key = DecalKey::Traffic(TrafficSign::Stop);
         let mut ctx = test_ctx(vec![key.clone()]);
-        // A road along z, x = 28..=36, with a stop for southbound traffic at (32, 20).
+        // A road along z, x = 28..=36 kerb to kerb, its lanes x = 30..=34 between two
+        // parking rows, with a stop for southbound traffic at (32, 20).
         let mut carriageway = crate::floodfill_cache::CoordinateBitmap::new(&xzbbox);
         for z in 0..64 {
-            for x in 28..=36 {
+            for x in 30..=34 {
                 carriageway.set(x, z);
             }
         }
@@ -2801,6 +2883,7 @@ mod tests {
             NodeSignHeading {
                 dir: (0.0, 1.0),
                 both_ways: false,
+                kerb: 4,
             },
         );
         let ctx = std::sync::Arc::new(ctx);
@@ -2818,9 +2901,53 @@ mod tests {
             .collect();
         assert_eq!(frames.len(), 1, "{frames:?}");
         let (x, _, z) = frames[0];
-        // Southbound traffic keeps right, which is west; the sign faces north at it.
+        // Southbound traffic keeps right, which is west; the sign faces north at it, past the
+        // parking row, not in it.
         assert!(x < 28, "west kerb: {frames:?}");
         assert_eq!(z, 19, "frame on the north face: {frames:?}");
+    }
+
+    #[test]
+    fn a_parking_row_paved_with_its_street_has_its_post_beside_it() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let mut editor = crate::element_processing::building_test_support::test_editor(&xzbbox);
+        let ctx = std::sync::Arc::new(test_ctx(vec![DecalKey::Pictogram("parking")]));
+        editor.set_map_decals(true);
+        editor.set_signage(std::sync::Arc::clone(&ctx));
+        // A street along z paved x = 26..=38, its east parking row x = 35..=38 also mapped
+        // as a parking area.
+        let mut road_mask = crate::floodfill_cache::CoordinateBitmap::new(&xzbbox);
+        for z in 0..64 {
+            for x in 26..=38 {
+                road_mask.set(x, z);
+            }
+        }
+        let row = ProcessedWay {
+            id: 9,
+            nodes: vec![
+                sign_node(1, 36, 20, &[]),
+                sign_node(2, 38, 20, &[]),
+                sign_node(3, 38, 40, &[]),
+                sign_node(4, 36, 40, &[]),
+                sign_node(1, 36, 20, &[]),
+            ],
+            tags: tags(&[("amenity", "parking"), ("parking", "street_side")]),
+        };
+        let empty = crate::floodfill_cache::CoordinateBitmap::new_empty();
+        generate_parking_signage(&mut editor, &row, &empty, &road_mask);
+
+        // Two frames, one each side of the post's head.
+        let frames: Vec<(i32, i32)> = editor.item_frames().iter().map(|f| (f.x, f.z)).collect();
+        assert_eq!(frames.len(), 2, "{frames:?}");
+        let post = (
+            (frames[0].0 + frames[1].0) / 2,
+            (frames[0].1 + frames[1].1) / 2,
+        );
+        assert_eq!(
+            post,
+            (39, 20),
+            "the nearest cell off the street: {frames:?}"
+        );
     }
 
     #[test]

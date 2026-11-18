@@ -16,6 +16,7 @@ use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::raceways;
 use crate::element_processing::road_detail::RoadDetail;
 use crate::element_processing::road_markings::{self, CrossMark, CrossingPaint, RoadMarkingIndex};
+use crate::element_processing::road_width;
 use crate::element_processing::surfaces::{
     cycleway_palette, get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
 };
@@ -28,9 +29,6 @@ use fnv::FnvHashMap;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-
-/// Widest road half-width in blocks.
-const MAX_BLOCK_RANGE: usize = 8;
 
 /// Centerline cells between pillars under a raised non-bridge road.
 const OVERPASS_PILLAR_INTERVAL: usize = 8;
@@ -391,6 +389,28 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     RED_CONCRETE,
 ];
 
+/// What the parking rows of a road, outside its lanes, must not overwrite: the road list and
+/// the paving of a sidewalk mapped beside the road.
+const PARKING_ROW_PROTECTED_SURFACES: &[Block] = &[
+    BLACK_CONCRETE,
+    GRAY_CONCRETE_POWDER,
+    CYAN_TERRACOTTA,
+    WHITE_CONCRETE,
+    YELLOW_CONCRETE,
+    WARPED_STAIRS,
+    WARPED_TRAPDOOR,
+    WARPED_SLAB,
+    STRIPPED_WARPED_STEM,
+    STRIPPED_WARPED_HYPHAE,
+    SEA_LANTERN,
+    ANDESITE_WALL,
+    SMOOTH_SANDSTONE_STAIRS,
+    RED_TERRACOTTA,
+    RED_CONCRETE,
+    SMOOTH_STONE,
+    GRAY_CONCRETE,
+];
+
 /// What a red bicycle path or race track paint must not overwrite: the road list
 /// without the asphalt mix, so they show where a road's width runs over them
 /// whichever of the two is built first. Lane stripes and zebras still win.
@@ -447,7 +467,14 @@ fn pedestrian_paving(tags: &HashMap<String, String>) -> Option<&'static [Block]>
     if !is_pedestrian_way_tags(tags) {
         return None;
     }
-    match tags.get("surface").map(String::as_str)? {
+    // A sidewalk with no surface tagged is paved, as nearly all are, not the grey concrete
+    // close to the road's asphalt beside it.
+    let surface = match tags.get("surface") {
+        Some(surface) => surface.as_str(),
+        None if tags.get("footway").map(String::as_str) == Some("sidewalk") => "paved",
+        None => return None,
+    };
+    match surface {
         "concrete" | "concrete:plates" | "concrete:lanes" | "paving_stones" | "sett" | "paved"
         | "cement" => Some(&[SMOOTH_STONE]),
         "asphalt" | "chipseal" | "bitmac" => Some(&[GRAY_CONCRETE]),
@@ -542,6 +569,7 @@ pub fn generate_highways(
     tunnel_footprint: &CoordinateBitmap,
     tunnel_cells: &mut Vec<HighwayTunnelCell>,
     markings: &RoadMarkingIndex,
+    building_footprints: &CoordinateBitmap,
 ) {
     if let ProcessedElement::Way(way) = element {
         if let Some(cars) = editor.car_network() {
@@ -573,6 +601,7 @@ pub fn generate_highways(
         tunnel_portals,
         tunnel_footprint,
         markings,
+        building_footprints,
     );
 }
 
@@ -1638,6 +1667,7 @@ fn generate_highways_internal(
     tunnel_portals: &TunnelPortalMap,
     tunnel_footprint: &CoordinateBitmap,
     markings: &RoadMarkingIndex,
+    building_footprints: &CoordinateBitmap,
 ) {
     // Shared `indoor=yes` / layer parsing for the whole function. Indoor
     // highways must never produce elevated geometry (they sit inside
@@ -1896,15 +1926,87 @@ fn generate_highways_internal(
             // Surface palette; width is resolved by highway_block_range below so
             // renderer and prescan stay in sync.
             let block_types = surface_palette(highway_type, &way.tags);
+            // The strip the way is paved out over to the road beside it, laid at the level of
+            // the cell of its own each cell reaches out from.
+            let kerb_strips = editor.kerb_strips();
+            let strip = kerb_strips.as_ref().map_or(&[][..], |k| k.of(way.id));
+            let mut levels: FnvHashMap<(i32, i32), (i32, bool)> = FnvHashMap::default();
             let surface_protect =
                 if highway_type == "cycleway" && cycleway_palette(&way.tags).is_some() {
                     OVER_ASPHALT_PROTECTED_SURFACES
                 } else {
                     ROAD_PROTECTED_SURFACES
                 };
+            // A sidewalk, or a crossing out to the lanes, is drawn over a road's parking row
+            // though not over its lanes, so the two meet at the kerb whichever is built first.
+            let is_sidewalk = matches!(
+                way.tags.get("footway").map(String::as_str),
+                Some("sidewalk" | "crossing")
+            );
 
             // Canonical width (shared with prescan/bridge consumers).
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
+            // The lanes the paint divides, inside any parking rows.
+            let lane_range = highway_lane_range(highway_type, &way.tags, scale_factor);
+            // Decks keep the square their railings are laid out from; the masks read the same.
+            let square_stamp = stamps_square(way);
+            // The rows of cars parked across the kerb or at an angle, marked a stall apart from
+            // the kerb to the lane edge: the side, +1 right of the way or -1 left. A row along
+            // the kerb stays bare, as most are.
+            let stall_rows: Vec<f32> = if is_carriageway(highway_type) {
+                [("right", 1.0f32), ("left", -1.0)]
+                    .into_iter()
+                    .filter(|&(side, _)| {
+                        road_width::parking_orientation(&way.tags, side)
+                            .is_some_and(|o| o != "parallel")
+                    })
+                    .map(|(_, sign)| sign)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            // Below a block a metre a stall's lines would run together into a dashed band.
+            let stall_period = (STALL_M * scale_factor).round() as i64;
+            // Nobody parks across a junction's mouth.
+            let junction_nodes: Vec<(i32, i32)> = way
+                .nodes
+                .iter()
+                .filter(|n| editor.is_junction(n.x, n.z))
+                .map(|n| (n.x, n.z))
+                .collect();
+            // How far the road paves into a building standing against it, or a verge.
+            let kept_by_walls = wall_core(way, highway_type, scale_factor);
+            // Whether the stamp of the centreline cell (dx, dz) back leaves (x, z) unpaved.
+            // Rows of parked cars tagged on it are the road's own, which no verge takes back.
+            let verges = !road_width::parks_along(&way.tags);
+            // The walls on the ground its strip stops at, as the masks read them.
+            let wall_footprints = editor.wall_footprints();
+            let walls: &CoordinateBitmap =
+                wall_footprints.as_deref().unwrap_or(building_footprints);
+            // How far its kerb reaches either side, parked cars widening their own side only.
+            let sides = road_width::kerb_sides(highway_type, &way.tags, scale_factor);
+            // Whether a cell beside the core stops the road is the cell's own, and the lines
+            // out from every stamp within reach of it ask: the first one's answer is kept for
+            // the rest.
+            let cut_memo = std::cell::RefCell::new(CutMemo::default());
+            let cut_here = |editor: &WorldEditor, dx: i32, dz: i32, x: i32, z: i32| {
+                kept_by_walls.is_some_and(|core| {
+                    cut_outward(core, dx, dz, |cx, cz| {
+                        let (ax, az) = (x - dx + cx, z - dz + cz);
+                        cut_memo.borrow_mut().get_or(ax, az, || {
+                            cut_beside(
+                                |sx, sz| near_centreline(way, core, sx, sz),
+                                walls,
+                                Some(editor),
+                                |px, pz| editor.on_mapped_path(px, pz),
+                                verges,
+                                ax,
+                                az,
+                            )
+                        })
+                    })
+                })
+            };
             let race_paint = (highway_type == "raceway").then(|| markings.raceway_paint());
             let race_deck = raceways::deck(&way.tags);
 
@@ -1935,9 +2037,9 @@ fn generate_highways_internal(
             let lines = if renders_as_highway_tunnel(way) {
                 Vec::new()
             } else {
-                let road_width = 2 * block_range + 1;
+                let road_width = 2 * lane_range + 1;
                 let oneway = road_markings::oneway_sign(highway_type, &way.tags) != 0;
-                lane_lines(highway_type, &way.tags, block_range, markings)
+                lane_lines(highway_type, &way.tags, lane_range, markings)
                     .into_iter()
                     .filter(|l| {
                         args.road_detail.keeps_lane_line(
@@ -2031,12 +2133,34 @@ fn generate_highways_internal(
             let crossing_paint = markings.crossing_way_paint(way);
             let crossing_clips = crossing_paint.and(markings.crossing_clips(way.id));
             // Surface of the carriageway under a crossing cell; None off the road, and
-            // everywhere for a crossing that shares no node with a road.
-            let carriageway_at = |cx: i32, cz: i32| -> Option<&'static [Block]> {
-                crossing_clips?
-                    .iter()
-                    .find(|c| c.contains(cx, cz))
-                    .map(|c| c.palette())
+            // everywhere for a crossing that shares no node with a road. Every stamp along
+            // the crossing asks about the cells it covers, so each answer is kept.
+            let carriageway_memo = std::cell::RefCell::new(CellMemo::default());
+            let carriageway_at = |editor: &WorldEditor, cx: i32, cz: i32| {
+                let clips = crossing_clips?;
+                carriageway_memo.borrow_mut().get_or(cx, cz, || {
+                    clips
+                        .iter()
+                        .find(|c| {
+                            c.contains(cx, cz)
+                                && !(c.past_core(cx, cz)
+                                    && c.core().is_some_and(|core| {
+                                        let (ox, oz) = c.nearest_centre(cx, cz).unwrap_or((cx, cz));
+                                        cut_outward(core, cx - ox, cz - oz, |dx, dz| {
+                                            cut_beside(
+                                                |sx, sz| c.in_core(core, sx, sz),
+                                                walls,
+                                                Some(editor),
+                                                |px, pz| editor.on_mapped_path(px, pz),
+                                                c.verges(),
+                                                ox + dx,
+                                                oz + dz,
+                                            )
+                                        })
+                                    }))
+                        })
+                        .map(|c| c.palette())
+                })
             };
 
             // One surface level per centerline cell; bridges and ramps carry their own.
@@ -2238,8 +2362,14 @@ fn generate_highways_internal(
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
                             for dz in -block_range..=block_range {
+                                if !square_stamp && !in_side_stamp(dx, dz, paint_axes, sides) {
+                                    continue;
+                                }
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
+                                if cut_here(editor, dx, dz, set_x, set_z) {
+                                    continue;
+                                }
                                 if drown_over_water
                                     && !road_mask.contains(set_x, set_z)
                                     && editor.is_lc_water(set_x, set_z)
@@ -2307,7 +2437,7 @@ fn generate_highways_internal(
                                 // A crossing on the road is painted on the road's own
                                 // surface, not the footway's grey.
                                 let crossing_here =
-                                    crossing_paint.zip(carriageway_at(set_x, set_z));
+                                    crossing_paint.zip(carriageway_at(editor, set_x, set_z));
                                 if let Some((paint, road)) = crossing_here {
                                     let along = if dir_horizontal { set_x } else { set_z };
                                     let on_stripe = paint == CrossingPaint::Zebra
@@ -2360,7 +2490,16 @@ fn generate_highways_internal(
                                     let effective_block = race.unwrap_or_else(|| {
                                         semirandom_surface(set_x, set_z, block_types)
                                     });
+                                    // The parking rows outside the lanes stop at a
+                                    // sidewalk mapped alongside, whichever is built first.
+                                    let parking_row = !square_stamp
+                                        && lane_range < block_range
+                                        && !in_road_stamp(dx, dz, lane_range);
                                     let protect = if race.is_some() {
+                                        OVER_ASPHALT_PROTECTED_SURFACES
+                                    } else if parking_row {
+                                        PARKING_ROW_PROTECTED_SURFACES
+                                    } else if is_sidewalk && !editor.on_carriageway(set_x, set_z) {
                                         OVER_ASPHALT_PROTECTED_SURFACES
                                     } else {
                                         surface_protect
@@ -2383,6 +2522,9 @@ fn generate_highways_internal(
                                             None,
                                             Some(protect),
                                         );
+                                    }
+                                    if !strip.is_empty() {
+                                        levels.insert((set_x, set_z), (cell_y, use_absolute_y));
                                     }
                                 }
 
@@ -2489,9 +2631,9 @@ fn generate_highways_internal(
                         // Side railings; stair_steps keeps the rail 4-connected on diagonals.
                         if let (Some(by), Some((perp_x, perp_z))) = (rail_y_here, bridge_rail_perp)
                         {
-                            // L1-projected stamp extent + 1, so the rail never lands on the deck.
+                            // The stamp's extent across + 1, so the rail never lands on the deck.
                             let rail_dist =
-                                block_range as f32 * (perp_x.abs() + perp_z.abs()) + 1.0;
+                                stamp_reach(block_range, square_stamp, perp_x, perp_z) + 1.0;
                             for (sign, prev_state, prev_parapet) in [
                                 (1.0_f32, &mut previous_rail_left, &mut previous_parapet_left),
                                 (
@@ -2619,7 +2761,7 @@ fn generate_highways_internal(
                                     } else {
                                         (*x + off, *z)
                                     };
-                                    if let Some(road) = carriageway_at(sx, sz) {
+                                    if let Some(road) = carriageway_at(editor, sx, sz) {
                                         paint(editor, WHITE_CONCRETE, sx, sz, road);
                                     }
                                 }
@@ -2663,7 +2805,8 @@ fn generate_highways_internal(
                                 .iter()
                                 .filter(|m| m.covers(t))
                             {
-                                let reach = block_range as f32 * (perp_x.abs() + perp_z.abs());
+                                // Kerb to kerb: nobody parks by a junction or a crossing.
+                                let reach = stamp_reach(block_range, square_stamp, perp_x, perp_z);
                                 let spacing = perp_x.abs() + perp_z.abs();
                                 let r = block_range + 1;
                                 for dx in -r..=r {
@@ -2698,6 +2841,79 @@ fn generate_highways_internal(
                                     }
                                 }
                             }
+
+                            // Stall lines across the parking rows, one stall apart, kerb to
+                            // lane edge; none off the road's own asphalt, on another road's
+                            // lanes, by a junction or a crossing.
+                            if !stall_rows.is_empty()
+                                && lane_range < block_range
+                                && stall_period >= 3
+                            {
+                                let along = if args.one_world_run.is_some() {
+                                    if dir_horizontal {
+                                        i64::from(*x) * i64::from((x2 - x1).signum())
+                                    } else {
+                                        i64::from(*z) * i64::from((z2 - z1).signum())
+                                    }
+                                } else {
+                                    way_marks.map_or(t as i64, |m| m.dash_phase(t))
+                                };
+                                let clear_of_junctions = junction_nodes.iter().all(|&(jx, jz)| {
+                                    let (dx, dz) = (*x - jx, *z - jz);
+                                    let gap = block_range + TURN_SWEEP;
+                                    dx * dx + dz * dz > gap * gap
+                                });
+                                let clear_of_marks = way_marks.is_none_or(|m| {
+                                    (t.saturating_sub(1)..=t + 1).all(|k| !m.in_gap(k))
+                                        && m.marks.iter().all(|mark| mark.t.abs_diff(t) > 1)
+                                });
+                                if along.rem_euclid(stall_period) == 0
+                                    && clear_of_junctions
+                                    && clear_of_marks
+                                {
+                                    // Square to the kerb, or along the grid where the road
+                                    // runs near it, so a line stays one row.
+                                    let gridded = ux.abs().min(uz.abs()) < 0.42;
+                                    let across = |dx: i32, dz: i32| {
+                                        if !gridded {
+                                            (dx as f32 * ux + dz as f32 * uz).abs() <= 0.5
+                                        } else if ux.abs() > uz.abs() {
+                                            dx == 0
+                                        } else {
+                                            dz == 0
+                                        }
+                                    };
+                                    let r = block_range + 1;
+                                    for &sign in &stall_rows {
+                                        let side = if sign > 0.0 { sides.1 } else { sides.0 };
+                                        let reach = stamp_reach(side, square_stamp, perp_x, perp_z);
+                                        for dx in -r..=r {
+                                            for dz in -r..=r {
+                                                let p = sign
+                                                    * (dx as f32 * perp_x + dz as f32 * perp_z);
+                                                if !across(dx, dz)
+                                                    || p <= lane_range as f32 + 0.5
+                                                    || p > reach + 0.01
+                                                {
+                                                    continue;
+                                                }
+                                                let (sx, sz) = (*x + dx, *z + dz);
+                                                if !editor.on_carriageway(sx, sz)
+                                                    && !cut_here(editor, dx, dz, sx, sz)
+                                                {
+                                                    paint(
+                                                        editor,
+                                                        WHITE_CONCRETE,
+                                                        sx,
+                                                        sz,
+                                                        block_types,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -2705,6 +2921,19 @@ fn generate_highways_internal(
                     cumulative_distance_from_start += segment_length - 1;
                 }
                 previous_node = Some((node.x, node.z));
+            }
+            for cell in strip {
+                let (x, z) = cell.cell;
+                let block = semirandom_surface(x, z, block_types);
+                match levels.get(&cell.from) {
+                    Some(&(y, true)) => {
+                        editor.set_block_absolute(block, x, y, z, None, Some(surface_protect))
+                    }
+                    Some(&(y, false)) => {
+                        editor.set_block(block, x, y, z, None, Some(surface_protect))
+                    }
+                    None => editor.set_block(block, x, 0, z, None, Some(surface_protect)),
+                }
             }
 
             if is_bridge_member {
@@ -2902,11 +3131,8 @@ fn runway_centerline_dash_on(s: f32, scale: f64) -> bool {
 }
 
 /// Parses an OSM `width=*` value in metres (tolerates a trailing "m").
-// Parse an OSM width=* tag in metres, tolerating a trailing "m"/" m".
 pub(crate) fn parse_width_tag_m(tags: &HashMap<String, String>) -> Option<f64> {
-    let raw = tags.get("width")?;
-    let s = raw.trim().trim_end_matches('m').trim();
-    s.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+    road_width::metres(tags.get("width")?)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3526,60 +3752,75 @@ fn is_fast_road(highway_type: &str, tags: &HashMap<String, String>) -> bool {
     .any(|v| v.contains("rural") || v.contains("motorway") || v.contains("nsl"))
 }
 
-/// Canonical road half-width in blocks. Single source of truth shared by the
-/// renderer and the prescan/bitmap/bridge consumers, so they never disagree.
+/// Canonical road half-width in blocks, kerb to kerb. Single source of truth shared by the
+/// renderer and the prescan/bitmap/bridge consumers, so they never disagree. The rules are
+/// in `road_width`.
 pub(crate) fn highway_block_range(
     highway_type: &str,
     tags: &HashMap<String, String>,
     scale: f64,
 ) -> i32 {
-    // A road under construction is as wide as the finished road.
-    let highway_type = if highway_type == "construction" {
-        tags.get("construction")
-            .map_or(highway_type, String::as_str)
-    } else {
-        highway_type
-    };
-    let (mut block_range, scales_with_lanes): (i32, bool) = match highway_type {
-        "footway" | "pedestrian" => (1, false),
-        // Bicycle paths are 2-4 m across; at the road default they swallowed the verge
-        // and the kerb of the road they run beside.
-        "path" | "cycleway" => (1, false),
-        "motorway" | "primary" | "trunk" => (5, true),
-        "secondary" => (4, true),
-        "tertiary" => (2, true),
-        "track" => (1, false),
-        "service" => (2, true),
-        "secondary_link" | "tertiary_link" => (1, true),
-        "escape" => (1, false),
-        "steps" => (1, false),
-        "raceway" => (raceways::default_half_width(tags), false),
-        _ => (2, true),
-    };
+    road_width::road_halves(highway_type, tags, scale).kerb
+}
 
-    const MAX_LANES: i32 = 16;
-    let lanes = tags
-        .get("lanes")
-        .and_then(|l| l.parse::<i32>().ok())
-        .unwrap_or_else(|| highway_default_lanes(highway_type))
-        .clamp(1, MAX_LANES);
+/// Half-width in blocks of a road's traffic lanes, which its lane lines divide and cars
+/// drive in: the kerb-to-kerb width less the cars parked along it.
+pub(crate) fn highway_lane_range(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    scale: f64,
+) -> i32 {
+    road_width::road_halves(highway_type, tags, scale).lanes
+}
 
-    // Explicit width=* wins; else vehicular roads use 3.5 m/lane, never below
-    // the default. The -1 accounts for the centre block in 2*block_range+1.
-    if let Some(w) = parse_width_tag_m(tags) {
-        block_range = (w / 2.0).round() as i32;
-    } else if scales_with_lanes {
-        let lanes_based = ((lanes as f32 * 3.5 - 1.0) / 2.0).round() as i32;
-        block_range = block_range.max(lanes_based);
+/// Whether the cell `(dx, dz)` from a centreline cell lies in the stamp of a road of
+/// half-width `half`. A disc, so a road is as wide across on a diagonal as along an axis;
+/// a square came out about a quarter wider at 30 to 45 degrees. Footways (half 1) still
+/// stamp their full 3x3.
+pub(crate) fn in_road_stamp(dx: i32, dz: i32, half: i32) -> bool {
+    dx * dx + dz * dz <= half * half + half
+}
+
+/// Whether a way is stamped with a square rather than `in_road_stamp`'s disc: a bridge deck,
+/// whose railings, parapets and piers are laid out from the square. Its approach ramps take
+/// the disc like any road. Decided from the way alone, so the pre-scan masks and the
+/// renderer agree.
+pub(crate) fn stamps_square(way: &ProcessedWay) -> bool {
+    is_bridge_way(way) && lays_deck(way)
+}
+
+/// The half-width a road keeps where a building stands against it, a verge with its grass
+/// or a street tree, or a sidewalk mapped as its own way, when narrower than the road: its
+/// lanes inside the parking rows, a two-way street with a sidewalk the width it would have
+/// without one. What the road gains past that, as in a narrow old-town street whose house
+/// fronts are mapped wider than they stand, stops at the walls instead of paving the ground
+/// floors, leaves the verge green and the sidewalk paved. None for a road paved whole: a
+/// bridge deck, or a passage through a building.
+pub(crate) fn wall_core(way: &ProcessedWay, highway_type: &str, scale: f64) -> Option<i32> {
+    if stamps_square(way) || way.tags.get("tunnel").map(String::as_str) == Some("building_passage")
+    {
+        return None;
     }
-    block_range = block_range.clamp(1, MAX_BLOCK_RANGE as i32);
+    let kerb = road_width::road_halves(highway_type, &way.tags, scale).kerb;
+    let core = road_width::wall_half(highway_type, &way.tags, scale);
+    (core < kerb).then_some(core)
+}
 
-    if scale < 1.0 {
-        // max(1): scaling must never collapse a road to zero width.
-        block_range = (((block_range as f64) * scale).floor() as i32).max(1);
+/// How far a road's stamp reaches from a centreline cell along the unit direction
+/// `(px, pz)`: the furthest cell centre it covers that way.
+pub(crate) fn stamp_reach(half: i32, square: bool, px: f32, pz: f32) -> f32 {
+    if square {
+        return half as f32 * (px.abs() + pz.abs());
     }
-
-    block_range
+    let mut reach = 0f32;
+    for dx in -half..=half {
+        for dz in -half..=half {
+            if in_road_stamp(dx, dz, half) {
+                reach = reach.max(dx as f32 * px + dz as f32 * pz);
+            }
+        }
+    }
+    reach
 }
 
 /// The road half of `collect_road_and_carriageway_coords`.
@@ -3591,7 +3832,15 @@ pub fn collect_road_surface_coords(
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
 ) -> CoordinateBitmap {
-    collect_road_and_carriageway_coords(elements, editor, xzbbox, scale, water_detail).0
+    collect_road_and_carriageway_coords(
+        elements,
+        editor,
+        xzbbox,
+        scale,
+        water_detail,
+        &CoordinateBitmap::new_empty(),
+    )
+    .roads
 }
 
 /// True for highway types that carry vehicles rather than people on foot, bike or horse.
@@ -3657,13 +3906,13 @@ pub(crate) fn tunnel_renders_at_surface(
 }
 
 /// Collect all (x, z) coordinates that are covered by any rendered road or path
-/// surface, and in a second bitmap the carriageways among them, in one pass over the
-/// roads. The first bitmap has 1 for every block that the highway renderer
+/// surface, and in a second bitmap the carriageways among them (their lanes, without the
+/// parking rows along the kerbs), in one pass over the roads. The first bitmap has 1 for every block that the highway renderer
 /// places as a road/path surface and 0 everywhere else.
 ///
 /// Geometry is computed identically to `generate_highways_internal`:
 /// - Bresenham line between each consecutive pair of OSM nodes
-/// - Expanded by `block_range` in both axes (same value as the renderer uses)
+/// - Stamped with `block_range` around each cell (same value and shape as the renderer)
 /// - `area=yes` ways, indoor ways, negative-level ways, and pure node types
 ///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
 ///   early-return guards.
@@ -3678,24 +3927,302 @@ pub fn collect_road_and_carriageway_coords(
     xzbbox: &XZBBox,
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
-) -> (CoordinateBitmap, CoordinateBitmap) {
-    let mut roads = CoordinateBitmap::new(xzbbox);
-    let mut carriageways = CoordinateBitmap::new(xzbbox);
+    building_footprints: &CoordinateBitmap,
+) -> RoadCoords {
     let editor = Some(editor);
-    stamp_highway_surfaces(
-        elements,
-        editor,
-        scale,
-        water_detail,
-        |_| true,
-        |carriageway, x, z| {
-            roads.set(x, z);
-            if carriageway {
-                carriageways.set(x, z);
+    // The sidewalks first, which the roads beside them then stop at; read only where a road
+    // has a strip past its core to stop.
+    let widens = elements.iter().any(|e| match e {
+        ProcessedElement::Way(w) => {
+            surface_highway_type(w).is_some_and(|t| wall_core(w, t, scale).is_some())
+        }
+        _ => false,
+    });
+    let junctions = road_junctions(elements);
+    let mut paths = CoordinateBitmap::new_empty();
+    if widens {
+        let mut found = CoordinateBitmap::new(xzbbox);
+        let mut any = false;
+        stamp_highway_surfaces(
+            elements,
+            editor,
+            scale,
+            water_detail,
+            building_footprints,
+            None,
+            |_| true,
+            false,
+            |carriageway, x, z| {
+                if !carriageway {
+                    found.set(x, z);
+                    any = true;
+                }
+            },
+            |_, _| {},
+        );
+        if any {
+            paths = found;
+        }
+    }
+    // The ways in two halves, by the parity of their ids, each on a thread of its own with
+    // masks of its own, which then come together as one.
+    let half = |parity: u64| {
+        let mut roads = CoordinateBitmap::new(xzbbox);
+        let mut carriageways = CoordinateBitmap::new(xzbbox);
+        let mut cut: Vec<u64> = Vec::new();
+        stamp_highway_surfaces(
+            elements,
+            editor,
+            scale,
+            water_detail,
+            building_footprints,
+            Some(&paths),
+            |e| matches!(e, ProcessedElement::Way(w) if w.id % 2 == parity),
+            false,
+            |carriageway, x, z| {
+                roads.set(x, z);
+                if carriageway {
+                    carriageways.set(x, z);
+                }
+            },
+            |x, z| cut.push(pack_xz(x, z)),
+        );
+        (roads, carriageways, cut)
+    };
+    let ((mut roads, mut carriageways, mut cut), (odd_roads, odd_carriageways, odd_cut)) =
+        rayon::join(|| half(0), || half(1));
+    roads.union_with(&odd_roads);
+    carriageways.union_with(&odd_carriageways);
+    drop((odd_roads, odd_carriageways));
+    cut.extend(odd_cut);
+    cut.sort_unstable();
+    cut.dedup();
+    cut.retain(|&c| !roads.contains((c >> 32) as u32 as i32, c as u32 as i32));
+    cut.shrink_to_fit();
+    RoadCoords {
+        roads,
+        carriageways,
+        paths,
+        cut: CutCells(cut),
+        junctions,
+    }
+}
+
+/// What `collect_road_and_carriageway_coords` finds.
+pub struct RoadCoords {
+    /// Every road and path surface cell.
+    pub roads: CoordinateBitmap,
+    /// The lanes among them, without the parking rows along the kerbs.
+    pub carriageways: CoordinateBitmap,
+    /// The sidewalks mapped as their own ways, which a road's parking rows and second lane
+    /// stop at; empty where no road widens past its core or no such sidewalk is mapped.
+    pub paths: CoordinateBitmap,
+    /// The cells a road's stamp covers but leaves unpaved beside it, which no other way
+    /// paves.
+    pub cut: CutCells,
+    /// Where three or more road arms meet, packed and sorted, as `road_junctions` finds them.
+    pub junctions: Vec<u64>,
+}
+
+/// Cells a road's stamp covers but `cut_beside` leaves unpaved, packed and sorted.
+#[derive(Default)]
+pub struct CutCells(Vec<u64>);
+
+impl CutCells {
+    pub fn contains(&self, x: i32, z: i32) -> bool {
+        self.0.binary_search(&pack_xz(x, z)).is_ok()
+    }
+}
+
+/// Whether a road leaves (x, z), past the core it keeps against what stands beside it,
+/// unpaved: a building stands there, a sidewalk is mapped there as its own way (`on_path`),
+/// water is there, or with `verges` the verge keeps its ground; without, as along rows of
+/// parked cars, only a street tree keeps its pit. `in_core` says whether a cell lies in the
+/// road's own core, where no tree will stand.
+pub(crate) fn cut_beside(
+    in_core: impl Fn(i32, i32) -> bool,
+    footprints: &CoordinateBitmap,
+    editor: Option<&WorldEditor>,
+    on_path: impl Fn(i32, i32) -> bool,
+    verges: bool,
+    x: i32,
+    z: i32,
+) -> bool {
+    let paved = |sx: i32, sz: i32| footprints.contains(sx, sz) || in_core(sx, sz);
+    footprints.contains(x, z)
+        || on_path(x, z)
+        || editor.is_some_and(|e| {
+            e.water_at(x, z)
+                || if verges {
+                    e.keeps_its_ground(x, z, paved)
+                } else {
+                    e.keeps_a_pit(x, z, paved)
+                }
+        })
+}
+
+/// What a question that depends on the cell alone, such as whether `cut_beside` cuts it,
+/// answered for the cells of one way lately: a small cache with a slot per cell of a square
+/// `SIDE` across, laid over the world like tiles, so the cells round the stamp being laid
+/// never share one. A cell it lost is only worked out again.
+struct CellMemo<T> {
+    slots: Vec<(i32, i32, T)>,
+}
+
+impl<T> Default for CellMemo<T> {
+    fn default() -> Self {
+        Self { slots: Vec::new() }
+    }
+}
+
+type CutMemo = CellMemo<bool>;
+
+impl<T: Copy + Default> CellMemo<T> {
+    /// Wider than most roads' stamps and the stall lines beside them.
+    const SIDE: i32 = 32;
+
+    /// The answer for (x, z), from `find` where none is kept.
+    fn get_or(&mut self, x: i32, z: i32, find: impl FnOnce() -> T) -> T {
+        if self.slots.is_empty() {
+            self.slots =
+                vec![(i32::MIN, i32::MIN, T::default()); (Self::SIDE * Self::SIDE) as usize];
+        }
+        let at = z.rem_euclid(Self::SIDE) * Self::SIDE + x.rem_euclid(Self::SIDE);
+        let slot = &mut self.slots[at as usize];
+        if (slot.0, slot.1) != (x, z) {
+            *slot = (x, z, find());
+        }
+        slot.2
+    }
+}
+
+/// The cell one step nearer the centreline cell on the line out to `(dx, dz)`.
+fn inward(dx: i32, dz: i32) -> (i32, i32) {
+    let len = f64::from(dx * dx + dz * dz).sqrt();
+    let keep = (len - 1.0) / len;
+    (
+        (f64::from(dx) * keep).round() as i32,
+        (f64::from(dz) * keep).round() as i32,
+    )
+}
+
+/// Whether a road's stamp leaves its cell `(dx, dz)` past the core unpaved: where `cut` says
+/// that cell is, or one between it and the core on the line out to it. A cut runs outward,
+/// so no patch of road is left standing beyond the ground it stops at.
+pub(crate) fn cut_outward(
+    core: i32,
+    dx: i32,
+    dz: i32,
+    mut cut: impl FnMut(i32, i32) -> bool,
+) -> bool {
+    let (mut cx, mut cz) = (dx, dz);
+    while !in_road_stamp(cx, cz, core) {
+        if cut(cx, cz) {
+            return true;
+        }
+        let next = inward(cx, cz);
+        if next == (cx, cz) {
+            break;
+        }
+        (cx, cz) = next;
+    }
+    false
+}
+
+/// Whether the stamp of a centreline cell on a way running along `u` covers its cell
+/// `(dx, dz)`: out to the kerb on that cell's side of the way, `sides` being how far the
+/// left kerb and the right one reach, so a row of cars parked on one side widens that side.
+pub(crate) fn in_side_stamp(dx: i32, dz: i32, u: Option<(f32, f32)>, sides: (i32, i32)) -> bool {
+    let wide = sides.0.max(sides.1);
+    let half = match u {
+        Some(u) if sides.0 != sides.1 => {
+            let right = dx as f32 * -u.1 + dz as f32 * u.0;
+            if right > 0.01 {
+                sides.1
+            } else if right < -0.01 {
+                sides.0
+            } else {
+                wide
             }
-        },
-    );
-    (roads, carriageways)
+        }
+        _ => wide,
+    };
+    in_road_stamp(dx, dz, half)
+}
+
+/// How far past a road's kerb, from a junction node, the cars turning there sweep the
+/// corner, where nobody parks.
+const TURN_SWEEP: i32 = 4;
+
+/// The width along the kerb of a stall marked in a row of cars parked across the kerb or at
+/// an angle.
+const STALL_M: f64 = 2.5;
+
+/// Where three or more road arms meet, as packed cells: the junctions across whose mouths
+/// nobody parks. A way's middle node is two arms of it, an end one.
+pub(crate) fn road_junctions(elements: &[ProcessedElement]) -> Vec<u64> {
+    let mut arms: FnvHashMap<u64, u8> = FnvHashMap::default();
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+        if !surface_highway_type(way).is_some_and(is_carriageway) {
+            continue;
+        }
+        let last = way.nodes.len().saturating_sub(1);
+        for (i, n) in way.nodes.iter().enumerate() {
+            let a = arms.entry(pack_xz(n.x, n.z)).or_default();
+            *a = a.saturating_add(u8::from(i > 0) + u8::from(i < last));
+        }
+    }
+    let mut out: Vec<u64> = arms
+        .into_iter()
+        .filter(|&(_, a)| a >= 3)
+        .map(|(c, _)| c)
+        .collect();
+    out.sort_unstable();
+    out
+}
+
+/// How far from a centreline cell the disc stamp of half-width `half` reaches.
+pub(crate) fn stamp_radius(half: i32) -> f32 {
+    ((half * half + half) as f32).sqrt()
+}
+
+/// Whether (x, z) lies within the disc stamp of half-width `half` along the way's
+/// centreline, as near as the segments between its nodes tell.
+fn near_centreline(way: &ProcessedWay, half: i32, x: i32, z: i32) -> bool {
+    let reach = stamp_radius(half);
+    let (px, pz) = (x as f32, z as f32);
+    way.nodes.windows(2).any(|w| {
+        let (ax, az) = (w[0].x as f32, w[0].z as f32);
+        let (dx, dz) = (w[1].x as f32 - ax, w[1].z as f32 - az);
+        let len_sq = dx * dx + dz * dz;
+        let t = if len_sq > 0.0 {
+            (((px - ax) * dx + (pz - az) * dz) / len_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        (px - ax - t * dx).hypot(pz - az - t * dz) <= reach
+    })
+}
+
+/// A sidewalk mapped as its own way at grade, which a road's parking rows and second lane
+/// stop at: a footway, cycle path or path tagged as a sidewalk or a side path, so running
+/// alongside the road. A path that only joins or crosses the street, and a footbridge or a
+/// walkway on another level, do not cut it.
+pub(crate) fn is_mapped_path(way: &ProcessedWay, highway_type: &str) -> bool {
+    let tag = |k: &str| way.tags.get(k).map(String::as_str);
+    let alongside = ["footway", "cycleway", "path"]
+        .iter()
+        .any(|k| tag(k) == Some("sidewalk"))
+        || tag("is_sidepath") == Some("yes");
+    let at_grade = !is_bridge_way(way)
+        && tag("tunnel").is_none_or(|t| t == "no")
+        && ["layer", "level"]
+            .iter()
+            .all(|k| tag(k).is_none_or(|v| v.trim().parse::<f64>().is_ok_and(|l| l == 0.0)));
+    !is_carriageway(highway_type) && alongside && at_grade
 }
 
 /// Where a garden keeps a few metres of paving: the carriageways as the renderer stamps
@@ -3709,20 +4236,27 @@ pub fn collect_garden_streets(
     car_park_cells: impl Fn(&ProcessedWay) -> Option<std::sync::Arc<Vec<(i32, i32)>>>,
 ) -> CoordinateBitmap {
     let mut streets = CoordinateBitmap::new(xzbbox);
+    // Only the lanes are read, which no building, sidewalk or verge cuts, so the rest of
+    // each stamp is skipped.
+    let none = CoordinateBitmap::new_empty();
     stamp_highway_surfaces(
         elements,
         Some(editor),
         scale,
         water_detail,
+        &none,
+        Some(&none),
         |element| {
             !matches!(element, ProcessedElement::Way(w)
                 if w.tags.get("service").map(String::as_str) == Some("driveway"))
         },
+        true,
         |carriageway, x, z| {
             if carriageway {
                 streets.set(x, z);
             }
         },
+        |_, _| {},
     );
     for element in elements {
         let ProcessedElement::Way(way) = element else {
@@ -3762,34 +4296,72 @@ pub fn collect_roads_at_grade(
     let deck = |element: &ProcessedElement| matches!(element, ProcessedElement::Way(w) if is_bridge_way(w) && lays_deck(w));
     let mut roads = CoordinateBitmap::new(xzbbox);
     let water = crate::water_detail::WaterDetail::Default;
+    // Before the buildings are filled: a widened road keeps the cells it gives up to a wall,
+    // which the building covers anyway. The sidewalks mapped as their own ways first, which
+    // the roads beside them stop at, as they do in the drawing.
+    let no_footprints = CoordinateBitmap::new(xzbbox);
+    let mut paths = CoordinateBitmap::new(xzbbox);
     stamp_highway_surfaces(
         elements,
         None,
         scale,
         water,
-        |element| keep(element) && !matches!(element, ProcessedElement::Way(w) if is_bridge_way(w)),
-        |_, x, z| roads.set(x, z),
+        &no_footprints,
+        None,
+        &keep,
+        false,
+        |_, x, z| paths.set(x, z),
+        |_, _| {},
     );
     stamp_highway_surfaces(
         elements,
         None,
         scale,
         water,
+        &no_footprints,
+        Some(&paths),
+        |element| keep(element) && !matches!(element, ProcessedElement::Way(w) if is_bridge_way(w)),
+        false,
+        |_, x, z| roads.set(x, z),
+        |_, _| {},
+    );
+    stamp_highway_surfaces(
+        elements,
+        None,
+        scale,
+        water,
+        &no_footprints,
+        Some(&paths),
         |element| keep(element) && deck(element),
+        false,
         |_, x, z| roads.clear(x, z),
+        |_, _| {},
     );
     roads
 }
 
 /// Hands `stamp` every road and path surface cell of the elements `keep` lets through, with
-/// whether its way carries vehicles.
+/// whether its way carries vehicles, and `skipped` every cell a road's stamp covers but
+/// `cut_beside` leaves unpaved. Without `paths`, only the sidewalks mapped as their own
+/// ways; with them, every way, a road's parking rows and second lane stopping at those
+/// sidewalks. With `lanes_only`, only the carriageway lanes, for a caller that reads nothing
+/// else: the rest of each stamp is neither stamped nor looked into for a cut.
+///
+/// The cells come as a union: one may be handed over more than once, and where the stamps
+/// along a way overlap, a cell the core of one already handed over, lanes and all, is not
+/// handed over again for the next.
+#[allow(clippy::too_many_arguments)]
 fn stamp_highway_surfaces(
     elements: &[ProcessedElement],
     editor: Option<&WorldEditor>,
     scale: f64,
     water_detail: crate::water_detail::WaterDetail,
+    building_footprints: &CoordinateBitmap,
+    paths: Option<&CoordinateBitmap>,
     keep: impl Fn(&ProcessedElement) -> bool,
+    lanes_only: bool,
     mut stamp: impl FnMut(bool, i32, i32),
+    mut skipped: impl FnMut(i32, i32),
 ) {
     // A way that meets a bridge is its ramp or its approach, and keeps its surface.
     let drowning = editor.filter(|_| water_detail.drowns_crossing(scale, &HashMap::new()));
@@ -3810,6 +4382,7 @@ fn stamp_highway_surfaces(
         None => HashSet::new(),
     };
 
+    let mut stamp_cells: Vec<(i32, i32, bool, bool)> = Vec::new();
     for element in elements.iter().filter(|e| keep(e)) {
         let ProcessedElement::Way(way) = element else {
             continue;
@@ -3818,22 +4391,35 @@ fn stamp_highway_surfaces(
         let Some(highway_type) = surface_highway_type(way) else {
             continue;
         };
+        if paths.is_none() && !is_mapped_path(way, highway_type) {
+            continue;
+        }
         if !tunnel_renders_at_surface(way, editor, scale) {
             continue;
         }
 
         // Use the same block_range the renderer uses for this highway type
         let block_range = highway_block_range(highway_type, &way.tags, scale);
+        // Only the lanes count as carriageway; the parking rows outside them do not.
+        let lane_range = highway_lane_range(highway_type, &way.tags, scale);
         let carriageway = is_carriageway(highway_type);
+        if lanes_only && !carriageway {
+            continue;
+        }
         let drowned = drowning.filter(|_| {
             water_detail.drowns_crossing(scale, &way.tags)
                 && !way.nodes.iter().any(|n| bridge_nodes.contains(&(n.x, n.z)))
         });
 
         let mut points: Vec<(i32, i32)> = Vec::new();
+        // The segment each point lies on, by its first point and its direction.
+        let mut segments: Vec<(usize, Option<(f32, f32)>)> = Vec::new();
         for i in 1..way.nodes.len() {
             let prev = way.nodes[i - 1].xz();
             let cur = way.nodes[i].xz();
+            let (sx, sz) = ((cur.x - prev.x) as f32, (cur.z - prev.z) as f32);
+            let len = sx.hypot(sz);
+            segments.push((points.len(), (len > 0.0).then(|| (sx / len, sz / len))));
             points.extend(
                 bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z)
                     .into_iter()
@@ -3847,18 +4433,295 @@ fn stamp_highway_surfaces(
             crate::water_detail::drowned_points(&points, block_range, |x, z| fills(e, x, z))
         });
 
-        for (i, &(bx, bz)) in points.iter().enumerate() {
-            let skip_water = drowned_points.as_ref().is_some_and(|d| d[i]);
+        let square = stamps_square(way);
+        let kept_by_walls = wall_core(way, highway_type, scale);
+        let verges = !road_width::parks_along(&way.tags);
+        let sides = road_width::kerb_sides(highway_type, &way.tags, scale);
+        // The stamp's cells, worked out once a segment (once a way, its kerbs alike): whether
+        // each lies past the core, where the road stops at what stands beside it, and whether
+        // it is carriageway.
+        let cells_along = |u: Option<(f32, f32)>, cells: &mut Vec<(i32, i32, bool, bool)>| {
+            cells.clear();
             for dx in -block_range..=block_range {
                 for dz in -block_range..=block_range {
-                    if skip_water && drowned.is_some_and(|e| fills(e, bx + dx, bz + dz)) {
+                    if !square && !in_side_stamp(dx, dz, u, sides) {
                         continue;
                     }
-                    stamp(carriageway, bx + dx, bz + dz);
+                    let past_core = kept_by_walls.is_some_and(|core| !in_road_stamp(dx, dz, core));
+                    let in_lanes = if square {
+                        dx.abs() <= lane_range && dz.abs() <= lane_range
+                    } else {
+                        in_road_stamp(dx, dz, lane_range)
+                    };
+                    if lanes_only && !in_lanes {
+                        continue;
+                    }
+                    cells.push((dx, dz, past_core, carriageway && in_lanes));
                 }
             }
+        };
+        let lopsided = !square && sides.0 != sides.1;
+        if !lopsided {
+            cells_along(None, &mut stamp_cells);
+        }
+        let mut segment = 0;
+        // Whether a cell past the core is cut is the cell's own, and the stamps along a way
+        // overlap: what one point found, by offset in its stamp, the next reads back. The
+        // tables by offset reach a block past the stamp's square, so the offset a cell lay at
+        // in the stamp a step back is its own index shifted.
+        let reach = block_range + 1;
+        let side = (2 * reach + 1) as usize;
+        let at = |dx: i32, dz: i32| (dz + reach) as usize * side + (dx + reach) as usize;
+        let (mut found, mut last_found) = match kept_by_walls {
+            Some(_) => (
+                vec![Verdict::Unknown; side * side],
+                vec![Verdict::Unknown; side * side],
+            ),
+            None => (Vec::new(), Vec::new()),
+        };
+        // The walk `cut_outward` takes in from each offset of the stamp's square: the next
+        // offset in, `IN_CORE` at the core and `END` where it stops short of it. Worked out
+        // once a way.
+        const IN_CORE: usize = usize::MAX;
+        const END: usize = usize::MAX - 1;
+        let offset = |k: usize| ((k % side) as i32 - reach, (k / side) as i32 - reach);
+        let walk_in: Vec<usize> = kept_by_walls.map_or_else(Vec::new, |core| {
+            (0..side * side)
+                .map(|k| {
+                    let (dx, dz) = offset(k);
+                    if in_road_stamp(dx, dz, core) {
+                        return IN_CORE;
+                    }
+                    let (nx, nz) = inward(dx, dz);
+                    if (nx, nz) == (dx, dz) {
+                        END
+                    } else {
+                        at(nx, nz)
+                    }
+                })
+                .collect()
+        });
+        let offsets: Vec<(i32, i32)> = (0..walk_in.len()).map(offset).collect();
+        // What each offset of the stamp's square is known to have handed over, as of the last
+        // point and of this one: 0 nothing, 1 the cell, 2 the cell as a lane. The core's cells
+        // always are, the sweep handing them over; a cell past the core is where its walk in
+        // finds no cut, or where the stamp a step back had handed it over already, which then
+        // is not looked into again, the cells coming as a union. A drowned crossing, which
+        // gives up cells to the water point by point, looks into every one.
+        let levels_of = |cells: &[(i32, i32, bool, bool)], base: &mut Vec<u8>| {
+            base.clear();
+            base.resize(walk_in.len(), 0);
+            if drowned.is_none() && !walk_in.is_empty() {
+                for &(dx, dz, _, lanes) in cells.iter().filter(|c| !c.2) {
+                    base[at(dx, dz)] = 1 + u8::from(lanes);
+                }
+            }
+        };
+        let mut base: Vec<u8> = Vec::new();
+        if !lopsided {
+            levels_of(&stamp_cells, &mut base);
+        }
+        let (mut covered, mut last_covered) = (vec![0u8; walk_in.len()], vec![0u8; walk_in.len()]);
+        // Whether each offset's walk in meets a cut, as this point finds it: 0 not yet known,
+        // 1 no, 2 yes.
+        let mut cut_at = vec![0u8; walk_in.len()];
+        let mut walked: Vec<usize> = Vec::new();
+        // The core's cells, which no cut reaches, are swept along the way; a drowned crossing,
+        // which gives up some of them point by point, lays them at every point.
+        let mut sweep: Option<Sweep> = None;
+        let mut last: Option<(i32, i32)> = None;
+        for (i, &(bx, bz)) in points.iter().enumerate() {
+            let skip_water = drowned_points.as_ref().is_some_and(|d| d[i]);
+            if lopsided && segments.get(segment).is_some_and(|&(start, _)| start == i) {
+                while segments
+                    .get(segment + 1)
+                    .is_some_and(|&(start, _)| start == i)
+                {
+                    segment += 1;
+                }
+                cells_along(segments[segment].1, &mut stamp_cells);
+                levels_of(&stamp_cells, &mut base);
+                sweep = None;
+                segment += 1;
+            }
+            if drowned.is_none() {
+                let sweep = sweep.get_or_insert_with(|| {
+                    Sweep::new(
+                        block_range,
+                        stamp_cells
+                            .iter()
+                            .filter(|c| !c.2)
+                            .map(|&(dx, dz, _, lanes)| (dx, dz, lanes))
+                            .collect(),
+                    )
+                });
+                for &(dx, dz, lanes) in sweep.step_to(bx, bz) {
+                    stamp(lanes, bx + dx, bz + dz);
+                }
+            } else {
+                for &(dx, dz, _, lanes) in stamp_cells.iter().filter(|c| !c.2) {
+                    let (x, z) = (bx + dx, bz + dz);
+                    if skip_water && drowned.is_some_and(|e| fills(e, x, z)) {
+                        continue;
+                    }
+                    stamp(lanes, x, z);
+                }
+            }
+            let Some(core) = kept_by_walls else {
+                continue;
+            };
+            found.fill(Verdict::Unknown);
+            cut_at.fill(0);
+            covered.copy_from_slice(&base);
+            // Where an offset here lay in the stamp a step back, the last point being a step away.
+            let shift = last
+                .map(|(lx, lz)| (bx - lx, bz - lz))
+                .filter(|&(sx, sz)| sx.abs() <= 1 && sz.abs() <= 1)
+                .map(|(sx, sz)| sz as isize * side as isize + sx as isize);
+            let back_of = |k: usize| shift.map(|d| k.wrapping_add_signed(d));
+            for &(dx, dz, _, lanes) in stamp_cells.iter().filter(|c| c.2) {
+                let k = at(dx, dz);
+                let wanted = 1 + u8::from(lanes);
+                let before = if drowned.is_none() {
+                    back_of(k).map_or(0, |j| last_covered[j])
+                } else {
+                    0
+                };
+                covered[k] = before;
+                if before >= wanted {
+                    continue;
+                }
+                let (x, z) = (bx + dx, bz + dz);
+                if skip_water && drowned.is_some_and(|e| fills(e, x, z)) {
+                    continue;
+                }
+                // `cut_outward`'s walk in, stopping at the first offset whose cut is known.
+                let mut j = k;
+                let cut = loop {
+                    if walk_in[j] == IN_CORE {
+                        break false;
+                    }
+                    if cut_at[j] != 0 {
+                        break cut_at[j] == 2;
+                    }
+                    if found[j] == Verdict::Unknown {
+                        found[j] = back_of(j).map_or(Verdict::Unknown, |o| last_found[o]);
+                    }
+                    if found[j] == Verdict::Unknown {
+                        let (cx, cz) = offsets[j];
+                        found[j] = if cut_beside(
+                            |sx, sz| near_centreline(way, core, sx, sz),
+                            building_footprints,
+                            editor,
+                            |px, pz| paths.is_some_and(|p| p.contains(px, pz)),
+                            verges,
+                            bx + cx,
+                            bz + cz,
+                        ) {
+                            Verdict::Cut
+                        } else {
+                            Verdict::Kept
+                        };
+                    }
+                    walked.push(j);
+                    if found[j] == Verdict::Cut {
+                        break true;
+                    }
+                    if walk_in[j] == END {
+                        break false;
+                    }
+                    j = walk_in[j];
+                };
+                for w in walked.drain(..) {
+                    cut_at[w] = 1 + u8::from(cut);
+                }
+                if cut {
+                    skipped(x, z);
+                } else {
+                    stamp(lanes, x, z);
+                    covered[k] = wanted;
+                }
+            }
+            std::mem::swap(&mut covered, &mut last_covered);
+            std::mem::swap(&mut found, &mut last_found);
+            last = Some((bx, bz));
         }
     }
+}
+
+/// One stamp laid at every point of a run along a way, a block apart. At each point it hands
+/// over only the cells the stamp a block back left out, or covered off the lanes where they
+/// are lanes here: the run's cells come out as the union of its stamps, each with its lanes,
+/// for a fraction of the whole stamp at every point.
+pub(crate) struct Sweep {
+    half: i32,
+    side: usize,
+    /// By offset in the stamp's square: 0 off the stamp, 1 on it, 2 on its lanes.
+    member: Vec<u8>,
+    cells: Vec<(i32, i32, bool)>,
+    /// The cells handed over after each of the nine steps, worked out as they come.
+    fresh: [Option<Vec<(i32, i32, bool)>>; 9],
+    last: Option<(i32, i32)>,
+}
+
+impl Sweep {
+    /// A sweep of `cells`: offsets within `half` of the point along both axes, with whether
+    /// each is a lane.
+    pub(crate) fn new(half: i32, cells: Vec<(i32, i32, bool)>) -> Self {
+        let side = (2 * half + 1) as usize;
+        let mut member = vec![0u8; side * side];
+        for &(dx, dz, lanes) in &cells {
+            let m = &mut member[(dz + half) as usize * side + (dx + half) as usize];
+            *m = (*m).max(1 + u8::from(lanes));
+        }
+        Self {
+            half,
+            side,
+            member,
+            cells,
+            fresh: Default::default(),
+            last: None,
+        }
+    }
+
+    /// The cells to hand over at (x, z): every one at the run's first point or after a jump,
+    /// else those the stamp a step back left out or left off its lanes.
+    pub(crate) fn step_to(&mut self, x: i32, z: i32) -> &[(i32, i32, bool)] {
+        let step = self.last.map(|(lx, lz)| (x - lx, z - lz));
+        self.last = Some((x, z));
+        let Some((sx, sz)) = step.filter(|&(sx, sz)| sx.abs() <= 1 && sz.abs() <= 1) else {
+            return &self.cells;
+        };
+        let k = ((sz + 1) * 3 + sx + 1) as usize;
+        if self.fresh[k].is_none() {
+            let (half, side, member) = (self.half, self.side, &self.member);
+            // A cell at offset (dx, dz) here lay at (dx + sx, dz + sz) in the stamp a step back.
+            let fresh = self
+                .cells
+                .iter()
+                .copied()
+                .filter(|&(dx, dz, lanes)| {
+                    let (bx, bz) = (dx + sx, dz + sz);
+                    let back = if bx.abs() <= half && bz.abs() <= half {
+                        member[(bz + half) as usize * side + (bx + half) as usize]
+                    } else {
+                        0
+                    };
+                    back < 1 + u8::from(lanes)
+                })
+                .collect();
+            self.fresh[k] = Some(fresh);
+        }
+        self.fresh[k].as_deref().unwrap_or_default()
+    }
+}
+
+/// What `stamp_highway_surfaces` found of a cell past a road's core, the cell alone.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Unknown,
+    Cut,
+    Kept,
 }
 
 /// Collect all (x, z) coordinates covered by highways tagged
@@ -3910,7 +4773,9 @@ pub fn collect_building_passage_coords(
             for (bx, _, bz) in &points {
                 for dx in -block_range..=block_range {
                     for dz in -block_range..=block_range {
-                        bitmap.set(bx + dx, bz + dz);
+                        if in_road_stamp(dx, dz, block_range) {
+                            bitmap.set(bx + dx, bz + dz);
+                        }
                     }
                 }
             }
@@ -3978,11 +4843,10 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect()
         };
-        // Untagged roads keep their per-type defaults...
+        // Untagged roads keep their per-type defaults: a rural secondary is 7 m across.
         assert_eq!(highway_block_range("residential", &tags(&[]), 1.0), 2);
         assert_eq!(highway_block_range("motorway", &tags(&[]), 1.0), 5);
-        assert_eq!(highway_block_range("secondary", &tags(&[]), 1.0), 4);
-        // ...except tertiary, which widens to its two-lane default.
+        assert_eq!(highway_block_range("secondary", &tags(&[]), 1.0), 3);
         assert_eq!(highway_block_range("tertiary", &tags(&[]), 1.0), 3);
         assert_eq!(
             highway_block_range("tertiary", &tags(&[("lanes", "2")]), 1.0),
@@ -3991,11 +4855,11 @@ mod tests {
         // More lanes widen, clamped to the cap.
         assert_eq!(
             highway_block_range("primary", &tags(&[("lanes", "4")]), 1.0),
-            7
+            6
         );
         assert_eq!(
             highway_block_range("motorway", &tags(&[("lanes", "6")]), 1.0),
-            MAX_BLOCK_RANGE as i32
+            road_width::MAX_HALF
         );
         // Non-vehicular types never scale with lanes.
         assert_eq!(
@@ -4016,9 +4880,126 @@ mod tests {
             ),
             4
         );
+        // Parked cars widen the kerb, not the lanes.
+        let parked = tags(&[("parking:both", "lane")]);
+        assert_eq!(highway_block_range("residential", &parked, 1.0), 4);
+        assert_eq!(highway_lane_range("residential", &parked, 1.0), 2);
         // Down-scaling never collapses a road to zero width.
         assert_eq!(highway_block_range("footway", &tags(&[]), 0.4), 1);
         assert_eq!(highway_block_range("residential", &tags(&[]), 0.4), 1);
+    }
+
+    #[test]
+    fn lots_mapped_as_multipolygons_are_drawn_and_squares_left_to_the_ground() {
+        use crate::element_processing::RelationArea;
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let mp = |pairs: &[(&str, &str)]| {
+            let mut t = tags(pairs);
+            t.insert("type".into(), "multipolygon".into());
+            RelationArea::of(&t)
+        };
+        let lot = mp(&[("amenity", "parking")]);
+        assert_eq!(lot, Some(RelationArea::Parking));
+        assert!(lot.unwrap().fills_members(&tags(&[])));
+        // A square keeps the town's paving and the paths across it, with its trees.
+        assert_eq!(mp(&[("highway", "pedestrian"), ("area", "yes")]), None);
+        // A park that is also a square stays a park.
+        assert_eq!(
+            mp(&[("highway", "pedestrian"), ("leisure", "park")]),
+            Some(RelationArea::Leisure)
+        );
+    }
+
+    #[test]
+    fn decks_stamp_a_square_and_everything_else_the_disc() {
+        let way = |pairs: &[(&str, &str)]| ProcessedWay {
+            id: 1,
+            nodes: vec![
+                ProcessedNode {
+                    id: 1,
+                    tags: HashMap::new(),
+                    x: 0,
+                    z: 0,
+                },
+                ProcessedNode {
+                    id: 2,
+                    tags: HashMap::new(),
+                    x: 9,
+                    z: 9,
+                },
+            ],
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        assert!(stamps_square(&way(&[
+            ("highway", "primary"),
+            ("bridge", "yes")
+        ])));
+        // An approach ramp is an ordinary way.
+        assert!(!stamps_square(&way(&[("highway", "primary")])));
+        assert!(!stamps_square(&way(&[
+            ("highway", "platform"),
+            ("bridge", "yes"),
+            ("area", "yes")
+        ])));
+        // Across a diagonal the disc reaches less far than the square's corner.
+        let d = std::f32::consts::FRAC_1_SQRT_2;
+        assert!((stamp_reach(3, true, d, -d) - 3.0 * 2.0 * d).abs() < 1e-5);
+        assert!((stamp_reach(3, false, d, -d) - 4.0 * d).abs() < 1e-5);
+        assert!((stamp_reach(3, false, 1.0, 0.0) - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn only_what_a_road_gains_past_its_lanes_stops_at_walls() {
+        let way = |pairs: &[(&str, &str)]| ProcessedWay {
+            id: 1,
+            nodes: Vec::new(),
+            tags: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        let core = |pairs: &[(&str, &str)]| wall_core(&way(pairs), pairs[0].1, 1.0);
+        assert_eq!(core(&[("highway", "residential")]), None);
+        assert_eq!(
+            core(&[("highway", "residential"), ("parking:both", "lane")]),
+            Some(2)
+        );
+        // The second lane a sidewalk gives a street stops at walls; tagged lanes do not.
+        assert_eq!(
+            core(&[("highway", "residential"), ("sidewalk", "both")]),
+            Some(2)
+        );
+        assert_eq!(core(&[("highway", "residential"), ("lanes", "2")]), None);
+        assert_eq!(core(&[("highway", "pedestrian")]), None);
+        assert_eq!(
+            core(&[("highway", "pedestrian"), ("tunnel", "building_passage")]),
+            None
+        );
+        assert_eq!(
+            core(&[
+                ("highway", "residential"),
+                ("parking:both", "lane"),
+                ("bridge", "yes")
+            ]),
+            None
+        );
+    }
+
+    #[test]
+    fn the_road_stamp_is_a_disc() {
+        // A footway still covers its full 3x3.
+        assert!(in_road_stamp(1, 1, 1));
+        // Wider roads lose their corners, so a diagonal is no wider than an axis.
+        assert!(in_road_stamp(2, 0, 2) && in_road_stamp(2, 1, 2) && !in_road_stamp(2, 2, 2));
+        assert!(in_road_stamp(3, 1, 3) && !in_road_stamp(3, 2, 3));
     }
 
     /// The water carve finds a bore's roof by what it is built of, so it has to know
@@ -4235,6 +5216,13 @@ mod tests {
             ("footway", &[("surface", "paved")], SMOOTH_STONE),
             ("pedestrian", &[("surface", "sett")], SMOOTH_STONE),
             ("footway", &[], GRAY_CONCRETE),
+            // A sidewalk with no surface tagged is paved.
+            ("footway", &[("footway", "sidewalk")], SMOOTH_STONE),
+            (
+                "footway",
+                &[("footway", "sidewalk"), ("surface", "gravel")],
+                GRAVEL,
+            ),
         ] {
             let mut tags = tags(kv);
             tags.insert("highway".into(), highway.into());
@@ -4461,6 +5449,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
     }
@@ -4497,6 +5486,7 @@ mod tests {
             &empty,
             &mut Vec::new(),
             &markings,
+            &CoordinateBitmap::new_empty(),
         );
         for z in [44, 56] {
             assert!(
@@ -4548,6 +5538,7 @@ mod tests {
             &empty,
             &mut Vec::new(),
             &markings,
+            &CoordinateBitmap::new_empty(),
         );
         assert!(editor.check_for_block(200, 0, 56, Some(&[WHITE_CONCRETE])));
     }
@@ -4588,6 +5579,7 @@ mod tests {
                 &empty,
                 &mut Vec::new(),
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
     }
@@ -4800,6 +5792,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &markings,
+                &CoordinateBitmap::new_empty(),
             );
         }
     }
@@ -5305,6 +6298,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
         crate::ground_generation::generate_ground_region(
@@ -5969,12 +6963,414 @@ mod tests {
                 &footprint,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
         crate::ground_generation::generate_ground_region(
             editor, ground, &args, xzbbox, &empty, &footprint, &surface, 0, 199, 0, 199, false,
         );
         carve_highway_tunnel_interior(editor, &cells);
+    }
+
+    /// A verge keeps its ground where land cover keeps it green, and next to the trunk of a
+    /// canopy tree that will stand: not one on the road's own lanes, nor one under a mapped
+    /// tree's crown.
+    #[test]
+    fn a_cut_runs_outward_and_a_parked_side_reaches_its_own_kerb() {
+        // Past a core of 2, ground kept at (4, 0) leaves (5, 0) beyond it unpaved too, but
+        // ground kept further out leaves the road up to it.
+        assert!(cut_outward(2, 5, 0, |x, z| (x, z) == (4, 0)));
+        assert!(cut_outward(2, 4, 0, |x, z| (x, z) == (4, 0)));
+        assert!(!cut_outward(2, 3, 0, |x, z| (x, z) == (4, 0)));
+        assert!(!cut_outward(2, 5, 0, |x, z| (x, z) == (6, 0)));
+        // Inside the core nothing is cut.
+        assert!(!cut_outward(2, 1, 1, |_, _| true));
+        // A way running east has its right to the south (+z): cars parked there take it out
+        // to 5, the left stops at 2.
+        let east = Some((1.0, 0.0));
+        assert!(in_side_stamp(0, 5, east, (2, 5)));
+        assert!(!in_side_stamp(0, -3, east, (2, 5)));
+        assert!(in_side_stamp(0, -2, east, (2, 5)));
+        // Alike, or with no direction, the disc of the wider side.
+        assert!(in_side_stamp(0, -5, None, (2, 5)));
+        assert_eq!(in_side_stamp(3, 3, east, (4, 4)), in_road_stamp(3, 3, 4));
+    }
+
+    #[test]
+    fn a_verge_keeps_its_ground_for_grass_and_for_trees_that_will_stand() {
+        use crate::canopy::CanopyData;
+        use crate::land_cover::{LandCoverData, LC_BUILT_UP, LC_GRASSLAND, LC_TREE_COVER};
+        let cover = |class: u8| LandCoverData {
+            grid: vec![vec![class]],
+            water_distance: vec![vec![0]],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
+            width: 1,
+            height: 1,
+            cells_per_meter: 1.0,
+        };
+        let xzbbox = XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let open = |_: i32, _: i32| false;
+        // A lawn keeps all of it.
+        let mut editor = test_editor(&xzbbox);
+        editor.set_ground(std::sync::Arc::new(
+            crate::ground::Ground::new_flat_land_cover_test(cover(LC_GRASSLAND), 64, 64),
+        ));
+        assert!(editor.keeps_its_ground(20, 20, open));
+        // Not along rows of parked cars, where only a tree keeps its pit.
+        assert!(!editor.keeps_a_pit(20, 20, open));
+        // Tree cover is no verge: it takes in the streets its crowns line.
+        editor.set_ground(std::sync::Arc::new(
+            crate::ground::Ground::new_flat_land_cover_test(cover(LC_TREE_COVER), 64, 64),
+        ));
+        assert!(!editor.keeps_its_ground(20, 20, open));
+        // Built-up ground under a closed canopy: only round the trunk slots.
+        let canopy = CanopyData::from_grid(vec![20; 64 * 64], 64, 64);
+        let ground = std::sync::Arc::new(
+            crate::ground::Ground::new_flat_canopy_test(canopy, 64, 64)
+                .with_land_cover_test(cover(LC_BUILT_UP)),
+        );
+        editor.set_ground(std::sync::Arc::clone(&ground));
+        let spacing = editor.tree_slot_spacing();
+        let slot = crate::trees::schematic::trunk_slot_s(30, 30, spacing);
+        let (_, tree) = crate::ground_generation::canopy_verdict(
+            &ground, slot.0, slot.1, 0, 0, spacing, None, 1.0,
+        );
+        assert!(tree, "a closed canopy plants its slot");
+        assert!(editor.keeps_its_ground(slot.0 + 1, slot.1, open));
+        assert!(editor.keeps_a_pit(slot.0 + 1, slot.1, open));
+        // A trunk on the road's own lanes never stands, so it keeps nothing.
+        assert!(!editor.keeps_its_ground(slot.0 + 1, slot.1, |x, z| (x, z) == slot));
+        // Nor one under a mapped tree's crown; the mapped tree keeps its own pit instead,
+        // unless it stands on the lanes.
+        let trunk = (slot.0 + 3, slot.1);
+        let mapped = vec![ProcessedElement::Node(ProcessedNode {
+            id: 9,
+            tags: [("natural".to_string(), "tree".to_string())].into(),
+            x: trunk.0,
+            z: trunk.1,
+        })];
+        editor.set_mapped_trunks(std::sync::Arc::new(
+            crate::trees::mapped::MappedTrunks::collect(&mapped, 1.0),
+        ));
+        assert!(editor.under_mapped_crown(slot.0, slot.1));
+        assert!(!editor.keeps_its_ground(slot.0 - 1, slot.1, open));
+        assert!(editor.keeps_its_ground(trunk.0 + 1, trunk.1 + 1, open));
+        assert!(!editor.keeps_its_ground(trunk.0 + 2, trunk.1, open));
+        assert!(!editor.keeps_its_ground(trunk.0 + 1, trunk.1, |x, z| (x, z) == trunk));
+    }
+
+    /// The trunks found once for the area keep the ground the slots worked out cell by cell
+    /// keep, mapped ones among them.
+    #[test]
+    fn the_trunk_index_keeps_the_ground_the_slots_keep() {
+        use crate::canopy::CanopyData;
+        use crate::land_cover::{LandCoverData, LC_BUILT_UP};
+        let built_up = LandCoverData {
+            grid: vec![vec![LC_BUILT_UP]],
+            water_distance: vec![vec![0]],
+            water_blend_cache: once_cell::sync::OnceCell::new(),
+            beach_tiles: once_cell::sync::OnceCell::new(),
+            inland_water: Default::default(),
+            width: 1,
+            height: 1,
+            cells_per_meter: 1.0,
+        };
+        let xzbbox = XZBBox::rect_from_xz_lengths(64.0, 64.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        // A patchy canopy, so some slots grow a tree and some do not.
+        let heights: Vec<u8> = (0..64 * 64)
+            .map(|i| {
+                if (i % 64 * 7 + i / 64 * 13) % 5 < 2 {
+                    20
+                } else {
+                    0
+                }
+            })
+            .collect();
+        editor.set_ground(std::sync::Arc::new(
+            crate::ground::Ground::new_flat_canopy_test(
+                CanopyData::from_grid(heights, 64, 64),
+                64,
+                64,
+            )
+            .with_land_cover_test(built_up),
+        ));
+        let mapped = vec![ProcessedElement::Node(ProcessedNode {
+            id: 9,
+            tags: [("natural".to_string(), "tree".to_string())].into(),
+            x: 12,
+            z: 40,
+        })];
+        editor.set_mapped_trunks(std::sync::Arc::new(
+            crate::trees::mapped::MappedTrunks::collect(&mapped, 1.0),
+        ));
+        let lanes = |_: i32, z: i32| (28..=32).contains(&z) || z == 40;
+        let answers = |editor: &WorldEditor| {
+            (0..64)
+                .flat_map(|x| (0..64).map(move |z| (x, z)))
+                .map(|(x, z)| {
+                    (
+                        editor.keeps_its_ground(x, z, |_, _| false),
+                        editor.keeps_its_ground(x, z, lanes),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let one_by_one = answers(&editor);
+        editor.index_standing_trunks();
+        assert_eq!(answers(&editor), one_by_one);
+        let kept = one_by_one.iter().filter(|a| a.0).count();
+        assert!(kept > 0 && kept < 64 * 64);
+        assert!(
+            one_by_one.iter().any(|a| a.0 != a.1),
+            "the lanes pave over some"
+        );
+        assert!(one_by_one[12 * 64 + 41].0 && !one_by_one[12 * 64 + 41].1);
+    }
+
+    /// Cars parked across the kerb get a stall line every stall, kerb to lane edge, on their
+    /// side only; the lanes stay bare.
+    #[test]
+    fn parking_rows_are_marked_a_stall_apart() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let mut editor = tunnel_editor(&xzbbox, flat_ground());
+        let street = way_between(
+            1,
+            (10, 30),
+            (110, 30),
+            &[
+                ("highway", "residential"),
+                ("oneway", "yes"),
+                ("parking:right", "lane"),
+                ("parking:right:orientation", "perpendicular"),
+            ],
+        );
+        // Running a cell north for every four east: its lines run square to the grid.
+        let slanted = way_between(
+            2,
+            (10, 70),
+            (110, 45),
+            &[
+                ("highway", "residential"),
+                ("oneway", "yes"),
+                ("parking:right", "lane"),
+                ("parking:right:orientation", "diagonal"),
+            ],
+        );
+        // Cars parked along the kerb get no marks.
+        let along = way_between(
+            3,
+            (10, 100),
+            (110, 100),
+            &[
+                ("highway", "residential"),
+                ("parking:both", "lane"),
+                ("parking:both:orientation", "parallel"),
+            ],
+        );
+        let halves = road_width::road_halves("residential", &street.tags, 1.0);
+        let elems = vec![
+            ProcessedElement::Way(street.clone()),
+            ProcessedElement::Way(slanted),
+            ProcessedElement::Way(along.clone()),
+        ];
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let endpoints = collect_tunnel_internal_endpoints(&elems, &xzbbox);
+        let portals = test_portals(&editor, &elems, &endpoints);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        for element in &elems {
+            generate_highways(
+                &mut editor,
+                element,
+                &args,
+                &HighwayConnectivityMap::new(),
+                &FloodFillCache::new(),
+                &empty,
+                &structures,
+                &surface,
+                &endpoints,
+                &portals,
+                &empty,
+                &mut Vec::new(),
+                &RoadMarkingIndex::default(),
+                &empty,
+            );
+        }
+        let white = |x: i32, z: i32| editor.check_for_block(x, 0, z, Some(&[WHITE_CONCRETE]));
+        // Heading east, the right is south: the row is z = 30 + lanes + 1 ..= 30 + kerb.
+        let row = 30 + halves.lanes + 1..=30 + halves.kerb;
+        let marked: Vec<i32> = (20..100)
+            .filter(|&x| row.clone().all(|z| white(x, z)))
+            .collect();
+        assert!(marked.len() >= 20, "{marked:?}");
+        assert!(marked.windows(2).all(|w| w[1] - w[0] == 3), "{marked:?}");
+        // The lanes and the other side are left bare.
+        for x in 20..100 {
+            for z in 30 - halves.kerb..=30 + halves.lanes {
+                assert!(!white(x, z), "({x}, {z})");
+            }
+        }
+        // On the slanted street every line keeps to one column, a stall from the next.
+        let lines: Vec<(i32, i32)> = (20..100)
+            .flat_map(|x| (40..80).map(move |z| (x, z)))
+            .filter(|&(x, z)| white(x, z))
+            .collect();
+        assert!(lines.len() >= 20, "{lines:?}");
+        for &(x, z) in &lines {
+            assert!(
+                !white(x - 1, z) && !white(x + 1, z),
+                "({x}, {z}) in {lines:?}"
+            );
+        }
+        // The street with cars along its kerbs is bare but for its lane line.
+        let parallel = road_width::road_halves("residential", &along.tags, 1.0);
+        for x in 20..100 {
+            for z in 100 - parallel.kerb..=100 + parallel.kerb {
+                if (z - 100).abs() > 0 {
+                    assert!(!white(x, z), "({x}, {z})");
+                }
+            }
+        }
+    }
+
+    /// A caller that reads only the lanes gets them as the whole stamp gives them, the
+    /// second lane cut at a house front as there.
+    #[test]
+    fn the_lanes_alone_come_as_the_whole_stamp_gives_them() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let editor = tunnel_editor(&xzbbox, flat_ground());
+        let elems = vec![
+            ProcessedElement::Way(way_between(
+                1,
+                (10, 50),
+                (110, 50),
+                &[("highway", "residential"), ("sidewalk", "both")],
+            )),
+            ProcessedElement::Way(way_between(
+                2,
+                (10, 40),
+                (110, 40),
+                &[("highway", "footway")],
+            )),
+        ];
+        let mut houses = CoordinateBitmap::new(&xzbbox);
+        for x in 40..=60 {
+            for z in 50..=60 {
+                houses.set(x, z);
+            }
+        }
+        let none = CoordinateBitmap::new_empty();
+        let lanes = |footprints: &CoordinateBitmap, lanes_only: bool| {
+            let mut cells = Vec::new();
+            stamp_highway_surfaces(
+                &elems,
+                Some(&editor),
+                1.0,
+                Default::default(),
+                footprints,
+                Some(&none),
+                |_| true,
+                lanes_only,
+                |carriageway, x, z| {
+                    if carriageway {
+                        cells.push((x, z));
+                    }
+                },
+                |_, _| {},
+            );
+            cells.sort_unstable();
+            cells.dedup();
+            cells
+        };
+        let open = lanes(&none, false);
+        let walled = lanes(&houses, false);
+        assert!(!walled.is_empty());
+        assert_ne!(walled, open, "the houses cut the second lane");
+        assert_eq!(lanes(&none, true), open);
+        assert_eq!(lanes(&houses, true), walled);
+    }
+
+    /// The renderer leaves unpaved what the masks leave out: the second lane of a street
+    /// stops at a house front and at a sidewalk mapped as its own way, its core runs on.
+    #[test]
+    fn the_renderer_cuts_the_strip_the_masks_cut() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let mut editor = tunnel_editor(&xzbbox, flat_ground());
+        let street = way_between(
+            1,
+            (10, 50),
+            (110, 50),
+            &[("highway", "residential"), ("sidewalk", "both")],
+        );
+        let sidewalk = way_between(
+            2,
+            (70, 47),
+            (90, 47),
+            &[("highway", "footway"), ("footway", "sidewalk")],
+        );
+        let mut houses = CoordinateBitmap::new(&xzbbox);
+        for x in 40..=60 {
+            for z in 53..=60 {
+                houses.set(x, z);
+            }
+        }
+        let elems = vec![
+            ProcessedElement::Way(street.clone()),
+            ProcessedElement::Way(sidewalk),
+        ];
+        let coords = collect_road_and_carriageway_coords(
+            &elems,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+            &houses,
+        );
+        editor.set_mapped_paths(std::sync::Arc::new(coords.paths));
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let endpoints = collect_tunnel_internal_endpoints(&elems, &xzbbox);
+        let portals = test_portals(&editor, &elems, &endpoints);
+        let outlines = crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&[]);
+        let structures =
+            BridgeStructureMap::build(&[], &editor, &HighwayConnectivityMap::new(), &outlines, 1.0);
+        let surface = BridgeSurfaceMap::build(&[], &structures, 1.0);
+        let empty = CoordinateBitmap::new_empty();
+        generate_highways(
+            &mut editor,
+            &ProcessedElement::Way(street),
+            &args,
+            &HighwayConnectivityMap::new(),
+            &FloodFillCache::new(),
+            &coords.roads,
+            &structures,
+            &surface,
+            &endpoints,
+            &portals,
+            &empty,
+            &mut Vec::new(),
+            &RoadMarkingIndex::default(),
+            &houses,
+        );
+        let paved = |x: i32, z: i32| editor.highest_block_between(x, z, -12, 8).is_some();
+        // Before the house its seven blocks, in front of it the core's five.
+        assert!(paved(20, 53) && paved(20, 47));
+        assert!(paved(50, 52) && !paved(50, 53));
+        // Its strip stops at the sidewalk, which draws itself.
+        assert!(paved(80, 48) && !paved(80, 47) && paved(80, 53));
+        // Where the masks cut, the renderer did.
+        for x in 10..=110 {
+            for z in 46..=54 {
+                if coords.cut.contains(x, z) {
+                    assert!(!paved(x, z), "({x}, {z})");
+                }
+            }
+        }
     }
 
     fn flat_ground() -> crate::ground::Ground {
@@ -6111,13 +7507,14 @@ mod tests {
             ],
         );
 
-        // Perpendicular to a (1, 1) way is (1, -1).
+        // Perpendicular to a (1, 1) way is (1, -1); the 5-wide road covers cells whose x - z
+        // is at most 3 from the centreline's, so one step each way is still on it.
         for along in [46, 50, 54] {
             let level = editor
                 .highest_block_between(along, along, -12, 8)
                 .expect("centerline is not empty");
             assert!(level < 0, "the ramp has descended by ({along}, {along})");
-            for k in -2..=2 {
+            for k in -1..=1 {
                 let (x, z) = (along + k, along - k);
                 assert_eq!(
                     editor.highest_block_between(x, z, -12, 8),
@@ -6155,6 +7552,92 @@ mod tests {
         let mask = collect_road_surface_coords(&elems, &editor, &xzbbox, 1.0, Default::default());
         assert!(!mask.contains(30, 20), "a pier is a deck, not a road");
         assert!(mask.contains(30, 40));
+    }
+
+    #[test]
+    fn a_street_widens_up_to_its_mapped_sidewalk_not_over_it() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let street = [("highway", "residential"), ("sidewalk:both", "separate")];
+        let elems = vec![
+            line_way(1, &[(10, 50), (110, 50)], &street),
+            // Its north sidewalk, mapped as its own way three blocks off its middle.
+            line_way(
+                2,
+                &[(10, 53), (110, 53)],
+                &[("highway", "footway"), ("footway", "sidewalk")],
+            ),
+            // A crossing over it runs across the road.
+            line_way(
+                3,
+                &[(30, 40), (30, 60)],
+                &[("highway", "footway"), ("footway", "crossing")],
+            ),
+            // A path joining it from the south, and a footbridge and a first-floor walkway
+            // over it.
+            line_way(4, &[(80, 30), (80, 50)], &[("highway", "footway")]),
+            line_way(
+                5,
+                &[(90, 40), (90, 60)],
+                &[("highway", "footway"), ("bridge", "yes"), ("layer", "1")],
+            ),
+            line_way(
+                6,
+                &[(100, 40), (100, 60)],
+                &[("highway", "footway"), ("level", "1")],
+            ),
+        ];
+        let coords = collect_road_and_carriageway_coords(
+            &elems,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+            &CoordinateBitmap::new_empty(),
+        );
+        let (roads, lanes, paths) = (&coords.roads, &coords.carriageways, &coords.paths);
+        // Two lanes, seven blocks, where nothing is mapped beside it; the second lane stops
+        // at the sidewalk, which stays one, and cars there keep off the cells it left.
+        assert!(lanes.contains(60, 47) && lanes.contains(60, 52));
+        assert!(!lanes.contains(60, 53) && paths.contains(60, 53) && roads.contains(60, 53));
+        assert!(!coords.cut.contains(60, 53), "the sidewalk paves it");
+        // Nothing that only crosses, joins or bridges it cuts its strip.
+        for x in [30, 80, 90, 100] {
+            assert!(!paths.contains(x, 47) && lanes.contains(x, 47), "{x}");
+        }
+    }
+
+    #[test]
+    fn a_street_beside_a_house_leaves_its_cut_strip_to_the_cars() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(120.0, 120.0).unwrap();
+        let editor = test_editor(&xzbbox);
+        let elems = vec![line_way(
+            1,
+            &[(10, 50), (110, 50)],
+            &[("highway", "residential"), ("sidewalk", "both")],
+        )];
+        // A house front on the street's north edge, between x = 40 and 60.
+        let mut houses = CoordinateBitmap::new(&xzbbox);
+        for x in 40..=60 {
+            for z in 53..=60 {
+                houses.set(x, z);
+            }
+        }
+        let coords = collect_road_and_carriageway_coords(
+            &elems,
+            &editor,
+            &xzbbox,
+            1.0,
+            Default::default(),
+            &houses,
+        );
+        // The second lane stops at the wall; the cells it left are the cut the cars see,
+        // the core in front of it is paved.
+        assert!(!coords.roads.contains(50, 53) && coords.cut.contains(50, 53));
+        assert!(coords.roads.contains(50, 52) && !coords.cut.contains(50, 52));
+        assert!(coords.roads.contains(20, 53) && !coords.cut.contains(20, 53));
+        // No road stops at a sidewalk here, so no sidewalk mask is kept.
+        assert!(coords.paths.is_empty());
     }
 
     fn line_way(id: u64, points: &[(i32, i32)], tags: &[(&str, &str)]) -> ProcessedElement {
@@ -6308,6 +7791,7 @@ mod tests {
                 &empty,
                 &mut cells,
                 &RoadMarkingIndex::default(),
+                &CoordinateBitmap::new_empty(),
             );
         }
     }

@@ -67,6 +67,8 @@ pub struct Footing {
     half: u8,
     /// Whether what stands at the level asked about is no more than a post or a trunk.
     thin: bool,
+    /// Whether that post carries a sign's head, a full block.
+    sign: bool,
 }
 
 impl Footing {
@@ -83,6 +85,11 @@ impl Footing {
 
     pub fn thin(&self) -> bool {
         self.thin
+    }
+
+    /// A sign's post: thin, but with a head a walker cannot pass through.
+    pub fn sign(&self) -> bool {
+        self.sign
     }
 
     /// A post or a trunk where the ground was planned: nothing to stand on within a block.
@@ -220,14 +227,23 @@ pub fn footing(block: impl Fn(i32) -> Spot, expect: i32) -> Footing {
             }
         }
     }
+    // A lamp, a bollard or a trunk is no full block from head height up; a wall is. A
+    // sign's post carries one, its head, with nothing over it but a street tree's leaves.
+    let up = || FOOT_BELOW as usize + 2..=FOOT_BELOW as usize + 4;
+    let sign = up().any(|k| spots[k] == Spot::Solid);
+    let thin = up().all(|k| {
+        spots[k] != Spot::Solid
+            || (spots[FOOT_BELOW as usize + 1..k]
+                .iter()
+                .all(|&s| s == Spot::Tall)
+                && matches!(spots[k + 1], Spot::Open | Spot::Leaves))
+    });
     Footing {
         base: base.clamp(i16::MIN.into(), i16::MAX.into()) as i16,
         levels,
         half,
-        // A lamp, a bollard or a trunk is no full block from head height up; a wall is.
-        thin: spots[FOOT_BELOW as usize + 2..=FOOT_BELOW as usize + 4]
-            .iter()
-            .all(|&s| s != Spot::Solid),
+        thin,
+        sign: thin && sign,
     }
 }
 
@@ -391,6 +407,21 @@ mod tests {
         );
         assert_eq!(fence.nearest(65.0), None);
         assert!(fence.thin());
+        // A sign is passed like a lamp: two wall blocks and the head its frames hang on,
+        // under the open sky or a street tree.
+        for over in [Spot::Open, Spot::Leaves] {
+            let sign = footing(
+                |y| match y {
+                    ..=63 => Spot::Solid,
+                    64 | 65 => Spot::Tall,
+                    66 => Spot::Solid,
+                    _ => over,
+                },
+                63,
+            );
+            assert!(sign.thin() && sign.post() && sign.sign());
+        }
+        assert!(!fence.sign());
         // A low branch at head height is ducked under, a hedge is not walked through.
         let leaves = |at: i32| {
             move |y: i32| match y {

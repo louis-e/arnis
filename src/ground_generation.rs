@@ -186,7 +186,7 @@ impl WaterColumnMemo {
 /// slot, since every column in a cell snaps to that slot anyway. An unmeasured
 /// cell reports `(false, false)` so the land cover keeps its say.
 #[allow(clippy::too_many_arguments)]
-fn canopy_verdict(
+pub(crate) fn canopy_verdict(
     ground: &Ground,
     x: i32,
     z: i32,
