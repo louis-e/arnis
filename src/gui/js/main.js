@@ -150,6 +150,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   await initSavePath();
   initSettings();
+  initWorldPainterSettings();
   // Before the store restores values, so the cards follow the restored ones.
   initSettingsLayout();
   initDialogs();
@@ -172,6 +173,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // The store's restore fired the toggle's change event before the save path
   // and the world name were known; read the world once more with both in hand.
   refreshOneWorldState();
+  refreshWorldPainterAvailability();
   resolveDefaultSavePath();
   initTelemetryConsent();
   initClearCacheButton();
@@ -2202,6 +2204,7 @@ function setWorldFormat(format) {
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
   updateFormatToggleUI(format);
+  refreshWorldPainterAvailability();
 }
 
 function getEffectiveWorldFormat() {
@@ -3927,6 +3930,67 @@ function setSettingsRowAvailable(inputId, available, reason = null) {
   }
 }
 
+function refreshWorldPainterAvailability() {
+  const available = selectedWorldFormat === 'java' && !liveActive() && !isOneWorldEnabled();
+  setSettingsRowAvailable('worldpainter-mode-toggle', available);
+  const modeToggle = document.getElementById('worldpainter-mode-toggle');
+  const enabled = !!(modeToggle && modeToggle.checked && !modeToggle.disabled);
+  for (const id of [
+    'worldpainter-project-input',
+    'worldpainter-executable-input',
+    'worldpainter-trees-toggle',
+    'worldpainter-keep-export-toggle',
+  ]) {
+    setSettingsRowAvailable(id, enabled);
+  }
+}
+
+function initWorldPainterSettings() {
+  const modeToggle = document.getElementById('worldpainter-mode-toggle');
+  if (!modeToggle) return;
+
+  modeToggle.addEventListener('change', refreshWorldPainterAvailability);
+
+  const browseOptions = [
+    {
+      buttonId: 'worldpainter-project-browse',
+      inputId: 'worldpainter-project-input',
+      command: 'gui_pick_worldpainter_project',
+    },
+    {
+      buttonId: 'worldpainter-executable-browse',
+      inputId: 'worldpainter-executable-input',
+      command: 'gui_pick_worldpainter_executable',
+    },
+  ];
+  for (const { buttonId, inputId, command } of browseOptions) {
+    const button = document.getElementById(buttonId);
+    const input = document.getElementById(inputId);
+    if (!button || !input) continue;
+    button.addEventListener('click', async () => {
+      try {
+        const picked = await invoke(command, { startPath: input.value.trim() });
+        if (typeof picked === 'string' && picked) {
+          input.value = picked;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } catch (error) {
+        console.error(`${command} picker failed:`, error);
+      }
+    });
+  }
+
+  refreshWorldPainterAvailability();
+}
+
+function showWorldPainterValidation(localizationKey) {
+  const progressInfo = document.getElementById('progress-info');
+  if (!progressInfo) return;
+  localizeElement(window.localization, { element: progressInfo }, localizationKey);
+  progressInfo.style.color = '#fa7878';
+}
+
 // Laser data is Earth-only, never used for One World, and needs a World Scale of 0.75 or more
 // (mirrors LASER_MIN_SCALE in src/args.rs). Its features and limit sit in the same block and show
 // only while the master switch is on, as the Live rows under One World do.
@@ -4223,6 +4287,9 @@ let oneWorldRefit = false;
 let redrawProjects = () => {};
 async function refreshOneWorldState() {
   const seq = ++oneWorldRefreshSeq;
+  refreshLuantiAvailability();
+  setSegmentedRowAvailable('one-world-group', isOneWorldAvailable() && !liveActive());
+  refreshWorldPainterAvailability();
   refreshLayout();
   // An outline picked while One World was off is written once it is on.
   if (outline && isOneWorldEnabled() !== outlineWritten) noteOutline(outline);
@@ -4807,6 +4874,7 @@ function onLiveStatus() {
   renderLiveProgress();
   renderLiveLan();
   refreshStartButton();
+  refreshWorldPainterAvailability();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   refreshLiveRows();
   refreshOneWorldRow();
@@ -5100,6 +5168,23 @@ async function startGeneration(confirmed = false, prewarm = false) {
       return;
     }
 
+    const worldpainterToggle = document.getElementById('worldpainter-mode-toggle');
+    const worldpainterEnabled = !!(worldpainterToggle && worldpainterToggle.checked && !worldpainterToggle.disabled);
+    const worldpainterProject = document.getElementById('worldpainter-project-input').value.trim();
+    const worldpainterExecutable = document.getElementById('worldpainter-executable-input').value.trim();
+    if (worldpainterEnabled && !worldpainterProject) {
+      showWorldPainterValidation('worldpainter_project_required');
+      return;
+    }
+    if (worldpainterEnabled && !worldpainterProject.toLowerCase().endsWith('.world')) {
+      showWorldPainterValidation('worldpainter_project_invalid');
+      return;
+    }
+    if (worldpainterEnabled && !worldpainterExecutable) {
+      showWorldPainterValidation('worldpainter_executable_required');
+      return;
+    }
+
     // Past every synchronous refusal, so from here the click is a real start.
     resetProgressUi(STARTING_MESSAGE);
     if (!prewarm) clearPieces();
@@ -5203,7 +5288,11 @@ async function startGeneration(confirmed = false, prewarm = false) {
         oneWorld: oneWorld,
         oneWorldName: oneWorld ? oneWorldFolderName() : "",
         flags: [...flags, ...(prewarm ? ["--prewarm"] : [])],
-        selectionShapes: generationShapes({ oneWorld, shapes: selectedShapes })
+        selectionShapes: generationShapes({ oneWorld, shapes: selectedShapes }),
+        worldpainterProject: worldpainterEnabled ? worldpainterProject : "",
+        worldpainterExecutable: worldpainterEnabled ? worldpainterExecutable : "",
+        includeArnisTrees: worldpainterEnabled && document.getElementById('worldpainter-trees-toggle').checked,
+        keepWorldPainterExport: worldpainterEnabled && document.getElementById('worldpainter-keep-export-toggle').checked
     });
 
     console.log("Generation process started.");

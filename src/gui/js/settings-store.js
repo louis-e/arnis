@@ -22,6 +22,11 @@ const NONE = 'none'; // never stored, revert only
 // kind picks how the value is read, compared and written.
 const SETTINGS = [
   // Generation
+  { id: 'worldpainter-mode-toggle', kind: 'checkbox', store: OWN },
+  { id: 'worldpainter-project-input', kind: 'text', store: OWN },
+  { id: 'worldpainter-executable-input', kind: 'text', store: OWN },
+  { id: 'worldpainter-trees-toggle', kind: 'checkbox', store: OWN },
+  { id: 'worldpainter-keep-export-toggle', kind: 'checkbox', store: OWN },
   { id: 'generation-mode-select', kind: 'select', store: OWN },
   { id: 'overture-toggle', kind: 'checkbox', store: OWN },
   { id: 'use-3d-toggle', kind: 'checkbox', store: OWN },
