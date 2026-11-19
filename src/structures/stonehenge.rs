@@ -38,11 +38,14 @@ enum Kind {
 }
 use Kind::*;
 
+/// One row of `STONES`.
+type StoneRow = (&'static str, Kind, i32, i32, i32, i32, i32, i32);
+
 /// Stone number, kind, blocks above the turf, centre in decimetres east and south of the circle's
 /// centre, length, width and the bearing of the length in degrees from east toward south. Plan from
 /// the published stone plan fitted to the Environment Agency LiDAR, heights from that LiDAR.
 #[rustfmt::skip]
-const STONES: &[(&str, Kind, i32, i32, i32, i32, i32, i32)] = &[
+const STONES: &[StoneRow] = &[
     ("1", Sarsen, 4, 128, -86, 21, 12, 57),
     ("2", Sarsen, 4, 143, -59, 23, 15, 74),
     ("3", Sarsen, 4, 152, -27, 20, 13, 71),
@@ -333,7 +336,7 @@ fn place_stone(h: &mut Henge, stone: &Stone, i: u32, flat: bool) {
             Sarsen | Blue => {
                 // Free-standing tops are rough: their ends drop a block here and there.
                 let rough = !flat && stone.cells.len() > 2 && u.abs() > 0.5;
-                let top = stone.height - i32::from(rough && noise(x, 0, z, i) % 2 == 0);
+                let top = stone.height - i32::from(rough && noise(x, 0, z, i).is_multiple_of(2));
                 for y in -2..top {
                     let block = if stone.kind == Blue {
                         bluestone(x, y, z)
