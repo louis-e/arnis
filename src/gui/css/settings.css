@@ -456,9 +456,12 @@ label[for].setting-label {
   color: var(--ui-muted);
 }
 
+/* As wide as the row allows, not as its text: sized to the text, a heading had no room to spare, and
+   with Windows display scaling the text came out a hair wider and broke before its last word. */
 .setting-text {
   display: flex;
   flex-direction: column;
+  flex-grow: 1;
   gap: 2px;
   min-width: 0;
 }
@@ -566,6 +569,15 @@ label[for].setting-label {
 
 .setting-choice > .setting-label {
   margin-bottom: 8px;
+}
+
+/* The same for a choice row's heading, whose short name has the whole row and never breaks. */
+.setting-choice > .setting-label > .setting-heading {
+  width: 100%;
+}
+
+.setting-choice .setting-heading > [data-localize] {
+  white-space: nowrap;
 }
 
 /* A choice row has no description line, so its reason goes under the title as one */
