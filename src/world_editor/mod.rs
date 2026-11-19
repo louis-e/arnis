@@ -227,6 +227,61 @@ pub(crate) struct WorldMetadata {
     pub scale: f64,
 }
 
+/// What the coarse ground marks record, for the ground pass to read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroundMark {
+    /// Mown lawns of parks and greens.
+    Lawn,
+    /// Woods, scrub and meadows mapped on their own, never mown even inside a park.
+    Wild,
+    /// Footprints of houses and other low dwellings, whose grounds are gardens.
+    Dwelling,
+    /// Footprints of buildings over four storeys, near which open ground stays paved.
+    Tall,
+    /// Footprints of dwellings mapped as houses, whose gardens reach into school and
+    /// hospital grounds as well: a caretaker's house, a rectory, a farmhouse.
+    House,
+}
+
+impl GroundMark {
+    const COUNT: usize = 5;
+}
+
+/// What the gardens read besides the marks, built once from the element list before
+/// anything is placed and shared with the tile editors.
+pub struct GardenLand {
+    /// Land whose open ground stays paved whatever stands near it: commercial and retail
+    /// land, and the grounds of schools, hospitals and town halls.
+    pub grounds: crate::floodfill_cache::CoarseMask,
+    /// Residential land, where a plain building of any size counts as a home.
+    pub residential: crate::floodfill_cache::CoarseMask,
+    /// Streets, pedestrian streets, squares and car parks, which keep a few metres of
+    /// paving beside them; footways, paths and driveways keep only a step's width (the
+    /// sealed-surface mask).
+    pub streets: crate::floodfill_cache::CoordinateBitmap,
+}
+
+/// Where a trunk stands, unless something paves over it, over an area and a margin round
+/// it: every mapped tree's, and the canopy map's trunk slots that grow a tree outside every
+/// mapped tree's crown. `WorldEditor::index_standing_trunks` finds them.
+pub struct StandingTrunks {
+    bits: crate::floodfill_cache::CoordinateBitmap,
+    min: (i32, i32),
+    max: (i32, i32),
+}
+
+impl StandingTrunks {
+    /// Whether a trunk that `stands` says will stand lies within a block of (x, z) along both
+    /// axes; `None` where the cells round (x, z) reach past the indexed bounds.
+    fn within_a_block(&self, x: i32, z: i32, stands: impl Fn(i32, i32) -> bool) -> Option<bool> {
+        let inside = x > self.min.0 && z > self.min.1 && x < self.max.0 && z < self.max.1;
+        inside.then(|| {
+            (x - 1..=x + 1)
+                .any(|tx| (z - 1..=z + 1).any(|tz| self.bits.contains(tx, tz) && stands(tx, tz)))
+        })
+    }
+}
+
 /// The main world editor struct for placing blocks and saving worlds.
 ///
 /// The lifetime `'a` is tied to the `XZBBox` reference, which defines
@@ -245,12 +300,30 @@ pub struct WorldEditor<'a> {
     /// The vehicular part of the roads, where trees keep their trunks out and leave
     /// more headroom than over a footway. Shared via Arc with the tile editors.
     carriageway: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// The sidewalks and paths mapped as their own ways, which a road's parking rows and
+    /// second lane stop at. Shared via Arc with the tile editors.
+    mapped_paths: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// Where three or more road arms meet, packed and sorted: nobody parks across their mouths.
+    junctions: Option<Arc<Vec<u64>>>,
+    /// The strips paved between sidewalks and the roads they run beside, by sidewalk.
+    kerb_strips: Option<Arc<crate::element_processing::kerb_strips::KerbStrips>>,
+    /// The buildings whose walls come down to the ground, which a road's strip stops at.
+    wall_footprints: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// The water OSM maps as areas, block for block.
+    water_areas: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Mapped tree trunks, shared via Arc with the tile editors.
     mapped_trunks: Option<Arc<crate::trees::mapped::MappedTrunks>>,
+    /// Where the mapped and the canopy's trunks stand, found once for the area; shared via
+    /// Arc with the tile editors.
+    standing_trunks: Option<Arc<StandingTrunks>>,
     /// Where `man_made=crane` stands, shared via Arc with the tile editors.
     mapped_cranes: Option<Arc<Vec<(i32, i32)>>>,
     /// Lift lines and terminals, kept free of trees.
     clear_corridors: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// Mapped water the measured trees keep clear of (see `tree_keep_clear`).
+    tree_keep_clear: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
+    /// The bed of track laid at grade, ballast on either side of the rails.
+    rail_bed: Option<Arc<crate::floodfill_cache::CoordinateBitmap>>,
     /// Stations laid out for the whole area, shared with the tile editors.
     stations: Option<Arc<crate::element_processing::stations::StationIndex>>,
     /// Every rail block laid here, halo included, for the clearing of the track's gauge.
@@ -273,6 +346,12 @@ pub struct WorldEditor<'a> {
     support_columns: FnvHashMap<(i32, i32), Block>,
     /// Hedge columns, whose leaves the road cleanup must not take for stray bushes.
     hedge_columns: FnvHashSet<(i32, i32)>,
+    /// Columns a mapped barrier stands on: hedges, fences, walls.
+    barrier_columns: FnvHashSet<(i32, i32)>,
+    /// Coarse marks the ground pass reads, one mask per `GroundMark`.
+    ground_marks: [Option<crate::floodfill_cache::CoarseMask>; GroundMark::COUNT],
+    /// Commercial land and streets for the gardens, shared via Arc with the tile editors.
+    garden_land: Option<Arc<GardenLand>>,
     /// Street lamp columns, checked for water once the fill is done.
     lamp_columns: Vec<(i32, i32)>,
     /// Benches and bins as their cells, checked for water once the fill is done.
@@ -356,6 +435,9 @@ pub struct WorldEditor<'a> {
     frame_cells: FnvHashSet<(i32, i32, i32)>,
     /// Trunk slots a schematic tree already stands in.
     tree_slots: FnvHashSet<(i32, i32)>,
+    /// Door nodes on an outline whose walls stepped in under the eave: the
+    /// building set their door on the stepped wall, so none stands in the strip.
+    stepped_doors: FnvHashSet<(i32, i32)>,
     /// Set for a One World run: merge into the world's existing regions.
     merge_into_existing: Option<crate::world_utils::WorldLayout>,
     /// A piece of a job builds past its own area and writes only inside these block bounds.
@@ -378,9 +460,17 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             carriageway: None,
+            mapped_paths: None,
+            junctions: None,
+            kerb_strips: None,
+            wall_footprints: None,
+            water_areas: None,
             mapped_trunks: None,
+            standing_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
+            rail_bed: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -389,6 +479,9 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            barrier_columns: FnvHashSet::default(),
+            ground_marks: Default::default(),
+            garden_land: None,
             lamp_columns: Vec::new(),
             furniture: Vec::new(),
             rail_heights: None,
@@ -430,6 +523,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -456,9 +550,17 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             carriageway: None,
+            mapped_paths: None,
+            junctions: None,
+            kerb_strips: None,
+            wall_footprints: None,
+            water_areas: None,
             mapped_trunks: None,
+            standing_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
+            rail_bed: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -467,6 +569,9 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            barrier_columns: FnvHashSet::default(),
+            ground_marks: Default::default(),
+            garden_land: None,
             lamp_columns: Vec::new(),
             furniture: Vec::new(),
             rail_heights: None,
@@ -508,6 +613,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -534,9 +640,17 @@ impl<'a> WorldEditor<'a> {
             tree_pack: None,
             sealed_surface: None,
             carriageway: None,
+            mapped_paths: None,
+            junctions: None,
+            kerb_strips: None,
+            wall_footprints: None,
+            water_areas: None,
             mapped_trunks: None,
+            standing_trunks: None,
             mapped_cranes: None,
             clear_corridors: None,
+            tree_keep_clear: None,
+            rail_bed: None,
             stations: None,
             laid_rails: Vec::new(),
             fuel_index: None,
@@ -545,6 +659,9 @@ impl<'a> WorldEditor<'a> {
             road_surface_overrides: CoordMap::default(),
             support_columns: FnvHashMap::default(),
             hedge_columns: FnvHashSet::default(),
+            barrier_columns: FnvHashSet::default(),
+            ground_marks: Default::default(),
+            garden_land: None,
             lamp_columns: Vec::new(),
             furniture: Vec::new(),
             rail_heights: None,
@@ -586,6 +703,7 @@ impl<'a> WorldEditor<'a> {
             strict_bounds: None,
             frame_cells: FnvHashSet::default(),
             tree_slots: FnvHashSet::default(),
+            stepped_doors: FnvHashSet::default(),
             merge_into_existing: None,
             write_bounds: None,
             metadata_extent: None,
@@ -689,17 +807,75 @@ impl<'a> WorldEditor<'a> {
         self.sealed_surface = Some(mask);
     }
 
+    /// The sealed-surface mask, while vegetation is placed.
+    pub fn sealed_surface(&self) -> Option<&crate::floodfill_cache::SealedSurfaceBitmap> {
+        self.sealed_surface.as_deref()
+    }
+
     /// Sets the carriageway mask (shared across the main and tile editors).
     pub fn set_carriageway(&mut self, mask: Arc<crate::floodfill_cache::CoordinateBitmap>) {
         self.carriageway = Some(mask);
     }
 
-    /// Drops the sealed-surface and carriageway masks and the mapped trunks once
+    /// Sets the mapped sidewalk and path mask (shared across the main and tile editors).
+    pub fn set_mapped_paths(&mut self, mask: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.mapped_paths = Some(mask);
+    }
+
+    /// Sets the road junctions, packed and sorted (shared across the main and tile editors).
+    /// Sets the water OSM maps as areas (shared with the tile editors).
+    pub fn set_water_areas(&mut self, water: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.water_areas = Some(water);
+    }
+
+    /// Whether water is at (x, z): the land cover's, or an area OSM maps, block for block.
+    pub fn water_at(&self, x: i32, z: i32) -> bool {
+        self.water_areas.as_ref().is_some_and(|w| w.contains(x, z)) || self.is_mapped_water(x, z)
+    }
+
+    /// Sets the buildings whose walls reach the ground (shared with the tile editors).
+    pub fn set_wall_footprints(&mut self, walls: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.wall_footprints = Some(walls);
+    }
+
+    /// The buildings whose walls reach the ground, where they are known.
+    pub fn wall_footprints(&self) -> Option<Arc<crate::floodfill_cache::CoordinateBitmap>> {
+        self.wall_footprints.clone()
+    }
+
+    /// Sets the strips paved between sidewalks and roads (shared with the tile editors).
+    pub fn set_kerb_strips(
+        &mut self,
+        fills: Arc<crate::element_processing::kerb_strips::KerbStrips>,
+    ) {
+        self.kerb_strips = Some(fills);
+    }
+
+    /// The strips paved between sidewalks and the roads they run beside.
+    pub fn kerb_strips(&self) -> Option<Arc<crate::element_processing::kerb_strips::KerbStrips>> {
+        self.kerb_strips.clone()
+    }
+
+    pub fn set_junctions(&mut self, junctions: Arc<Vec<u64>>) {
+        self.junctions = Some(junctions);
+    }
+
+    /// True if three or more road arms meet at (x, z).
+    pub fn is_junction(&self, x: i32, z: i32) -> bool {
+        let packed = (u64::from(x as u32) << 32) | u64::from(z as u32);
+        self.junctions
+            .as_ref()
+            .is_some_and(|j| j.binary_search(&packed).is_ok())
+    }
+
+    /// Drops the sealed-surface, carriageway and path masks and the mapped trunks once
     /// every vegetation pass is done, so none is carried into the save phase.
     pub fn release_sealed_surface(&mut self) {
         self.sealed_surface = None;
         self.carriageway = None;
+        self.mapped_paths = None;
         self.mapped_trunks = None;
+        self.standing_trunks = None;
     }
 
     /// Sets where mapped cranes stand (shared across the main and tile editors).
@@ -727,6 +903,13 @@ impl<'a> WorldEditor<'a> {
     /// Sets the water carve depths (shared across the main and tile editors).
     pub fn set_water_field(&mut self, field: Arc<crate::water_depth::BigWaterField>) {
         self.water_field = Some(field);
+    }
+
+    /// Top block of a mapped wood at (x, z): its forest floor, or None to keep the grass.
+    pub fn forest_floor_at(&self, x: i32, z: i32) -> Option<Block> {
+        let ground = self.ground.as_deref()?;
+        let lat = (self.llbbox.min().lat() + self.llbbox.max().lat()) / 2.0;
+        crate::ground_generation::mapped_forest_floor(ground, self.ground_point(x, z), x, z, lat)
     }
 
     /// Drops the water carve depths once every bore is laid out.
@@ -780,6 +963,30 @@ impl<'a> WorldEditor<'a> {
         self.clear_corridors = Some(map);
     }
 
+    /// Sets the mapped water measured trees keep clear of (shared across the main
+    /// and tile editors); only a run with measured trees sets it.
+    pub fn set_tree_keep_clear(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.tree_keep_clear = Some(map);
+    }
+
+    /// Sets the bed of track laid at grade (shared across the main and tile
+    /// editors); only a run with laser data sets it.
+    pub fn set_rail_bed(&mut self, map: Arc<crate::floodfill_cache::CoordinateBitmap>) {
+        self.rail_bed = Some(map);
+    }
+
+    /// True on the ballast of track laid at grade, rails included.
+    #[inline]
+    pub fn on_rail_bed(&self, x: i32, z: i32) -> bool {
+        self.rail_bed.as_ref().is_some_and(|m| m.contains(x, z))
+    }
+
+    /// Mapped water and the block around it, where a measured tree may neither
+    /// stand nor reach with its crown; `None` in a run without measured trees.
+    pub fn tree_keep_clear(&self) -> Option<&crate::floodfill_cache::CoordinateBitmap> {
+        self.tree_keep_clear.as_deref()
+    }
+
     /// True where a lift line or terminal, a track or a platform keeps trees off.
     pub fn in_clear_corridor(&self, x: i32, z: i32) -> bool {
         self.clear_corridors
@@ -813,6 +1020,102 @@ impl<'a> WorldEditor<'a> {
         self.mapped_trunks = Some(trunks);
     }
 
+    /// Finds, once for the area and a margin round it, where the mapped trees stand their
+    /// trunks and which of the canopy's trunk slots grow a tree outside every mapped tree's
+    /// crown, so `keeps_its_ground` reads them rather than working each out again for every
+    /// cell it is asked about. Runs after the ground, the tree pack and the mapped trunks
+    /// are set.
+    pub fn index_standing_trunks(&mut self) {
+        use rayon::prelude::*;
+        let (min_x, min_z) = (self.xzbbox.min_x() - 2, self.xzbbox.min_z() - 2);
+        let (max_x, max_z) = (self.xzbbox.max_x() + 2, self.xzbbox.max_z() + 2);
+        let Ok(bounds) = XZBBox::rect_from_min_max(min_x, min_z, max_x, max_z) else {
+            return;
+        };
+        let mut bits = crate::floodfill_cache::CoordinateBitmap::new(&bounds);
+        for (x, z) in self.mapped_trunks.iter().flat_map(|t| t.positions()) {
+            bits.set(x, z);
+        }
+        let spacing = self.tree_slot_spacing();
+        let s = spacing.max(1);
+        let editor = &*self;
+        // Each lattice cell holds one slot, inside the cell; a row's cells start a shift
+        // along it, as `trunk_slot_s` lays them out. Without canopy and land cover data no
+        // canopy trunk keeps a verge.
+        let canopy = self
+            .ground
+            .as_deref()
+            .filter(|g| g.has_canopy() && g.has_land_cover());
+        let slots: Vec<(i32, i32)> = canopy.map_or_else(Vec::new, |ground| {
+            (min_z.div_euclid(s)..=max_z.div_euclid(s))
+                .into_par_iter()
+                .flat_map_iter(|cz| {
+                    let (x0, z0) = crate::trees::schematic::slot_cell(0, cz * s, s);
+                    let shift = x0.rem_euclid(s);
+                    let cells = (min_x - shift).div_euclid(s)..=(max_x - shift).div_euclid(s);
+                    cells.filter_map(move |k| {
+                        let slot = crate::trees::schematic::trunk_slot_s(k * s + shift, z0, s);
+                        let stands = (min_x..=max_x).contains(&slot.0)
+                            && (min_z..=max_z).contains(&slot.1)
+                            && !editor.under_mapped_crown(slot.0, slot.1)
+                            && crate::ground_generation::canopy_verdict(
+                                ground,
+                                slot.0,
+                                slot.1,
+                                editor.ground_origin_x,
+                                editor.ground_origin_z,
+                                spacing,
+                                editor.tree_pack.as_deref(),
+                                editor.scale,
+                            )
+                            .1;
+                        stands.then_some(slot)
+                    })
+                })
+                .collect()
+        });
+        for (x, z) in slots {
+            bits.set(x, z);
+        }
+        self.standing_trunks = Some(Arc::new(StandingTrunks {
+            bits,
+            min: (min_x, min_z),
+            max: (max_x, max_z),
+        }));
+    }
+
+    /// Whether a trunk, mapped or one the canopy map grows, stands within a block of (x, z).
+    pub fn trunk_near(&self, x: i32, z: i32) -> bool {
+        self.standing_trunks
+            .as_ref()
+            .and_then(|t| t.within_a_block(x, z, |_, _| true))
+            .unwrap_or_else(|| self.keeps_a_pit(x, z, |_, _| false))
+    }
+
+    /// Whether land cover keeps (x, z) green: scrub, grass, crops, wetland, moss. Not tree
+    /// cover, which takes in the streets its crowns line; the trees themselves are known.
+    pub fn green_at(&self, x: i32, z: i32) -> bool {
+        use crate::land_cover::{
+            LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND, LC_WETLAND,
+        };
+        self.ground.as_ref().is_some_and(|ground| {
+            matches!(
+                ground.cover_class(self.ground_point(x, z)),
+                LC_SHRUBLAND | LC_GRASSLAND | LC_CROPLAND | LC_WETLAND | LC_MANGROVES | LC_MOSS
+            )
+        })
+    }
+
+    /// The trunks `index_standing_trunks` found, to share with the tile editors.
+    pub fn standing_trunks(&self) -> Option<Arc<StandingTrunks>> {
+        self.standing_trunks.clone()
+    }
+
+    /// Sets the trunks found for the area (shared across the main and tile editors).
+    pub fn set_standing_trunks(&mut self, trunks: Arc<StandingTrunks>) {
+        self.standing_trunks = Some(trunks);
+    }
+
     /// True under the crown of a tree OSM maps.
     #[inline]
     pub fn under_mapped_crown(&self, x: i32, z: i32) -> bool {
@@ -830,6 +1133,11 @@ impl<'a> WorldEditor<'a> {
             .is_some_and(|m| !m.contains(x, z))
     }
 
+    /// Whether the man-made surfaces are known, as `surface_is_sealed` reads them.
+    pub fn knows_sealed_surface(&self) -> bool {
+        self.sealed_surface.is_some()
+    }
+
     /// True if a man-made surface owns this column, so scattered vegetation
     /// would land on a road, a pitch or a parking lot.
     #[inline]
@@ -839,11 +1147,18 @@ impl<'a> WorldEditor<'a> {
             .is_some_and(|m| m.contains(x, z))
     }
 
-    /// True if a road for vehicles runs over this column (footways, paths and tracks
-    /// are not counted).
+    /// True if the lanes of a road for vehicles run over this column (footways, paths and
+    /// tracks are not counted, nor the parking rows along a kerb).
     #[inline]
     pub fn on_carriageway(&self, x: i32, z: i32) -> bool {
         self.carriageway.as_ref().is_some_and(|m| m.contains(x, z))
+    }
+
+    /// True if a sidewalk or path mapped as its own way runs over this column, not a
+    /// crossing.
+    #[inline]
+    pub fn on_mapped_path(&self, x: i32, z: i32) -> bool {
+        self.mapped_paths.as_ref().is_some_and(|m| m.contains(x, z))
     }
 
     /// The carriageway mask, while vegetation and signs are placed.
@@ -923,6 +1238,83 @@ impl<'a> WorldEditor<'a> {
             ground.cover_class(coord),
             crate::land_cover::LC_TREE_COVER | crate::land_cover::LC_SHRUBLAND
         )
+    }
+
+    /// Whether what a road gains past its lanes leaves (x, z) to the ground: land cover keeps
+    /// it green, or a mapped tree or one the canopy map grows has its trunk within a block of
+    /// it. Parking rows and the second lane of a street pave over neither, so verges keep
+    /// their grass and street trees their pits, as the plain road beside them did. A trunk
+    /// counts only where it will stand: not on what `paved` says is paved whatever the verge
+    /// does, as the road's own lanes, and a canopy one not under a mapped tree's crown,
+    /// which the canopy leaves to that tree.
+    pub fn keeps_its_ground(&self, x: i32, z: i32, paved: impl Fn(i32, i32) -> bool) -> bool {
+        self.ground_kept(x, z, paved, true)
+    }
+
+    /// Whether a tree that will stand, mapped or one the canopy map grows, has its trunk
+    /// within a block of (x, z): the pit a street tree keeps in a row of parked cars, where
+    /// the grass round it does not.
+    pub fn keeps_a_pit(&self, x: i32, z: i32, paved: impl Fn(i32, i32) -> bool) -> bool {
+        self.ground_kept(x, z, paved, false)
+    }
+
+    fn ground_kept(&self, x: i32, z: i32, paved: impl Fn(i32, i32) -> bool, green: bool) -> bool {
+        let green_at = |x: i32, z: i32| green && self.green_at(x, z);
+        // Every canopy slot lies in its own lattice cell, so the trunks within a block of
+        // (x, z) are the indexed ones among the cells round it.
+        if let Some(near) = self
+            .standing_trunks
+            .as_ref()
+            .and_then(|t| t.within_a_block(x, z, |tx, tz| !paved(tx, tz)))
+        {
+            return near || green_at(x, z);
+        }
+        if self
+            .mapped_trunks
+            .as_ref()
+            .is_some_and(|t| t.trunk_within(x, z, 1, |tx, tz| !paved(tx, tz)))
+        {
+            return true;
+        }
+        let Some(ground) = self.ground.as_ref() else {
+            return false;
+        };
+        if green_at(x, z) {
+            return true;
+        }
+        if !ground.has_canopy() || !ground.has_land_cover() {
+            return false;
+        }
+        let spacing = self.tree_slot_spacing();
+        // The trunk slots of the lattice cells around (x, z) that stand within a block of it.
+        let mut seen: [(i32, i32); 9] = [(i32::MIN, i32::MIN); 9];
+        for (k, (dx, dz)) in (-1..=1)
+            .flat_map(|dx| (-1..=1).map(move |dz| (dx, dz)))
+            .enumerate()
+        {
+            let slot = crate::trees::schematic::trunk_slot_s(x + dx, z + dz, spacing);
+            if (slot.0 - x).abs() > 1 || (slot.1 - z).abs() > 1 || seen[..k].contains(&slot) {
+                continue;
+            }
+            seen[k] = slot;
+            if paved(slot.0, slot.1) || self.under_mapped_crown(slot.0, slot.1) {
+                continue;
+            }
+            let (_, tree) = crate::ground_generation::canopy_verdict(
+                ground,
+                slot.0,
+                slot.1,
+                self.ground_origin_x,
+                self.ground_origin_z,
+                spacing,
+                self.tree_pack.as_deref(),
+                self.scale,
+            );
+            if tree {
+                return true;
+            }
+        }
+        false
     }
 
     /// World (x, z) as a point on the shared `Ground` grid.
@@ -1050,6 +1442,16 @@ impl<'a> WorldEditor<'a> {
     /// Claims the trunk slot (x, z); false when a tree already stands in it.
     pub fn claim_tree_slot(&mut self, x: i32, z: i32) -> bool {
         self.tree_slots.insert((x, z))
+    }
+
+    /// Marks the door node at (x, z) as moved onto a stepped wall.
+    pub fn step_door_in(&mut self, x: i32, z: i32) {
+        self.stepped_doors.insert((x, z));
+    }
+
+    /// Whether the door node at (x, z) has its door on a stepped wall.
+    pub fn door_stepped_in(&self, x: i32, z: i32) -> bool {
+        self.stepped_doors.contains(&(x, z))
     }
 
     /// Strict bounds of a tile editor (inclusive), used by placements that must run in
@@ -1760,6 +2162,61 @@ impl<'a> WorldEditor<'a> {
     #[inline]
     pub fn register_hedge(&mut self, x: i32, z: i32) {
         self.hedge_columns.insert((x, z));
+    }
+
+    /// Record a mapped barrier (a hedge, fence or wall) standing at (x, z).
+    #[inline]
+    pub fn register_barrier(&mut self, x: i32, z: i32) {
+        self.barrier_columns.insert((x, z));
+    }
+
+    /// Whether a mapped barrier stands at (x, z).
+    #[inline]
+    pub fn is_barrier(&self, x: i32, z: i32) -> bool {
+        !self.barrier_columns.is_empty() && self.barrier_columns.contains(&(x, z))
+    }
+
+    /// Mark column (x, z) as `kind`, to the nearest few blocks.
+    pub fn mark_ground(&mut self, kind: GroundMark, x: i32, z: i32) {
+        let bbox = self.xzbbox;
+        self.ground_marks[kind as usize]
+            .get_or_insert_with(|| crate::floodfill_cache::CoarseMask::new(bbox))
+            .set(x, z);
+    }
+
+    /// The marks of `kind` made so far, if any.
+    #[inline]
+    pub fn ground_marks(&self, kind: GroundMark) -> Option<&crate::floodfill_cache::CoarseMask> {
+        self.ground_marks[kind as usize].as_ref()
+    }
+
+    /// Whether (x, z) lies on a mown lawn: a park's, outside any wild area mapped in it.
+    #[inline]
+    pub fn is_lawn(&self, x: i32, z: i32) -> bool {
+        let marked = |kind| self.ground_marks(kind).is_some_and(|m| m.contains(x, z));
+        marked(GroundMark::Lawn) && !marked(GroundMark::Wild)
+    }
+
+    /// Shares the commercial land and streets the gardens read.
+    pub fn set_garden_land(&mut self, land: Arc<GardenLand>) {
+        self.garden_land = Some(land);
+    }
+
+    /// The commercial land and streets the gardens read, if set.
+    #[inline]
+    pub fn garden_land(&self) -> Option<&GardenLand> {
+        self.garden_land.as_deref()
+    }
+
+    /// Drops this editor's share of the garden land once the ground is laid.
+    pub fn release_garden_land(&mut self) {
+        self.garden_land = None;
+    }
+
+    /// The land cover class under (x, z), when the run has land cover.
+    pub fn land_cover_class(&self, x: i32, z: i32) -> Option<u8> {
+        let ground = self.ground.as_ref().filter(|g| g.has_land_cover())?;
+        Some(ground.cover_class(self.ground_point(x, z)))
     }
 
     /// Shares the record of where rails were laid (across the main and tile editors).
@@ -3028,13 +3485,14 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
-    /// Saves all changes made to the world by writing to the appropriate format.
+    /// Saves all changes made to the world by writing to the appropriate format, and returns
+    /// where it went: the path asked for, or a Bedrock archive saved beside it.
     ///
     /// Returns `Err` on I/O failure so callers can abort the generation pipeline
     /// cleanly. A user-facing error message is also emitted via `emit_gui_error`
     /// before returning so the GUI is notified regardless of how the caller handles
     /// the `Result`.
-    pub fn save(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn save(&mut self) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         println!(
             "Generating world for: {}",
             match self.format {
@@ -3069,7 +3527,7 @@ impl<'a> WorldEditor<'a> {
                 self.finish_voxy();
                 self.finish_dh();
             }
-            WorldFormat::BedrockMcWorld => self.save_bedrock()?,
+            WorldFormat::BedrockMcWorld => return self.save_bedrock(),
             WorldFormat::LuantiWorld => {
                 if let Err(e) = luanti::save_luanti_world(
                     &self.world,
@@ -3105,7 +3563,7 @@ impl<'a> WorldEditor<'a> {
             }
         }
 
-        Ok(())
+        Ok(self.world_dir.clone())
     }
 
     /// Seal the voxy LOD database. A failure here costs the user nothing but
@@ -3160,22 +3618,37 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
-    fn save_bedrock(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// Returns the archive written: beside the one asked for when that could not be replaced.
+    fn save_bedrock(&mut self) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
         println!("{} Saving Bedrock world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving Bedrock world...");
 
-        if let Err(error) = self.save_bedrock_internal() {
-            // The GUI shows this again and cuts it at 35 characters, so the cause leads.
-            let user_msg = format!("Bedrock save: {} ({error})", error.reason());
-            eprintln!("{user_msg}");
-            #[cfg(feature = "gui")]
-            emit_gui_error(&user_msg);
-            return Err(user_msg.into());
+        match self.save_bedrock_internal() {
+            Ok(archive) => {
+                if archive != self.world_dir {
+                    let msg = format!(
+                        "'{}' could not be replaced, so the world was saved as '{}'.",
+                        self.world_dir.display(),
+                        archive.display()
+                    );
+                    eprintln!("Warning: {msg}");
+                    #[cfg(feature = "gui")]
+                    send_log(LogLevel::Warning, &msg);
+                }
+                Ok(archive)
+            }
+            Err(error) => {
+                // The GUI shows this again and cuts it at 35 characters, so the cause leads.
+                let user_msg = format!("Bedrock save: {} ({error})", error.reason());
+                eprintln!("{user_msg}");
+                #[cfg(feature = "gui")]
+                emit_gui_error(&user_msg);
+                Err(user_msg.into())
+            }
         }
-        Ok(())
     }
 
-    fn save_bedrock_internal(&mut self) -> Result<(), BedrockSaveError> {
+    fn save_bedrock_internal(&mut self) -> Result<PathBuf, BedrockSaveError> {
         // Use the stored level name if available, otherwise extract from path
         let level_name = self.bedrock_level_name.clone().unwrap_or_else(|| {
             self.world_dir
@@ -3342,6 +3815,15 @@ fn region_storage_bytes(region: &common::RegionToModify) -> u64 {
     bytes
 }
 
+/// The message a panic carried.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "panicked".to_string())
+}
+
 /// Background writer pool for stream-to-disk eviction. Regions taken off the merge
 /// thread are compacted, serialized and written here, overlapping I/O with the next
 /// batch's compute. At most `capacity + threads + 1` regions are alive at once; the
@@ -3400,7 +3882,13 @@ impl FlushWorker {
                         };
                         let started = bench.then(std::time::Instant::now);
                         region.compact_sections();
-                        let result = ctx.write(rxx, rzz, &region);
+                        // A panic here would leave only "terminated early"; its message is the cause.
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            ctx.write(rxx, rzz, &region)
+                        }))
+                        .unwrap_or_else(|payload| {
+                            Err(format!("r.{rxx}.{rzz}.mca: {}", panic_text(&*payload)).into())
+                        });
                         if let Some(t) = started {
                             write_ns.fetch_add(
                                 t.elapsed().as_nanos() as u64,

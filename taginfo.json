@@ -1669,12 +1669,12 @@
         {
             "key": "waterway",
             "value": "brook",
-            "description": "Generates a brook channel 2 blocks wide unless width is set."
+            "description": "Generates a brook channel 3 blocks wide unless width is set."
         },
         {
             "key": "waterway",
             "value": "ditch",
-            "description": "Generates a ditch 2 blocks wide unless width is set."
+            "description": "Generates a ditch 1 block wide unless width is set."
         },
         {
             "key": "waterway",

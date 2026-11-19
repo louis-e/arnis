@@ -16,6 +16,10 @@ pub fn generate_doors(editor: &mut WorldEditor, element: &ProcessedNode) {
 
         let x: i32 = element.x;
         let z: i32 = element.z;
+        // The building it belongs to stepped its wall in and set the door there.
+        if editor.door_stepped_in(x, z) {
+            return;
+        }
 
         // Set the ground block and the door blocks
         editor.set_block(GRAY_CONCRETE, x, 0, z, None, None);

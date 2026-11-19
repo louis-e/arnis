@@ -29,14 +29,24 @@ pub fn retain_for_mode(
     mode: GenerationMode,
     buildings: bool,
 ) {
-    if !buildings {
-        elements.retain(|e| !is_building_element(e));
+    if !buildings
+        || matches!(
+            mode,
+            GenerationMode::TerrainOnly | GenerationMode::Blueprint
+        )
+    {
+        elements.retain(|e| kept_for_mode(e, mode, buildings));
     }
-    match mode {
-        GenerationMode::TerrainOnly => elements.retain(is_terrain_feature),
-        GenerationMode::Blueprint => elements.retain(is_blueprint_feature),
-        GenerationMode::GeoTerrain | GenerationMode::GeoOnly => {}
-    }
+}
+
+/// Whether `retain_for_mode` keeps the element.
+pub fn kept_for_mode(element: &ProcessedElement, mode: GenerationMode, buildings: bool) -> bool {
+    (buildings || !is_building_element(element))
+        && match mode {
+            GenerationMode::TerrainOnly => is_terrain_feature(element),
+            GenerationMode::Blueprint => is_blueprint_feature(element),
+            GenerationMode::GeoTerrain | GenerationMode::GeoOnly => true,
+        }
 }
 
 /// Outlines whose parts would render in their place. A blueprint drops the parts and

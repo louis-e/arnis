@@ -1,6 +1,6 @@
 [package]
 name = "arnis"
-version = "3.4.0"
+version = "3.5.0"
 edition = "2021"
 # Cargo only auto-detects a root build.rs, so the moved path has to be declared.
 build = "src/build.rs"
@@ -16,7 +16,7 @@ overflow-checks = true
 
 [features]
 default = ["gui"]
-gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "tauri-build", "trash"]
+gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "tauri-build", "trash", "webkit2gtk"]
 
 [build-dependencies]
 # The explicit `features = []` on tauri and tauri-build keeps `cargo tauri build` from rewriting them, which marked Linux release hashes -dirty.
@@ -71,12 +71,18 @@ rusty-leveldb = { git = "https://github.com/louis-e/leveldb-rs", rev = "6cd88082
 rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
 quick-xml = "0.41.0"
+laz = { version = "0.14.0", features = ["parallel"] }
+weezl = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.0", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# The version Tauri's webview uses, to watch its web process.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2", features = ["v2_20"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.26.0"

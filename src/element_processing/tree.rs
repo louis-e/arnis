@@ -790,6 +790,19 @@ impl Tree {
             return;
         }
 
+        // With measured trees, a tree keeps clear of mapped water: it stands neither
+        // on it nor beside it, and its crown does not reach over it, so no pool,
+        // stream or fountain goes under the leaves. A tree OSM maps stands anyway,
+        // turned, swapped for a slimmer model or stepped aside where that keeps it off.
+        let kept = editor.tree_keep_clear();
+        let keep_clear = kept.filter(|_| mapped.is_none());
+        let reaches_kept = |x: i32, z: i32, r: i32| {
+            keep_clear.is_some_and(|k| k.any_in(x - r, z - r, x + r, z + r))
+        };
+        if reaches_kept(x, z, 0) {
+            return;
+        }
+
         // A tree rooted under a bridge deck would grow straight up through the roadway.
         if bridge_surface.is_some_and(|b| b.contains(x, z)) {
             return;
@@ -863,6 +876,9 @@ impl Tree {
             let height_m = mapped
                 .and_then(|m| m.height_m)
                 .unwrap_or(NOMINAL_TREE_HEIGHT_M);
+            if reaches_kept(x, z, 1) {
+                return;
+            }
             Self::create_micro(editor, x, base_y, z, &tree, scale, height_m, &blacklist);
             return;
         }
@@ -923,22 +939,44 @@ impl Tree {
                     };
                     // Its middle stays out of the road too, so a model without a trunk to
                     // check does not hang its crown over the carriageway.
-                    let fit = |models: &[usize], ax: i32, az: i32| {
+                    let fit_kept = |models: &[usize], ax: i32, az: i32, dry: bool| {
                         if !editor.owns(ax, az) || editor.on_carriageway(ax, az) || !spot_ok(ax, az)
                         {
                             return None;
                         }
-                        let fits = |i: usize, r: u8| fits_at(ax, az, i, r);
+                        let fits = |i: usize, r: u8| {
+                            fits_at(ax, az, i, r)
+                                && !kept.filter(|_| dry).is_some_and(|k| {
+                                    crate::trees::schematic::covers_any(
+                                        region.schem(i),
+                                        r,
+                                        ax,
+                                        az,
+                                        k,
+                                    )
+                                })
+                        };
                         models.iter().find_map(|&i| {
                             crate::trees::region::turn_to_fit(i, pick.rot, &fits).map(|r| (i, r))
                         })
                     };
+                    let fit = |models: &[usize], ax: i32, az: i32| fit_kept(models, ax, az, false);
+                    let reach = Self::mapped_reach(editor);
+                    // Beside mapped water, as its own species, genus or leaf type, turned
+                    // or stepped aside as it would for a road so its crown keeps off the
+                    // water, where one does. Away from water this is the first two
+                    // steps below.
+                    let dry = kept
+                        .is_some()
+                        .then(|| {
+                            let own = pick.own_models();
+                            nearest_fit(editor, x, z, reach, |ax, az| fit_kept(&own, ax, az, true))
+                        })
+                        .flatten();
                     // As picked where it is mapped; else at the nearest spot off the road as
                     // its own species, genus or leaf type, slimmer models before moving
                     // further; only where none of those fits, a tree of its community.
-                    let reach = Self::mapped_reach(editor);
-                    fit(&[pick.model], x, z)
-                        .map(|found| (x, z, found))
+                    dry.or_else(|| fit(&[pick.model], x, z).map(|found| (x, z, found)))
                         .or_else(|| {
                             let own = pick.own_models();
                             nearest_fit(editor, x, z, reach, |ax, az| fit(&own, ax, az))
@@ -968,11 +1006,19 @@ impl Tree {
                         (x, z)
                     };
                     // Requests from several cells snap to one slot: its first tree stands.
-                    if editor.tree_slot_taken(sx, sz) || !spot_ok(sx, sz) {
+                    if editor.tree_slot_taken(sx, sz) || !spot_ok(sx, sz) || reaches_kept(sx, sz, 0)
+                    {
                         return;
                     }
                     let eco = editor.ecoregion(hx, hz);
-                    let fits = |i: usize, r: u8| fits_at(sx, sz, i, r);
+                    // Kept clear of mapped water: a model whose crown would reach
+                    // over it gives way to one that does not, or to none.
+                    let fits = |i: usize, r: u8| {
+                        fits_at(sx, sz, i, r)
+                            && !keep_clear.is_some_and(|k| {
+                                crate::trees::schematic::covers_any(region.schem(i), r, sx, sz, k)
+                            })
+                    };
                     let req = crate::trees::region::SlotRequest {
                         want_height: wanted_height_m(editor, hx, hz, None).map(blocks),
                         density_decided,
@@ -1018,6 +1064,10 @@ impl Tree {
                     y,
                 );
             }
+            return;
+        }
+
+        if reaches_kept(x, z, MAX_CANOPY_RADIUS) {
             return;
         }
 
@@ -2482,6 +2532,56 @@ mod road_clearance_tests {
             blocked.is_empty(),
             "tree blocks in the headroom at {blocked:?}"
         );
+    }
+
+    /// With measured trees, the trees that fill a canopy or a wood put no block over
+    /// mapped water, while trees still line its banks; one OSM maps beside it stands,
+    /// stepped aside.
+    #[test]
+    fn with_measured_trees_crowns_keep_off_mapped_water() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, SIZE - 1, SIZE - 1).unwrap();
+        // A stream across the world where the road would be, kept clear a block beyond.
+        let mut keep = CoordinateBitmap::new(&xzbbox);
+        for x in 0..SIZE {
+            for z in *ROAD.start() - 1..=*ROAD.end() + 1 {
+                keep.set(x, z);
+            }
+        }
+        let keep = Arc::new(keep);
+        let over_water = |e: &WorldEditor| {
+            (0..SIZE)
+                .flat_map(|x| ROAD.map(move |z| (x, z)))
+                .filter(|&(x, z)| (-4..60).any(|y| e.get_block_absolute(x, y, z).is_some()))
+                .count()
+        };
+        let requests: Vec<(i32, i32)> = (4..SIZE - 4)
+            .step_by(5)
+            .flat_map(|x| [3, 8].map(|d| [(x, *ROAD.start() - d), (x, *ROAD.end() + d)]))
+            .flatten()
+            .collect();
+        for pack in [false, true] {
+            let mut open = editor_with(&xzbbox, pack, false);
+            let mut kept = editor_with(&xzbbox, pack, false);
+            kept.set_tree_keep_clear(Arc::clone(&keep));
+            for e in [&mut open, &mut kept] {
+                for &(x, z) in &requests {
+                    Tree::create_from_canopy(e, (x, 1, z), None, None);
+                    Tree::create_of_type(e, (x + 2, 1, z), TreeType::Oak, None, None, false, false);
+                }
+            }
+            assert!(over_water(&open) > 0, "pack {pack}: some crowns reach over");
+            assert_eq!(over_water(&kept), 0, "pack {pack}: blocks over the water");
+            assert!(
+                wood_count(&kept) > 0,
+                "pack {pack}: trees still line the banks"
+            );
+        }
+        let mut kept = editor_with(&xzbbox, true, false);
+        kept.set_tree_keep_clear(keep);
+        let mapped = MappedTree::from_tags(&HashMap::new(), 1);
+        Tree::create_mapped(&mut kept, (40, 1, *ROAD.start() - 2), &mapped, None, None);
+        assert!(wood_count(&kept) > 0, "the mapped tree stands");
+        assert_eq!(over_water(&kept), 0, "and its crown keeps off the water");
     }
 
     #[test]

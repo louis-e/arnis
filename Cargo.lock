@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "arnis"
-version = "3.4.0"
+version = "3.5.0"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -213,6 +213,7 @@ dependencies = [
  "include_dir",
  "indicatif",
  "itertools 0.15.0",
+ "laz",
  "libc",
  "log",
  "mimalloc",
@@ -242,6 +243,8 @@ dependencies = [
  "tokio",
  "trash",
  "twox-hash 2.1.2",
+ "webkit2gtk",
+ "weezl",
  "windows 0.62.2",
  "zip",
  "zstd",
@@ -2994,6 +2997,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "laz"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0dccd63a9175618371557b3e92b61ab4e7cffb459d8d2d32ec4e39feaddc61b2"
+dependencies = [
+ "byteorder",
+ "num-traits",
+ "rayon",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5071,9 +5085,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.150"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",

@@ -33,12 +33,12 @@ impl Args {
     }
 }
 
-/// Checks for the output flags. `--map-item-only` and `--dh-lod-only` run before the general
-/// validation (they need no area), so `main` calls this directly for them.
+/// Checks for the output flags. The `--*-only` redraws run before the general validation
+/// (they need no area), so `main` calls this directly for them.
 pub fn validate(args: &Args) -> Result<(), String> {
-    if (args.map_item_only || args.dh_lod_only) && !args.one_world {
+    if args.redraws_only() && !args.one_world {
         return Err(
-            "--map-item-only and --dh-lod-only need --one-world (the world at --output-dir and --world-name)."
+            "--map-item-only, --dh-lod-only, --voxy-lod-only and --bake-lighting-only need --one-world (the world at --output-dir and --world-name)."
                 .to_string(),
         );
     }

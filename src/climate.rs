@@ -60,6 +60,20 @@ pub enum Climate {
 }
 
 impl Climate {
+    /// The climate plants grow by: moist tropical forest keeps its green through the dry
+    /// season the grid gives it.
+    pub fn for_plants(self, eco: Option<crate::ecoregion::Ecoregion>) -> Climate {
+        match eco {
+            Some(e)
+                if self == Climate::TropicalSavanna
+                    && e.biome == crate::ecoregion::EcoBiome::MoistTropical =>
+            {
+                Climate::Temperate
+            }
+            _ => self,
+        }
+    }
+
     /// Deserts, steppes and dry-summer continental climates.
     pub fn is_dry(self) -> bool {
         matches!(

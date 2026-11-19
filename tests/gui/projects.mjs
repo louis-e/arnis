@@ -159,6 +159,63 @@ save = 's';
 await fresh();
 assert.ok(!newBtn.disabled);
 
+// Light & LODs: shown with the hook, held while the settings ask nothing, sends the world and the asks.
+const upWorlds = [
+  { name: 'Paris', area_count: 1, scale: 1, locked: false, modified_ms: 1e12 },
+  { name: 'Busy', area_count: 2, scale: 1, locked: true, modified_ms: null },
+];
+const upCalls = [];
+let want = { light: false, voxy: false, dh: false };
+let upFail = null;
+const ups = initProjects({
+  invoke: async (cmd, args) => {
+    if (cmd !== 'gui_one_world_upkeep') return upWorlds;
+    upCalls.push(args);
+    if (upFail) throw upFail;
+    return ['Lighting: every area is baked.', 'Voxy LOD: 3 sections.'];
+  },
+  savePath: () => 's', scale: () => 1, open: async () => {}, upkeep: () => want,
+});
+await ups();
+const upRow = () => document.getElementById('projects-list').children[0];
+const settle = () => new Promise((r) => setTimeout(r, 0));
+assert.ok(!btn(rows[0], 'Light & LODs'), 'no hook, no button');
+assert.ok(btn(document.getElementById('projects-list').children[1], 'Light & LODs').disabled, 'a world in use is held');
+// The settings are read on the press: with nothing on, it says so and asks nothing.
+await btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
+assert.strictEqual(upCalls.length, 0);
+const none = upRow().children.find((c) => c.className === 'projects-error');
+assert.ok(none && none.textContent.startsWith('Nothing to do yet') && none.textContent.includes('Pre-generate Voxy LOD'), 'it says what to turn on');
+want = { light: true, voxy: true, dh: false };
+await btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
+assert.deepStrictEqual(upCalls, [{ worldPath: 's/Paris', light: true, voxy: true, dh: false }]);
+assert.ok(cells(upRow()).includes('Lighting: every area is baked. Voxy LOD: 3 sections.'), 'the result shows in its row');
+assert.ok(!btn(upRow(), 'Light & LODs').disabled, 'and the button is back');
+upFail = 'The world is in use (open in Minecraft, or another run writes it); close it first.';
+await btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
+assert.ok(cells(upRow()).includes(upFail), 'a refusal shows in its row');
+assert.ok(!cells(upRow()).includes('Lighting: every area is baked. Voxy LOD: 3 sections.'), 'the old result goes');
+
+// A redraw while it runs keeps it running and holds the world's other buttons.
+let finish;
+const slow = initProjects({
+  invoke: async (cmd) => (cmd === 'gui_one_world_upkeep' ? new Promise((r) => { finish = r; }) : upWorlds),
+  savePath: () => 's', scale: () => 1, open: async () => {}, upkeep: () => ({ light: true, voxy: false, dh: false }),
+});
+await slow();
+const pressed = btn(upRow(), 'Light & LODs').listeners.click();
+await settle();
+await slow();
+const busyRow = flat(upRow());
+assert.ok(busyRow.some((c) => c.textContent === 'Running' && c.disabled), 'still running after a redraw');
+assert.ok(btn(upRow(), 'Open').disabled && btn(upRow(), 'Delete').disabled, 'the world is held');
+finish(['Lighting: every area is baked.']);
+await pressed;
+assert.ok(btn(upRow(), 'Light & LODs') && !btn(upRow(), 'Open').disabled, 'released when done');
+
 // Advanced features off hides the tab.
 const html = fs.readFileSync(new URL('../../src/gui/index.html', import.meta.url), 'utf8');
 const css = fs.readFileSync(new URL('../../src/gui/css/settings.css', import.meta.url), 'utf8');

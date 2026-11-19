@@ -10,6 +10,7 @@ mod block_definitions;
 mod block_palette;
 mod bresenham;
 mod building_facades;
+mod building_sources;
 mod canopy;
 mod caves;
 mod celestial;
@@ -68,8 +69,10 @@ mod progress_json;
 mod projection;
 mod retrieve_data;
 mod river_bed;
+mod saved_chunks;
 mod scale;
 mod structures;
+mod survey;
 #[cfg(feature = "gui")]
 mod telemetry;
 mod terrain_surface;
@@ -217,38 +220,38 @@ fn exit_failed() -> ! {
     std::process::exit(1);
 }
 
-/// `--dh-lod-only`: LODs from the regions of the One World at `world_dir`.
-fn redraw_dh_lods(args: &mut Args, world_dir: &std::path::Path) -> Result<String, String> {
-    // The world decides the build range its LODs are cut against.
-    let manifest = one_world::Manifest::load(world_dir)?.ok_or_else(|| {
-        format!(
+/// `--bake-lighting-only`, `--voxy-lod-only` and `--dh-lod-only`: light and LOD caches for the
+/// One World at `world_dir`, from its region files.
+fn redraw_lods(args: &Args, world_dir: &std::path::Path) -> Result<String, String> {
+    if one_world::Manifest::load(world_dir)?.is_none() {
+        return Err(format!(
             "{} is not a One World (no {}).",
             world_dir.display(),
             one_world::MANIFEST_FILE
-        )
-    })?;
+        ));
+    }
     let _lock = world_utils::SessionLock::acquire(world_dir)
         .map_err(|_| "the world is open in Minecraft or being generated".to_string())?;
-    args.disable_height_limit = manifest.disable_height_limit;
-    args.height_multiplier = manifest.height_multiplier;
-    world_editor::set_world_bounds(
-        ground::extended_min_y_for(args),
-        ground::world_top_y_for(args),
-    );
-    let s = distant_horizons::from_existing(world_dir).map_err(|e| e.to_string())?;
-    let skipped = if s.skipped_regions + s.skipped_chunks > 0 {
-        format!(
-            " Skipped {} unreadable region file(s) and {} unreadable chunk(s).",
-            s.skipped_regions, s.skipped_chunks
-        )
-    } else {
-        String::new()
+    let upkeep = one_world::Upkeep {
+        light: args.bake_lighting_only,
+        voxy: args.voxy_lod_only,
+        dh: args.dh_lod_only,
     };
-    Ok(format!(
-        "Distant Horizons LODs: {} sections written to {}.{skipped}",
-        s.sections,
-        world_dir.display()
-    ))
+    let (built, failed): (Vec<_>, Vec<_>) = one_world::upkeep(world_dir, upkeep, false)
+        .into_iter()
+        .partition(Result::is_ok);
+    let built: Vec<String> = built.into_iter().flatten().collect();
+    if failed.is_empty() {
+        return Ok(built.join("\n"));
+    }
+    for line in &built {
+        println!("{line}");
+    }
+    Err(failed
+        .into_iter()
+        .filter_map(Result::err)
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 /// The One World folder: `--world-name` inside the saves folder.
@@ -368,25 +371,35 @@ fn run_cli() {
     let one_world = args.one_world;
     scale::budget::single_below_break_even(&mut args, one_world);
 
-    // These two need no area, so they skip the general validation.
-    if args.map_item_only || args.dh_lod_only {
+    // These need no area, so they skip the general validation.
+    if args.redraws_only() {
         if let Err(e) = output_args::validate(&args) {
             eprintln!("{}: {}", "Error".red().bold(), e);
             exit_failed();
         }
         let world_dir = one_world_dir(&args);
-        let result = if args.map_item_only {
-            map_item::redraw_one_world_map(&world_dir)
-                .map(|id| format!("World map item (map #{id}) redrawn over every area."))
-        } else {
-            redraw_dh_lods(&mut args, &world_dir)
-        };
-        match result {
-            Ok(line) => println!("{line}"),
-            Err(e) => {
-                eprintln!("{} {e}", "Error:".red().bold());
-                exit_failed();
+        let mut results = Vec::new();
+        if args.map_item_only {
+            results.push(
+                map_item::redraw_one_world_map(&world_dir)
+                    .map(|id| format!("World map item (map #{id}) redrawn over every area.")),
+            );
+        }
+        if args.bake_lighting_only || args.voxy_lod_only || args.dh_lod_only {
+            results.push(redraw_lods(&args, &world_dir));
+        }
+        let mut failed = false;
+        for result in results {
+            match result {
+                Ok(line) => println!("{line}"),
+                Err(e) => {
+                    eprintln!("{} {e}", "Error:".red().bold());
+                    failed = true;
+                }
             }
+        }
+        if failed {
+            exit_failed();
         }
         return;
     }
@@ -482,6 +495,7 @@ fn run_live_cli(args: Args) {
         version: args.live.version.clone(),
         view_distance: args.live.view_distance,
         port: args.live.port,
+        lan: args.live.lan,
         messages: live::Messages::default(),
     };
     // Downloads are shown in tenths, so the terminal is not flooded.
@@ -1053,42 +1067,28 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         );
     bench.mark("parse_osm");
 
-    // Merge the Overture buildings now that the OSM elements are parsed.
-    let overture::OvertureData {
-        elements: overture_elements,
-        hints: overture_hints,
-        ..
-    } = overture_data;
-
-    // Fill height/levels on OSM buildings that have neither, before the
-    // footprints are merged (Overture's own ways carry their tags already).
-    let enriched = overture_hints.apply(&mut parsed_elements);
-    if enriched > 0 {
-        println!(
-            "  Filled heights on {} OSM buildings from Overture Maps",
-            enriched.to_string().bright_white().bold()
-        );
-    }
-
-    if !overture_elements.is_empty() {
-        let before_count = parsed_elements.len();
-        let unique_overture =
-            overture::deduplicate_against_osm(overture_elements, &parsed_elements);
-        parsed_elements.extend(unique_overture);
-        let added = parsed_elements.len() - before_count;
-        println!(
-            "  Added {} buildings from Overture Maps",
-            added.to_string().bright_white().bold()
-        );
-    } else if args.overture && !skip_objects && enriched == 0 {
-        println!("  No additional buildings from Overture Maps for this area");
-    }
+    // OSM's buildings with what the laser and Overture add, the same as the window.
+    building_sources::merge(
+        &mut parsed_elements,
+        overture_data,
+        &ground,
+        &xzbbox,
+        args.overture && !skip_objects,
+        args.scale,
+    );
 
     osm_parser::sort_by_priority(&mut parsed_elements);
     bench.mark("sort_priority");
 
+    // Where line waterways are piped under roads; the masks below skip it as the drawing does.
+    ground.pipe_channels_under_roads(&parsed_elements, &xzbbox, &args);
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
-    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    ground.apply_osm_water_override(
+        &parsed_elements,
+        &xzbbox,
+        args.scale,
+        args.water.water_detail.channel_width_cap(args.scale),
+    );
     // Before the land override, which would give them land to stand on.
     let wet =
         overture::drop_footprints_in_water(&mut parsed_elements, &ground, &xzbbox, args.scale);
@@ -1098,7 +1098,12 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
             wet.to_string().bright_white().bold()
         );
     }
-    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
+    ground.apply_osm_land_override(
+        &parsed_elements,
+        &xzbbox,
+        args.scale,
+        args.water.water_detail.channel_width_cap(args.scale),
+    );
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
     }
@@ -1318,7 +1323,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         part_groups,
         housing_parts,
     ) {
-        Ok(_) => {
+        Ok(saved_path) => {
             if let Some(run) = worldpainter_run.as_ref() {
                 if let Err(e) = run.publish(&generation_path) {
                     eprintln!("{} {}", "Error:".red().bold(), e);
@@ -1335,11 +1340,12 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
                     exit_failed();
                 }
             }
+            one_world::after_run(&args);
             if args.bedrock {
                 println!(
                     "{} Bedrock world saved to: {}",
                     "Done!".green().bold(),
-                    generation_path.display()
+                    saved_path.display()
                 );
             }
 

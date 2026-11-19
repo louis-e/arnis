@@ -1076,56 +1076,15 @@ impl WalkNetwork {
     pub fn finish(&mut self, probe: &WalkProbe) {
         for lane in &mut self.lanes {
             if lane.points.len() >= 2 {
-                let mut side = settle(&lane.points, probe);
-                // Bent round street furniture into a wall: straight on, if that gets further.
-                if side.as_ref().is_none_or(|s| s.cut != (false, false)) {
-                    if let Some(p) = settle(&lane.plain, probe) {
-                        if side.as_ref().is_none_or(|s| p.length() > s.length()) {
-                            side = Some(p);
-                        }
-                    }
+                // A sign it would walk through rather than step round stands in its way as
+                // a wall does.
+                let (mut points, mut cut, through) = place(lane, probe, true);
+                if through {
+                    (points, cut, _) = place(lane, probe, false);
                 }
-                let best = match side {
-                    Some(s) if s.cut == (false, false) => Some(s),
-                    _ if lane.across => None,
-                    side => match (side, settle(&lane.alt, probe)) {
-                        (Some(s), Some(m))
-                            if s.length() >= m.length() && m.cut != (false, false) =>
-                        {
-                            Some(s)
-                        }
-                        (side, middle) => middle.or(side),
-                    },
-                };
-                let best = best.unwrap_or(Settled {
-                    points: Vec::new(),
-                    cut: (false, false),
-                    posts: Vec::new(),
-                });
-                // Round the posts it met, as round mapped furniture, onto the ground read
-                // round them; where that is not clear, past them.
-                let posts: Vec<Item> = best
-                    .posts
-                    .iter()
-                    .map(|&(x, z)| Item {
-                        x: x as f64 + 0.5,
-                        z: z as f64 + 0.5,
-                        hx: 0.4,
-                        hz: 0.4,
-                        long: 0.0,
-                    })
-                    .collect();
-                lane.points = if posts.is_empty() {
-                    best.points
-                } else {
-                    let bent = Furniture::new(posts).go_round(best.points.clone());
-                    match settle(&bent, probe) {
-                        Some(s) if s.cut == (false, false) => s.points,
-                        _ => best.points,
-                    }
-                };
-                lane.cut = best.cut;
-                lane.out &= !best.cut.1;
+                lane.points = points;
+                lane.cut = cut;
+                lane.out &= !cut.1;
             }
             lane.alt = Vec::new();
             lane.plain = Vec::new();
@@ -1499,6 +1458,8 @@ struct Settled {
     cut: (bool, bool),
     /// Columns of the posts it passes, as a lamp or a tree trunk nobody mapped.
     posts: Vec<(i32, i32)>,
+    /// Whether a sign's post is among them.
+    signs: bool,
 }
 
 impl Settled {
@@ -1510,15 +1471,85 @@ impl Settled {
     }
 }
 
+/// A lane put on the ground: its side line, straight on past the furniture, or the middle
+/// of its way, round the posts it meets where there is room, with where it is cut and
+/// whether it walks through a sign's post. `signs` lets it past signs as past lamps.
+fn place(lane: &Lane, probe: &WalkProbe, signs: bool) -> (Vec<Point>, (bool, bool), bool) {
+    let mut side = settle(&lane.points, probe, signs);
+    // Bent round street furniture into a wall: straight on, if that gets further.
+    if side.as_ref().is_none_or(|s| s.cut != (false, false)) {
+        if let Some(p) = settle(&lane.plain, probe, signs) {
+            if side.as_ref().is_none_or(|s| p.length() > s.length()) {
+                side = Some(p);
+            }
+        }
+    }
+    let best = match side {
+        Some(s) if s.cut == (false, false) => Some(s),
+        _ if lane.across => None,
+        side => match (side, settle(&lane.alt, probe, signs)) {
+            (Some(s), Some(m)) if s.length() >= m.length() && m.cut != (false, false) => Some(s),
+            (side, middle) => middle.or(side),
+        },
+    };
+    let best = best.unwrap_or(Settled {
+        points: Vec::new(),
+        cut: (false, false),
+        posts: Vec::new(),
+        signs: false,
+    });
+    // Round the posts it met, as round mapped furniture, onto the ground read
+    // round them; None where that is not clear.
+    let round = |settled: &Settled| -> Option<Vec<Point>> {
+        if settled.posts.is_empty() {
+            return Some(settled.points.clone());
+        }
+        let posts: Vec<Item> = settled
+            .posts
+            .iter()
+            .map(|&(x, z)| Item {
+                x: x as f64 + 0.5,
+                z: z as f64 + 0.5,
+                hx: 0.4,
+                hz: 0.4,
+                long: 0.0,
+            })
+            .collect();
+        let bent = Furniture::new(posts).go_round(settled.points.clone());
+        match settle(&bent, probe, signs) {
+            Some(s) if s.cut == (false, false) && !s.signs => Some(s.points),
+            _ => None,
+        }
+    };
+    match round(&best) {
+        Some(points) => (points, best.cut, false),
+        // A post it cannot step round, as a tree in a row along a wide sidewalk:
+        // the middle of the way if that passes fewer, else past them.
+        None => match (!lane.across)
+            .then(|| settle(&lane.alt, probe, signs))
+            .flatten()
+        {
+            Some(m) if m.cut == (false, false) && m.posts.len() < best.posts.len() => {
+                match round(&m) {
+                    Some(points) => (points, m.cut, false),
+                    None => (m.points, m.cut, m.signs),
+                }
+            }
+            _ => (best.points, best.cut, best.signs),
+        },
+    }
+}
+
 /// The lane on the ground the probe found along it, with points put in where that ground
 /// bends. Something wider than a post in the way, or a climb of more than a step, cuts it:
 /// the longest stretch clear of those is kept, if it is a few blocks long.
-fn settle(points: &[Point], probe: &WalkProbe) -> Option<Settled> {
+fn settle(points: &[Point], probe: &WalkProbe, signs: bool) -> Option<Settled> {
     let steps = steps(points);
     let mut feet: Vec<Option<f64>> = Vec::with_capacity(steps.len());
     let mut prev: Option<f64> = None;
     let mut post: Option<(i32, i32)> = None;
     let mut posts = Vec::new();
+    let mut past_sign = false;
     for s in &steps {
         let (x, z, level) = s.column();
         let footing = probe.get(x, z, level);
@@ -1536,10 +1567,13 @@ fn settle(points: &[Point], probe: &WalkProbe) -> Option<Settled> {
                 Some(g)
             }
             // One post is walked past, but not a wall, nor posts side by side.
-            None if footing.is_some_and(|f| f.thin()) && post.is_none_or(|p| p == (x, z)) => {
+            None if footing.is_some_and(|f| f.thin() && (signs || !f.sign()))
+                && post.is_none_or(|p| p == (x, z)) =>
+            {
                 if post.is_none() {
                     posts.push((x, z));
                 }
+                past_sign |= footing.is_some_and(|f| f.sign());
                 post = Some((x, z));
                 Some(prev.unwrap_or(s.y))
             }
@@ -1601,6 +1635,7 @@ fn settle(points: &[Point], probe: &WalkProbe) -> Option<Settled> {
         points: out,
         cut: (a > 0, b + 1 < steps.len()),
         posts,
+        signs: past_sign,
     })
 }
 

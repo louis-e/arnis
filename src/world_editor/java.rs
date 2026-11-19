@@ -255,6 +255,37 @@ impl RegionWriteMode {
 /// The location and timestamp tables at the start of a region file. Chunks come after them.
 const REGION_HEADER_BYTES: u64 = 8192;
 
+/// Clears the location entries fastanvil cannot write past: inside the header, which it would
+/// write over, past the end of the file, which it would grow to reach, or with no sectors.
+/// Returns how many it cleared and whether any chunk is left.
+fn repair_header(file: &mut File) -> std::io::Result<(usize, bool)> {
+    use std::io::{Read, Seek, Write};
+    let sectors_in_file = file.metadata()?.len().div_ceil(4096);
+    let mut table = [0u8; 4096];
+    file.rewind()?;
+    file.read_exact(&mut table)?;
+    let (mut cleared, mut any) = (0, false);
+    for entry in table.as_chunks_mut::<4>().0 {
+        let [a, b, c, sectors] = *entry;
+        let offset = u32::from_be_bytes([0, a, b, c]);
+        if offset == 0 && sectors == 0 {
+            continue;
+        }
+        if offset < 2 || sectors == 0 || u64::from(offset) + u64::from(sectors) > sectors_in_file {
+            *entry = [0; 4];
+            cleared += 1;
+        } else {
+            any = true;
+        }
+    }
+    if cleared > 0 {
+        file.rewind()?;
+        file.write_all(&table)?;
+    }
+    file.rewind()?;
+    Ok((cleared, any))
+}
+
 /// Opens `r.X.Z.mca` for a merge, or creates it empty. Never from the
 /// template: its placeholder chunks carry another region's positions, and
 /// Minecraft refuses to load the ones a merge leaves standing.
@@ -266,14 +297,29 @@ fn open_region_file_for_merge(
     let region_dir = overworld_dir.join("region");
     let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
     // A save that never finished leaves a file too short to hold a chunk, which starts over.
-    let holds_chunks =
+    let long_enough =
         std::fs::metadata(&out_path).is_ok_and(|m| m.is_file() && m.len() >= REGION_HEADER_BYTES);
-    if holds_chunks {
-        let file = File::options().read(true).write(true).open(&out_path)?;
+    if long_enough {
+        let mut file = File::options().read(true).write(true).open(&out_path)?;
+        let unreadable = |why: String| {
+            format!(
+                "{} is not a readable region file: {why}",
+                out_path.display()
+            )
+        };
+        let (cleared, any) = repair_header(&mut file).map_err(|e| unreadable(e.to_string()))?;
+        if cleared > 0 {
+            eprintln!(
+                "Warning: {}: {cleared} damaged chunk entries were dropped from its header.",
+                out_path.display()
+            );
+        }
         // Refused rather than replaced: the file holds chunks of other areas.
-        return Region::from_stream(file).map_err(|e| {
-            format!("{} is not a readable region file: {e}", out_path.display()).into()
-        });
+        if any {
+            return Region::from_stream(file).map_err(|e| unreadable(e.to_string()).into());
+        }
+        // With none, fastanvil would put the first chunk over the header, so it starts over.
+        drop(file);
     }
     std::fs::create_dir_all(&region_dir)?;
     let file = File::options()
@@ -2397,7 +2443,8 @@ mod merge_tests {
             std::fs::metadata(&mca).unwrap().modified().unwrap(),
         );
 
-        let summary = crate::distant_horizons::from_existing(dir.path()).unwrap();
+        let summary =
+            crate::distant_horizons::from_existing(dir.path(), (-64, 319), &|| false).unwrap();
         assert!(summary.sections > 0, "LOD rows written");
         assert!(dir
             .path()
@@ -2409,9 +2456,12 @@ mod merge_tests {
             std::fs::metadata(&mca).unwrap().modified().unwrap(),
         );
         assert!(before == after, "region file untouched");
-        assert!(
-            crate::distant_horizons::from_existing(tempfile::tempdir().unwrap().path()).is_err()
-        );
+        assert!(crate::distant_horizons::from_existing(
+            tempfile::tempdir().unwrap().path(),
+            (-64, 319),
+            &|| false
+        )
+        .is_err());
     }
 
     /// The same region through both containers carries the same chunk NBT.
@@ -2530,6 +2580,93 @@ mod merge_tests {
             }
         }
         None
+    }
+
+    /// A region file with a header and no chunks, as a merge that stopped before its first chunk
+    /// or a removal leaves it, starts over instead of taking its first chunk over the header.
+    #[test]
+    fn a_merge_into_a_region_without_chunks_starts_it_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let regions = dir.path().join("region");
+        std::fs::create_dir_all(&regions).unwrap();
+        std::fs::write(regions.join("r.0.0.mca"), vec![0u8; 8192]).unwrap();
+        let merge = RegionWriteMode::Merge {
+            min_x: 0,
+            min_z: 0,
+            max_x: 511,
+            max_z: 511,
+            layout: crate::world_utils::WorldLayout::Legacy,
+        };
+        let cells: Vec<(i32, i32)> = (0..40).map(|i| (i % 32, i / 32)).collect();
+        write(dir.path(), &region_with(&cells, STONE), merge);
+        assert_eq!(
+            present_chunks(dir.path()).len(),
+            1024,
+            "every chunk in the bounds"
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 7, 1).as_deref(),
+            Some("minecraft:stone")
+        );
+    }
+
+    /// Entries fastanvil cannot write past are dropped, the chunks around them kept, as in a
+    /// region whose header a 3.4.0 merge wrote a chunk over.
+    #[test]
+    fn a_merge_drops_header_entries_it_cannot_write_past() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            &region_with(&[(0, 0), (3, 0)], STONE),
+            RegionWriteMode::Merge {
+                min_x: 0,
+                min_z: 0,
+                max_x: 511,
+                max_z: 511,
+                layout: crate::world_utils::WorldLayout::Legacy,
+            },
+        );
+        let path = dir.path().join("region").join("r.0.0.mca");
+        let mut bytes = std::fs::read(&path).unwrap();
+        // Slot 1 into the header, slot 2 with no sectors, slot 5 far past the end.
+        bytes[4..8].copy_from_slice(&[0, 0, 1, 1]);
+        bytes[8..12].copy_from_slice(&[0, 0, 9, 0]);
+        bytes[20..24].copy_from_slice(&[0xAB, 0xCD, 0xEF, 1]);
+        std::fs::write(&path, &bytes).unwrap();
+
+        let cells: Vec<(i32, i32)> = (4..40).map(|i| (i % 32, i / 32)).collect();
+        write(
+            dir.path(),
+            &region_with(&cells, SMOOTH_STONE),
+            RegionWriteMode::Merge {
+                min_x: 64,
+                min_z: 0,
+                max_x: 511,
+                max_z: 511,
+                layout: crate::world_utils::WorldLayout::Legacy,
+            },
+        );
+        let present = present_chunks(dir.path());
+        assert!(
+            present.contains(&(0, 0)) && present.contains(&(3, 0)),
+            "kept"
+        );
+        assert!(
+            !present.contains(&(1, 0)) && !present.contains(&(2, 0)),
+            "dropped"
+        );
+        assert!(
+            std::fs::metadata(&path).unwrap().len() < 1 << 30,
+            "not grown to reach a far entry"
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 0, 0).as_deref(),
+            Some("minecraft:stone")
+        );
+        assert_eq!(
+            base_block_name(dir.path(), 7, 1).as_deref(),
+            Some("minecraft:smooth_stone")
+        );
     }
 
     #[test]
@@ -3086,6 +3223,156 @@ mod merge_tests {
         assert_eq!(light_opacity("minecraft:light"), 0);
         // Names merely containing "light" keep their own behaviour.
         assert_eq!(light_opacity("minecraft:light_gray_concrete"), 15);
+    }
+
+    /// Stone, glass and leaves over a few chunks and sections, so palettes, light and voxy's
+    /// leaf opacity all take part.
+    fn mixed_region() -> RegionToModify {
+        use crate::block_definitions::{GLASS, OAK_LEAVES};
+        let mut region = region_with(&[(5, 5), (6, 5), (20, 30)], STONE);
+        let chunk = region.get_or_create_chunk(6, 5);
+        chunk.sections.get_or_default(1).storage.set(17, GLASS);
+        chunk
+            .sections
+            .get_or_default(3)
+            .storage
+            .set(300, OAK_LEAVES);
+        region
+            .get_or_create_chunk(31, 31)
+            .sections
+            .get_or_default(-2)
+            .storage
+            .set(4095, GLASS);
+        region
+    }
+
+    fn written(
+        dir: &std::path::Path,
+        region: &RegionToModify,
+        bake: bool,
+        voxy: Option<&crate::voxy::VoxyWriter>,
+    ) {
+        write_region_to_disk(
+            dir,
+            &llbbox(),
+            None,
+            bake,
+            false,
+            None,
+            voxy,
+            None,
+            0,
+            0,
+            region,
+            &RegionWriteMode::Fresh,
+            (0, 0),
+            None,
+        )
+        .unwrap();
+    }
+
+    /// Every chunk of region (0, 0) under `dir`, as NBT values.
+    fn chunk_values(dir: &std::path::Path) -> Vec<Value> {
+        let file = File::open(dir.join("region").join("r.0.0.mca")).unwrap();
+        let mut region = fastanvil::Region::from_stream(file).unwrap();
+        let mut out = Vec::new();
+        for z in 0..32 {
+            for x in 0..32 {
+                if let Some(raw) = region.read_chunk(x, z).unwrap() {
+                    out.push(fastnbt::from_bytes(&raw).unwrap());
+                }
+            }
+        }
+        out
+    }
+
+    /// Light baked into a region written without it is the light a baked write gives it.
+    #[test]
+    fn baking_later_matches_baking_on_write() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let (plain, baked) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let region = mixed_region();
+        written(plain.path(), &region, false, None);
+        written(baked.path(), &region, true, None);
+        assert_ne!(chunk_values(plain.path()), chunk_values(baked.path()));
+
+        let done = crate::saved_chunks::bake_unlit(plain.path(), &|| false).unwrap();
+        assert_eq!((done.chunks, done.regions, done.skipped), (1024, 1, 0));
+        assert!(chunk_values(plain.path()) == chunk_values(baked.path()));
+        let again = crate::saved_chunks::bake_unlit(plain.path(), &|| false).unwrap();
+        assert_eq!(again.chunks, 0, "a lit chunk is left alone");
+    }
+
+    /// Voxy's cache rebuilt from the regions on disk is the one written with them.
+    #[test]
+    fn voxy_rebuild_matches_the_written_cache() {
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        crate::voxy::write_test_level_dat(dir.path(), -1743857021154781143);
+        let writer = crate::voxy::VoxyWriter::create(dir.path())
+            .unwrap()
+            .unwrap();
+        written(dir.path(), &mixed_region(), true, Some(&writer));
+        writer.finish().unwrap();
+        let on_write = crate::voxy::logged_puts(dir.path());
+        assert!(on_write.len() > 10);
+
+        let summary = crate::voxy::from_existing(dir.path(), &|| false).unwrap();
+        assert_eq!((summary.skipped_regions, summary.skipped_chunks), (0, 0));
+        let rebuilt = crate::voxy::logged_puts(dir.path());
+        assert!(rebuilt == on_write);
+        let ids = dir
+            .path()
+            .join("voxy")
+            .join(crate::voxy::world_id(-1743857021154781143));
+        let mut left: Vec<_> = std::fs::read_dir(&ids)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["storage"], "no staging or old copy is left");
+    }
+
+    /// A rebuild that reads nothing keeps the cache there was.
+    #[test]
+    fn a_failed_voxy_rebuild_keeps_the_old_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::voxy::write_test_level_dat(dir.path(), 7);
+        let storage = dir
+            .path()
+            .join("voxy")
+            .join(crate::voxy::world_id(7))
+            .join("storage");
+        std::fs::create_dir_all(&storage).unwrap();
+        std::fs::write(storage.join("CURRENT"), b"old").unwrap();
+        let regions = dir.path().join("region");
+        std::fs::create_dir_all(&regions).unwrap();
+        std::fs::write(regions.join("r.0.0.mca"), b"garbage").unwrap();
+
+        assert!(crate::voxy::from_existing(dir.path(), &|| false).is_err());
+        assert_eq!(std::fs::read(storage.join("CURRENT")).unwrap(), b"old");
+        assert!(!storage.with_file_name("storage.arnis-tmp").exists());
+        assert!(crate::voxy::has_cache(dir.path()));
+
+        // Stopped, it keeps the old cache too.
+        let _g = crate::world_editor::FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        std::fs::remove_file(regions.join("r.0.0.mca")).unwrap();
+        written(dir.path(), &mixed_region(), false, None);
+        assert!(crate::voxy::from_existing(dir.path(), &|| true).is_err());
+        assert_eq!(std::fs::read(storage.join("CURRENT")).unwrap(), b"old");
+        assert!(!storage.with_file_name("storage.arnis-tmp").exists());
+
+        // With every region removed, the cache is emptied rather than kept.
+        std::fs::remove_file(regions.join("r.0.0.mca")).unwrap();
+        let summary = crate::voxy::from_existing(dir.path(), &|| false).unwrap();
+        assert_eq!(summary.sections, 0);
+        assert_ne!(std::fs::read(storage.join("CURRENT")).unwrap(), b"old");
     }
 }
 

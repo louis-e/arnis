@@ -106,8 +106,8 @@ impl<W: Write> LogWriter<W> {
         Ok(())
     }
 
-    pub(crate) fn flush(&mut self) -> std::io::Result<()> {
-        self.out.flush()
+    pub(crate) fn into_inner(self) -> W {
+        self.out
     }
 }
 
@@ -239,6 +239,12 @@ pub(crate) fn manifest_bytes(db_id: &str, log_number: u64, next_file_number: u64
     out
 }
 
+/// The logical records of a log, for tests.
+#[cfg(test)]
+pub(crate) fn read_log(log: &[u8]) -> Vec<Vec<u8>> {
+    tests::read_back(log)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,7 +312,7 @@ mod tests {
     }
 
     /// Reassembles logical records, the way RocksDB's `log_reader.cc` does.
-    fn read_back(log: &[u8]) -> Vec<Vec<u8>> {
+    pub(super) fn read_back(log: &[u8]) -> Vec<Vec<u8>> {
         let mut records = Vec::new();
         let mut pending: Vec<u8> = Vec::new();
         let mut off = 0usize;

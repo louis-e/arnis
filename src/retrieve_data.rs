@@ -76,7 +76,8 @@ fn download_with_reqwest(
         Ok(resp) => {
             emit_gui_progress_update(3.0, "");
             if resp.status().is_success() {
-                let text = resp.text()?;
+                // reqwest says only "error decoding response body"; the cause is in its sources.
+                let text = resp.text().map_err(|e| with_causes(&e))?;
                 if text.is_empty() {
                     return Err("Received invalid data from server".into());
                 }
@@ -110,6 +111,18 @@ fn download_with_reqwest(
             }
         }
     }
+}
+
+/// `e` and the errors under it, as "outer: inner: innermost".
+fn with_causes(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        source = s.source();
+    }
+    out
 }
 
 /// Function to download data using `curl`
@@ -978,6 +991,27 @@ mod tests {
         set_overpass_urls(Vec::new());
         assert_eq!(got, ["http://a/api", "http://b/api"]);
         assert_eq!(overpass_urls(), [ARNIS_OVERPASS_URL]);
+    }
+
+    #[test]
+    fn error_causes_are_spelled_out() {
+        #[derive(Debug)]
+        struct Body(std::io::Error);
+        impl std::fmt::Display for Body {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("error decoding response body")
+            }
+        }
+        impl std::error::Error for Body {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        let cut = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "connection closed");
+        assert_eq!(
+            with_causes(&Body(cut)),
+            "error decoding response body: connection closed"
+        );
     }
 
     #[test]

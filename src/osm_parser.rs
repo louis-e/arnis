@@ -43,6 +43,8 @@ const IGNORED_TAGS: &[&str] = &[
 
 // Tag-key prefixes Arnis never reads (localized names, addresses, regional import refs).
 const IGNORED_PREFIXES: &[&str] = &[
+    // Arnis keeps its own working tags in this namespace.
+    "arnis:",
     "addr:",
     "source",
     "name:",
@@ -62,12 +64,47 @@ const IGNORED_PREFIXES: &[&str] = &[
     "check_date:",
 ];
 
+/// The prefix of a Flemish GRB building (`Gbg/`) or annex (`Gba/`) in a
+/// `source:geometry:ref`: an outline surveyed at its walls.
+pub(crate) fn grb_prefix(value: &str) -> Option<&'static str> {
+    ["Gbg/", "Gba/"]
+        .into_iter()
+        .find(|p| value.trim_start().starts_with(p))
+}
+
 fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
     // start_date is otherwise filtered, but on buildings the construction year picks the facade style.
     let keep_start_date = tags.contains_key("building") || tags.contains_key("building:part");
     tags.retain(|k, v| {
         if k == "start_date" {
             return keep_start_date;
+        }
+        // A building's outline source tells a surveyed wall line (a cadastre,
+        // the Dutch BAG) from a roof traced from the air.
+        if keep_start_date
+            && matches!(
+                k.as_str(),
+                "source" | "source:geometry" | "source:outline" | "ref:bag"
+            )
+        {
+            return true;
+        }
+        // So does a Czech RUIAN or Norwegian cadastre building number, of
+        // which only the key is read.
+        if keep_start_date && matches!(k.as_str(), "ref:ruian:building" | "ref:bygningsnr") {
+            v.clear();
+            return true;
+        }
+        // And a Flemish GRB survey object (`Gbg/`, `Gba/`), of which only
+        // that prefix is read.
+        if keep_start_date && k == "source:geometry:ref" {
+            return match grb_prefix(v) {
+                Some(prefix) => {
+                    *v = prefix.to_string();
+                    true
+                }
+                None => false,
+            };
         }
         // The house number feeds the door plate; the rest of addr:* stays out.
         if k == "addr:housenumber" {
@@ -1103,7 +1140,14 @@ pub fn parse_osm_data(
         &mut part_groups,
         &mut housing_parts,
     );
-    inherit_masonry_facade_tags(&mut data.ways, &data.relations, &part_groups);
+    inherit_facade_tags(&mut data.ways, &data.relations, &part_groups);
+    lower_outlines_under_parts(
+        &mut data.ways,
+        &data.nodes,
+        &data.relations,
+        &outline_suppression,
+        &part_groups,
+    );
 
     let mut nodes_map: FnvHashMap<u64, ProcessedNode> =
         FnvHashMap::with_capacity_and_hasher(data.nodes.len(), Default::default());
@@ -1162,6 +1206,11 @@ pub fn parse_osm_data(
     let mut total_node_refs: u64 = 0;
     let mut ways_missing_nodes: u64 = 0;
 
+    // Surface lots as mapped and the parking aisles, unclipped: a lot is laid out from the
+    // whole of it, so every piece of a One World draws its rows alike.
+    let mut lot_ways: HashMap<u64, Vec<ProcessedNode>> = HashMap::new();
+    let mut lot_aisles: Vec<ProcessedWay> = Vec::new();
+
     // Second pass: process ways and clip them to bbox
     for element in data.ways {
         if !seen_ways.insert(element.id) {
@@ -1184,6 +1233,33 @@ pub fn parse_osm_data(
 
         // Clip the way to bbox to reduce node count dramatically
         let tags = filter_tags(element.tags.unwrap_or_default());
+
+        let closed = nodes.len() >= 4 && nodes.first().map(|n| n.id) == nodes.last().map(|n| n.id);
+        if closed && crate::element_processing::parking_lots::is_surface_lot(&tags) {
+            lot_ways.insert(element.id, nodes.clone());
+        }
+        // A field's plots come from the way as mapped, not the part the area kept, so every
+        // piece of a One World agrees on them. So do a 3D model's place and size, and whether
+        // a building the area cuts stands in its footprint; a plain run keeps what it has.
+        let field =
+            is_closed_ring(&nodes) && crate::element_processing::field_texture::is_field(&tags);
+        let cut_building = projection.model_footprints
+            && crate::models_3d::may_be_hidden(&tags)
+            && nodes
+                .iter()
+                .any(|n| !clip_bbox.contains(&XZPoint::new(n.x, n.z)));
+        let model = projection.model_footprints
+            && (cut_building || tags.contains_key("wikidata") || tags.contains_key("3dmr"));
+        let whole = (field || model).then(|| nodes.clone());
+        if tags.get("service").map(String::as_str) == Some("parking_aisle")
+            && tags.contains_key("highway")
+        {
+            lot_aisles.push(ProcessedWay {
+                id: element.id,
+                tags: tags.clone(),
+                nodes: nodes.clone(),
+            });
+        }
 
         // A lift the area cuts must not end in the station beyond the cut.
         let lift_ends = match (nodes.first(), nodes.last()) {
@@ -1214,11 +1290,22 @@ pub fn parse_osm_data(
             continue;
         }
 
-        let processed: ProcessedWay = ProcessedWay {
+        let mut processed: ProcessedWay = ProcessedWay {
             id: element.id,
             tags,
             nodes: clipped_nodes,
         };
+        if let Some(whole) = whole {
+            if field {
+                let frame = crate::element_processing::field_texture::frame_tag(&whole);
+                processed.tags.extend(frame);
+            }
+            if model && (cut_building || crate::models_3d::may_replace(&processed.tags)) {
+                processed
+                    .tags
+                    .extend(crate::models_3d::footprint_tag(whole.iter()));
+            }
+        }
 
         processed_elements.push(ProcessedElement::Way(processed));
     }
@@ -1238,6 +1325,8 @@ pub fn parse_osm_data(
             .bold()
         );
     }
+    // Every way holds its own nodes now; relations only read `ways_map`.
+    drop(nodes_map);
 
     // Third pass: process relations and clip member ways
     let mut seen_relations: HashSet<u64> = HashSet::new();
@@ -1268,6 +1357,7 @@ pub fn parse_osm_data(
             || tags.contains_key("building:part"))
             && relation_type == Some("multipolygon");
         let keep_unclipped = is_water_relation || is_building_multipolygon;
+        let field = crate::element_processing::field_texture::is_field(tags);
 
         let roles = member_roles(
             &element.members,
@@ -1295,6 +1385,7 @@ pub fn parse_osm_data(
                 &ways_map,
                 &clip_bbox,
                 touches_world,
+                field,
             );
             if !members.is_empty() {
                 repeated_outers.extend(repeating_outers(
@@ -1304,10 +1395,17 @@ pub fn parse_osm_data(
                     &members,
                     &ways_map,
                 ));
+                let mut tags = tags.clone();
+                if projection.model_footprints && crate::models_3d::may_replace(&tags) {
+                    let whole = whole_area_rings(element.id, &element.members, &roles, &ways_map);
+                    tags.extend(crate::models_3d::footprint_tag(
+                        whole.iter().flat_map(|m| m.way.nodes.iter()),
+                    ));
+                }
                 processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                     id: element.id,
                     members,
-                    tags: tags.clone(),
+                    tags,
                 }));
             }
             continue;
@@ -1344,9 +1442,15 @@ pub fn parse_osm_data(
                     if clipped_nodes.is_empty() {
                         return None;
                     }
+                    let mut tags = way.tags.clone();
+                    if field && role == ProcessedMemberRole::Outer && is_closed_ring(&way.nodes) {
+                        tags.extend(crate::element_processing::field_texture::frame_tag(
+                            &way.nodes,
+                        ));
+                    }
                     Arc::new(ProcessedWay {
                         id: way.id,
-                        tags: way.tags.clone(),
+                        tags,
                         nodes: clipped_nodes,
                     })
                 };
@@ -1366,10 +1470,21 @@ pub fn parse_osm_data(
                 &members,
                 &ways_map,
             ));
+            let mut tags = tags.clone();
+            if projection.model_footprints && crate::models_3d::may_replace(&tags) {
+                let whole = element
+                    .members
+                    .iter()
+                    .zip(&roles)
+                    .filter(|(m, role)| m.r#type == "way" && role.is_some())
+                    .filter_map(|(m, _)| ways_map.get(&m.r#ref))
+                    .flat_map(|w| w.nodes.iter());
+                tags.extend(crate::models_3d::footprint_tag(whole));
+            }
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
-                tags: tags.clone(),
+                tags,
             }));
         }
     }
@@ -1379,9 +1494,22 @@ pub fn parse_osm_data(
         );
     }
 
+    if !lot_ways.is_empty()
+        || processed_elements.iter().any(|e| {
+            matches!(e, ProcessedElement::Relation(r)
+                if crate::element_processing::parking_lots::is_surface_lot(&r.tags))
+        })
+    {
+        crate::element_processing::parking_lots::lay_out_whole_lots(
+            &mut processed_elements,
+            &lot_ways,
+            lot_aisles,
+            &ways_map,
+        );
+    }
+
     emit_gui_progress_update(18.5, "");
 
-    drop(nodes_map);
     drop(ways_map);
 
     (
@@ -1638,8 +1766,9 @@ pub(crate) fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
 /// its building: the mapper described the brick, stone or render of the whole
 /// building once, on its outline or relation, and the parts are that
 /// building. Glass, metal and the like stay with the outline, where the
-/// group's style hint already carries them.
-fn inherit_masonry_facade_tags(
+/// group's style hint already carries them; a glass building's colour, its
+/// tint, still reaches the parts mapped as glass that name none.
+fn inherit_facade_tags(
     ways: &mut [OsmElement],
     relations: &[OsmElement],
     part_groups: &PartGroups,
@@ -1678,6 +1807,21 @@ fn inherit_masonry_facade_tags(
             .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
             .collect()
     };
+    const COLOUR_KEYS: [&str; 2] = ["building:colour", "colour"];
+    let material_of = |tags: &HashMap<String, String>| {
+        tags.get("building:material")
+            .or_else(|| tags.get("building:facade:material"))
+            .or_else(|| tags.get("facade:material"))
+            .map(|m| norm_tag(m))
+    };
+    let glass = |m: Option<&str>| matches!(m, Some("glass" | "mirror"));
+    let tint_of = |tags: &HashMap<String, String>| -> Option<Vec<(String, String)>> {
+        let tint: Vec<(String, String)> = COLOUR_KEYS
+            .iter()
+            .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
+            .collect();
+        (glass(material_of(tags).as_deref()) && !tint.is_empty()).then_some(tint)
+    };
     if part_groups.is_empty() {
         return;
     }
@@ -1688,6 +1832,7 @@ fn inherit_masonry_facade_tags(
     // Facade of each group's building, keyed like the groups: an outline way
     // by its id, a building relation by its salted id.
     let mut facade: HashMap<u64, Vec<(String, String)>> = HashMap::new();
+    let mut tint: HashMap<u64, Vec<(String, String)>> = HashMap::new();
     let mut relation_outlines: HashMap<u64, u64> = HashMap::new();
     for rel in relations {
         let Some(tags) = &rel.tags else { continue };
@@ -1699,6 +1844,9 @@ fn inherit_masonry_facade_tags(
             facade.insert(key, facade_of(tags));
             continue;
         }
+        if let Some(t) = tint_of(tags) {
+            tint.insert(key, t);
+        }
         for m in &rel.members {
             let role = m.role.trim();
             if m.r#type == "way"
@@ -1709,30 +1857,41 @@ fn inherit_masonry_facade_tags(
         }
     }
     for w in ways.iter() {
-        let Some(tags) = w.tags.as_ref().filter(|t| masonry(t)) else {
+        let Some(tags) = w.tags.as_ref() else {
             continue;
         };
-        if groups.contains(&w.id) {
-            facade.insert(w.id, facade_of(tags));
+        let key = if groups.contains(&w.id) {
+            w.id
         } else if let Some(&key) = relation_outlines.get(&w.id) {
+            key
+        } else {
+            continue;
+        };
+        if masonry(tags) {
             facade.entry(key).or_insert_with(|| facade_of(tags));
+        } else if let Some(t) = tint_of(tags) {
+            tint.entry(key).or_insert(t);
         }
     }
-    if facade.is_empty() {
+    if facade.is_empty() && tint.is_empty() {
         return;
     }
     for w in ways.iter_mut() {
-        let Some(inherited) = part_groups
-            .get(&w.id)
-            .and_then(|&seed| facade.get(&seed_without_hint(seed)))
-        else {
+        let Some(group) = part_groups.get(&w.id).map(|&seed| seed_without_hint(seed)) else {
             continue;
         };
         let tags = w.tags.get_or_insert_with(HashMap::new);
-        if FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
-            continue;
+        if let Some(inherited) = facade.get(&group) {
+            if !FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
+                tags.extend(inherited.iter().cloned());
+            }
+        } else if let Some(inherited) = tint.get(&group) {
+            if !COLOUR_KEYS.iter().any(|k| tags.contains_key(*k))
+                && glass(material_of(tags).as_deref())
+            {
+                tags.extend(inherited.iter().cloned());
+            }
         }
-        tags.extend(inherited.iter().cloned());
     }
 }
 
@@ -2605,6 +2764,233 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
     suppressed
 }
 
+/// Metres a building or part rises to by its `height`, else by its storeys as parts are built.
+fn mapped_top(tags: &HashMap<String, String>, storey: f64) -> Option<f64> {
+    tags.get("height")
+        .and_then(|h| parse_length_m(h))
+        .or_else(|| {
+            tags.get("building:levels")
+                .and_then(|l| l.trim().parse::<f64>().ok())
+                .map(|l| storeys_m(l, storey))
+        })
+        .filter(|m| m.is_finite() && *m > 0.0)
+}
+
+/// Metres of `storeys` on the raised ground floor, as parts are built and lifted.
+fn storeys_m(storeys: f64, storey: f64) -> f64 {
+    storeys * storey + 2.0
+}
+
+/// Storey height of the parts of a building: a housing block's are lower.
+fn part_storey_m(outline: &HashMap<String, String>) -> f64 {
+    if is_housing_type(outline) {
+        3.0
+    } else {
+        4.0
+    }
+}
+
+/// A raised part sets the storeys under it when it covers this share of its outline.
+const PODIUM_PART_SHARE: f64 = 0.25;
+
+/// Parts smaller than this share of their outline do not count for its height.
+const MINOR_PART_SHARE: f64 = 0.05;
+
+/// A raised part larger than its outline by more than this, as a canopy over a kiosk, stands
+/// over it rather than on it.
+const PART_FIT: f64 = 1.25;
+
+/// On an outline kept beside its parts, the top an Overture height for it must stay under.
+pub(crate) const PARTS_TOP_TAG: &str = "arnis:parts_top";
+
+/// Lowers each outline kept beside its parts where it would stand over them and hide them.
+fn lower_outlines_under_parts(
+    ways: &mut [OsmElement],
+    nodes: &[OsmElement],
+    relations: &[OsmElement],
+    suppressed: &OutlineSuppression,
+    part_groups: &PartGroups,
+) {
+    use crate::element_processing::buildings::is_underground_building;
+    let mut outline_ids: Vec<usize> = Vec::new();
+    let mut part_ids: Vec<usize> = Vec::new();
+    for (i, w) in ways.iter().enumerate() {
+        let (Some(tags), Some(ns)) = (&w.tags, &w.nodes) else {
+            continue;
+        };
+        if ns.len() < 4 || ns.first() != ns.last() || is_underground_building(tags) {
+            continue;
+        }
+        if tags
+            .get("building:part")
+            .is_some_and(|v| !v.eq_ignore_ascii_case("no"))
+        {
+            part_ids.push(i);
+        } else if tags.get("building").is_some_and(|b| b != "no")
+            && !suppressed.contains(&("way", w.id))
+        {
+            outline_ids.push(i);
+        }
+    }
+    if outline_ids.is_empty() || part_ids.is_empty() {
+        return;
+    }
+    let wanted: HashSet<u64> = outline_ids
+        .iter()
+        .chain(&part_ids)
+        .flat_map(|&i| ways[i].nodes.iter().flatten().copied())
+        .collect();
+    let node_ll: HashMap<u64, (f64, f64)> = nodes
+        .iter()
+        .filter(|n| wanted.contains(&n.id))
+        .filter_map(|n| Some((n.id, (n.lat?, n.lon?))))
+        .collect();
+    let ring = |i: usize| -> Vec<(f64, f64)> {
+        ways[i]
+            .nodes
+            .iter()
+            .flatten()
+            .filter_map(|id| node_ll.get(id).copied())
+            .collect()
+    };
+    let mut outlines: HashMap<usize, (Vec<(f64, f64)>, f64)> = HashMap::new();
+    // The outlines a part's group stands for: its way, or a building relation's outlines.
+    let mut by_group: HashMap<u64, Vec<usize>> = HashMap::new();
+    let mut by_id: HashMap<u64, usize> = HashMap::new();
+    for &i in &outline_ids {
+        let r = ring(i);
+        let area = ring_area(&r);
+        if area <= 0.0 {
+            continue;
+        }
+        outlines.insert(i, (r, area));
+        by_group.entry(ways[i].id).or_default().push(i);
+        by_id.insert(ways[i].id, i);
+    }
+    let is_outline = |r: &str| r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer");
+    for rel in relations {
+        let building = rel
+            .tags
+            .as_ref()
+            .and_then(|t| t.get("type"))
+            .is_some_and(|t| t == "building");
+        if !building {
+            continue;
+        }
+        for m in rel.members.iter().filter(|m| m.r#type == "way") {
+            if let (true, Some(&i)) = (is_outline(m.role.trim()), by_id.get(&m.r#ref)) {
+                by_group
+                    .entry(RELATION_SEED_BIT | rel.id)
+                    .or_default()
+                    .push(i);
+            }
+        }
+    }
+
+    struct Part {
+        ring: Vec<(f64, f64)>,
+        area: f64,
+        top: Option<f64>,
+        /// Metres above the ground its lowest storey starts.
+        base: f64,
+    }
+    let mut parts_of: HashMap<usize, Vec<Part>> = HashMap::new();
+    for &pi in &part_ids {
+        let r = ring(pi);
+        let area = ring_area(&r);
+        let Some(tags) = ways[pi].tags.as_ref().filter(|_| area > 0.0) else {
+            continue;
+        };
+        // A roof on posts gives its building no storeys.
+        if matches!(
+            tags.get("building:part").map(String::as_str),
+            Some("roof" | "canopy")
+        ) {
+            continue;
+        }
+        let n = r.len() as f64;
+        let lat = r.iter().map(|p| p.0).sum::<f64>() / n;
+        let lon = r.iter().map(|p| p.1).sum::<f64>() / n;
+        // Only the outline the part is grouped with counts it, as generation does.
+        let Some(group) = part_groups.get(&ways[pi].id).map(|&seed| group_key(seed)) else {
+            continue;
+        };
+        let Some(oi) = by_group.get(&group).and_then(|cands| {
+            cands
+                .iter()
+                .copied()
+                .filter(|oi| cands.len() == 1 || point_in_ring(lat, lon, &outlines[oi].0))
+                .min_by(|a, b| outlines[a].1.total_cmp(&outlines[b].1))
+        }) else {
+            continue;
+        };
+        let storey = ways[oi].tags.as_ref().map_or(4.0, part_storey_m);
+        let metres = |k: &str| tags.get(k).and_then(|v| parse_length_m(v));
+        let base = metres("min_height")
+            .or_else(|| {
+                metres("building:min_level")
+                    .filter(|l| *l > 0.0)
+                    .map(|l| storeys_m(l, storey))
+            })
+            .filter(|b| b.is_finite() && *b > 0.0)
+            .unwrap_or(0.0);
+        parts_of.entry(oi).or_default().push(Part {
+            ring: r,
+            area,
+            top: mapped_top(tags, storey),
+            base,
+        });
+    }
+
+    for (oi, parts) in parts_of {
+        let (outline, area) = &outlines[&oi];
+        let Some(tags) = ways[oi].tags.as_mut() else {
+            continue;
+        };
+        let own_top = mapped_top(tags, part_storey_m(tags));
+        let share = |p: &Part| p.area / area;
+        let on_it = |p: &&Part| p.base > 0.0 && share(p) <= PART_FIT;
+        let lowest = |least: f64| {
+            parts
+                .iter()
+                .filter(on_it)
+                .filter(|p| share(p) >= least)
+                .map(|p| p.base)
+                .min_by(f64::total_cmp)
+        };
+        let raised: Vec<&[(f64, f64)]> = parts
+            .iter()
+            .filter(on_it)
+            .map(|p| p.ring.as_slice())
+            .collect();
+        // Parts covering the outline from some height up leave it the storeys below them.
+        let podium = lowest(PODIUM_PART_SHARE)
+            .filter(|_| parts_cover(std::slice::from_ref(outline), &raised))
+            .filter(|&p| own_top.is_none_or(|t| t > p));
+        if let Some(p) = podium {
+            for k in [
+                "building:levels",
+                "roof:height",
+                "roof:levels",
+                "roof:angle",
+            ] {
+                tags.remove(k);
+            }
+            tags.insert("height".to_string(), format!("{p:.1}"));
+            tags.insert("roof:shape".to_string(), "flat".to_string());
+            continue;
+        }
+        let parts_top = parts
+            .iter()
+            .filter(|p| share(p) >= MINOR_PART_SHARE)
+            .filter_map(|p| p.top)
+            .max_by(f64::total_cmp);
+        if let (None, Some(t)) = (own_top, parts_top) {
+            tags.insert(PARTS_TOP_TAG.to_string(), format!("{t:.1}"));
+        }
+    }
+}
+
 /// Returns true if tags indicate a water element handled by water_areas.rs.
 fn is_water_element(tags: &HashMap<String, String>) -> bool {
     // Check for explicit water tag
@@ -2629,12 +3015,14 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     false
 }
 
-/// Relations whose outer members are filled as areas: natural, landuse, leisure, and
-/// the piers and breakwaters drawn as decks and mounds.
+/// Relations whose outer members are filled as areas: natural, landuse, leisure, golf, camp
+/// site and cemetery grounds, surface parking lots, and the piers and breakwaters drawn as
+/// decks and mounds.
 fn is_filled_area_relation(tags: &HashMap<String, String>) -> bool {
     tags.contains_key("natural")
         || tags.contains_key("landuse")
         || tags.contains_key("leisure")
+        || crate::element_processing::parking_lots::is_surface_lot(tags)
         || crate::element_processing::golf::claims(tags)
         || crate::element_processing::camp_sites::claims(tags)
         || crate::element_processing::cemetery::claims(tags)
@@ -2819,10 +3207,14 @@ fn area_member_role(role: &str) -> Option<ProcessedMemberRole> {
 }
 
 fn is_closed_way(way: &ProcessedWay) -> bool {
-    match (way.nodes.first(), way.nodes.last()) {
+    is_closed_ring(&way.nodes)
+}
+
+/// Closed by its node ids or its coordinates, as the clipper reads a polygon.
+fn is_closed_ring(nodes: &[ProcessedNode]) -> bool {
+    match (nodes.first(), nodes.last()) {
         (Some(first), Some(last)) => {
-            way.nodes.len() >= 3
-                && (first.id == last.id || (first.x == last.x && first.z == last.z))
+            nodes.len() >= 3 && (first.id == last.id || (first.x == last.x && first.z == last.z))
         }
         _ => false,
     }
@@ -2840,7 +3232,7 @@ fn assembled_ring_id(relation_id: u64, inner: bool, index: usize) -> u64 {
 /// Joins a multipolygon's member ways into closed rings, clips every ring to the clip bbox
 /// and returns those reaching the world as synthetic member ways. Pieces that still do not
 /// close are dropped: filled they would make a wedge, and drawn they would be a stray
-/// outline around nothing.
+/// outline around nothing. The outer rings of a `field` keep their frame as mapped.
 fn assemble_area_rings(
     relation_id: u64,
     members: &[OsmMember],
@@ -2848,6 +3240,7 @@ fn assemble_area_rings(
     ways_map: &HashMap<u64, Arc<ProcessedWay>>,
     clip_bbox: &XZBBox,
     touches_world: impl Fn(&[ProcessedNode]) -> bool,
+    field: bool,
 ) -> Vec<ProcessedMember> {
     let mut outers: Vec<Vec<ProcessedNode>> = Vec::new();
     let mut inners: Vec<Vec<ProcessedNode>> = Vec::new();
@@ -2888,17 +3281,57 @@ fn assemble_area_rings(
                 continue;
             }
             let inner = role == ProcessedMemberRole::Inner;
+            let mut tags = HashMap::new();
+            if field && !inner {
+                tags.extend(crate::element_processing::field_texture::frame_tag(&ring));
+            }
             assembled.push(ProcessedMember {
                 role: role.clone(),
                 way: Arc::new(ProcessedWay {
                     id: assembled_ring_id(relation_id, inner, index),
-                    tags: HashMap::new(),
+                    tags,
                     nodes,
                 }),
             });
         }
     }
     assembled
+}
+
+/// The rings `assemble_area_rings` joins, unclipped and kept whether or not they reach the
+/// world; pieces that do not close are still left out. A relation whose rings are whole ways
+/// takes its footprint from those ways instead.
+fn whole_area_rings(
+    relation_id: u64,
+    members: &[OsmMember],
+    roles: &[Option<ProcessedMemberRole>],
+    ways_map: &HashMap<u64, Arc<ProcessedWay>>,
+) -> Vec<ProcessedMember> {
+    let (x0, z0, x1, z1) = members
+        .iter()
+        .zip(roles)
+        .filter(|(_, role)| role.is_some())
+        .filter_map(|(m, _)| ways_map.get(&m.r#ref))
+        .flat_map(|w| w.nodes.iter())
+        .fold(
+            (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
+            |(a, b, c, d), n| (a.min(n.x), b.min(n.z), c.max(n.x), d.max(n.z)),
+        );
+    if x0 > x1 {
+        return Vec::new();
+    }
+    match XZBBox::rect_from_min_max(x0, z0, x1, z1) {
+        Ok(bounds) => assemble_area_rings(
+            relation_id,
+            members,
+            roles,
+            ways_map,
+            &bounds,
+            |_| true,
+            false,
+        ),
+        Err(_) => Vec::new(),
+    }
 }
 
 const PRIORITY_ORDER: [&str; 6] = [
@@ -3382,7 +3815,7 @@ mod outline_suppression_tests {
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
         let mut groups = PartGroups::new();
         compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
-        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        inherit_facade_tags(&mut ways, &[], &groups);
         let part = ways[1].tags.as_ref().unwrap();
         assert_eq!(
             part.get("building:material").map(String::as_str),
@@ -3405,12 +3838,51 @@ mod outline_suppression_tests {
             glass,
             tagged(square_way(200, 2000, 0.5).0, "building:part", "yes"),
         ];
-        inherit_masonry_facade_tags(&mut ways, &[], &groups);
+        inherit_facade_tags(&mut ways, &[], &groups);
         assert!(!ways[1]
             .tags
             .as_ref()
             .unwrap()
             .contains_key("building:colour"));
+    }
+
+    #[test]
+    fn glass_parts_take_the_tint_of_their_glass_outline() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let (q, qn) = square_way(300, 3000, 0.3);
+        let outline = with_tag(
+            tagged(o, "building", "office"),
+            "building:material",
+            "glass",
+        );
+        let outline = with_tag(outline, "building:colour", "#FFFFFF");
+        let part = with_tag(
+            tagged(p, "building:part", "yes"),
+            "building:material",
+            "glass",
+        );
+        let own = with_tag(
+            tagged(q, "building:part", "yes"),
+            "building:material",
+            "glass",
+        );
+        let own = with_tag(own, "building:colour", "black");
+        let mut ways = vec![outline, part, own];
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
+        let mut groups = PartGroups::new();
+        compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+        inherit_facade_tags(&mut ways, &[], &groups);
+        let colour = |i: usize| {
+            ways[i]
+                .tags
+                .as_ref()
+                .unwrap()
+                .get("building:colour")
+                .cloned()
+        };
+        assert_eq!(colour(1).as_deref(), Some("#FFFFFF"));
+        assert_eq!(colour(2).as_deref(), Some("black"));
     }
 
     // The parts of a block of flats carry the housing mark; it leaves the
@@ -3997,6 +4469,216 @@ mod outline_suppression_tests {
         let s = compute_spatial_relation_part_suppression(&[outline, part], &ways, &nodes);
         assert!(!s.contains(&("relation", 1)));
     }
+
+    // A box from (lat0, lon0) to (lat1, lon1) with the given tags, and its corner nodes.
+    fn boxed(id: u64, corners: [f64; 4], tags: &[(&str, &str)]) -> (OsmElement, Vec<OsmElement>) {
+        let [lat0, lon0, lat1, lon1] = corners;
+        let first = id * 10;
+        let nodes: Vec<OsmElement> = [(lat0, lon0), (lat0, lon1), (lat1, lon1), (lat1, lon0)]
+            .iter()
+            .enumerate()
+            .map(|(i, &(lat, lon))| node(first + i as u64, lat, lon))
+            .collect();
+        let mut ids: Vec<u64> = nodes.iter().map(|n| n.id).collect();
+        ids.push(first);
+        let way = OsmElement {
+            r#type: "way".into(),
+            id,
+            lat: None,
+            lon: None,
+            nodes: Some(ids),
+            tags: Some(
+                tags.iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            ),
+            members: Vec::new(),
+        };
+        (way, nodes)
+    }
+
+    /// A building or part's corners and tags.
+    type PartSpec<'a> = ([f64; 4], &'a [(&'a str, &'a str)]);
+
+    // Every way's tags after the outlines are lowered, parts grouped as parsing groups them.
+    fn lower_all(specs: &[PartSpec]) -> Vec<HashMap<String, String>> {
+        let mut ways = Vec::new();
+        let mut nodes = Vec::new();
+        for (i, (corners, tags)) in specs.iter().enumerate() {
+            let (w, n) = boxed(1 + i as u64, *corners, tags);
+            ways.push(w);
+            nodes.extend(n);
+        }
+        let mut groups = PartGroups::new();
+        let suppressed = suppress_outlines(
+            &[] as &[OsmElement],
+            &ways,
+            &nodes,
+            &mut groups,
+            &mut HousingRelationParts::new(),
+        );
+        lower_outlines_under_parts(&mut ways, &nodes, &[], &suppressed, &groups);
+        ways.into_iter().map(|w| w.tags.unwrap()).collect()
+    }
+
+    // The outline's tags after the outlines are lowered under the given parts.
+    fn lowered(outline: &[(&str, &str)], parts: &[PartSpec]) -> HashMap<String, String> {
+        let mut specs = vec![([0.0, 0.0, 0.001, 0.001], outline)];
+        specs.extend_from_slice(parts);
+        lower_all(&specs).swap_remove(0)
+    }
+
+    #[test]
+    fn only_storeys_raised_above_the_ground_make_a_podium() {
+        // A part from storey 0 stands on the ground beside the raised one.
+        let tags = lowered(
+            &[("building", "office"), ("height", "60")],
+            &[
+                (
+                    [0.0, 0.0, 0.001, 0.0004],
+                    &[
+                        ("building:part", "yes"),
+                        ("building:min_level", "0"),
+                        ("height", "60"),
+                    ],
+                ),
+                (
+                    [0.0, 0.0004, 0.001, 0.0007],
+                    &[
+                        ("building:part", "yes"),
+                        ("building:min_level", "5"),
+                        ("height", "60"),
+                    ],
+                ),
+            ],
+        );
+        assert_eq!(tags.get("height").map(String::as_str), Some("60"));
+        // A station's roof on posts leaves its hall as it is.
+        let hall = lowered(
+            &[("building", "train_station")],
+            &[(
+                [0.0, 0.0, 0.001, 0.001],
+                &[("building:part", "roof"), ("min_height", "8")],
+            )],
+        );
+        assert!(!hall.contains_key("height"));
+    }
+
+    #[test]
+    fn a_part_lowers_only_the_building_it_belongs_to() {
+        // A canopy over a kiosk, centred on it and far larger.
+        let kiosk = lower_all(&[
+            (TOWER, &[("building", "kiosk")]),
+            (
+                [0.0, 0.0, 0.001, 0.001],
+                &[("building:part", "yes"), ("min_height", "8")],
+            ),
+        ]);
+        assert!(!kiosk[0].contains_key("height"));
+        // A hall's raised part belongs to the small tower it is centred on, which its own
+        // ground parts replace, and not to the block around both.
+        let block = lower_all(&[
+            (
+                [0.0, 0.0, 0.001, 0.001],
+                &[("building", "yes"), ("height", "40")],
+            ),
+            (
+                [0.0002, 0.0002, 0.0008, 0.0008],
+                &[("building", "yes"), ("height", "10")],
+            ),
+            (
+                [0.0002, 0.0002, 0.0008, 0.0008],
+                &[("building:part", "yes"), ("height", "10")],
+            ),
+            (
+                [0.0001, 0.0001, 0.0009, 0.0009],
+                &[("building:part", "yes"), ("min_height", "6")],
+            ),
+        ]);
+        assert_eq!(block[0].get("height").map(String::as_str), Some("40"));
+    }
+
+    const TOWER: [f64; 4] = [0.0004, 0.0004, 0.0006, 0.0006];
+
+    #[test]
+    fn an_outline_under_raised_parts_fills_the_storeys_below_them() {
+        // The Empire State Building: its stack starts on storey five, its mast is mapped from the ground.
+        let tags = lowered(
+            &[
+                ("building", "office"),
+                ("height", "443.2"),
+                ("building:levels", "102"),
+            ],
+            &[
+                (
+                    [0.0, 0.0, 0.001, 0.001],
+                    &[
+                        ("building:part", "yes"),
+                        ("building:min_level", "5"),
+                        ("height", "75"),
+                    ],
+                ),
+                (TOWER, &[("building:part", "yes"), ("height", "443.2")]),
+            ],
+        );
+        assert_eq!(tags.get("height").map(String::as_str), Some("22.0"));
+        assert_eq!(tags.get("roof:shape").map(String::as_str), Some("flat"));
+        assert!(!tags.contains_key("building:levels"));
+    }
+
+    #[test]
+    fn a_housing_block_stands_on_housing_storeys_under_its_parts() {
+        // Its parts are lifted three metres a storey, so the podium ends where they start.
+        let tags = lowered(
+            &[("building", "apartments"), ("building:levels", "12")],
+            &[(
+                [0.0, 0.0, 0.001, 0.001],
+                &[
+                    ("building:part", "yes"),
+                    ("building:min_level", "5"),
+                    ("building:levels", "12"),
+                ],
+            )],
+        );
+        assert_eq!(tags.get("height").map(String::as_str), Some("17.0"));
+    }
+
+    #[test]
+    fn outlines_their_parts_rise_out_of_or_stay_under_keep_their_height() {
+        // A canopy raised over a corner of the ground floor.
+        let canopy = lowered(
+            &[("building", "yes"), ("height", "30")],
+            &[(TOWER, &[("building:part", "yes"), ("min_height", "3")])],
+        );
+        assert_eq!(canopy.get("height").map(String::as_str), Some("30"));
+        // A rooftop bulkhead mapped from the ground pokes out of a New York block.
+        let roof = lowered(
+            &[("building", "yes"), ("height", "47.3")],
+            &[(TOWER, &[("building:part", "yes"), ("height", "50")])],
+        );
+        assert_eq!(roof.get("height").map(String::as_str), Some("47.3"));
+        // A low wing mapped as a part of a taller hall.
+        let wing = lowered(
+            &[("building", "museum"), ("building:levels", "3")],
+            &[(TOWER, &[("building:part", "yes"), ("building:levels", "2")])],
+        );
+        assert_eq!(wing.get("building:levels").map(String::as_str), Some("3"));
+        assert!(!roof.contains_key(PARTS_TOP_TAG) && !wing.contains_key(PARTS_TOP_TAG));
+    }
+
+    #[test]
+    fn an_outline_without_height_marks_how_tall_its_parts_stand() {
+        // The Westin Bonaventure: the outline gives no height, its towers 117 m.
+        let tags = lowered(
+            &[("building", "hotel")],
+            &[(
+                [0.0, 0.0, 0.0006, 0.0007],
+                &[("building:part", "yes"), ("height", "117.4")],
+            )],
+        );
+        assert_eq!(tags.get(PARTS_TOP_TAG).map(String::as_str), Some("117.4"));
+        assert!(!tags.contains_key("height"));
+    }
 }
 
 #[cfg(test)]
@@ -4289,6 +4971,175 @@ mod osm_xml_tests {
         );
     }
 
+    // Across x = 0: a tilted field 900 m long, a Parthenon 280 m long, two fields mapped as
+    // multipolygons, one ring closed and one in two ways, an Acropolis mapped as one, and a
+    // plain building 270 m long.
+    const ACROSS_THE_SEAM: &str = r#"<osm version="0.6">
+  <node id="1" lat="47.9975" lon="10.9940"/>
+  <node id="2" lat="47.9990" lon="11.0060"/>
+  <node id="3" lat="48.0025" lon="11.0058"/>
+  <node id="4" lat="48.0010" lon="10.9938"/>
+  <node id="5" lat="47.9995" lon="10.9970"/>
+  <node id="6" lat="47.9995" lon="11.0008"/>
+  <node id="7" lat="48.0003" lon="11.0008"/>
+  <node id="8" lat="48.0003" lon="10.9970"/>
+  <way id="40"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>
+    <tag k="landuse" v="farmland"/></way>
+  <way id="41"><nd ref="5"/><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="5"/>
+    <tag k="building" v="yes"/><tag k="wikidata" v="Q10288"/></way>
+  <node id="11" lat="48.0030" lon="10.9950"/>
+  <node id="12" lat="48.0030" lon="11.0050"/>
+  <node id="13" lat="48.0045" lon="11.0052"/>
+  <node id="14" lat="48.0045" lon="10.9948"/>
+  <way id="42"><nd ref="11"/><nd ref="12"/><nd ref="13"/><nd ref="14"/><nd ref="11"/></way>
+  <relation id="50">
+    <member type="way" ref="42" role="outer"/>
+    <tag k="type" v="multipolygon"/><tag k="landuse" v="farmland"/>
+  </relation>
+  <node id="21" lat="47.9960" lon="10.9950"/>
+  <node id="22" lat="47.9960" lon="11.0050"/>
+  <node id="23" lat="47.9970" lon="11.0052"/>
+  <node id="24" lat="47.9970" lon="10.9948"/>
+  <way id="43"><nd ref="21"/><nd ref="22"/><nd ref="23"/></way>
+  <way id="44"><nd ref="23"/><nd ref="24"/><nd ref="21"/></way>
+  <relation id="51">
+    <member type="way" ref="43" role="outer"/>
+    <member type="way" ref="44" role="outer"/>
+    <tag k="type" v="multipolygon"/><tag k="landuse" v="farmland"/>
+  </relation>
+  <node id="31" lat="48.0012" lon="10.9960"/>
+  <node id="32" lat="48.0012" lon="11.0005"/>
+  <node id="33" lat="48.0018" lon="11.0005"/>
+  <node id="34" lat="48.0018" lon="10.9960"/>
+  <way id="45"><nd ref="31"/><nd ref="32"/><nd ref="33"/><nd ref="34"/><nd ref="31"/></way>
+  <relation id="52">
+    <member type="way" ref="45" role="outer"/>
+    <tag k="type" v="multipolygon"/><tag k="historic" v="castle"/>
+    <tag k="wikidata" v="Q131013"/>
+  </relation>
+  <node id="35" lat="48.0004" lon="10.9965"/>
+  <node id="36" lat="48.0004" lon="11.0002"/>
+  <node id="37" lat="48.0008" lon="11.0002"/>
+  <node id="38" lat="48.0008" lon="10.9965"/>
+  <way id="46"><nd ref="35"/><nd ref="36"/><nd ref="37"/><nd ref="38"/><nd ref="35"/>
+    <tag k="building" v="yes"/></way>
+</osm>"#;
+
+    #[test]
+    fn two_one_world_areas_lay_out_a_field_and_place_a_model_alike() {
+        use crate::element_processing::field_texture::{FieldLayout, FieldPreset, FRAME_TAG};
+        let spec = crate::projection::ProjectionSpec {
+            kind: crate::projection::ProjectionKind::WebMercator,
+            origin: Some((48.0, 11.0)),
+            scale: 1.0,
+            clip_pad: crate::one_world::CLIP_PAD_BLOCKS,
+            model_footprints: true,
+        };
+        let area = |bbox: LLBBox| parse_osm_data(parse(ACROSS_THE_SEAM).0, bbox, false, &spec).0;
+        let west = area(LLBBox::new(47.995, 10.99, 48.005, 11.0).unwrap());
+        let east = area(LLBBox::new(47.995, 11.0, 48.005, 11.01).unwrap());
+        let way = |elements: &[ProcessedElement], id: u64| {
+            elements
+                .iter()
+                .find_map(|e| match e {
+                    ProcessedElement::Way(w) if w.id == id => Some(w.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+
+        let (a, b) = (way(&west, 40), way(&east, 40));
+        assert_ne!(
+            a.nodes, b.nodes,
+            "each area keeps its own part of the field"
+        );
+        assert!(a.tags.contains_key(FRAME_TAG));
+        let (a, b) = (
+            FieldLayout::of_way(FieldPreset::Patchwork, 1.0, &a).unwrap(),
+            FieldLayout::of_way(FieldPreset::Patchwork, 1.0, &b).unwrap(),
+        );
+        for x in (-128..=128).step_by(2) {
+            for z in (-250..=250).step_by(2) {
+                assert_eq!(a.plot_at(x, z), b.plot_at(x, z), "({x}, {z})");
+            }
+        }
+
+        let (a, b) = (way(&west, 41), way(&east, 41));
+        assert_ne!(a.nodes, b.nodes, "the east area cuts the building");
+        let whole = crate::models_3d::whole_footprint(&a.tags);
+        assert!(whole.is_some());
+        assert_eq!(whole, crate::models_3d::whole_footprint(&b.tags));
+
+        let relation = |elements: &[ProcessedElement], id: u64| {
+            elements
+                .iter()
+                .find_map(|e| match e {
+                    ProcessedElement::Relation(r) if r.id == id => Some(r.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        // A multipolygon field's outer ring is laid out as landuse lays it out: under its own
+        // id, with the relation's tags and the ring's frame.
+        for (id, ring) in [(50, 42), (51, assembled_ring_id(51, false, 0))] {
+            let field = |elements: &[ProcessedElement]| {
+                let r = relation(elements, id);
+                assert_eq!(r.members.len(), 1, "{id}");
+                let member = &r.members[0].way;
+                assert_eq!(member.id, ring, "{id}");
+                let mut tags = r.tags.clone();
+                tags.extend(
+                    member
+                        .tags
+                        .get_key_value(FRAME_TAG)
+                        .map(|(k, v)| (k.clone(), v.clone())),
+                );
+                assert!(tags.contains_key(FRAME_TAG), "{id}");
+                let way = ProcessedWay {
+                    id: member.id,
+                    nodes: member.nodes.clone(),
+                    tags,
+                };
+                let zs = member.nodes.iter().map(|n| n.z);
+                let span = zs.clone().min().unwrap()..=zs.max().unwrap();
+                (
+                    FieldLayout::of_way(FieldPreset::Patchwork, 1.0, &way).unwrap(),
+                    span,
+                )
+            };
+            let ((a, span), (b, _)) = (field(&west), field(&east));
+            for x in (-120..=120).step_by(4) {
+                for z in span.clone().step_by(4) {
+                    assert_eq!(a.plot_at(x, z), b.plot_at(x, z), "{id} ({x}, {z})");
+                }
+            }
+        }
+        let (a, b) = (relation(&west, 52), relation(&east, 52));
+        assert_ne!(a.members[0].way.nodes, b.members[0].way.nodes);
+        let whole = crate::models_3d::whole_footprint(&a.tags);
+        assert!(whole.is_some());
+        assert_eq!(whole, crate::models_3d::whole_footprint(&b.tags));
+
+        // A building the east area cuts is weighed against a model's footprint as mapped.
+        let (a, b) = (way(&west, 46), way(&east, 46));
+        assert_ne!(a.nodes, b.nodes);
+        assert_eq!(crate::models_3d::whole_footprint(&a.tags), None, "not cut");
+        let whole = crate::models_3d::whole_footprint(&b.tags);
+        assert_eq!(whole.map(|(_, b)| b[2]), a.nodes.iter().map(|n| n.x).max());
+
+        // A plain run places models from what it holds, as before.
+        let plain = parse_osm_data(
+            parse(ACROSS_THE_SEAM).0,
+            LLBBox::new(47.995, 11.0, 48.005, 11.01).unwrap(),
+            false,
+            &crate::projection::ProjectionSpec::local(1.0),
+        )
+        .0;
+        assert!(plain
+            .iter()
+            .all(|e| crate::models_3d::whole_footprint(e.tags()).is_none()));
+    }
+
     #[test]
     fn parses_bounds_into_llbbox() {
         let (_, bounds) = parse(SAMPLE);
@@ -4559,6 +5410,55 @@ mod lifecycle_tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn buildings_keep_the_source_of_their_outline() {
+        let kept = filter_tags(tags(&[
+            ("building", "yes"),
+            ("source", "cadastre-dgi-fr"),
+            ("ref:bag", "363100012345678"),
+            ("source:date", "2015"),
+        ]));
+        assert_eq!(
+            kept.get("source").map(String::as_str),
+            Some("cadastre-dgi-fr")
+        );
+        assert!(kept.contains_key("ref:bag"));
+        assert!(!kept.contains_key("source:date"));
+        // Cadastre building numbers keep their key alone, a GRB reference its
+        // prefix alone, and neither survives off a building.
+        let prague = filter_tags(tags(&[
+            ("building", "yes"),
+            ("ref:ruian:building", "21642028"),
+            ("ref:ruian:addr", "123"),
+        ]));
+        assert_eq!(
+            prague.get("ref:ruian:building").map(String::as_str),
+            Some("")
+        );
+        assert!(!prague.contains_key("ref:ruian:addr"));
+        let oslo = filter_tags(tags(&[
+            ("building", "house"),
+            ("ref:bygningsnr", "80012345"),
+        ]));
+        assert_eq!(oslo.get("ref:bygningsnr").map(String::as_str), Some(""));
+        let ghent = filter_tags(tags(&[
+            ("building", "house"),
+            ("source:geometry:ref", "Gbg/1234567"),
+            ("source:geometry:date", "2015-10-01"),
+        ]));
+        assert_eq!(
+            ghent.get("source:geometry:ref").map(String::as_str),
+            Some("Gbg/")
+        );
+        assert!(!ghent.contains_key("source:geometry:date"));
+        let other = filter_tags(tags(&[("building", "yes"), ("source:geometry:ref", "abc")]));
+        assert!(!other.contains_key("source:geometry:ref"));
+        let road = filter_tags(tags(&[("highway", "service"), ("ref:bygningsnr", "1")]));
+        assert!(!road.contains_key("ref:bygningsnr"));
+        let road = filter_tags(tags(&[("highway", "residential"), ("source", "Bing")]));
+        assert!(!road.contains_key("source"));
     }
 
     #[test]

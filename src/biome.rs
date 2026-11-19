@@ -62,6 +62,7 @@ pub fn cell_biome(c: &Cell, climate: Climate, lat_deg: f64) -> &'static str {
     if c.lc == LC_WATER {
         return water_biome(c, climate, lat_deg);
     }
+    let climate = climate.for_plants(c.eco);
     if let Some(name) = mountain_biome(c, climate) {
         return name;
     }
@@ -779,5 +780,35 @@ mod tests {
         let t = Climate::Temperate;
         assert_eq!(at(LC_SHRUBLAND, t, 5.0), "minecraft:sparse_jungle");
         assert_eq!(at(LC_SHRUBLAND, t, 53.0), "minecraft:plains");
+    }
+
+    #[test]
+    fn moist_island_forest_is_no_savanna() {
+        use crate::ecoregion::lookup;
+        let aw = Climate::TropicalSavanna;
+        // St. Thomas: Leeward Islands moist forests under an Aw cell.
+        let moist = |lc| Cell {
+            eco: lookup(475),
+            ..Cell::land(lc)
+        };
+        assert_eq!(
+            cell_biome(&moist(LC_GRASSLAND), aw, 18.3),
+            "minecraft:plains"
+        );
+        assert_eq!(
+            cell_biome(&moist(LC_BUILT_UP), aw, 18.3),
+            "minecraft:plains"
+        );
+        assert_eq!(
+            cell_biome(&moist(LC_TREE_COVER), aw, 18.3),
+            "minecraft:jungle"
+        );
+        assert_eq!(water(false, aw, 18.3), "minecraft:warm_ocean");
+        // Puerto Rican dry forests stay savanna.
+        let dry = Cell {
+            eco: lookup(543),
+            ..Cell::land(LC_GRASSLAND)
+        };
+        assert_eq!(cell_biome(&dry, aw, 18.0), "minecraft:savanna");
     }
 }

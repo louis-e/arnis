@@ -303,8 +303,12 @@ fn collect_aeroways(elements: &[ProcessedElement]) -> Vec<AerowayStrip> {
     for i in 0..segs.len() {
         groups.entry(uf.find(i)).or_default().push(i);
     }
+    // In map order, not the hash map's: the spacing and the plane cap keep the first ones,
+    // so the order decides which planes stand.
+    let mut groups: Vec<Vec<usize>> = groups.into_values().collect();
+    groups.sort_unstable_by_key(|g| g[0]);
     groups
-        .values()
+        .iter()
         .filter_map(|g| strip_from_group(&segs, g))
         .collect()
 }
@@ -853,6 +857,25 @@ mod tests {
             tags,
         });
         assert_eq!(collect_aeroways(&[gravel]).len(), 1);
+    }
+
+    /// The strips come in map order on every run, so the spacing and the plane cap keep the
+    /// same planes; a hash map's order differs from one map to the next.
+    #[test]
+    fn aeroways_come_in_map_order() {
+        let ways: Vec<ProcessedElement> = (0..40u64)
+            .map(|i| {
+                let z = i as i32 * 30;
+                runway_way(
+                    100 - i,
+                    vec![mk_node(2 * i, 0, z), mk_node(2 * i + 1, 300, z)],
+                )
+            })
+            .collect();
+        for _ in 0..5 {
+            let order: Vec<u64> = collect_aeroways(&ways).iter().map(|s| s.rep_id).collect();
+            assert_eq!(order, (0..40u64).map(|i| 100 - i).collect::<Vec<_>>());
+        }
     }
 
     #[test]

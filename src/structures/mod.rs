@@ -1,18 +1,25 @@
 //! Generic Sponge .schem structure stamping (non-tree models such as the construction crane).
 
 pub mod boat;
+pub mod brandenburger_tor;
 pub mod car;
+pub mod colosseum;
 pub mod crane;
+pub mod elbphilharmonie;
 pub mod elizabeth_tower;
 pub mod excavator;
 pub mod fountain;
 pub mod helicopter;
+pub mod hollywood_sign;
 pub mod jetbridge;
 pub mod lighthouse;
 pub mod plane;
 pub mod playground;
+pub mod reichstag;
 pub mod schematic;
 pub mod starship;
+pub mod stonehenge;
+pub mod sydney_opera_house;
 pub mod tombstone;
 pub mod tractor;
 pub mod windturbine;

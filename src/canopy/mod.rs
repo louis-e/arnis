@@ -86,6 +86,13 @@ impl CanopyData {
         self.height = height;
     }
 
+    /// Overwrite one cell, as measured laser canopy does.
+    pub fn set(&mut self, gx: usize, gz: usize, v: u8) {
+        if gx < self.width && gz < self.height {
+            self.grid[gz * self.width + gx] = v;
+        }
+    }
+
     #[inline(always)]
     pub fn at(&self, gx: usize, gz: usize) -> u8 {
         if gx >= self.width || gz >= self.height {

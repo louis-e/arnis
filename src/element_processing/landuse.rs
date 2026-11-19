@@ -4,12 +4,13 @@ use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::element_processing::bush::{place_bush, BushKind};
 use crate::element_processing::construction_site;
-use crate::element_processing::field_texture::{place_cover, FieldLayout, Plot};
+use crate::element_processing::field_texture::{self, place_cover, FieldLayout, Plot};
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{
     in_hole, without_holes, BuildingFootprintBitmap, FloodFillCache, Holes, InnerRings,
     RoadMaskBitmap,
 };
+use crate::ground_generation::FOREST_LITTER;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::prelude::IndexedRandom;
@@ -199,12 +200,15 @@ fn landuse_area(
     let area_climate = editor.climate();
 
     let field_layout = (landuse_tag == "farmland")
-        .then(|| FieldLayout::new(args.fields, args.scale, element.id, &element.nodes))
+        .then(|| FieldLayout::of_way(args.fields, args.scale, element))
         .flatten();
 
     let draws_per_cell = matches!(landuse_tag.as_str(), "industrial" | "quarry");
     let plants_here = crate::element_processing::natural::piece_plants_at(args);
     let woods_by_cell = crate::element_processing::natural::woods_by_cell(args);
+    // Commercial land and the like are marked from the element list (`garden_areas`).
+    let wild = matches!(landuse_tag.as_str(), "forest" | "meadow");
+    let mown = mows(landuse_tag, floor_area.len(), args.scale);
     for &(x, z) in floor_area.iter() {
         if in_hole(holes, x, z) {
             continue;
@@ -218,8 +222,14 @@ fn landuse_area(
             }
             continue;
         }
+        if wild {
+            editor.mark_ground(crate::world_editor::GroundMark::Wild, x, z);
+        }
         let plot = field_layout.as_ref().map(|l| l.plot_at(x, z));
         let climate = editor.local_climate(x, z).unwrap_or(area_climate);
+        let forest_floor = (landuse_tag == "forest")
+            .then(|| editor.forest_floor_at(x, z))
+            .flatten();
 
         // Apply per-block randomness for certain landuse types
         let actual_block = if let Some(p) = &plot {
@@ -251,6 +261,8 @@ fn landuse_area(
             } else {
                 ANDESITE
             }
+        } else if let Some(floor) = forest_floor {
+            floor
         } else {
             block_type
         };
@@ -274,6 +286,13 @@ fn landuse_area(
         } else if !is_protected {
             editor.set_block(actual_block, x, 0, z, None, None);
         }
+        if mown
+            && !editor.surface_is_sealed(x, z)
+            && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+            && crate::land_cover::mown_cover(editor.land_cover_class(x, z))
+        {
+            editor.mark_ground(crate::world_editor::GroundMark::Lawn, x, z);
+        }
 
         // Nothing is scattered on land-cover water: the depth carve turns these
         // cells into lake after this runs, leaving plants floating on top. And
@@ -288,7 +307,13 @@ fn landuse_area(
 
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
-            "forest" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
+            "forest"
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    || editor.check_for_block(x, 0, z, Some(FOREST_LITTER)) =>
+            {
+                // Litter carries the odd fern, a sward under crowns thins out.
+                let litter = editor.check_for_block(x, 0, z, Some(FOREST_LITTER));
+                let floor = forest_floor.is_some();
                 // Density-modulated spawn: thickets in some patches, clearings in others.
                 let density = crate::ground_generation::value_noise_01(x, z, 32);
                 let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
@@ -329,9 +354,14 @@ fn landuse_area(
                             ),
                         }
                     } else if random_choice <= 12 {
-                        if rng.random_range(0..100) < 12 {
+                        let fern = rng.random_range(0..100) < 12;
+                        if litter {
+                            if random_choice <= 3 {
+                                editor.set_block(FERN, x, 1, z, None, None);
+                            }
+                        } else if fern {
                             editor.set_block(FERN, x, 1, z, None, None);
-                        } else {
+                        } else if !floor || random_choice <= 5 {
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
                     }
@@ -610,10 +640,14 @@ pub fn generate_landuse_from_relation(
             if member.role == ProcessedMemberRole::Outer {
                 let holes = flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
                 // Use relation tags so the member inherits the relation's landuse=* type
+                let mut tags = rel.tags.clone();
+                if let Some(frame) = member.way.tags.get(field_texture::FRAME_TAG) {
+                    tags.insert(field_texture::FRAME_TAG.to_string(), frame.clone());
+                }
                 let way_with_rel_tags = ProcessedWay {
                     id: member.way.id,
                     nodes: member.way.nodes.clone(),
-                    tags: rel.tags.clone(),
+                    tags,
                 };
                 landuse_area(
                     editor,
@@ -655,6 +689,344 @@ pub fn generate_place(
     // Place ground blocks
     for &(x, z) in floor_area.iter() {
         editor.set_block(block_type, x, 0, z, None, None);
+    }
+}
+
+/// Largest recreation ground mown as a lawn, in m²: a sports field or a park lawn. A larger
+/// one, an airfield's meadow or a common, keeps its tall grass.
+const MOWN_RECREATION_M2: f64 = 50_000.0;
+
+/// Whether a landuse area of `cells` blocks is mown: a village green, or a recreation
+/// ground up to `MOWN_RECREATION_M2`. Not `landuse=grass`, which is also mapped on rural
+/// meadows.
+fn mows(landuse: &str, cells: usize, scale: f64) -> bool {
+    match landuse {
+        "village_green" => true,
+        "recreation_ground" => (cells as f64) <= MOWN_RECREATION_M2 * scale * scale,
+        _ => false,
+    }
+}
+
+/// Calls `span(x0, x1, z)` for the filled row spans inside `bbox` of every closed way and
+/// multipolygon whose tags `pick` takes, holes left out. `pick` is told whether it is
+/// looking at a relation.
+fn area_spans(
+    elements: &[crate::osm_parser::ProcessedElement],
+    bbox: &crate::coordinate_system::cartesian::XZBBox,
+    pick: impl Fn(&std::collections::HashMap<String, String>, bool) -> bool,
+    mut span: impl FnMut(i32, i32, i32),
+) {
+    use crate::coordinate_system::cartesian::XZPoint;
+    use crate::osm_parser::{ProcessedElement, ProcessedNode};
+    let ring = |nodes: &[ProcessedNode]| -> Option<Vec<XZPoint>> {
+        let (first, last) = (nodes.first()?, nodes.last()?);
+        (nodes.len() >= 4 && first.x == last.x && first.z == last.z)
+            .then(|| nodes.iter().map(ProcessedNode::xz).collect())
+    };
+    let mut fill = |outers: Vec<Vec<XZPoint>>, inners: Vec<Vec<XZPoint>>| {
+        let Some((z0, z1)) = outers
+            .iter()
+            .flatten()
+            .fold(None, |b: Option<(i32, i32)>, p| {
+                Some(b.map_or((p.z, p.z), |(lo, hi)| (lo.min(p.z), hi.max(p.z))))
+            })
+        else {
+            return;
+        };
+        let edges = crate::element_processing::water_areas::PolygonEdges::new(&outers, &inners);
+        for z in z0.max(bbox.min_z())..=z1.min(bbox.max_z()) {
+            for (x0, x1) in edges.row_spans(z, bbox.min_x(), bbox.max_x()) {
+                span(x0, x1, z);
+            }
+        }
+    };
+    for element in elements {
+        match element {
+            ProcessedElement::Way(way) if pick(&way.tags, false) => {
+                if let Some(r) = ring(&way.nodes) {
+                    fill(vec![r], Vec::new());
+                }
+            }
+            ProcessedElement::Relation(rel) if pick(&rel.tags, true) => {
+                let (mut outers, mut inners) = (Vec::new(), Vec::new());
+                for m in &rel.members {
+                    match m.role {
+                        ProcessedMemberRole::Outer => outers.push(m.way.nodes.clone()),
+                        ProcessedMemberRole::Inner => inners.push(m.way.nodes.clone()),
+                        ProcessedMemberRole::Part => {}
+                    }
+                }
+                super::merge_way_segments(&mut outers);
+                super::merge_way_segments(&mut inners);
+                let outers: Vec<_> = outers.iter().filter_map(|r| ring(r)).collect();
+                let inners = inners.iter().filter_map(|r| ring(r)).collect();
+                if !outers.is_empty() {
+                    fill(outers, inners);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Land whose open ground stays paved whatever stands near it: commercial and retail land,
+/// and the grounds of schools, hospitals and town halls. Not church land, where the
+/// churches are no homes but a rectory or a seminary's houses stand in green, nor a
+/// kindergarten's, which is a play garden.
+fn keeps_no_gardens(tags: &std::collections::HashMap<String, String>) -> bool {
+    matches!(
+        tags.get("landuse").map(String::as_str),
+        Some("commercial" | "retail" | "education")
+    ) || matches!(
+        tags.get("amenity").map(String::as_str),
+        Some("school" | "college" | "university" | "hospital" | "clinic" | "townhall")
+    )
+}
+
+/// What the gardens read of the land, from the element list on their coarse grid: the
+/// grounds that stay paved (`keeps_no_gardens`), and residential land. Ways and
+/// multipolygons, holes left out. From the element list, since most of this land leaves its
+/// ground to the land cover and is never filled while elements are placed.
+pub fn garden_areas(
+    elements: &[crate::osm_parser::ProcessedElement],
+    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
+) -> (
+    crate::floodfill_cache::CoarseMask,
+    crate::floodfill_cache::CoarseMask,
+) {
+    let mut grounds = crate::floodfill_cache::CoarseMask::new(xzbbox);
+    area_spans(
+        elements,
+        xzbbox,
+        |tags, _| keeps_no_gardens(tags),
+        |x0, x1, z| grounds.set_span(x0, x1, z),
+    );
+    let mut residential = crate::floodfill_cache::CoarseMask::new(xzbbox);
+    area_spans(
+        elements,
+        xzbbox,
+        |tags, _| tags.get("landuse").map(String::as_str) == Some("residential"),
+        |x0, x1, z| residential.set_span(x0, x1, z),
+    );
+    (grounds, residential)
+}
+
+/// Marks the paved areas a garden keeps a street's margin from: squares, pedestrian areas,
+/// `area:highway` surfaces, marketplaces, and car parks mapped as multipolygons (those
+/// mapped as ways come in with their fills, `highways::collect_garden_streets`). Many of
+/// these paint no ground of their own, so their land would read as open.
+pub fn mark_paved_areas(
+    elements: &[crate::osm_parser::ProcessedElement],
+    bbox: &crate::coordinate_system::cartesian::XZBBox,
+    streets: &mut crate::floodfill_cache::CoordinateBitmap,
+) {
+    let paved = |tags: &std::collections::HashMap<String, String>, relation: bool| {
+        tags.contains_key("area:highway")
+            || tags.get("place").map(String::as_str) == Some("square")
+            || tags.get("amenity").map(String::as_str) == Some("marketplace")
+            || (relation && super::highways::is_surface_car_park(tags))
+            || (tags.contains_key("highway")
+                && (relation || tags.get("area").map(String::as_str) == Some("yes")))
+    };
+    area_spans(elements, bbox, paved, |x0, x1, z| {
+        for x in x0..=x1 {
+            streets.set(x, z);
+        }
+    });
+}
+
+#[cfg(test)]
+mod garden_areas_tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::osm_parser::{ProcessedElement, ProcessedMember, ProcessedNode};
+    use std::collections::HashMap;
+
+    fn square(id: u64, (x0, z0): (i32, i32), (x1, z1): (i32, i32)) -> ProcessedWay {
+        let node = |i: u64, x: i32, z: i32| ProcessedNode {
+            id: id * 10 + i,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        ProcessedWay {
+            id,
+            nodes: vec![
+                node(0, x0, z0),
+                node(1, x1, z0),
+                node(2, x1, z1),
+                node(3, x0, z1),
+                node(0, x0, z0),
+            ],
+            tags: HashMap::new(),
+        }
+    }
+
+    fn tagged(mut way: ProcessedWay, k: &str, v: &str) -> ProcessedWay {
+        way.tags.insert(k.to_string(), v.to_string());
+        way
+    }
+
+    /// Commercial land paints no ground and is never filled while elements are placed,
+    /// so it is marked from the element list: ways and multipolygons, holes left out,
+    /// retail as well. Residential land comes in its own mask.
+    #[test]
+    fn commercial_and_retail_land_is_marked_from_the_element_list() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 199, 199).unwrap();
+        let elements = vec![
+            ProcessedElement::Way(tagged(
+                square(1, (10, 10), (40, 40)),
+                "landuse",
+                "commercial",
+            )),
+            ProcessedElement::Way(tagged(square(2, (60, 10), (80, 30)), "landuse", "retail")),
+            ProcessedElement::Way(tagged(
+                square(3, (100, 10), (130, 40)),
+                "landuse",
+                "residential",
+            )),
+            ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+                id: 9,
+                tags: HashMap::from([
+                    ("type".to_string(), "multipolygon".to_string()),
+                    ("landuse".to_string(), "commercial".to_string()),
+                ]),
+                members: vec![
+                    ProcessedMember {
+                        role: ProcessedMemberRole::Outer,
+                        way: std::sync::Arc::new(square(4, (10, 100), (90, 180))),
+                    },
+                    ProcessedMember {
+                        role: ProcessedMemberRole::Inner,
+                        way: std::sync::Arc::new(square(5, (30, 120), (70, 160))),
+                    },
+                ],
+            }),
+        ];
+        // The landuse pass itself leaves commercial land alone.
+        assert!(!crate::element_processing::landuse_paints_ground(
+            elements[0].tags()
+        ));
+        let (mask, residential) = garden_areas(&elements, &bbox);
+        assert!(mask.contains(25, 25) && mask.contains(70, 20));
+        assert!(!mask.contains(115, 25), "residential");
+        assert!(residential.contains(115, 25) && !residential.contains(25, 25));
+        assert!(mask.contains(20, 110) && mask.contains(85, 175));
+        assert!(!mask.contains(50, 140), "the hole");
+        assert!(!mask.contains(150, 150));
+    }
+
+    /// School and hospital grounds stay paved like commercial land, mapped as landuse or as
+    /// the amenity's own area; church land, kindergartens and parks do not.
+    #[test]
+    fn school_and_hospital_grounds_keep_no_gardens() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 199, 99).unwrap();
+        let elements = vec![
+            ProcessedElement::Way(tagged(square(1, (0, 0), (20, 20)), "landuse", "education")),
+            ProcessedElement::Way(tagged(square(2, (30, 0), (50, 20)), "landuse", "retail")),
+            ProcessedElement::Way(tagged(square(3, (60, 0), (80, 20)), "amenity", "school")),
+            ProcessedElement::Way(tagged(square(4, (90, 0), (110, 20)), "amenity", "hospital")),
+            ProcessedElement::Way(tagged(square(5, (120, 0), (140, 20)), "amenity", "clinic")),
+            ProcessedElement::Way(tagged(
+                square(6, (150, 0), (170, 20)),
+                "amenity",
+                "townhall",
+            )),
+            ProcessedElement::Way(tagged(square(7, (0, 50), (20, 70)), "amenity", "cafe")),
+            ProcessedElement::Way(tagged(square(8, (30, 50), (50, 70)), "leisure", "park")),
+            ProcessedElement::Way(tagged(
+                square(9, (60, 50), (80, 70)),
+                "landuse",
+                "religious",
+            )),
+            ProcessedElement::Way(tagged(
+                square(10, (90, 50), (110, 70)),
+                "amenity",
+                "kindergarten",
+            )),
+        ];
+        let (grounds, _) = garden_areas(&elements, &bbox);
+        for x in [10, 40, 70, 100, 130, 160] {
+            assert!(grounds.contains(x, 10), "x={x}");
+        }
+        assert!(!grounds.contains(10, 60) && !grounds.contains(40, 60));
+        assert!(!grounds.contains(70, 60), "church land");
+        assert!(!grounds.contains(100, 60), "a kindergarten");
+    }
+
+    /// Squares, pedestrian areas and car parks mapped as multipolygons paint no ground of
+    /// their own, so they are marked as paving from the element list, with `area:highway`
+    /// surfaces and pedestrian areas mapped as ways. A footway or a lawn is not.
+    #[test]
+    fn squares_and_pedestrian_areas_are_paved_for_the_gardens() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 199, 99).unwrap();
+        let relation = |id: u64, pairs: &[(&str, &str)], outer: ProcessedWay| {
+            let mut tags: HashMap<String, String> = pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            tags.insert("type".to_string(), "multipolygon".to_string());
+            ProcessedElement::Relation(crate::osm_parser::ProcessedRelation {
+                id,
+                tags,
+                members: vec![ProcessedMember {
+                    role: ProcessedMemberRole::Outer,
+                    way: std::sync::Arc::new(outer),
+                }],
+            })
+        };
+        let elements = vec![
+            relation(
+                10,
+                &[("place", "square"), ("highway", "pedestrian")],
+                square(1, (0, 0), (20, 20)),
+            ),
+            relation(11, &[("amenity", "parking")], square(2, (30, 0), (50, 20))),
+            relation(
+                12,
+                &[("amenity", "parking"), ("parking", "underground")],
+                square(3, (60, 0), (80, 20)),
+            ),
+            ProcessedElement::Way(tagged(
+                square(4, (90, 0), (110, 20)),
+                "area:highway",
+                "pedestrian",
+            )),
+            ProcessedElement::Way(tagged(
+                tagged(square(5, (120, 0), (140, 20)), "highway", "pedestrian"),
+                "area",
+                "yes",
+            )),
+            ProcessedElement::Way(tagged(square(6, (150, 0), (170, 20)), "highway", "footway")),
+            ProcessedElement::Way(tagged(square(7, (0, 50), (20, 70)), "landuse", "grass")),
+            ProcessedElement::Way(tagged(
+                square(8, (30, 50), (50, 70)),
+                "amenity",
+                "marketplace",
+            )),
+        ];
+        let mut streets = crate::floodfill_cache::CoordinateBitmap::new(&bbox);
+        mark_paved_areas(&elements, &bbox, &mut streets);
+        for (x, z) in [(10, 10), (40, 10), (100, 10), (130, 10), (40, 60)] {
+            assert!(streets.contains(x, z), "({x}, {z})");
+        }
+        assert!(!streets.contains(70, 10), "an underground car park");
+        assert!(!streets.contains(160, 10), "a footway's ring is a line");
+        assert!(!streets.contains(10, 60), "a lawn");
+    }
+
+    /// Greens and small recreation grounds are mown, a recreation ground of more than 5 ha
+    /// keeps its tall grass, at any scale, and plain grass is never a lawn.
+    #[test]
+    fn only_greens_and_small_recreation_grounds_are_mown() {
+        assert!(mows("village_green", 400_000, 1.0));
+        assert!(mows("recreation_ground", 30_000, 1.0));
+        assert!(!mows("recreation_ground", 60_000, 1.0));
+        assert!(mows("recreation_ground", 12_000, 0.5));
+        assert!(!mows("recreation_ground", 15_000, 0.5));
+        assert!(mows("recreation_ground", 150_000, 2.0));
+        assert!(!mows("recreation_ground", 250_000, 2.0));
+        assert!(!mows("grass", 100, 1.0));
     }
 }
 

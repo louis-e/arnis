@@ -289,6 +289,7 @@ fn process_element(
     part_groups: &PartGroups,
     housing_relation_parts: &HousingRelationParts,
     group_members: &FnvHashMap<u64, Vec<u64>>,
+    neighbours: &buildings::Neighbours,
     still_surfaces: &water_areas::StillWaterSurfaces,
     interior_uses: &InteriorUseIndex,
     barrier_clearance: &barriers::RoadClearance,
@@ -348,6 +349,10 @@ fn process_element(
                         args.timeout.as_ref(),
                     );
                 }
+            } else if (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
+                && editor.stations().is_some_and(|s| s.draws_building(way.id))
+            {
+                // A canopy or train shed over platforms, drawn with its station.
             } else if args.mode == GenerationMode::Blueprint
                 && (way.tags.contains_key("building") || way.tags.contains_key("building:part"))
             {
@@ -363,6 +368,8 @@ fn process_element(
                     building_footprints,
                     group_members,
                     housing_relation_parts,
+                    neighbour_heights: &neighbours.heights,
+                    inset_plan: &neighbours.steps,
                     interior_uses,
                 };
                 let anchor =
@@ -401,9 +408,15 @@ fn process_element(
                     tunnel_footprint,
                     tunnel_cells,
                     road_markings,
+                    building_footprints,
                 );
                 if signage {
-                    signage::generate_highway_way_signage(editor, way, building_footprints);
+                    signage::generate_highway_way_signage(
+                        editor,
+                        way,
+                        building_footprints,
+                        road_mask,
+                    );
                 }
             } else if way.tags.get("amenity").map(String::as_str) == Some("fuel") {
                 fuel_stations::generate_station(
@@ -476,7 +489,7 @@ fn process_element(
                     bridge_surface,
                 );
                 if signage && way.tags.get("amenity").map(String::as_str) == Some("parking") {
-                    signage::generate_parking_signage(editor, way, road_mask);
+                    signage::generate_parking_signage(editor, way, building_footprints, road_mask);
                 }
             } else if way.tags.contains_key("leisure") {
                 leisure::generate_leisure(
@@ -486,6 +499,7 @@ fn process_element(
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    road_mask,
                 );
             } else if way.tags.contains_key("barrier") {
                 barriers::generate_barriers(
@@ -511,15 +525,16 @@ fn process_element(
                     waterways::generate_waterways(
                         editor,
                         way,
-                        args.water.water_detail.channel_width_cap(args.scale),
+                        waterways::ChannelShape {
+                            scale: args.scale,
+                            width_cap: args.water.water_detail.channel_width_cap(args.scale),
+                            roads_at_grade: big_water_field.roads_at_grade(),
+                        },
                         &waterways::ChannelBed {
                             field: big_water_field,
                             road_mask,
                             tunnel_footprint,
                             decks: bridge_surface,
-                            piped_under_roads: (args.water.river_bed != Default::default()
-                                || args.water.water_detail != Default::default())
-                            .then_some(bridge_surface),
                         },
                     );
                 }
@@ -578,6 +593,28 @@ fn process_element(
             }
         }
         ProcessedElement::Node(node) => {
+            // A fountain is handed to the tiles its basin reaches; outside its own only the basin is built.
+            if !editor.owns(node.x, node.z)
+                && crate::structures::fountain::node_spread(&node.tags, args.scale).is_some()
+            {
+                // Only if its own tile reaches the amenity branch below with it too.
+                let claimed_before = node.tags.contains_key("door")
+                    || node.tags.contains_key("entrance")
+                    || node.tags.get("natural").map(String::as_str) == Some("tree")
+                    || attractions::claims(&node.tags)
+                    || man_made::is_summit_cross(&node.tags);
+                if !claimed_before {
+                    amenities::generate_amenities(
+                        editor,
+                        element,
+                        args,
+                        flood_fill_cache,
+                        road_mask,
+                        bridge_surface,
+                    );
+                }
+                return;
+            }
             if signage {
                 signage::generate_node_signage(editor, node, building_footprints, road_mask);
             }
@@ -643,6 +680,7 @@ fn process_element(
                     tunnel_footprint,
                     tunnel_cells,
                     road_markings,
+                    building_footprints,
                 );
             } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
                 highways::generate_helipad_node(editor, node, args, building_footprints);
@@ -662,6 +700,22 @@ fn process_element(
                 emergency::generate_emergency(editor, node, road_mask);
             } else if node.tags.contains_key("advertising") {
                 advertising::generate_advertising(editor, node, road_mask);
+            } else if let Some(kind @ ("stone" | "rock")) =
+                node.tags.get("natural").map(String::as_str)
+            {
+                // A mapped boulder, at full size and on land: water is carved after nodes.
+                if args.scale >= 0.75
+                    && editor.cover_class(node.x, node.z) != crate::land_cover::LC_WATER
+                {
+                    crate::ground_scatter::place_mapped_rock(
+                        editor,
+                        building_footprints,
+                        node.x,
+                        node.z,
+                        node.id,
+                        kind == "stone",
+                    );
+                }
             }
         }
         ProcessedElement::Relation(rel) => match RelationArea::of(&rel.tags) {
@@ -677,6 +731,8 @@ fn process_element(
                     building_footprints,
                     group_members,
                     housing_relation_parts,
+                    neighbour_heights: &neighbours.heights,
+                    inset_plan: &neighbours.steps,
                     interior_uses,
                 };
                 buildings::generate_building_from_relation(editor, rel, args, &ctx, xzbbox);
@@ -722,6 +778,7 @@ fn process_element(
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    road_mask,
                 );
             }
             Some(RelationArea::Golf) => {
@@ -774,6 +831,38 @@ fn process_element(
                     timeout: args.timeout.as_ref(),
                 };
                 swimming_pools::generate_swimming_pool_from_relation(editor, rel, &ctx);
+            }
+            Some(RelationArea::Parking) => {
+                // Each outer ring with the relation's tags, less the holes its inner rings cut.
+                let inners = InnerRings::of(rel);
+                for member in rel
+                    .members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer)
+                {
+                    let holes =
+                        flood_fill_cache.holes_in(&member.way, &inners, args.timeout.as_ref());
+                    let way = ProcessedWay {
+                        id: member.way.id,
+                        nodes: member.way.nodes.clone(),
+                        tags: rel.tags.clone(),
+                    };
+                    parking_lots::generate_parking_lot(
+                        editor,
+                        &way,
+                        args,
+                        flood_fill_cache,
+                        holes.as_ref(),
+                    );
+                    if signage {
+                        signage::generate_parking_signage(
+                            editor,
+                            &way,
+                            building_footprints,
+                            road_mask,
+                        );
+                    }
+                }
             }
             Some(RelationArea::ManMade) => {
                 man_made::generate_man_made(
@@ -909,7 +998,7 @@ pub fn generate_world_with_options(
     args: &Args,
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
-    part_groups: PartGroups,
+    mut part_groups: PartGroups,
     housing_parts: HousingRelationParts,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
@@ -964,6 +1053,8 @@ pub fn generate_world_with_options(
     waterfront::drop_paths_on_piers(&mut elements, args.scale, args.timeout.as_ref());
     // A peak's summit cross that is also mapped on its own stands once, as the mapped one.
     man_made::drop_doubled_summit_crosses(&mut elements, args.scale);
+    // Parking lots lay their stalls along the aisles mapped in them.
+    parking_lots::orient_parking_lots(&mut elements);
 
     crate::element_processing::surfaces::set_patches(args.surface_patches);
 
@@ -1007,10 +1098,11 @@ pub fn generate_world_with_options(
     };
     // Voxy and DH render from stored light, so an unlit LOD cache would be a
     // black horizon. The toggles imply baked lighting rather than silently
-    // producing that.
-    let wants_voxy = args.voxy_lod && world_format == WorldFormat::JavaAnvil;
-    let wants_dh = args.dh_lod && world_format == WorldFormat::JavaAnvil;
-    editor.set_bake_lighting(args.bake_lighting || wants_voxy || wants_dh);
+    // producing that. A One World builds its caches from every region after the run.
+    let java = world_format == WorldFormat::JavaAnvil;
+    let wants_voxy = args.voxy_lod && java && one_world.is_none();
+    let wants_dh = args.dh_lod && java && one_world.is_none();
+    editor.set_bake_lighting(args.bake_lighting || (java && (args.voxy_lod || args.dh_lod)));
     let void_world =
         world_format == WorldFormat::JavaAnvil && args.world_type == crate::args::WorldType::Void;
     editor.set_void_world(void_world || args.sparse_features);
@@ -1111,7 +1203,6 @@ pub fn generate_world_with_options(
     // Mapillary side still decides for itself whether to collect anything: its
     // `collect` also asks the facade store, which is off unless the export
     // asked for the photos mode.
-    let java = world_format == WorldFormat::JavaAnvil;
     // The atlas the panels are budgeted against, before anything measures one.
     // Both sources read it, so it is set whichever of them is running.
     crate::mapillary::atlas::set_atlas_side(args.facade_detail.atlas_side());
@@ -1238,6 +1329,8 @@ pub fn generate_world_with_options(
         );
     }
 
+    let mut ground = ground;
+    let roads_at_grade = ground.take_roads_at_grade();
     let ground = Arc::new(ground);
     let mut bench = crate::bench::Bench::new(args.benchmark);
     crate::world_editor::reset_section_counters(args.benchmark);
@@ -1273,6 +1366,7 @@ pub fn generate_world_with_options(
         args.water.water_detail,
         args.scale,
     );
+    big_water_field.pipe_channels_under(roads_at_grade);
     big_water_field.set_river_bed(crate::river_bed::compute_river_bed_field(
         args.water.river_bed,
         &elements,
@@ -1281,7 +1375,11 @@ pub fn generate_world_with_options(
         &xzbbox,
         &clip_bbox,
         args.scale,
-        args.water.water_detail.channel_width_cap(args.scale),
+        waterways::ChannelShape {
+            scale: args.scale,
+            width_cap: args.water.water_detail.channel_width_cap(args.scale),
+            roads_at_grade: big_water_field.roads_at_grade(),
+        },
     ));
     let big_water_field = Arc::new(big_water_field);
     // Resolved once here: a body spanning many tiles must not be measured per tile.
@@ -1326,6 +1424,7 @@ pub fn generate_world_with_options(
     cemetery::prepare(&mut elements, sign_region);
     camp_sites::prepare(&mut elements);
     allotments::prepare(&mut elements, args.scale);
+    mobile_homes::prepare(&mut elements, args.scale);
     // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 
@@ -1334,7 +1433,10 @@ pub fn generate_world_with_options(
 
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
-    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &clip_bbox);
+    // The walls that come down to the ground among them come in the same pass, each
+    // building filled once for both.
+    let (building_footprints, wall_footprints) =
+        flood_fill_cache.collect_building_and_wall_footprints(&elements, &clip_bbox);
 
     // Tenants and surrounding areas per building, for interiors furnished by use.
     let interior_uses = if args.interior {
@@ -1352,19 +1454,107 @@ pub fn generate_world_with_options(
         railways::collect_rail_passages(&elements, &clip_bbox, args.scale, &building_footprints);
     building_passages.union_with(&rail_passages.cells);
 
+    // Mapped trees first: a road's verge keeps its ground only for a canopy tree that will
+    // stand, and none stands under a mapped tree's crown.
+    let mut mapped_trunks = crate::trees::mapped::MappedTrunks::collect(&elements, args.scale);
+    let crown_r = crate::element_processing::tree::crown_probe_blocks(args.scale);
+    mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
+    let mapped_trunks = Arc::new(mapped_trunks);
+    editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+    // Where trunks stand, mapped or grown from the canopy map, found once: the road masks and
+    // the roads ask about them for every cell past a road's core.
+    editor.index_standing_trunks();
+    let standing_trunks = editor.standing_trunks();
+
+    // What a road's strip past its core stops at: the walls on the ground, not a roof on
+    // posts or a part bridging the street, which the road runs on under.
+    let wall_footprints = Arc::new(wall_footprints);
+    editor.set_wall_footprints(Arc::clone(&wall_footprints));
+    // And the water it stops at, block for block.
+    let water_areas = Arc::new(flood_fill_cache.collect_water_areas(&elements, &clip_bbox));
+    editor.set_water_areas(Arc::clone(&water_areas));
+
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups. The carriageways
     // among them come in the same pass: trees keep their trunks out of them, mapped
     // street trees included, and leave more headroom over them than over a footway.
-    let (road_mask, carriageway) = highways::collect_road_and_carriageway_coords(
-        &elements,
-        &editor,
-        &clip_bbox,
-        args.scale,
-        args.water.water_detail,
+    // Alongside, each on a thread of its own, what the gardens read besides the marks: the
+    // grounds that stay paved and residential land, which are never filled while elements
+    // are placed, and the streets, squares and car parks that keep paving beside them, which
+    // read neither the kerb strips nor anything set from the road masks. And what the kerb strips read besides the masks: the ways they
+    // lie between, stamped from their tags, and what they must not pave over.
+    let (road_coords, (garden_land, kerb_ways, kerb_blockers)) = rayon::join(
+        || {
+            highways::collect_road_and_carriageway_coords(
+                &elements,
+                &editor,
+                &clip_bbox,
+                args.scale,
+                args.water.water_detail,
+                &wall_footprints,
+            )
+        },
+        || {
+            let (garden_land, (kerb_ways, kerb_blockers)) = rayon::join(
+                || {
+                    let (grounds, residential) =
+                        crate::element_processing::landuse::garden_areas(&elements, &xzbbox);
+                    let mut streets = highways::collect_garden_streets(
+                        &elements,
+                        &editor,
+                        &clip_bbox,
+                        args.scale,
+                        args.water.water_detail,
+                        |way| Some(flood_fill_cache.get_or_compute(way, args.timeout.as_ref())),
+                    );
+                    crate::element_processing::landuse::mark_paved_areas(
+                        &elements,
+                        &clip_bbox,
+                        &mut streets,
+                    );
+                    crate::world_editor::GardenLand {
+                        grounds,
+                        residential,
+                        streets,
+                    }
+                },
+                || {
+                    rayon::join(
+                        || {
+                            crate::element_processing::kerb_strips::KerbWays::stamp(
+                                &elements, &editor, &clip_bbox, args.scale,
+                            )
+                        },
+                        || flood_fill_cache.collect_kerb_blockers(&elements, &clip_bbox),
+                    )
+                },
+            );
+            (garden_land, kerb_ways, kerb_blockers)
+        },
     );
+    // Sidewalks a block or two off the road they run beside are paved out to it.
+    let kerb_strips = kerb_ways.strips(
+        &editor,
+        args.scale,
+        &road_coords.roads,
+        &building_footprints,
+        &kerb_blockers,
+    );
+    drop((kerb_ways, kerb_blockers));
+    let highways::RoadCoords {
+        roads: mut road_mask,
+        carriageways: carriageway,
+        paths: mapped_paths,
+        cut: road_cut,
+        junctions: road_junctions,
+    } = road_coords;
+    let kerb_strips = Arc::new(kerb_strips);
+    for (x, z) in kerb_strips.cells() {
+        road_mask.set(x, z);
+    }
+    editor.set_kerb_strips(Arc::clone(&kerb_strips));
     let road_mask = Arc::new(road_mask);
     let carriageway = Arc::new(if carriageway.is_empty() {
         CoordinateBitmap::new_empty()
@@ -1386,17 +1576,52 @@ pub fn generate_world_with_options(
     editor.set_sealed_surface(Arc::clone(&sealed_surface));
 
     editor.set_carriageway(Arc::clone(&carriageway));
+    let mapped_paths = Arc::new(mapped_paths);
+    editor.set_mapped_paths(Arc::clone(&mapped_paths));
+    let road_junctions = Arc::new(road_junctions);
+    editor.set_junctions(Arc::clone(&road_junctions));
 
-    let mut mapped_trunks = crate::trees::mapped::MappedTrunks::collect(&elements, args.scale);
-    let crown_r = crate::element_processing::tree::crown_probe_blocks(args.scale);
-    mapped_trunks.measure_typical_height(|x, z| editor.canopy_top_m(x, z, crown_r).flatten());
-    let mapped_trunks = Arc::new(mapped_trunks);
-    editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+    let garden_land = Arc::new(garden_land);
+    editor.set_garden_land(Arc::clone(&garden_land));
+
     // Indexed up front, so a construction site skips its own crane whichever renders first.
     let mapped_cranes = Arc::new(man_made::mapped_crane_points(&elements));
     editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
     let clear_corridors = Arc::new(aerialways::clear_corridors(&elements, &xzbbox));
     editor.set_clear_corridors(Arc::clone(&clear_corridors));
+    // The laser's trees stand where it saw them, crowns over a pool or a stream
+    // included, which would hide what OSM maps there. With measured trees, trees
+    // keep a block clear of mapped water (see `tree::Tree::build`); a run without
+    // them is as before.
+    let tree_keep_clear = ground
+        .laser_trees_wanted()
+        .then(|| {
+            let room = crate::structures::fountain::room_at(&editor, &road_mask);
+            crate::floodfill_cache::collect_tree_keep_clear(
+                &elements,
+                &xzbbox,
+                args.scale,
+                args.water.water_detail.channel_width_cap(args.scale),
+                1,
+                Some(&room),
+            )
+        })
+        .flatten()
+        .map(Arc::new);
+    if let Some(keep) = &tree_keep_clear {
+        editor.set_tree_keep_clear(Arc::clone(keep));
+    }
+    // The laser reads a track's ballast as paving or open ground; it is ballast.
+    let rail_bed = ground.has_survey().then(|| {
+        Arc::new(railways::collect_rail_bed(
+            &elements,
+            &xzbbox,
+            railways::BALLAST_REACH,
+        ))
+    });
+    if let Some(bed) = &rail_bed {
+        editor.set_rail_bed(Arc::clone(bed));
+    }
     let fuel_index = Arc::new(fuel_stations::FuelIndex::build(&elements, args.scale));
     editor.set_fuel_index(Arc::clone(&fuel_index));
 
@@ -1404,11 +1629,12 @@ pub fn generate_world_with_options(
     // blocks and standing still; other formats keep their banner heads.
     let traffic_signals = (extras.traffic_lights || java).then(|| {
         Arc::new(
-            crate::element_processing::traffic_lights::SignalIndex::build(
+            crate::element_processing::traffic_lights::SignalIndex::build_beside(
                 &elements,
                 args.scale,
                 sign_region.drives_on_left(),
                 &road_mask,
+                &mapped_paths,
                 extras.traffic_lights,
             ),
         )
@@ -1433,6 +1659,26 @@ pub fn generate_world_with_options(
         }
         map
     };
+
+    let started = std::time::Instant::now();
+    let heights = buildings::tagged_neighbour_heights(&elements, args.scale);
+    let heights_time = started.elapsed();
+    let started = std::time::Instant::now();
+    let steps = buildings::plan_attached_steps(
+        &elements,
+        &flood_fill_cache,
+        &building_footprints,
+        args.scale,
+    );
+    let steps_time = started.elapsed();
+    for (label, time) in [
+        ("neighbour_heights", heights_time),
+        ("attached_steps", steps_time),
+    ] {
+        bench.report(label, time);
+        bench.exclude(time);
+    }
+    let neighbours = buildings::Neighbours { heights, steps };
 
     let bridge_outlines =
         crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
@@ -1470,13 +1716,40 @@ pub fn generate_world_with_options(
         args.scale,
     );
     railways::add_tunnel_footprint(&elements, &xzbbox, &mut tunnel_footprint);
-    let tunnel_portals = highways::collect_tunnel_portals(
+    let mut tunnel_portals = highways::collect_tunnel_portals(
         &elements,
         &editor,
         &bridge_structures,
         &tunnel_internal_endpoints,
         args.scale,
     );
+    tunnel_portals.plan_bores(
+        &elements,
+        &editor,
+        &tunnel_internal_endpoints,
+        args.scale,
+        one_world.is_some().then_some(&own_rect),
+    );
+
+    // Resolved before the 3D archetypes so they never claim a landmark's element.
+    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+    // 3D model pipeline pre-scan: elements rendered as 3D models instead of
+    // voxels are recorded here and skipped by the element loop below.
+    let models_3d_pipeline = args.use_3d.then(|| {
+        crate::models_3d::Models3dPipeline::prescan(&elements, args, landmarks.suppressed())
+    });
+    // What the stations leave alone: landmarks, models and outlines their parts replace.
+    let station_taken: HashSet<(&'static str, u64)> = landmarks
+        .suppressed()
+        .iter()
+        .chain(models_3d_pipeline.iter().flat_map(|p| p.suppressed()))
+        .copied()
+        .collect();
+    let station_skips: HashSet<(&'static str, u64)> = station_taken
+        .iter()
+        .chain(&outline_suppression)
+        .copied()
+        .collect();
 
     // Platforms and halls, laid out before any track so the tracks can keep level with them.
     let stations = Arc::new(stations::StationIndex::build(
@@ -1492,13 +1765,29 @@ pub fn generate_world_with_options(
             scale: args.scale,
             timeout: args.timeout.as_ref(),
             underground: args.mode != GenerationMode::Blueprint,
+            roofs: args.mode != GenerationMode::Blueprint,
+            skips: &station_skips,
         },
     ));
     editor.set_stations(Arc::clone(&stations));
+    // Each rail tunnel is planned whole, after the halls it runs through, so every tile lays one grade.
+    let rail_tunnels = railways::plan_rail_tunnels(&elements, &editor, &rail_joins);
+    rail_joins.set_tunnels(rail_tunnels);
     let mut station_voids: Vec<stations::StationVoid> = Vec::new();
-
-    // Resolved before the 3D archetypes so they never claim a landmark's element.
-    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+    // The rest of a station building whose parts include a shed the station draws, styled
+    // like its parts.
+    let station_buildings = stations.station_buildings(
+        &elements,
+        &outline_suppression,
+        &station_taken,
+        args.timeout.as_ref(),
+    );
+    for (piece, part) in station_buildings {
+        if let Some(seed) = part.and_then(|p| part_groups.get(&p).copied()) {
+            part_groups.insert(piece.id(), seed);
+        }
+        elements.push(piece);
+    }
 
     // The trains are planned before the cars, which wait at the level crossings they close.
     let planned_trains = extras.cars.then(|| {
@@ -1556,7 +1845,9 @@ pub fn generate_world_with_options(
             crossings.as_deref(),
             &xzbbox,
             |way, x, z| surfaces.y_at(way, x, z),
-            |x, z| building_footprints.contains(x, z),
+            // Where the road stops short of a building, a mapped sidewalk or a verge, the
+            // lanes beside it move in.
+            |x, z| building_footprints.contains(x, z) || road_cut.contains(x, z),
         );
         println!(
             "  Moving cars: {} cars on the road network",
@@ -1564,6 +1855,7 @@ pub fn generate_world_with_options(
         );
         Arc::new(net)
     });
+    drop(road_cut);
     let mut walk_network = extras
         .pedestrians
         .then(|| {
@@ -1744,11 +2036,6 @@ pub fn generate_world_with_options(
             .any(|&[x0, z0, x1, z1]| x >= x0 && x <= x1 && z >= z0 && z <= z1)
     });
 
-    // 3D model pipeline pre-scan: elements rendered as 3D models instead of
-    // voxels are recorded here and skipped by the element loop below.
-    let models_3d_pipeline = args.use_3d.then(|| {
-        crate::models_3d::Models3dPipeline::prescan(&elements, args, landmarks.suppressed())
-    });
     // Offline, a model the cache lacks stops the run here instead of after the build.
     if crate::net::offline() {
         if let Some(p) = &models_3d_pipeline {
@@ -2020,9 +2307,24 @@ pub fn generate_world_with_options(
             }
             tile_editor.set_sealed_surface(Arc::clone(&sealed_surface));
             tile_editor.set_carriageway(Arc::clone(&carriageway));
+            tile_editor.set_mapped_paths(Arc::clone(&mapped_paths));
+            tile_editor.set_junctions(Arc::clone(&road_junctions));
+            tile_editor.set_kerb_strips(Arc::clone(&kerb_strips));
+            tile_editor.set_wall_footprints(Arc::clone(&wall_footprints));
+            tile_editor.set_water_areas(Arc::clone(&water_areas));
+            tile_editor.set_garden_land(Arc::clone(&garden_land));
             tile_editor.set_mapped_trunks(Arc::clone(&mapped_trunks));
+            if let Some(trunks) = &standing_trunks {
+                tile_editor.set_standing_trunks(Arc::clone(trunks));
+            }
             tile_editor.set_mapped_cranes(Arc::clone(&mapped_cranes));
             tile_editor.set_clear_corridors(Arc::clone(&clear_corridors));
+            if let Some(keep) = &tree_keep_clear {
+                tile_editor.set_tree_keep_clear(Arc::clone(keep));
+            }
+            if let Some(bed) = &rail_bed {
+                tile_editor.set_rail_bed(Arc::clone(bed));
+            }
             tile_editor.set_fuel_index(Arc::clone(&fuel_index));
             if let Some(ctx) = &signage_ctx {
                 tile_editor.set_signage(Arc::clone(ctx));
@@ -2091,6 +2393,7 @@ pub fn generate_world_with_options(
                     &part_groups,
                     &housing_parts,
                     &group_members,
+                    &neighbours,
                     &still_surfaces,
                     &interior_uses,
                     &barrier_clearance,
@@ -2538,6 +2841,7 @@ pub fn generate_world_with_options(
                 &part_groups,
                 &housing_parts,
                 &group_members,
+                &neighbours,
                 &still_surfaces,
                 &interior_uses,
                 &barrier_clearance,
@@ -2617,6 +2921,9 @@ pub fn generate_world_with_options(
     }
     drop(sealed_surface);
     drop(carriageway);
+    editor.release_garden_land();
+    drop(garden_land);
+    drop(mapped_paths);
     // The barrier clearance shares the road mask, so it goes first.
     drop(barrier_clearance);
     drop(road_mask);
@@ -2810,13 +3117,16 @@ pub fn generate_world_with_options(
         }
     }
 
-    // Save world
-    if let Err(e) = editor.save() {
-        // The panels were waiting for the pack this save was going to make a
-        // world for; without one they are only memory.
-        crate::mapillary::displays::discard();
-        return Err(e.to_string());
-    }
+    // Save world, which a Bedrock archive can leave beside the path asked for.
+    let output_path = match editor.save() {
+        Ok(written) => written,
+        Err(e) => {
+            // The panels were waiting for the pack this save was going to make a
+            // world for; without one they are only memory.
+            crate::mapillary::displays::discard();
+            return Err(e.to_string());
+        }
+    };
     bench.mark("save");
 
     if args.benchmark {

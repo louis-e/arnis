@@ -8,6 +8,15 @@ mod lod;
 
 pub use existing::from_existing;
 
+/// Whether the world has a Distant Horizons database, made by the mod or by Arnis.
+pub fn has_cache(world_dir: &Path) -> bool {
+    world_dir.join("data").join(DB_NAME).is_file()
+        || world_dir
+            .join("dimensions/minecraft/overworld/data")
+            .join(DB_NAME)
+            .is_file()
+}
+
 pub(crate) use lod::RegionLod;
 
 use rusqlite::{params, Connection};
@@ -192,11 +201,15 @@ impl DhWriter {
 
     /// A builder for one region's levels 0..=3, against the world's build range.
     pub(crate) fn region_lod(&self) -> RegionLod<'_> {
-        RegionLod::new(
-            self,
+        self.region_lod_within(
             crate::world_editor::common::min_y(),
-            crate::world_editor::common::world_max_y() + 1,
+            crate::world_editor::common::world_max_y(),
         )
+    }
+
+    /// `region_lod` for the build range `min_y..=max_y`.
+    pub(crate) fn region_lod_within(&self, min_y: i32, max_y: i32) -> RegionLod<'_> {
+        RegionLod::new(self, min_y, max_y + 1)
     }
 
     /// Errors are latched for [`Self::finish`]: a failed LOD cache must not fail the world.

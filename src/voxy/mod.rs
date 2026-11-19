@@ -18,11 +18,14 @@
 //! - The world id is `sha256(biome_zoom_seed || dimension key)`, truncated to 32
 //!   hex characters. See [`world_id`].
 
+mod existing;
 mod lod;
 mod mapper;
 mod rocks;
 
+pub use existing::from_existing;
 pub(crate) use lod::{mark_live, LiveSections, RegionLod};
+pub(crate) use mapper::is_air_name;
 
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -111,12 +114,33 @@ fn derive_db_id(world_id: &str) -> String {
     )
 }
 
-/// Reads `Data.WorldGenSettings.seed` out of a world's `level.dat`.
+/// The world's seed: `Data.WorldGenSettings.seed` in `level.dat`, or `data.seed` in
+/// `data/minecraft/world_gen_settings.dat`, where 26.x moves it.
 ///
 /// The seed decides the storage directory name, so a wrong one would leave voxy
 /// looking at an empty database rather than anything broken.
 fn read_world_seed(world_dir: &Path) -> Option<i64> {
-    let raw = fs::read(world_dir.join("level.dat")).ok()?;
+    let seed = |settings: &std::collections::HashMap<String, fastnbt::Value>| match settings
+        .get("seed")?
+    {
+        fastnbt::Value::Long(seed) => Some(*seed),
+        fastnbt::Value::Int(seed) => Some(*seed as i64),
+        _ => None,
+    };
+    let level = read_nbt(&world_dir.join("level.dat"));
+    let from_level = level
+        .as_ref()
+        .and_then(|root| child(root, "Data"))
+        .and_then(|data| child(data, "WorldGenSettings"))
+        .and_then(seed);
+    from_level.or_else(|| {
+        let moved = read_nbt(&world_dir.join("data/minecraft/world_gen_settings.dat"))?;
+        child(&moved, "data").and_then(seed)
+    })
+}
+
+fn read_nbt(path: &Path) -> Option<std::collections::HashMap<String, fastnbt::Value>> {
+    let raw = fs::read(path).ok()?;
     let mut plain = Vec::new();
     let nbt = if flate2::read::GzDecoder::new(&raw[..])
         .read_to_end(&mut plain)
@@ -126,20 +150,18 @@ fn read_world_seed(world_dir: &Path) -> Option<i64> {
     } else {
         raw
     };
+    match fastnbt::from_bytes(&nbt).ok()? {
+        fastnbt::Value::Compound(root) => Some(root),
+        _ => None,
+    }
+}
 
-    let value: fastnbt::Value = fastnbt::from_bytes(&nbt).ok()?;
-    let fastnbt::Value::Compound(root) = value else {
-        return None;
-    };
-    let fastnbt::Value::Compound(data) = root.get("Data")? else {
-        return None;
-    };
-    let fastnbt::Value::Compound(settings) = data.get("WorldGenSettings")? else {
-        return None;
-    };
-    match settings.get("seed")? {
-        fastnbt::Value::Long(seed) => Some(*seed),
-        fastnbt::Value::Int(seed) => Some(*seed as i64),
+fn child<'a>(
+    map: &'a std::collections::HashMap<String, fastnbt::Value>,
+    key: &str,
+) -> Option<&'a std::collections::HashMap<String, fastnbt::Value>> {
+    match map.get(key)? {
+        fastnbt::Value::Compound(c) => Some(c),
         _ => None,
     }
 }
@@ -147,7 +169,8 @@ fn read_world_seed(world_dir: &Path) -> Option<i64> {
 /// The write-ahead log under construction, plus the sequence counter RocksDB
 /// replays it with.
 struct Wal {
-    log: rocks::LogWriter<BufWriter<File>>,
+    /// Taken and closed by [`VoxyWriter::finish`].
+    log: Option<rocks::LogWriter<BufWriter<File>>>,
     seq: u64,
     error: Option<std::io::Error>,
     sections: u64,
@@ -162,9 +185,13 @@ impl Wal {
         if self.error.is_some() {
             return;
         }
+        let Some(log) = self.log.as_mut() else {
+            self.error = Some(std::io::Error::other("the voxy log is already closed"));
+            return;
+        };
         self.seq += 1;
         let batch = rocks::write_batch_put(self.seq, cf, key, value);
-        if let Err(e) = self.log.add_record(&batch) {
+        if let Err(e) = log.add_record(&batch) {
             self.error = Some(e);
             return;
         }
@@ -178,6 +205,8 @@ impl Wal {
 /// every entry point takes `&self`.
 pub struct VoxyWriter {
     storage_dir: PathBuf,
+    /// Set for a rebuild: the database it replaces once complete.
+    replaces: Option<PathBuf>,
     config_dir: PathBuf,
     db_id: String,
     wal: Mutex<Wal>,
@@ -189,12 +218,24 @@ impl VoxyWriter {
     /// world's seed cannot be read, since without it the data would land in a
     /// directory voxy never looks at.
     pub fn create(world_dir: &Path) -> Result<Option<Self>, std::io::Error> {
-        let Some(seed) = read_world_seed(world_dir) else {
+        Self::open(world_dir, false)
+    }
+
+    /// For a rebuild: the old database stays until this one is finished.
+    pub(crate) fn create_keeping_old(world_dir: &Path) -> Result<Option<Self>, std::io::Error> {
+        Self::open(world_dir, true)
+    }
+
+    fn open(world_dir: &Path, keep_old: bool) -> Result<Option<Self>, std::io::Error> {
+        let Some((world_id, storage)) = world_storage(world_dir) else {
             return Ok(None);
         };
-        let world_id = world_id(seed);
         let config_dir = world_dir.join("voxy");
-        let storage_dir = config_dir.join(&world_id).join("storage");
+        let (storage_dir, replaces) = if keep_old {
+            (storage.with_file_name(STAGING), Some(storage))
+        } else {
+            (storage, None)
+        };
 
         // A regenerated world must not inherit half of an older LOD cache.
         if storage_dir.exists() {
@@ -205,10 +246,14 @@ impl VoxyWriter {
         let log = File::create(storage_dir.join(format!("{WAL_FILE_NUMBER:06}.log")))?;
         Ok(Some(Self {
             storage_dir,
+            replaces,
             config_dir,
             db_id: derive_db_id(&world_id),
             wal: Mutex::new(Wal {
-                log: rocks::LogWriter::new(BufWriter::with_capacity(1 << 20, log)),
+                log: Some(rocks::LogWriter::new(BufWriter::with_capacity(
+                    1 << 20,
+                    log,
+                ))),
                 seq: 0,
                 error: None,
                 sections: 0,
@@ -273,9 +318,13 @@ impl VoxyWriter {
                 );
             }
         }
-        wal.log.flush()?;
         if let Some(e) = wal.error.take() {
             return Err(e);
+        }
+        // Closed before the folder moves: Windows will not rename one holding an open file.
+        if let Some(log) = wal.log.take() {
+            let file = log.into_inner().into_inner().map_err(|e| e.into_error())?;
+            file.sync_all()?;
         }
 
         fs::write(
@@ -288,10 +337,148 @@ impl VoxyWriter {
             format!("MANIFEST-{MANIFEST_FILE_NUMBER:06}\n"),
         )?;
         fs::write(self.storage_dir.join("IDENTITY"), &self.db_id)?;
+        if let Some(target) = &self.replaces {
+            swap_in(&self.storage_dir, target)?;
+        }
         fs::write(self.config_dir.join("config.json"), CONFIG_JSON)?;
 
         Ok((wal.sections, wal.bytes))
     }
+
+    /// Drops a rebuild that will not be finished; the old database stays.
+    pub(crate) fn abandon(&self) {
+        if self.replaces.is_some() {
+            // Closed first, so Windows lets the folder go.
+            drop(
+                self.wal
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .log
+                    .take(),
+            );
+            let _ = fs::remove_dir_all(&self.storage_dir);
+        }
+    }
+}
+
+const STAGING: &str = "storage.arnis-tmp";
+
+/// The world id and the folder voxy keeps the overworld of `world_dir` in; `None` without a seed.
+fn world_storage(world_dir: &Path) -> Option<(String, PathBuf)> {
+    let id = world_id(read_world_seed(world_dir)?);
+    let dir = world_dir.join("voxy").join(&id).join("storage");
+    Some((id, dir))
+}
+
+/// Whether the world has a voxy database for its overworld, made by voxy or by Arnis.
+pub fn has_cache(world_dir: &Path) -> bool {
+    world_storage(world_dir).is_some_and(|(_, d)| d.join("CURRENT").is_file())
+}
+
+/// Moves the finished `staged` database over `target`, putting the old one back if that fails.
+fn swap_in(staged: &Path, target: &Path) -> Result<(), std::io::Error> {
+    let old = target.with_file_name("storage.arnis-old");
+    if old.exists() {
+        fs::remove_dir_all(&old)?;
+    }
+    let had_old = target.exists();
+    if had_old {
+        fs::rename(target, &old)?;
+    }
+    if let Err(e) = fs::rename(staged, target) {
+        if had_old {
+            let _ = fs::rename(&old, target);
+        }
+        return Err(e);
+    }
+    if had_old {
+        let _ = fs::remove_dir_all(&old);
+    }
+    Ok(())
+}
+
+/// Every put in the world's voxy log by column family and key, sections decompressed.
+#[cfg(test)]
+pub(crate) fn logged_puts(world_dir: &Path) -> std::collections::BTreeMap<(u32, Vec<u8>), Vec<u8>> {
+    let varint = |b: &[u8], at: &mut usize| {
+        let (mut v, mut shift) = (0usize, 0);
+        loop {
+            let byte = b[*at];
+            *at += 1;
+            v |= ((byte & 0x7F) as usize) << shift;
+            shift += 7;
+            if byte & 0x80 == 0 {
+                return v;
+            }
+        }
+    };
+    let (_, storage) = world_storage(world_dir).expect("a seed");
+    let log = fs::read(storage.join(format!("{WAL_FILE_NUMBER:06}.log"))).expect("a log");
+    let mut out = std::collections::BTreeMap::new();
+    for record in rocks::read_log(&log) {
+        // Sequence and count, then one column family put.
+        let mut at = 12;
+        assert_eq!(record[at], 0x05);
+        at += 1;
+        let cf = varint(&record, &mut at) as u32;
+        let len = varint(&record, &mut at);
+        let key = record[at..at + len].to_vec();
+        at += len;
+        let len = varint(&record, &mut at);
+        let mut value = record[at..at + len].to_vec();
+        if cf == rocks::CF_WORLD_SECTIONS {
+            value = zstd::bulk::decompress(&value, MAX_DECOMPRESSED).expect("a zstd section");
+        } else {
+            // Compound keys come out in hash order, so mappings compare by content.
+            let mut nbt = Vec::new();
+            flate2::read::GzDecoder::new(&value[..])
+                .read_to_end(&mut nbt)
+                .expect("a gzipped mapping");
+            value = canonical(&fastnbt::from_bytes(&nbt).expect("mapping nbt")).into_bytes();
+        }
+        out.insert((cf, key), value);
+    }
+    out
+}
+
+#[cfg(test)]
+fn canonical(value: &fastnbt::Value) -> String {
+    match value {
+        fastnbt::Value::Compound(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let inner: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{k}:{}", canonical(&map[*k])))
+                .collect();
+            format!("{{{}}}", inner.join(","))
+        }
+        fastnbt::Value::List(list) => {
+            format!(
+                "[{}]",
+                list.iter().map(canonical).collect::<Vec<_>>().join(",")
+            )
+        }
+        other => format!("{other:?}"),
+    }
+}
+
+/// A `level.dat` holding only the seed, as voxy's world id needs it.
+#[cfg(test)]
+pub(crate) fn write_test_level_dat(dir: &Path, seed: i64) {
+    use std::collections::HashMap;
+    use std::io::Write;
+
+    let settings = HashMap::from([("seed".to_string(), fastnbt::Value::Long(seed))]);
+    let data = HashMap::from([(
+        "WorldGenSettings".to_string(),
+        fastnbt::Value::Compound(settings),
+    )]);
+    let root = HashMap::from([("Data".to_string(), fastnbt::Value::Compound(data))]);
+    let bytes = fastnbt::to_bytes(&fastnbt::Value::Compound(root)).unwrap();
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&bytes).unwrap();
+    fs::write(dir.join("level.dat"), encoder.finish().unwrap()).unwrap();
 }
 
 #[cfg(test)]
@@ -323,6 +510,52 @@ mod tests {
     }
 
     #[test]
+    fn the_seed_is_found_where_26x_moves_it() {
+        use std::collections::HashMap;
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let data = HashMap::from([(
+            "seed".to_string(),
+            fastnbt::Value::Long(-1743857021154781143),
+        )]);
+        let root = HashMap::from([("data".to_string(), fastnbt::Value::Compound(data))]);
+        let bytes = fastnbt::to_bytes(&fastnbt::Value::Compound(root)).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bytes).unwrap();
+        let path = dir.path().join("data/minecraft/world_gen_settings.dat");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, encoder.finish().unwrap()).unwrap();
+        // A 26.x level.dat has no WorldGenSettings, or one without the seed.
+        write_level_dat_without_settings(dir.path());
+        assert_eq!(read_world_seed(dir.path()), Some(-1743857021154781143));
+        write_level_dat_without_settings(dir.path());
+        let mut settings = read_nbt(&dir.path().join("level.dat")).unwrap();
+        let fastnbt::Value::Compound(data) = settings.get_mut("Data").unwrap() else {
+            panic!("no Data")
+        };
+        data.insert(
+            "WorldGenSettings".to_string(),
+            fastnbt::Value::Compound(HashMap::new()),
+        );
+        let bytes = fastnbt::to_bytes(&fastnbt::Value::Compound(settings)).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bytes).unwrap();
+        fs::write(dir.path().join("level.dat"), encoder.finish().unwrap()).unwrap();
+        assert_eq!(read_world_seed(dir.path()), Some(-1743857021154781143));
+    }
+
+    fn write_level_dat_without_settings(dir: &Path) {
+        use std::collections::HashMap;
+        use std::io::Write;
+        let data = HashMap::from([("DataVersion".to_string(), fastnbt::Value::Int(5023))]);
+        let root = HashMap::from([("Data".to_string(), fastnbt::Value::Compound(data))]);
+        let bytes = fastnbt::to_bytes(&fastnbt::Value::Compound(root)).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bytes).unwrap();
+        fs::write(dir.join("level.dat"), encoder.finish().unwrap()).unwrap();
+    }
+
+    #[test]
     fn missing_level_dat_disables_the_writer() {
         let dir = tempfile::tempdir().unwrap();
         assert!(VoxyWriter::create(dir.path()).unwrap().is_none());
@@ -333,7 +566,7 @@ mod tests {
     #[test]
     fn finish_lays_down_a_complete_database() {
         let dir = tempfile::tempdir().unwrap();
-        write_level_dat(dir.path(), -1743857021154781143);
+        write_test_level_dat(dir.path(), -1743857021154781143);
 
         let writer = VoxyWriter::create(dir.path()).unwrap().unwrap();
         let key = lod::section_key(0, 1, 0, 2);
@@ -396,7 +629,7 @@ mod tests {
     #[test]
     fn regenerating_clears_a_stale_database() {
         let dir = tempfile::tempdir().unwrap();
-        write_level_dat(dir.path(), -1743857021154781143);
+        write_test_level_dat(dir.path(), -1743857021154781143);
         let storage = dir
             .path()
             .join("voxy")
@@ -407,22 +640,5 @@ mod tests {
 
         let _writer = VoxyWriter::create(dir.path()).unwrap().unwrap();
         assert!(!storage.join("000008.sst").exists());
-    }
-
-    fn write_level_dat(dir: &Path, seed: i64) {
-        use std::collections::HashMap;
-        use std::io::Write;
-
-        let settings = HashMap::from([("seed".to_string(), fastnbt::Value::Long(seed))]);
-        let data = HashMap::from([(
-            "WorldGenSettings".to_string(),
-            fastnbt::Value::Compound(settings),
-        )]);
-        let root = HashMap::from([("Data".to_string(), fastnbt::Value::Compound(data))]);
-        let bytes = fastnbt::to_bytes(&fastnbt::Value::Compound(root)).unwrap();
-
-        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(&bytes).unwrap();
-        fs::write(dir.join("level.dat"), encoder.finish().unwrap()).unwrap();
     }
 }

@@ -178,6 +178,7 @@ pub(crate) fn habitat(
     alpine: bool,
     eco: Option<Ecoregion>,
 ) -> Option<Habitat> {
+    let climate = climate.for_plants(eco);
     if let Some(h) = eco.and_then(|e| ecoregion_habitat(cover, climate, alpine, e)) {
         return Some(h);
     }
@@ -707,6 +708,15 @@ fn grow_patch(
         if !site.contains(x, z) || editor.surface_is_sealed(x, z) {
             continue;
         }
+        // Mown lawns take no wild patches; pond plants and shade mushrooms still grow.
+        if editor.is_lawn(x, z)
+            && !matches!(
+                feature,
+                Feature::LilyPads | Feature::SugarCane | Feature::Mushrooms
+            )
+        {
+            continue;
+        }
         let y = site.ground_y(editor, x, z);
         let stays_in_habitat = match feature {
             // Pads float on the pools, cane grows on whatever bank the water has.
@@ -856,6 +866,22 @@ fn beside_water(editor: &WorldEditor, x: i32, ground_y: i32, z: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moist_island_forest_is_decorated_as_green_land() {
+        // St. Thomas: Leeward Islands moist forests under an Aw cell, and a dry forest beside.
+        use crate::ecoregion::lookup;
+        let aw = Climate::TropicalSavanna;
+        assert_eq!(
+            habitat(LC_GRASSLAND, aw, 18.3, false, lookup(475)),
+            Some(Habitat::Meadow)
+        );
+        assert_eq!(habitat(LC_BARE, aw, 18.3, false, lookup(475)), None);
+        assert_eq!(
+            habitat(LC_GRASSLAND, aw, 18.3, false, lookup(543)),
+            Some(Habitat::Steppe)
+        );
+    }
 
     #[test]
     fn habitats_follow_cover_and_climate() {

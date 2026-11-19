@@ -506,6 +506,8 @@ mod tests {
             building_footprints: &footprints,
             group_members: &groups,
             housing_relation_parts: &Default::default(),
+            neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+            inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses: &index,
         };
         let args = interior_args();
@@ -552,12 +554,13 @@ mod tests {
         blocks.iter().filter(|b| b.name().ends_with(suffix)).count()
     }
 
-    /// Rows holding a floor slab across most of the footprint.
+    /// Rows holding a floor slab across most of the footprint, inside walls
+    /// that may stand a block in from the outline under a pitched roof's eave.
     fn floor_rows(editor: &WorldEditor, way: &ProcessedWay, max_y: i32) -> Vec<i32> {
         let (x0, x1, z0, z1) = bbox(way);
         let ring: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
-        let cells: Vec<(i32, i32)> = (z0 + 1..z1)
-            .flat_map(|z| (x0 + 1..x1).map(move |x| (x, z)))
+        let cells: Vec<(i32, i32)> = (z0 + 2..z1 - 1)
+            .flat_map(|z| (x0 + 2..x1 - 1).map(move |x| (x, z)))
             .filter(|&(x, z)| index::covers(&ring, x, z))
             .collect();
         (0..max_y)
@@ -1019,6 +1022,8 @@ mod tests {
             building_footprints: &footprints,
             group_members: &groups,
             housing_relation_parts: &Default::default(),
+            neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
+            inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses: InteriorUseIndex::empty(),
         };
         generate_buildings(
@@ -1163,6 +1168,12 @@ mod tests {
             let way = way_of(&elements);
             let (x0, x1, z0, z1) = bbox(way);
             let mut doors = 0;
+            // The walls stand on the outline, or a block in under an eave.
+            let (x0, x1, z0, z1) = if editor.get_block_absolute(x0, 2, (z0 + z1) / 2).is_some() {
+                (x0, x1, z0, z1)
+            } else {
+                (x0 + 1, x1 - 1, z0 + 1, z1 - 1)
+            };
             for (x, z) in (z0..=z1).flat_map(|z| (x0..=x1).map(move |x| (x, z))) {
                 let on_rim = x == x0 || x == x1 || z == z0 || z == z1;
                 let is_door = editor

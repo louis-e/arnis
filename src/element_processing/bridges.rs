@@ -5,7 +5,8 @@ use crate::element_processing::bridge_styles::{
 };
 use crate::element_processing::bridge_towers::{self, CableSpan, DEFAULT_SIDE_SPAN};
 use crate::element_processing::highways::{
-    highway_block_range, junction_level, road_profile, HighwayConnectivityMap,
+    highway_block_range, in_road_stamp, junction_level, road_profile, stamps_square,
+    HighwayConnectivityMap,
 };
 use crate::element_processing::railways;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -63,10 +64,7 @@ const RAIL_SIDE_BY_SIDE_DISTANCE: f32 =
     (2 * railways::RAIL_DECK_HALF_WIDTH + 1 + railways::RAIL_DECK_GAP_FILL) as f32 + 0.5;
 
 pub(crate) fn is_non_vehicular_bridge_highway(highway: &str) -> bool {
-    matches!(
-        highway,
-        "footway" | "pedestrian" | "path" | "cycleway" | "bridleway" | "steps"
-    )
+    super::highways::is_walkway(highway)
 }
 
 #[derive(Clone)]
@@ -1985,8 +1983,13 @@ impl BridgeSurfaceMap {
     ) -> Self {
         let parts = bridge_decks::plan(elements, structures, &self, editor, scale);
         for p in parts.values() {
-            self.railings
-                .extend(p.rails.iter().chain(&p.lamps).map(|&(x, z, y)| ((x, z), y)));
+            // Two structures can rail one cell; the higher curb keeps it, in any map order.
+            for &(x, z, y) in p.rails.iter().chain(&p.lamps) {
+                self.railings
+                    .entry((x, z))
+                    .and_modify(|r| *r = (*r).max(y))
+                    .or_insert(y);
+            }
             for &(x, z, y) in &p.fills {
                 self.cells
                     .entry((x, z))
@@ -2366,8 +2369,10 @@ pub(crate) fn along_steps(from: (i32, i32), to: (i32, i32)) -> impl Fn(i32, i32)
     move |ox: i32, oz: i32| ((ox as f32 * ex + oz as f32 * ez) * inv).round() as i32
 }
 
-/// Columns a way's stamps cover, each with the centerline cell its level comes from.
+/// Columns a way's stamps cover, each with the centerline cell its level comes from: the
+/// square of a deck, the disc of an approach ramp.
 pub(crate) fn deck_columns(way: &ProcessedWay, half: i32) -> Vec<((i32, i32), usize)> {
+    let square = stamps_square(way);
     let total: usize = way
         .nodes
         .windows(2)
@@ -2384,6 +2389,9 @@ pub(crate) fn deck_columns(way: &ProcessedWay, half: i32) -> Vec<((i32, i32), us
         for &(x, _, z) in line.iter().skip(usize::from(seg_idx > 0)) {
             for dx in -half..=half {
                 for dz in -half..=half {
+                    if !square && !in_road_stamp(dx, dz, half) {
+                        continue;
+                    }
                     let c = (x + dx, z + dz);
                     if seen.insert(c) {
                         let i = (start as i32 + along(c.0 - a.0, c.1 - a.1)).clamp(0, total as i32);

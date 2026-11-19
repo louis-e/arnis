@@ -10,6 +10,7 @@ use crate::floodfill_cache::{
     edge_in_hole, in_hole, is_oversized_ring, BuildingFootprintBitmap, FloodFillCache, Holes,
     InnerRings,
 };
+use crate::ground_generation::FOREST_LITTER;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::terrain_surface::Rock;
 use crate::trees::mapped::{tree_row_positions, MappedTree};
@@ -230,6 +231,10 @@ fn natural_area(
                 let plants_here = piece_plants_at(args);
                 let woods_by_cell = woods_by_cell(args);
                 let mut shrubbery_species: Option<Block> = None;
+                let wild = matches!(
+                    natural_type.as_str(),
+                    "wood" | "scrub" | "grassland" | "heath" | "wetland"
+                );
                 for &(x, z) in filled_area.iter() {
                     if in_hole(holes, x, z) {
                         continue;
@@ -239,6 +244,9 @@ fn natural_area(
                     // Owned cells, such as One World's clip margin, still take their draws.
                     if !editor.in_bounds(x, z) && !editor.owns(x, z) {
                         continue;
+                    }
+                    if wild {
+                        editor.mark_ground(crate::world_editor::GroundMark::Wild, x, z);
                     }
                     let climate = editor.local_climate(x, z).unwrap_or(area_climate);
                     let arid = is_sand
@@ -265,6 +273,9 @@ fn natural_area(
                     // Roads, paths and paved areas keep their own surface. Checked
                     // by mask because a gravel or dirt road is not in the block list.
                     let sealed = editor.surface_is_sealed(x, z);
+                    let wood_floor = (natural_type == "wood")
+                        .then(|| editor.forest_floor_at(x, z))
+                        .flatten();
                     if !sealed && !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
                         let b = if dry_ground {
                             dry_ground_block(editor, climate, x, z, rock).unwrap_or(block_type)
@@ -272,6 +283,8 @@ fn natural_area(
                             rock.bare(x, z).0
                         } else if rock_variation {
                             vary_rock_block(block_type, x, z)
+                        } else if let Some(floor) = wood_floor {
+                            floor
                         } else {
                             block_type
                         };
@@ -384,9 +397,14 @@ fn natural_area(
                             }
                         }
                         "wood" => {
-                            if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                            if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                                && !editor.check_for_block(x, 0, z, Some(FOREST_LITTER))
+                            {
                                 continue;
                             }
+                            // Litter carries the odd fern, a sward under crowns thins out.
+                            let litter = editor.check_for_block(x, 0, z, Some(FOREST_LITTER));
+                            let floor = wood_floor.is_some();
                             let density = crate::ground_generation::value_noise_01(x, z, 32);
                             let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
                             let mut cell = woods_by_cell.then(|| coord_rng(x, z, way.id));
@@ -419,7 +437,11 @@ fn natural_area(
                                     z,
                                     crate::ground_decoration::FlowerSetting::Forest,
                                 );
-                            } else if random_choice <= 12 {
+                            } else if litter {
+                                if random_choice <= 3 {
+                                    editor.set_block(FERN, x, 1, z, None, None);
+                                }
+                            } else if random_choice <= if floor { 5 } else { 12 } {
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }

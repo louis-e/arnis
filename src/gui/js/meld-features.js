@@ -2,6 +2,7 @@
 // control marked meld-only is hidden and generation gets no flags, so it runs as stock.
 
 import { interfaceLocale, languageTag } from './language.js';
+import { formatMb, rangeText } from './world-size.js';
 
 const el = (id) => document.getElementById(id);
 const value = (id) => (el(id) ? el(id).value.trim() : '');
@@ -64,6 +65,13 @@ const SETTINGS_CHANGED = 'Settings changed since this job started:';
 export function progressText({ message = '', detail = '' }) {
   if (message.startsWith('region_download_fallback')) {
     return { text: t('region_download_fallback', 'Region Download is not available for this selection, so Arnis used the default source.'), title: '', log: message, notice: true };
+  }
+  // Sent by the engine when laser data would download more than the Download Limit
+  // (survey::OVER_LIMIT): the megabytes the area needs, then the limit.
+  const over = /^laser_over_limit: (\d+) (\d+)$/.exec(message);
+  if (over) {
+    const text = t('lidar_over_limit', 'Laser data skipped: the area needs about {mb} MB, more than the Download Limit of {limit} MB. Raise it under Settings > Advanced > Laser Data.', { mb: over[1], limit: over[2] });
+    return { text, title: '', log: text, notice: true };
   }
   if (message.startsWith(SETTINGS_CHANGED)) {
     const names = message.slice(SETTINGS_CHANGED.length).trim();
@@ -614,7 +622,8 @@ export async function cellAction(action, cells, deps = {}) {
       // Rebuild removes the land first: only when the run after it builds these cells again.
       if (action === 'rebuild' && !runs()) return say(t('cell_ignored', '{n} could not be changed.', { n: list.length }));
       const [command, args] = globalThis.arnisCells.calls('remove', list, worldPath(), job())[0];
-      const report = await invoke(command, args);
+      // Remove redraws the world's LOD caches without the land; Rebuild leaves that to its run.
+      const report = await invoke(command, { ...args, redrawLods: action === 'remove' });
       say(removedLine(report), false);
       after(list, action === 'rebuild');
     }
@@ -837,14 +846,6 @@ export function selectWithRing(bounds, oneWorld, skipBuilt = false) {
   return changed;
 }
 
-const gb = (mbs) => (mbs >= 1048576 ? `${(mbs / 1048576).toFixed(1)} TB` : mbs >= 1024 ? `${(mbs / 1024).toFixed(1)} GB` : `${Math.round(mbs)} MB`);
-// "327–388 MB": a unit both ends share is said once.
-const range = ([lo, hi], unit) => {
-  const [a, b] = [unit(lo), unit(hi)];
-  if (a === b) return a;
-  const u = a.match(/^[\d.,]+( \S+)$/);
-  return u && b.endsWith(u[1]) ? `${a.slice(0, -u[1].length)}–${b}` : `${a}–${b}`;
-};
 // Rounded so a time never claims more than it knows: 5 s
 // steps, then minutes, then 10 minutes.
 const minutes = (m) => {
@@ -866,11 +867,11 @@ export function planHead(e, more) {
   const ram = mid(e.ram_mb) * (e.workers || 1);
   for (const [kind, key, tip, text] of [
     ['time', 'plan_time_tip', 'Time (estimate, warm caches)', `≈ ${longTime(e.time_min[1] >= 600)(mid(e.time_min))}`],
-    ['ram', 'plan_ram_tip', 'Memory per worker', `≈ ${gb(ram)} RAM`],
-    ['disk', 'plan_disk_tip', 'Disk space', `≈ ${gb(mid(e.disk_mb))}`],
+    ['ram', 'plan_ram_tip', 'Memory per worker', `≈ ${formatMb(ram)} RAM`],
+    ['disk', 'plan_disk_tip', 'Disk space', `≈ ${formatMb(mid(e.disk_mb))}`],
   ]) head.append(Object.assign(div(`plan-stat plan-stat-${kind}`, text), { title: t(key, tip) }));
   const tip = Object.assign(div('plan-tip', ''), { id: 'plan-tip', role: 'tooltip' });
-  tip.append(...[`${range(e.time_min, longTime(e.time_min[1] >= 600))} · ${range(e.disk_mb, gb)}`, ...more].map((x) => div('', x)));
+  tip.append(...[`${rangeText(e.time_min, longTime(e.time_min[1] >= 600))} · ${rangeText(e.disk_mb, formatMb)}`, ...more].map((x) => div('', x)));
   // The one "?": hover or focus shows the details; a click holds them open, with the legend card (showPlan).
   const help = Object.assign(document.createElement('button'), { type: 'button', className: 'tooltip-icon plan-help', id: 'legend-help', textContent: '?', title: t('plan_more', 'Details') });
   help.setAttribute('aria-describedby', 'plan-tip');
@@ -886,8 +887,8 @@ export function planHead(e, more) {
   head.help = help;
   const fits = e.free_disk_mb == null ? null : e.disk_mb[1] <= e.free_disk_mb;
   const disk = div(`plan-disk${fits === false ? ' is-low' : ''}`, fits == null ? '' : fits
-    ? t('plan_disk_fits', 'Fits: {free} free', { free: gb(e.free_disk_mb) })
-    : t('plan_disk_short', 'Needs {need}, {free} free on this disk', { need: range(e.disk_mb, gb), free: gb(e.free_disk_mb) }));
+    ? t('plan_disk_fits', 'Fits: {free} free', { free: formatMb(e.free_disk_mb) })
+    : t('plan_disk_short', 'Needs {need}, {free} free on this disk', { need: rangeText(e.disk_mb, formatMb), free: formatMb(e.free_disk_mb) }));
   disk.hidden = fits == null;
   return [head, disk];
 }
@@ -1073,7 +1074,7 @@ async function updatePlan() {
       ...(ring ? [t('plan_ring', 'ring {n}', { n: ring })] : []),
       tn('plan_workers', '{n} workers', '{n} worker', e.workers),
     ].join(' · '),
-    `${t('plan_ram_tip', 'Memory per worker')}: ${range(e.ram_mb, gb)}`,
+    `${t('plan_ram_tip', 'Memory per worker')}: ${rangeText(e.ram_mb, formatMb)}`,
   ]), units.some((u) => u.ring), single);
   if (single && !pieces.size) {
     postToMap({ type: 'pieceOutlines', pieces: [] });
@@ -1194,7 +1195,7 @@ function lines(box, rows) {
   box.hidden = false;
 }
 
-const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints' };
+const SOURCE_NAMES = { osm: 'Map data', elevation: 'Elevation', land_cover: 'Land cover', overture: 'Building footprints', laser: 'Laser scans' };
 
 // `area()` is the selected bbox; `plan()` the settings a run's plan depends on; `baking(on)` hears
 // a Download & Bake start and end.
@@ -1369,7 +1370,7 @@ export async function resumeJob(job, rebuild, { select = selectBounds, current, 
 // job data from the engine) only Open and Expand are offered.
 // `busy()`: a run is under way, so no world is picked, renamed or run. `canRun()`: Resume and
 // Rebuild can start a run here (not in Live).
-export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null }) {
+export function initProjects({ invoke, savePath, scale, open, available = () => true, busy = () => false, canRun = () => true, geocode = nominatim, pause = sleep, resume = null, renamed = null, trashed = null, created = null, upkeep = null }) {
   const list = el('projects-list');
   let view = readView();
   const ratio = (s) => (s >= 1 ? `${+s.toFixed(2)}:1` : `1:${+(1 / s).toFixed(2)}`);
@@ -1397,6 +1398,9 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   // A thumbnail is asked for when its card scrolls into view; no image leaves the placeholder.
   const thumbs = new Map();
   const loaders = new Map();
+  // Light & LODs: the worlds it runs on, and its last answer per world, which redraws keep.
+  const upkeeping = new Set();
+  const upkeepNotes = new Map();
   const seen = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
@@ -1641,7 +1645,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       if (w.locked) kids.push(text('projects-meta is-warn', t('projects_in_use', 'In use')));
       // One World needs Java on Earth; a run holds every world.
       const off = !available();
-      const held = Boolean(w.locked || off || busy());
+      const worldPath = w.world_path || `${savePath()}/${w.name}`;
+      const held = Boolean(w.locked || off || busy() || upkeeping.has(worldPath));
       const job = resume ? projectJob(w) : null;
       const acts = [];
       if (job && job.total > 0) {
@@ -1672,8 +1677,34 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       acts.push(button('projects_open', 'Open', held, () => pick(w.name, false)));
       acts.push(button('projects_expand', 'Expand', held, () => pick(w.name, true)));
       if (off) acts.slice(-2).forEach((b) => { b.title = t('one_world_desc_on', 'Each area joins one growing world at its real position.'); });
+      if (upkeep) {
+        const running = upkeeping.has(worldPath);
+        const up = button('projects_upkeep', 'Light & LODs', held, async () => {
+          const want = upkeep();
+          if (!(want.light || want.voxy || want.dh)) {
+            const names = [t('bake_lighting', 'Bake lighting'), t('voxy_lod', 'Pre-generate Voxy LOD'), t('dh_lod', 'Pre-generate Distant Horizons LOD')];
+            const text = `${t('projects_upkeep_none', 'Nothing to do yet. Turn on one of these first:')} ${names.join(', ')}`;
+            upkeepNotes.set(worldPath, { error: true, text });
+            return refresh();
+          }
+          upkeeping.add(worldPath);
+          upkeepNotes.delete(worldPath);
+          refresh();
+          try {
+            const lines = await invoke('gui_one_world_upkeep', { worldPath, ...want });
+            upkeepNotes.set(worldPath, { error: false, text: (lines || []).join(' ') });
+          } catch (e) {
+            upkeepNotes.set(worldPath, { error: true, text: String((e && e.message) || e) });
+          }
+          upkeeping.delete(worldPath);
+          await refresh();
+        });
+        if (running) up.textContent = t('run_state_running', 'Running');
+        up.title = t('projects_upkeep_tip', 'Bakes light into the areas built without it and builds the Voxy and Distant Horizons LOD caches over every area, as Bake lighting and the Pre-generate LOD settings ask. Nothing is generated.');
+        acts.push(up);
+      }
       // Held like Rebuild; the world goes to the system trash, where it can still be restored.
-      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy()), () => {});
+      const del = button('projects_delete', 'Delete', Boolean(w.locked || busy() || upkeeping.has(worldPath)), () => {});
       del.classList.add('projects-hold', 'projects-delete');
       del.title = t('projects_delete_tip', 'Hold to move this world to the trash. It can be restored from there.');
       globalThis.arnisHold(del, async () => {
@@ -1695,6 +1726,8 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
       actions.className = 'projects-actions';
       actions.append(...acts);
       row.append(...kids, actions);
+      const note = upkeepNotes.get(worldPath);
+      if (note) row.append(note.error ? errorLine(note.text) : text('projects-meta', note.text));
       return row;
     });
     if (!rows.length) rows.push(text('projects-empty', t('projects_empty', 'No worlds yet. Build one with One World on.')));
@@ -1710,13 +1743,31 @@ export function initProjects({ invoke, savePath, scale, open, available = () => 
   return refresh;
 }
 
-// Lowest / Highest Y: what is typed is snapped to a height the world can have (sections are 16 tall).
-function snapY(id, lo, hi, off) {
+// Ground Level runs from the default to the highest base vanilla's ceiling still leaves terrain room above.
+export const DEFAULT_GROUND_LEVEL = -62;
+const GROUND_LEVEL_MAX = 304;
+
+// What is typed, as the level a run gets; anything else keeps the default.
+export const typedGroundLevel = (text) => {
+  const v = parseInt(text, 10);
+  return Number.isFinite(v) ? Math.min(GROUND_LEVEL_MAX, Math.max(DEFAULT_GROUND_LEVEL, v)) : DEFAULT_GROUND_LEVEL;
+};
+
+// The level a run sends and why the field is greyed: a One World keeps its own, and off Earth or on One World terrain it changes nothing.
+export function groundLevelFor({ advanced, typed, earth, oneWorld, terrain, world }) {
+  if (oneWorld && world && world.exists && typeof world.ground_level === 'number') return { level: world.ground_level, why: 'reason_world_set' };
+  const why = !earth ? 'reason_earth' : oneWorld && terrain ? 'reason_not_one_world' : null;
+  return { level: advanced && !why ? typedGroundLevel(typed) : DEFAULT_GROUND_LEVEL, why };
+}
+
+// Lowest / Highest Y snap to whole sections and Ground Level into its range; greyed, Ground Level keeps the One World level it shows.
+function snapY(id, lo, hi, off, step = 16, keepGreyed = false) {
   const el = typeof document !== 'undefined' && document.getElementById && document.getElementById(id);
   if (!el || !el.addEventListener) return;
   el.addEventListener('change', () => {
+    if (keepGreyed && el.disabled) return;
     const v = parseInt(el.value, 10);
-    const s = Number.isFinite(v) ? String(Math.min(hi, Math.max(lo, Math.round((v - off) / 16) * 16 + off))) : '';
+    const s = Number.isFinite(v) ? String(Math.min(hi, Math.max(lo, Math.round((v - off) / step) * step + off))) : '';
     if (s === el.value) return;
     el.value = s;
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1724,3 +1775,4 @@ function snapY(id, lo, hi, off) {
 }
 snapY('meld-min-y-input', -2032, -64, 0);
 snapY('meld-max-y-input', 319, 2031, -1);
+snapY('meld-ground-level-input', DEFAULT_GROUND_LEVEL, GROUND_LEVEL_MAX, 0, 1, true);

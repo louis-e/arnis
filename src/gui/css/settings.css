@@ -456,9 +456,11 @@ label[for].setting-label {
   color: var(--ui-muted);
 }
 
+/* Fills the row so Windows display scaling can't break the name. */
 .setting-text {
   display: flex;
   flex-direction: column;
+  flex-grow: 1;
   gap: 2px;
   min-width: 0;
 }
@@ -476,29 +478,31 @@ label[for].setting-label {
   overflow-wrap: anywhere;
 }
 
-/* The icons after a name never wrap alone: the name's last line keeps room for them, and they sit in it. */
+/* The icons after a name never wrap alone: the name's last line keeps room for them, and they sit in it.
+   The room is exactly what they take, and no markup space comes between, so a heading sized to its text
+   fits it on one line. */
 .setting-heading > [data-localize]:has(+ .tooltip-icon) {
   padding-right: 22px;
 }
 
 .setting-heading > [data-localize]:has(+ .tooltip-icon + .setting-revert) {
-  padding-right: 50px;
+  padding-right: 44px;
 }
 
 .setting-heading > [data-localize]:has(+ .setting-revert) {
-  padding-right: 28px;
+  padding-right: 22px;
 }
 
 .setting-heading > [data-localize]:has(+ .tooltip-icon) + .tooltip-icon {
-  margin-left: -20px;
+  margin-left: -16px;
 }
 
 .setting-heading > [data-localize]:has(+ .tooltip-icon + .setting-revert) + .tooltip-icon {
-  margin-left: -48px;
+  margin-left: -38px;
 }
 
 .setting-heading > [data-localize]:has(+ .setting-revert) + .setting-revert {
-  margin-left: -22px;
+  margin-left: -16px;
 }
 
 .setting-heading > .tooltip-icon,
@@ -506,11 +510,7 @@ label[for].setting-label {
   vertical-align: middle;
 }
 
-/* Markup whitespace already spaces the tooltip; the injected revert button has none. */
-.setting-heading > .tooltip-icon {
-  margin-left: 2px;
-}
-
+.setting-heading > .tooltip-icon,
 .setting-heading > .setting-revert {
   margin-left: 6px;
 }
@@ -568,6 +568,15 @@ label[for].setting-label {
 
 .setting-choice > .setting-label {
   margin-bottom: 8px;
+}
+
+/* A choice row's short name never breaks. */
+.setting-choice > .setting-label > .setting-heading {
+  width: 100%;
+}
+
+.setting-choice .setting-heading > [data-localize] {
+  white-space: nowrap;
 }
 
 /* A choice row has no description line, so its reason goes under the title as one */
@@ -663,6 +672,19 @@ button.setting-reason:focus-visible {
 /* The badge takes the place of the revert button while there is nothing to revert (new-badges.js) */
 .settings-row.has-new-badge:not(.is-modified) .setting-heading > .setting-revert {
   display: none;
+}
+
+/* Then the room after the name holds the tooltip and the badge, which is 42px wide at this height. */
+.setting-heading > .new-badge {
+  width: 42px;
+}
+
+.settings-row.has-new-badge:not(.is-modified) .setting-heading > [data-localize]:has(+ .tooltip-icon) {
+  padding-right: 70px;
+}
+
+.settings-row.has-new-badge:not(.is-modified) .setting-heading > [data-localize]:has(+ .tooltip-icon) + .tooltip-icon {
+  margin-left: -64px;
 }
 
 /* Clear of the modified dot in the item's corner */

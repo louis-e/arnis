@@ -8,7 +8,7 @@ use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{
     edge_in_hole, in_hole, is_oversized_ring, without_holes, BuildingFootprintBitmap,
-    FloodFillCache, Holes, InnerRings,
+    CoordinateBitmap, FloodFillCache, Holes, InnerRings,
 };
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -22,6 +22,7 @@ pub fn generate_leisure(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+    road_mask: &CoordinateBitmap,
 ) {
     leisure_area(
         editor,
@@ -30,11 +31,13 @@ pub fn generate_leisure(
         flood_fill_cache,
         building_footprints,
         bridge_surface,
+        road_mask,
         None,
     );
 }
 
 /// A leisure area less the cells of `holes`.
+#[allow(clippy::too_many_arguments)]
 fn leisure_area(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -42,6 +45,7 @@ fn leisure_area(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+    road_mask: &CoordinateBitmap,
     holes: Option<&Holes>,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
@@ -107,21 +111,21 @@ fn leisure_area(
                     if edge_in_hole(holes, bx, bz) {
                         continue;
                     }
-                    editor.set_block(
-                        block_type,
-                        bx,
-                        0,
-                        bz,
-                        Some(&[
+                    // On a mapped road or path the edge goes only over grass, so a path it runs
+                    // along stays whole; on a plaza or schoolyard a pitch still shows.
+                    let over: &[Block] = if road_mask.contains(bx, bz) {
+                        &[GRASS_BLOCK]
+                    } else {
+                        &[
                             GRASS_BLOCK,
                             STONE_BRICKS,
                             SMOOTH_STONE,
                             LIGHT_GRAY_CONCRETE,
                             COBBLESTONE,
                             GRAY_CONCRETE,
-                        ]),
-                        None,
-                    );
+                        ]
+                    };
+                    editor.set_block(block_type, bx, 0, bz, Some(over), None);
                 }
 
                 current_leisure.push((node.x, node.z));
@@ -151,6 +155,23 @@ fn leisure_area(
                     continue;
                 }
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
+                let park = matches!(leisure_type.as_str(), "park" | "garden");
+                let (in_bounds, owned) =
+                    (park && editor.in_bounds(x, z), park && editor.owns(x, z));
+                // Grass on the column and no paving over it, read once for the lawn and
+                // the plants below.
+                let open_grass = (in_bounds || owned)
+                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
+                    && !editor.surface_is_sealed(x, z);
+                // Only cells in this editor, halo included so the tiles agree where a
+                // patch reaches across. Woods and scrub the land cover sees in a park
+                // keep their floor.
+                let lawn = in_bounds
+                    && open_grass
+                    && crate::land_cover::mown_cover(editor.land_cover_class(x, z));
+                if lawn {
+                    editor.mark_ground(crate::world_editor::GroundMark::Lawn, x, z);
+                }
 
                 // Land-cover water is skipped because a park often spans its
                 // own lake, and the carve after this leaves plants floating. A pitch
@@ -158,16 +179,14 @@ fn leisure_area(
                 // read as grass here and only the mask tells them apart. Halo cells
                 // are left to the tile that owns them, whose own random sequence
                 // decides what grows there.
-                if matches!(leisure_type.as_str(), "park" | "garden")
-                    && editor.owns(x, z)
-                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
-                    && !editor.surface_is_sealed(x, z)
-                    && !editor.is_lc_water(x, z)
-                {
+                let plants = owned && open_grass && !editor.is_lc_water(x, z);
+                if plants {
                     let random_choice: i32 = rng.random_range(0..1000);
 
+                    // A mown lawn takes the odd flower and tuft, the park's woods and
+                    // scrub their flowers, ferns and grass; bushes and trees in both.
                     match random_choice {
-                        0..30 => {
+                        0..30 if !lawn => {
                             if random_choice < 22 {
                                 crate::ground_decoration::place_scattered_flower(
                                     editor,
@@ -179,8 +198,18 @@ fn leisure_area(
                                 editor.set_block(FERN, x, 1, z, None, None);
                             }
                         }
-                        30..90 => {
-                            // Grass
+                        0..15 => {
+                            crate::ground_decoration::place_scattered_flower(
+                                editor,
+                                x,
+                                z,
+                                crate::ground_decoration::FlowerSetting::Garden,
+                            );
+                        }
+                        30..90 if !lawn => {
+                            editor.set_block(GRASS, x, 1, z, None, None);
+                        }
+                        30..45 => {
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
                         90..105 => {
@@ -260,6 +289,7 @@ pub fn generate_leisure_from_relation(
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
     bridge_surface: &BridgeSurfaceMap,
+    road_mask: &CoordinateBitmap,
 ) {
     if relation_is_area(&rel.tags) {
         // Process each outer member way individually using cached flood fill.
@@ -283,6 +313,7 @@ pub fn generate_leisure_from_relation(
                     flood_fill_cache,
                     building_footprints,
                     bridge_surface,
+                    road_mask,
                     holes.as_ref(),
                 );
             }

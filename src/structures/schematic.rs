@@ -203,6 +203,7 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "tall_grass" => GRASS,
         // Fountain blocks. Water makes the basin; player_head (block entity) is dropped.
         "water" => WATER,
+        "water_cauldron" => WATER_CAULDRON,
         "cobblestone" => COBBLESTONE,
         "cobblestone_wall" => COBBLESTONE_WALL,
         "chiseled_stone_bricks" => CHISELED_STONE_BRICKS,

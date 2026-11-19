@@ -39,6 +39,12 @@ const SETTINGS = [
   { id: 'field-preset-group', kind: 'segmented', store: OWN, valueAttr: 'data-field-preset' },
   { id: 'legacy-trees-toggle', kind: 'checkbox', store: OWN },
   { id: 'winter-toggle', kind: 'checkbox', store: OWN },
+  { id: 'lidar-toggle', kind: 'checkbox', store: OWN },
+  { id: 'garden-detail-toggle', kind: 'checkbox', store: OWN },
+  { id: 'measured-trees-toggle', kind: 'checkbox', store: OWN },
+  { id: 'measured-heights-toggle', kind: 'checkbox', store: OWN },
+  { id: 'measured-roofs-toggle', kind: 'checkbox', store: OWN },
+  { id: 'lidar-limit-group', kind: 'segmented', store: OWN, valueAttr: 'data-lidar-limit' },
   { id: 'post-apocalyptic-toggle', kind: 'checkbox', store: OWN },
 
   // World
@@ -53,6 +59,7 @@ const SETTINGS = [
   // The version list comes from Mojang after start-up, so the choice keeps a key of its own.
   { id: 'live-version-select', kind: 'select', store: EXTERNAL },
   { id: 'live-view-distance-select', kind: 'select', store: OWN },
+  { id: 'live-lan-toggle', kind: 'checkbox', store: OWN },
   { id: 'signage-group', kind: 'segmented', store: OWN, valueAttr: 'data-signage' },
 
   // Gameplay
@@ -98,6 +105,7 @@ const SETTINGS = [
   { id: 'meld-ram-budget-input', kind: 'text', store: OWN },
   { id: 'meld-threads-input', kind: 'text', store: OWN },
   { id: 'meld-seed-input', kind: 'text', store: OWN },
+  { id: 'meld-ground-level-input', kind: 'text', store: OWN },
   { id: 'meld-min-y-input', kind: 'text', store: OWN },
   { id: 'meld-max-y-input', kind: 'text', store: OWN },
   { id: 'meld-road-detail-group', kind: 'segmented', store: OWN, valueAttr: 'data-v' },
@@ -531,6 +539,10 @@ function injectRevertButtons(localization) {
       revert(entry);
     });
 
+    // No space before it: the room a name keeps for its icons has none (settings.css).
+    if (slot.classList.contains('setting-heading')) {
+      for (const node of Array.from(slot.childNodes)) if (node.nodeType === 3 && !node.textContent.trim()) node.remove();
+    }
     // Before a "New!" badge: WebKit kept the heading's sibling-based padding stale when one went.
     slot.insertBefore(button, slot.querySelector(':scope > .new-badge'));
   }

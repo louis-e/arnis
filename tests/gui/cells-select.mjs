@@ -76,7 +76,7 @@ await cellAction('remove', [9, 3, 3], { call, ask: async () => false, live: fals
 assert.deepStrictEqual(sent, [], 'no hold, no call');
 const ask = async (action, list) => (assert.deepStrictEqual([action, list], ['remove', [3, 9]]), true);
 await cellAction('remove', [9, 3, 3], { call, ask, live: false, world: () => 'W', job: () => 'J', after: () => after++ });
-assert.deepStrictEqual(sent, [['gui_cells_remove', { worldPath: 'W', cells: [3, 9], job: 'J' }]], 'the job the cells belong to goes with them');
+assert.deepStrictEqual(sent, [['gui_cells_remove', { worldPath: 'W', cells: [3, 9], job: 'J', redrawLods: true }]], 'the job the cells belong to goes with them, and the LODs are redrawn');
 assert.strictEqual(after, 1);
 assert.strictEqual(removedLine({ removed: [3], not_built: [9] }), 'Cells removed: 1. Not built, so not removed: 1.');
 assert.strictEqual(removedLine({ removed: [3, 4], not_built: [] }), 'Cells removed: 2.');
@@ -87,7 +87,7 @@ assert.deepStrictEqual(sent, [], 'no cells run: nothing is removed');
 assert.strictEqual(after, 1);
 const rebuilt = [];
 await cellAction('rebuild', [4], { call, ask: async () => true, live: false, world: () => 'W', job: () => 'J', after: (list, rebuild) => rebuilt.push([list, rebuild]), runs: () => true });
-assert.deepStrictEqual(sent, [['gui_cells_remove', { worldPath: 'W', cells: [4], job: 'J' }]]);
+assert.deepStrictEqual(sent, [['gui_cells_remove', { worldPath: 'W', cells: [4], job: 'J', redrawLods: false }]], 'the run after it redraws the LODs');
 assert.deepStrictEqual(rebuilt, [[[4], true]], 'removed, then rebuilt');
 // An engine refusal is shown, not thrown, and nothing refreshes.
 await cellAction('remove', [1], { call: async () => { throw 'A job is building this world; stop it first.'; }, ask: async () => true, live: false, after: () => after++ });

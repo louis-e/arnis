@@ -36,6 +36,14 @@ pub struct RotationMask {
     pub orig_max_z: i32,
 }
 
+/// Share of its measured height a crown the laser saw is drawn at. A tree model
+/// carries its whole crown up to the height it is given, while a real crown
+/// slopes down to its edges: at full height the drawn canopy stands above the
+/// measured one (its median columns 2 to 5 m up in Erding, Bellevue and Munich).
+/// At this share its tallest tenth stays 3 to 4 m under the measured one, since
+/// trees are better a little short than too tall.
+const MEASURED_TREE_SHARE: f32 = 0.85;
+
 /// Represents terrain data, land cover classification, and elevation settings
 #[derive(Clone)]
 pub struct Ground {
@@ -48,6 +56,8 @@ pub struct Ground {
     /// `None` when the option is off or the fetch failed, which restores the
     /// land-cover-only behaviour.
     canopy: Option<CanopyData>,
+    /// Garden detail from laser scans and aerial photos, where a source covers the area.
+    survey: Option<crate::survey::SurveyData>,
     /// World size in blocks, used to map coords onto the land-cover grid when elevation data is absent (flat mode).
     world_width: usize,
     world_height: usize,
@@ -69,6 +79,9 @@ pub struct Ground {
     origin: (i32, i32),
     /// In a piece of a job, the whole job's bbox: per-run choices are taken there.
     anchor: Option<LLBBox>,
+    /// With a water option on, the road and path surfaces at grade line waterways are piped
+    /// under (`pipe_channels_under_roads`).
+    roads_at_grade: Option<crate::floodfill_cache::CoordinateBitmap>,
 }
 
 pub(crate) type Geo = Box<dyn Fn(f64, f64) -> (f64, f64) + Send + Sync>;
@@ -320,6 +333,7 @@ impl Ground {
             elevation_data: None,
             land_cover: None,
             canopy: None,
+            survey: None,
             world_width: 0,
             world_height: 0,
             rotation_mask: None,
@@ -331,6 +345,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -380,6 +395,7 @@ impl Ground {
             elevation_data: None,
             land_cover,
             canopy,
+            survey: None,
             world_width: world_w,
             world_height: world_h,
             rotation_mask: None,
@@ -391,6 +407,7 @@ impl Ground {
             winter: false,
             origin: frame.origin(bbox),
             anchor: frame.anchor,
+            roads_at_grade: None,
         }
     }
 
@@ -407,6 +424,7 @@ impl Ground {
             elevation_data: None,
             land_cover: Some(land_cover),
             canopy: None,
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -418,6 +436,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -440,6 +459,7 @@ impl Ground {
             elevation_data: None,
             land_cover: None,
             canopy: Some(canopy),
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -451,6 +471,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -495,6 +516,7 @@ impl Ground {
             }),
             land_cover: None,
             canopy: None,
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -506,6 +528,7 @@ impl Ground {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -642,6 +665,7 @@ impl Ground {
                         elevation_data: Some(elevation_data),
                         land_cover,
                         canopy,
+                        survey: None,
                         world_width: final_w,
                         world_height: final_h,
                         rotation_mask: None,
@@ -658,6 +682,7 @@ impl Ground {
                         winter: false,
                         origin: frame.origin(&requested_bbox),
                         anchor: frame.anchor,
+                        roads_at_grade: None,
                     }
                 }
                 Err(e) => {
@@ -682,6 +707,7 @@ impl Ground {
                         elevation_data: None,
                         land_cover: None,
                         canopy: None,
+                        survey: None,
                         world_width: 0,
                         world_height: 0,
                         rotation_mask: None,
@@ -698,6 +724,7 @@ impl Ground {
                         winter: false,
                         origin: frame.origin(&requested_bbox),
                         anchor: frame.anchor,
+                        roads_at_grade: None,
                     }
                 }
             }
@@ -805,6 +832,107 @@ impl Ground {
         self.canopy.is_some()
     }
 
+    /// Whether garden detail was measured for this area and is wanted.
+    pub fn has_survey(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.garden)
+    }
+
+    /// Whether laser data was measured for this area, whatever it is used for.
+    pub fn has_laser(&self) -> bool {
+        self.survey.is_some()
+    }
+
+    /// Whether the run wants measured building heights.
+    pub fn laser_heights_wanted(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.heights)
+    }
+
+    /// Whether the run wants the roof shapes the laser saw.
+    pub fn laser_roofs_wanted(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.roofs)
+    }
+
+    /// Whether the laser's trees replace the canopy map (see [`Self::apply_measured_canopy`]).
+    pub fn laser_trees_wanted(&self) -> bool {
+        self.survey.as_ref().is_some_and(|s| s.features.trees)
+    }
+
+    /// With measured trees on: the laser's trees replace the canopy map wherever
+    /// the laser measured, at [`MEASURED_TREE_SHARE`] of their measured height;
+    /// bare ground it measured is bare. Outside its reach the canopy map stays. Mapped trees read their height
+    /// from the same grid, so they get the measured one too.
+    pub fn apply_measured_canopy(&mut self) {
+        let Some(s) = self.survey.as_ref().filter(|s| s.features.trees) else {
+            return;
+        };
+        let (w, h) = (s.width, s.height);
+        let canopy = self
+            .canopy
+            .get_or_insert_with(|| CanopyData::from_grid(vec![canopy::CANOPY_NODATA; w * h], w, h));
+        if canopy.width != w || canopy.height != h {
+            return;
+        }
+        let mut trees = 0usize;
+        for gz in 0..h {
+            for gx in 0..w {
+                let Some(c) = s.at_any(gx, gz) else { continue };
+                let v = if c.kind == crate::survey::Kind::Tree {
+                    trees += 1;
+                    (c.height * MEASURED_TREE_SHARE).round().clamp(3.0, 60.0) as u8
+                } else {
+                    0
+                };
+                canopy.set(gx, gz, v);
+            }
+        }
+        println!("Measured trees: {trees} canopy blocks from the laser scans");
+    }
+
+    pub fn set_survey(&mut self, survey: Option<crate::survey::SurveyData>) {
+        self.survey = survey;
+    }
+
+    /// The garden survey's cell under `coord`, sampled like the canopy map, when
+    /// garden detail is on.
+    pub fn survey_cell(&self, coord: XZPoint) -> Option<crate::survey::Cell> {
+        if !self.has_survey() {
+            return None;
+        }
+        self.laser_cell(coord)
+    }
+
+    /// The laser's cell under `coord` whatever the run uses it for, buildings and
+    /// trees included.
+    pub fn laser_cell(&self, coord: XZPoint) -> Option<crate::survey::Cell> {
+        let s = self.survey.as_ref()?;
+        let (x, z) = self.survey_index(s, coord);
+        s.at_any(x, z)
+    }
+
+    /// The survey grid's cell under `coord`, sampled like the canopy map.
+    fn survey_index(&self, s: &crate::survey::SurveyData, coord: XZPoint) -> (usize, usize) {
+        let (world_w, world_h) = self.world_dims();
+        let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+        let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
+        let x = ((x_ratio * (s.width - 1) as f64).round() as usize).min(s.width - 1);
+        let z = ((z_ratio * (s.height - 1) as f64).round() as usize).min(s.height - 1);
+        (x, z)
+    }
+
+    /// The survey's raw cell under `coord`, for a rotation to carry over.
+    pub(crate) fn survey_raw(&self, coord: XZPoint) -> Option<[u8; 5]> {
+        let s = self.survey.as_ref()?;
+        let (x, z) = self.survey_index(s, coord);
+        Some(s.raw_at(x, z))
+    }
+
+    /// The survey turned with the world: its cells on the rotated grid.
+    pub(crate) fn rotate_survey(&mut self, cells: Vec<[u8; 5]>, width: usize, height: usize) {
+        if let Some(s) = self.survey.as_mut() {
+            s.regrid(cells, width, height);
+        }
+    }
+
     /// Canopy top in metres, or `None` where the map has no measurement.
     /// A measured zero is bare ground, not missing.
     #[inline(always)]
@@ -861,17 +989,59 @@ impl Ground {
         (measured > 0).then(|| (f64::from(wooded) / f64::from(measured), top))
     }
 
+    /// With a water option on, finds the road and path surfaces at grade that line waterways
+    /// are piped under, so a path along a stream leaves no strip of water on either side.
+    /// Their drawing and every mask of their water skip these cells alike: the overrides
+    /// here, then the river bed and the drawing, which `take_roads_at_grade` hands them to.
+    /// The ways later passes drop are left out, so no channel stops under a road not drawn.
+    pub fn pipe_channels_under_roads(
+        &mut self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        args: &Args,
+    ) {
+        self.roads_at_grade = args.water.pipes_channels_under_roads().then(|| {
+            crate::element_processing::highways::collect_roads_at_grade(
+                elements,
+                xzbbox,
+                args.scale,
+                |e| {
+                    crate::mode_filter::kept_for_mode(e, args.mode, args.buildings)
+                        && !args.road_detail.drops_element(e)
+                },
+            )
+        });
+    }
+
+    /// The roads at grade `pipe_channels_under_roads` found, for the river bed and the drawing.
+    pub fn take_roads_at_grade(&mut self) -> Option<crate::floodfill_cache::CoordinateBitmap> {
+        self.roads_at_grade.take()
+    }
+
     /// Force LC_WATER inside OSM water and sink it onto that water; flat worlds only mark inland.
-    pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
+    /// `channel_width_cap` narrows line waterways as their drawing does.
+    pub fn apply_osm_water_override(
+        &mut self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        scale: f64,
+        channel_width_cap: Option<i32>,
+    ) {
         use crate::land_cover::osm_water_override::{apply_osm_water_override, mark_inland_water};
         let (world_width, world_height) = self.world_dims();
         let Ground {
             land_cover,
             elevation_data,
+            roads_at_grade,
             ..
         } = self;
         let Some(lc) = land_cover.as_mut() else {
             return;
+        };
+        let channels = crate::element_processing::waterways::ChannelShape {
+            scale,
+            width_cap: channel_width_cap,
+            roads_at_grade: roads_at_grade.as_ref(),
         };
         match elevation_data.as_mut() {
             Some(data) => {
@@ -883,9 +1053,10 @@ impl Ground {
                     world_height,
                     elements,
                     xzbbox,
+                    channels,
                 );
             }
-            None => mark_inland_water(lc, world_width, world_height, elements, xzbbox),
+            None => mark_inland_water(lc, world_width, world_height, elements, xzbbox, channels),
         }
     }
 
@@ -895,10 +1066,16 @@ impl Ground {
         elements: &[ProcessedElement],
         xzbbox: &XZBBox,
         scale: f64,
+        channel_width_cap: Option<i32>,
     ) {
         let (world_width, world_height) = self.world_dims();
         let Some(lc) = self.land_cover.as_mut() else {
             return;
+        };
+        let channels = crate::element_processing::waterways::ChannelShape {
+            scale,
+            width_cap: channel_width_cap,
+            roads_at_grade: self.roads_at_grade.as_ref(),
         };
         crate::land_cover::osm_land_override::apply_osm_land_override(
             lc,
@@ -907,6 +1084,7 @@ impl Ground {
             elements,
             xzbbox,
             scale,
+            channels,
         );
     }
 
@@ -1577,8 +1755,47 @@ impl Ground {
     }
 }
 
-/// `peaks` delivers OSM summits once the parallel OSM fetch has them.
+/// `peaks` delivers OSM summits once the parallel OSM fetch has them. Garden
+/// detail downloads beside the elevation and land cover, on its own thread.
 pub fn generate_ground_data(
+    args: &Args,
+    bbox: LLBBox,
+    peaks: &crate::elevation::PeakSource,
+) -> Ground {
+    std::thread::scope(|scope| {
+        let survey = scope.spawn(|| fetch_survey(args, &bbox));
+        let mut ground = generate_ground_layers(args, bbox, peaks);
+        ground.set_survey(survey.join().ok().flatten());
+        ground.apply_measured_canopy();
+        ground
+    })
+}
+
+/// Laser data on the grid the canopy map is sampled on, so the two line up. None
+/// unless the run asks for a laser feature it can have and a source covers the area.
+fn fetch_survey(args: &Args, bbox: &LLBBox) -> Option<crate::survey::SurveyData> {
+    let Some(features) = args.lidar_features() else {
+        if let Some(why) = args.lidar_off_reason() {
+            println!("Laser data off: {why}");
+        }
+        return None;
+    };
+    let frame = GroundFrame::from_args(args, bbox);
+    let plan = frame.fetch_plan(bbox, args.scale);
+    let (grid_w, grid_h) = plan.grid_dims();
+    let mut survey =
+        crate::survey::fetch_survey_data(&plan.bbox, grid_w, grid_h, args.lidar_max_mb, features)?;
+    if frame.mercator.is_some() {
+        survey.remap_rows_to_mercator(plan.bbox.max().lat(), plan.bbox.min().lat());
+    }
+    if plan.pad > 0 {
+        let (w, h) = plan.final_dims;
+        survey.crop(plan.pad, plan.pad, w, h);
+    }
+    Some(survey)
+}
+
+fn generate_ground_layers(
     args: &Args,
     bbox: LLBBox,
     peaks: &crate::elevation::PeakSource,
@@ -1990,6 +2207,37 @@ mod tests {
     use crate::coordinate_system::cartesian::XZPoint;
     use crate::elevation_data::ElevationData;
 
+    /// A crown the laser measured 20 m tall is drawn at 17 m, a 3 m one at the
+    /// shortest tree; bare ground stays bare.
+    #[test]
+    fn measured_crowns_are_drawn_a_little_short() {
+        let (w, h) = (4usize, 1usize);
+        let tree = crate::survey::classify::TREE;
+        let cells = vec![
+            [tree, 100, 0, 0, 0],
+            [tree, 15, 0, 0, 0],
+            [1, 0, 0, 0, 0],
+            [tree, 255, 0, 0, 0],
+        ];
+        let features = crate::survey::Features {
+            garden: false,
+            trees: true,
+            heights: false,
+            roofs: false,
+        };
+        let mut ground = Ground::new_flat(0);
+        ground.set_world_dims(w, h);
+        ground.set_survey(Some(crate::survey::SurveyData::from_cells(
+            cells, w, h, features,
+        )));
+        ground.apply_measured_canopy();
+        let at = |x| ground.canopy_height_m(XZPoint::new(x, 0));
+        assert_eq!(
+            [at(0), at(1), at(2), at(3)],
+            [Some(17), Some(3), Some(0), Some(43)]
+        );
+    }
+
     fn ground_with(heights: Vec<Vec<f32>>) -> Ground {
         let h = heights.len();
         let w = heights[0].len();
@@ -2014,6 +2262,7 @@ mod tests {
             }),
             land_cover: None,
             canopy: None,
+            survey: None,
             world_width: w,
             world_height: h,
             rotation_mask: None,
@@ -2025,6 +2274,7 @@ mod tests {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 
@@ -2556,6 +2806,7 @@ pub(crate) mod test_support {
             }),
             land_cover: Some(land_cover),
             canopy: None,
+            survey: None,
             world_width,
             world_height,
             rotation_mask: None,
@@ -2567,6 +2818,7 @@ pub(crate) mod test_support {
             winter: false,
             origin: (0, 0),
             anchor: None,
+            roads_at_grade: None,
         }
     }
 }

@@ -14,7 +14,7 @@ use crate::{
 pub use peaks::{PeakSource, TallModel, TerrainHints};
 use postprocess::{
     apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
-    scale_to_minecraft_reserving, top_reserve_for,
+    scale_to_minecraft_in_place, top_reserve_for,
 };
 pub use postprocess::{AffinePolicy, ElevationAffine, SoftTop};
 use provider::{ElevationProvider, RawElevationGrid};
@@ -399,9 +399,12 @@ fn station_crossings(
             let x = ((s.lon - min_lon) / (max_lon - min_lon) * (gw - 1) as f64).round() as usize;
             let y = ((max_lat - s.lat) / (max_lat - min_lat) * (gh - 1) as f64).round() as usize;
             let h = *height_grid.get(y)?.get(x)?;
-            // The room asked is depth + 2 + BORE_ROOM over the floor; a hall wants depth + 1.
+            // The room asked is depth + 2 + BORE_ROOM over the floor; a hall wants its depth
+            // over the lowest a floor may lie.
             h.is_finite().then(|| crate::water_depth::BoreCrossing {
-                depth: s.depth - 1 - crate::water_depth::BORE_ROOM,
+                depth: s.depth + crate::element_processing::tunnel_grade::FLOOR_GUARD
+                    - 2
+                    - crate::water_depth::BORE_ROOM,
                 lowest_m: h,
             })
         })
@@ -679,8 +682,8 @@ pub fn fetch_elevation_data(
     // The multiplier stretches only the vertical axis. `slope_correction` below still
     // divides by the horizontal scale, so slopes keep their real incline and a stretched
     // hillside stays grass instead of turning to rock.
-    let (mc_heights, affine) = scale_to_minecraft_reserving(
-        &height_grid,
+    let affine = scale_to_minecraft_in_place(
+        &mut height_grid,
         scale * height_multiplier,
         ground_level,
         min_ground_level,
@@ -689,9 +692,7 @@ pub fn fetch_elevation_data(
         affine,
         top_reserve,
     );
-    // The metre grid is done with; freeing it first keeps the downcast below from holding
-    // three full grids at once.
-    drop(height_grid);
+    let mc_heights = height_grid;
     let ElevationAffine {
         min_height_m,
         blocks_per_meter,
@@ -964,22 +965,28 @@ mod band_tests {
         };
         // A carve six deep at the area's lowest point: the floor, the bed and its block
         // under it, the depth and the room.
-        assert_eq!(lift(band(false), &[deep], 50.0), (-48, -48));
-        assert_eq!(lift(band(false), &[shallow, deep], 50.0), (-48, -48));
-        assert_eq!(lift(band(false), &[shallow], 50.0), (-52, -52));
+        let at = |y: i32| {
+            (
+                y + crate::water_depth::BORE_ROOM,
+                y + crate::water_depth::BORE_ROOM,
+            )
+        };
+        assert_eq!(lift(band(false), &[deep], 50.0), at(-56));
+        assert_eq!(lift(band(false), &[shallow, deep], 50.0), at(-56));
+        assert_eq!(lift(band(false), &[shallow], 50.0), at(-60));
         // Water 10 m up the relief stands 10 blocks over the base, less two to be safe.
         let up = BoreCrossing {
             depth: 6,
             lowest_m: 10.0,
         };
-        assert_eq!(lift(band(false), &[up], 50.0), (-56, -56));
+        assert_eq!(lift(band(false), &[up], 50.0), at(-64));
         // ...unless the relief is tall enough that the fit may compress it.
-        assert_eq!(lift(band(false), &[up], 300.0), (-48, -48));
+        assert_eq!(lift(band(false), &[up], 300.0), at(-56));
         // The extended floor has room, and a base already over the need stays.
         let extended = band(true).with_bore_room(&[deep], 0.0, 50.0, 1.0);
         assert_eq!(
             (extended.ground_level, extended.min_ground_level),
-            (-62, -2016)
+            (-62, -2024 + crate::water_depth::BORE_ROOM)
         );
         let high = HeightBand {
             ground_level: 10,

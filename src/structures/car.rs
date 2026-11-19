@@ -42,21 +42,14 @@ fn cars() -> &'static [(StructureSchematic, u8)] {
     })
 }
 
-/// Sometimes parks a random car at a space centre, aligned via `rot_base` with a random nose flip.
-pub fn maybe_place_car(editor: &mut WorldEditor, cx: i32, cz: i32, rot_base: u8) {
+/// Sometimes parks a random car at a space centre, its length along `yaw` (Minecraft degrees,
+/// 0 along Z) with a random nose flip.
+pub fn maybe_park_car_facing(editor: &mut WorldEditor, cx: i32, cz: i32, yaw: f64) {
     let base_y = editor.get_absolute_y(cx, 1, cz);
-    park(
-        editor,
-        cx,
-        cz,
-        base_y,
-        rot_base,
-        coord_hash(cx, cz),
-        i32::MAX,
-    );
+    park(editor, cx, cz, base_y, yaw, coord_hash(cx, cz), i32::MAX);
 }
 
-/// Like `maybe_place_car`, on a deck whose surface is `base_y`, with only cars at most
+/// Like `maybe_park_car_facing`, on a deck whose surface is `base_y`, with only cars at most
 /// `max_height` blocks tall. Decks stacked over one another draw their own cars.
 pub fn maybe_place_car_on_deck(
     editor: &mut WorldEditor,
@@ -67,7 +60,8 @@ pub fn maybe_place_car_on_deck(
     max_height: i32,
 ) {
     let h = coord_hash(cx ^ base_y.wrapping_mul(0x2F1B), cz);
-    park(editor, cx, cz, base_y, rot_base, h, max_height);
+    let yaw = f64::from(rot_base & 3) * 90.0;
+    park(editor, cx, cz, base_y, yaw, h, max_height);
 }
 
 /// The camper, pickup, SUV and sedan, at fixed places even if one fails to load.
@@ -127,12 +121,16 @@ fn car_height(car: &StructureSchematic) -> i32 {
     car.voxels.iter().map(|v| v.1 + 1).max().unwrap_or(0)
 }
 
+/// Most a block-built car, which turns only in quarter turns, may sit off its space's
+/// direction, in degrees.
+const SCHEMATIC_SKEW_DEG: f64 = 15.0;
+
 fn park(
     editor: &mut WorldEditor,
     cx: i32,
     cz: i32,
     base_y: i32,
-    rot_base: u8,
+    yaw: f64,
     h: u64,
     max_height: i32,
 ) {
@@ -140,9 +138,14 @@ fn park(
         return;
     }
     if editor.parked_car_models() {
-        park_model(editor, cx, cz, base_y, rot_base, h, max_height);
+        park_model(editor, cx, cz, base_y, yaw, h, max_height);
         return;
     }
+    let quarters = (yaw / 90.0).round();
+    if (yaw - quarters * 90.0).abs() > SCHEMATIC_SKEW_DEG {
+        return;
+    }
+    let rot_base = (quarters as i64).rem_euclid(4) as u8;
     let pool: Vec<&(StructureSchematic, u8)> = cars()
         .iter()
         .filter(|(car, _)| car_height(car) <= max_height)
@@ -163,7 +166,7 @@ fn park_model(
     cx: i32,
     cz: i32,
     base_y: i32,
-    rot_base: u8,
+    yaw: f64,
     h: u64,
     max_height: i32,
 ) {
@@ -179,7 +182,7 @@ fn park_model(
     };
     let unit = |shift: u32| ((h >> shift) & 0xff) as f64 / 255.0 - 0.5;
     let flip = if (h >> 16) & 1 == 0 { 0.0 } else { 180.0 };
-    let yaw = f64::from(rot_base & 3) * 90.0 + flip + unit(40) * 5.0;
+    let yaw = yaw + flip + unit(40) * 5.0;
     let (x, z) = (
         f64::from(cx) + 0.5 + unit(48) * 0.3,
         f64::from(cz) + 0.5 + unit(56) * 0.3,

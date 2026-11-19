@@ -259,6 +259,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_stop_generation,
             gui_cells_control,
             gui_cells_remove,
+            gui_one_world_upkeep,
             gui_get_version,
             gui_get_update_info,
             gui_get_platform,
@@ -275,6 +276,7 @@ pub fn run_gui() -> Result<(), String> {
             gui_precompute_facades,
             gui_cancel_precompute,
             gui_one_world_info,
+            gui_world_size_estimate,
             gui_list_one_worlds,
             gui_world_thumbnail,
             gui_set_place_name,
@@ -301,6 +303,8 @@ pub fn run_gui() -> Result<(), String> {
             let app_handle = app.handle();
             let main_window = tauri::Manager::get_webview_window(app_handle, "main")
                 .ok_or_else(|| std::io::Error::other("Failed to get main window"))?;
+            #[cfg(target_os = "linux")]
+            crate::linux_gui::watch_web_process(&main_window);
             progress::set_main_window(main_window);
             Ok(())
         })
@@ -409,11 +413,16 @@ struct LiveStartOptions {
     world_name: String,
     version: Option<String>,
     view_distance: u32,
+    #[serde(default)]
+    lan: bool,
     accept_eula: bool,
     bbox_text: Option<String>,
     spawn_point: Option<(f64, f64)>,
     world_scale: f64,
     height_multiplier: f64,
+    /// Only a world this session creates takes it; an existing one keeps its own.
+    #[serde(default)]
+    ground_level: Option<i32>,
     generation_mode: String,
     winter_enabled: bool,
     post_apocalyptic_enabled: bool,
@@ -424,6 +433,12 @@ struct LiveStartOptions {
     max_tree_size: String,
     field_preset: String,
     canopy_height_enabled: bool,
+    lidar_enabled: bool,
+    garden_detail_enabled: bool,
+    measured_trees_enabled: bool,
+    measured_heights_enabled: bool,
+    measured_roofs_enabled: bool,
+    lidar_max_mb: u32,
     overture_enabled: bool,
     use_3d_enabled: bool,
     aws_only_elevation: bool,
@@ -500,6 +515,9 @@ fn gui_live_start(options: LiveStartOptions) -> Result<(), String> {
         ));
     }
     let mut args = Args::try_parse_from(&argv).map_err(|e| e.to_string())?;
+    if let Some(level) = options.ground_level {
+        args.ground_level = level;
+    }
     args.mode = crate::args::GenerationMode::from_name(&options.generation_mode);
     args.winter = options.winter_enabled;
     args.post_apocalyptic = options.post_apocalyptic_enabled;
@@ -513,6 +531,12 @@ fn gui_live_start(options: LiveStartOptions) -> Result<(), String> {
         &options.field_preset,
     );
     args.canopy_height = options.canopy_height_enabled;
+    args.lidar = options.lidar_enabled;
+    args.garden_detail = options.garden_detail_enabled;
+    args.measured_trees = options.measured_trees_enabled;
+    args.measured_heights = options.measured_heights_enabled;
+    args.measured_roofs = options.measured_roofs_enabled;
+    args.lidar_max_mb = options.lidar_max_mb;
     args.overture = options.overture_enabled;
     args.use_3d = options.use_3d_enabled;
     args.aws_only_elevation = options.aws_only_elevation;
@@ -537,6 +561,7 @@ fn gui_live_start(options: LiveStartOptions) -> Result<(), String> {
         version: options.version.filter(|v| !v.trim().is_empty()),
         view_distance: options.view_distance.clamp(4, 32),
         port: None,
+        lan: options.lan,
         messages: options.messages,
     };
     let notify = std::sync::Arc::new(|s: &crate::live::Status| progress::emit_live_status(s));
@@ -1338,6 +1363,7 @@ fn cache_size_string() -> String {
     let mut total = dir_size_bytes(&get_base_cache_dir());
     total = total.saturating_add(dir_size_bytes(&crate::land_cover::land_cover_cache_dir()));
     total = total.saturating_add(dir_size_bytes(&crate::canopy::canopy_cache_dir()));
+    total = total.saturating_add(dir_size_bytes(&crate::survey::cache_root()));
     // Its own root beside the tile cache, and Clear Cache deletes it.
     total = total.saturating_add(dir_size_bytes(&crate::overture::cache_root()));
     for d in [crate::osm_tiles::cache_root(), crate::osm_pbf::cache_dir()]
@@ -1418,6 +1444,7 @@ fn clear_tile_caches_now() -> Result<String, String> {
     let combined = clear_all_cached_tiles()
         .combined(clear_land_cover_cache())
         .combined(crate::canopy::clear_canopy_cache())
+        .combined(crate::survey::clear_cache())
         .combined(crate::overture::clear_overture_cache())
         .combined(crate::osm_tiles::clear_osm_tiles_cache())
         .combined(crate::osm_pbf::clear_osm_pbf_cache())
@@ -1751,6 +1778,45 @@ struct OneWorldInfo {
     knee_m: Option<f64>,
     /// Changes whenever an area is recorded.
     revision: u32,
+}
+
+/// The settings the size of a world depends on, as a run would take them.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldSizeRequest {
+    /// Ground km² times the scale squared.
+    blocks_km2: f64,
+    world_format: String,
+    interior: bool,
+    bake_lighting: bool,
+    voxy_lod: bool,
+    dh_lod: bool,
+    caves: bool,
+    fillground: bool,
+    tall: bool,
+    ground_level: i32,
+}
+
+/// The estimate under the map: MiB on disk on flat land and in the Alps, from the table the
+/// disk check uses; nothing for Luanti and Hytale.
+#[tauri::command]
+fn gui_world_size_estimate(request: WorldSizeRequest) -> Option<(f64, f64)> {
+    let format = match request.world_format.as_str() {
+        "java" => WorldFormat::JavaAnvil,
+        "bedrock" => WorldFormat::BedrockMcWorld,
+        _ => return None,
+    };
+    let options = crate::world_utils::WorldSizeOptions {
+        interior: request.interior,
+        bake_lighting: request.bake_lighting,
+        voxy_lod: request.voxy_lod,
+        dh_lod: request.dh_lod,
+        caves: request.caves,
+        fillground: request.fillground,
+        tall: request.tall,
+        ground_level: request.ground_level,
+    };
+    crate::world_utils::typical_world_mib(request.blocks_km2, format, options)
 }
 
 fn one_world_request(one_world: bool, world_format: &str, body: &str) -> Result<(), String> {
@@ -2489,6 +2555,12 @@ fn gui_data_plan(
     terrain_enabled: bool,
     skip_osm_objects: bool,
     canopy_height_enabled: bool,
+    lidar_enabled: bool,
+    garden_detail_enabled: bool,
+    measured_trees_enabled: bool,
+    measured_heights_enabled: bool,
+    measured_roofs_enabled: bool,
+    lidar_max_mb: u32,
     overture_enabled: bool,
     aws_only_elevation: bool,
     flags: Vec<String>,
@@ -2504,6 +2576,12 @@ fn gui_data_plan(
         crate::args::GenerationMode::GeoOnly
     };
     args.canopy_height = canopy_height_enabled;
+    args.lidar = lidar_enabled;
+    args.garden_detail = garden_detail_enabled;
+    args.measured_trees = measured_trees_enabled;
+    args.measured_heights = measured_heights_enabled;
+    args.measured_roofs = measured_roofs_enabled;
+    args.lidar_max_mb = lidar_max_mb;
     args.overture = overture_enabled;
     args.aws_only_elevation = aws_only_elevation;
     let bbox = LLBBox::from_str(&bbox_text)?;
@@ -2709,12 +2787,47 @@ fn gui_cells_remove(
     world_path: String,
     cells: Vec<u32>,
     job: String,
+    redraw_lods: Option<bool>,
 ) -> Result<crate::one_world::RemoveReport, String> {
     let world = PathBuf::from(world_path);
     if live_plays(&world) {
         return Err("Live mode is playing this world. Stop it first.".to_string());
     }
-    crate::one_world::remove_cells(&world, &job, &cells)
+    crate::one_world::remove_cells(&world, &job, &cells, redraw_lods.unwrap_or(false))
+}
+
+/// Projects: bakes light into a One World's older areas and builds its LOD caches, as the
+/// settings ask, without generating anything. One line per part.
+#[tauri::command(async)]
+fn gui_one_world_upkeep(
+    world_path: String,
+    light: bool,
+    voxy: bool,
+    dh: bool,
+) -> Result<Vec<String>, String> {
+    let world = PathBuf::from(world_path);
+    if live_plays(&world) {
+        return Err("Live mode is playing this world. Stop it first.".to_string());
+    }
+    if crate::scale::runs_on(&world) {
+        return Err("A job is building this world; stop it first.".to_string());
+    }
+    let _lock = crate::world_utils::SessionLock::acquire(&world).map_err(|_| {
+        "The world is in use (open in Minecraft, or another run writes it); close it first."
+            .to_string()
+    })?;
+    if crate::one_world::Manifest::load(&world)?.is_none() {
+        return Err("Not a One World.".to_string());
+    }
+    let upkeep = crate::one_world::Upkeep { light, voxy, dh };
+    let lines = crate::one_world::upkeep(&world, upkeep, false);
+    let failed = lines.iter().any(Result::is_err);
+    let text: Vec<String> = lines.into_iter().map(|l| l.unwrap_or_else(|e| e)).collect();
+    // On a failure the row still shows what finished, not only the error.
+    if failed {
+        return Err(text.join(" "));
+    }
+    Ok(text)
 }
 
 // Everything before the `spawn` below - the spawn point written into level.dat -
@@ -2744,6 +2857,12 @@ fn gui_start_generation(
     max_tree_size: String,
     field_preset: String,
     canopy_height_enabled: bool,
+    lidar_enabled: bool,
+    garden_detail_enabled: bool,
+    measured_trees_enabled: bool,
+    measured_heights_enabled: bool,
+    measured_roofs_enabled: bool,
+    lidar_max_mb: u32,
     overture_enabled: bool,
     use_3d_enabled: bool,
     disable_height_limit: bool,
@@ -3157,6 +3276,12 @@ fn gui_start_generation(
                     &field_preset,
                 ),
                 canopy_height: canopy_height_enabled,
+                lidar: lidar_enabled,
+                garden_detail: garden_detail_enabled,
+                measured_trees: measured_trees_enabled,
+                measured_heights: measured_heights_enabled,
+                measured_roofs: measured_roofs_enabled,
+                lidar_max_mb,
                 overture: overture_enabled,
                 // Auto picks whichever transport is cheaper for the area. The
                 // two are not bit-identical - tiles quantise coordinates to a
@@ -3237,6 +3362,8 @@ fn gui_start_generation(
                 capabilities: false,
                 map_item_only: false,
                 dh_lod_only: false,
+                voxy_lod_only: false,
+                bake_lighting_only: false,
                 climate_map: None,
                 export_tree_packs: None,
                 loot_table: None,
@@ -3259,6 +3386,11 @@ fn gui_start_generation(
                 })?;
             }
             crate::y_bounds::apply(&mut args);
+            if let Err(e) = crate::args::validate_ground_level(&args, "Ground Level") {
+                eprintln!("{e}");
+                emit_gui_error(&e);
+                return Err(e);
+            }
             crate::scale::budget::single_below_break_even(&mut args, one_world);
 
             let mut one_world_extending = false;
@@ -3451,7 +3583,7 @@ fn gui_start_generation(
                 level_name,
                 spawn_point: None,
                 luanti_game,
-                ground_level,
+                ground_level: args.ground_level,
                 facades: crate::mapillary::FacadeJob::default(),
             };
 
@@ -3595,6 +3727,7 @@ fn gui_start_generation(
                     }
                     apply_worldpainter_spawn(run, &generation_path, mc_spawn_point);
                 }
+                crate::one_world::after_run(&args);
                 if let Some(g) = cleanup_guard.as_mut() {
                     g.disarm();
                 }
@@ -3726,35 +3859,41 @@ fn gui_start_generation(
                         &crate::projection::ProjectionSpec::from_args(&args),
                     );
 
-                    let overture::OvertureData {
-                        elements: overture_elements,
-                        hints: overture_hints,
-                        ..
-                    } = overture_data;
-
-                    // Fill height/levels on OSM buildings that have neither
-                    overture_hints.apply(&mut parsed_elements);
-
-                    // Merge supplementary Overture buildings against parsed OSM
-                    if !overture_elements.is_empty() {
-                        let unique_overture =
-                            overture::deduplicate_against_osm(overture_elements, &parsed_elements);
-                        parsed_elements.extend(unique_overture);
-                    }
+                    // The same merge as run_cli: measured heights, Overture, garden buildings.
+                    crate::building_sources::merge(
+                        &mut parsed_elements,
+                        overture_data,
+                        &ground,
+                        &xzbbox,
+                        args.overture && !args.skip_objects(),
+                        args.scale,
+                    );
 
                     osm_parser::sort_by_priority(&mut parsed_elements);
 
                     let mut ground = ground;
 
+                    // Where line waterways are piped under roads; the masks skip it too.
+                    ground.pipe_channels_under_roads(&parsed_elements, &xzbbox, &args);
                     // OSM water override first, then bridge repair.
-                    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    ground.apply_osm_water_override(
+                        &parsed_elements,
+                        &xzbbox,
+                        args.scale,
+                        args.water.water_detail.channel_width_cap(args.scale),
+                    );
                     overture::drop_footprints_in_water(
                         &mut parsed_elements,
                         &ground,
                         &xzbbox,
                         args.scale,
                     );
-                    ground.apply_osm_land_override(&parsed_elements, &xzbbox, args.scale);
+                    ground.apply_osm_land_override(
+                        &parsed_elements,
+                        &xzbbox,
+                        args.scale,
+                        args.water.water_detail.channel_width_cap(args.scale),
+                    );
                     ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
                     ground.finish_land_cover(args.mode);
 
@@ -3815,6 +3954,7 @@ fn gui_start_generation(
                         }
                         apply_worldpainter_spawn(run, &generation_path, mc_spawn_point);
                     }
+                    crate::one_world::after_run(&args);
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
                     }

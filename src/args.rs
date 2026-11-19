@@ -110,7 +110,7 @@ pub struct Args {
     pub tall_range: Option<(i32, i32)>,
 
     /// Ground level to use in the Minecraft world
-    #[arg(long, default_value_t = -62, allow_hyphen_values = true)]
+    #[arg(long, default_value_t = DEFAULT_GROUND_LEVEL, allow_hyphen_values = true)]
     pub ground_level: i32,
 
     /// What to generate, mirroring the GUI's generation mode dropdown:
@@ -231,6 +231,40 @@ pub struct Args {
     #[arg(long = "canopy-height", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub canopy_height: bool,
 
+    /// Use open airborne laser scans and aerial photos where a region publishes them
+    /// (Bavaria, North Rhine-Westphalia, France, the Netherlands, Luxembourg, Estonia,
+    /// Latvia, Switzerland, much of the United States, parts of Canada). Off by
+    /// default: the first run of an area downloads 50 to 330 MB a square kilometre.
+    /// The features below follow it. Never used for One World pieces, and skipped
+    /// for areas over 16 km² or past --lidar-max-mb.
+    #[arg(long = "lidar", default_value_t = false, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub lidar: bool,
+
+    /// With --lidar: fill gardens and yards OpenStreetMap leaves empty with measured
+    /// lawn, paving, hedges, bushes, beds, sheds, pools and fences. Mapped features win.
+    #[arg(long = "garden-detail", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub garden_detail: bool,
+
+    /// With --lidar: trees where the laser saw them, at their measured height, in
+    /// place of the canopy map.
+    #[arg(long = "measured-trees", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub measured_trees: bool,
+
+    /// With --lidar: measured heights, and flat roofs, for buildings OpenStreetMap
+    /// gives neither height nor levels.
+    #[arg(long = "measured-heights", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub measured_heights: bool,
+
+    /// With --lidar: the roof shape the laser saw (gabled, hipped or flat), and a
+    /// gabled roof's ridge, for buildings OpenStreetMap gives no roof shape.
+    #[arg(long = "measured-roofs", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub measured_roofs: bool,
+
+    /// Most a run may download for --lidar, in megabytes of laser scans and aerial
+    /// photos not yet cached. Past it the run goes on without them.
+    #[arg(long = "lidar-max-mb", default_value_t = 1000)]
+    pub lidar_max_mb: u32,
+
     /// Add building footprints from Overture Maps that are missing in OpenStreetMap.
     /// Helps sparsely mapped areas; may occasionally add a satellite-detected false positive.
     #[arg(long = "overture", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
@@ -305,13 +339,15 @@ pub struct Args {
 
     /// Pre-generate the Voxy mod's LOD cache so the world renders to the horizon
     /// on first join, instead of needing `/voxy import current`. Java only;
-    /// implies --bake-lighting, since unlit LOD terrain renders black.
+    /// implies --bake-lighting, since unlit LOD terrain renders black. A One World
+    /// rebuilds it over every area after each run.
     #[arg(long, default_value_t = false)]
     pub voxy_lod: bool,
 
     /// Pre-generate the Distant Horizons mod's LOD database so the world renders
     /// to the horizon on first join, instead of DH building it chunk by chunk.
-    /// Java only; implies --bake-lighting.
+    /// Java only; implies --bake-lighting. A One World rebuilds it over every area
+    /// after each run.
     #[arg(long, default_value_t = false)]
     pub dh_lod: bool,
 
@@ -544,6 +580,14 @@ pub struct Args {
     /// Write the Distant Horizons LODs of the One World at --output-dir and --world-name from its region files and exit.
     #[arg(long, default_value_t = false)]
     pub dh_lod_only: bool,
+
+    /// Write the Voxy LOD cache of the One World at --output-dir and --world-name from its region files and exit.
+    #[arg(long, default_value_t = false)]
+    pub voxy_lod_only: bool,
+
+    /// Bake light into the chunks of the One World at --output-dir and --world-name saved without it and exit.
+    #[arg(long, default_value_t = false)]
+    pub bake_lighting_only: bool,
     #[command(flatten)]
     pub water: WaterArgs,
 
@@ -720,13 +764,21 @@ pub struct WaterArgs {
     pub river_bed: crate::river_bed::RiverBed,
 
     /// Water detail. `scaled` rounds bed depths instead of flooring them and, on small
-    /// maps, gives narrow water a bowl-shaped bed, draws streams narrower and lets water
-    /// run over a road where it crosses a short stretch of water without a bridge.
+    /// maps, gives narrow water a bowl-shaped bed, draws rivers at most 5 blocks wide and
+    /// streams tagged wider than 3 at 3, and lets water run over a road where it crosses a
+    /// short stretch of water without a bridge.
     #[arg(long, value_enum, default_value_t = crate::water_detail::WaterDetail::Default)]
     pub water_detail: crate::water_detail::WaterDetail,
 }
 
 impl WaterArgs {
+    /// Whether a line waterway is piped under the roads at grade on its centreline, so a
+    /// path along a stream leaves no strip of water on either side. Any water option.
+    pub fn pipes_channels_under_roads(&self) -> bool {
+        self.river_bed != crate::river_bed::RiverBed::Off
+            || self.water_detail != crate::water_detail::WaterDetail::Default
+    }
+
     /// How far these options can carve beyond the land-cover estimate.
     pub fn carve_depth(&self, scale: f64) -> crate::water_detail::CarveDepth {
         crate::water_detail::CarveDepth {
@@ -968,6 +1020,11 @@ impl Args {
     pub fn java(&self) -> bool {
         !self.bedrock && !self.sandbox()
     }
+
+    /// A run that only redraws the map item or LOD caches of a One World.
+    pub fn redraws_only(&self) -> bool {
+        self.map_item_only || self.dh_lod_only || self.voxy_lod_only || self.bake_lighting_only
+    }
 }
 
 /// Live tiles build with the stock settings only, so `--live` refuses every flag that would
@@ -1007,6 +1064,10 @@ pub fn refuse_live_extras(args: &Args) -> Result<(), String> {
         (args.world_border, "--world-border"),
         (args.map_item_only, "--map-item-only"),
         (args.dh_lod_only, "--dh-lod-only"),
+        (args.voxy_lod_only, "--voxy-lod-only"),
+        (args.bake_lighting_only, "--bake-lighting-only"),
+        (args.voxy_lod, "--voxy-lod"),
+        (args.dh_lod, "--dh-lod"),
         (w.river_bed != Default::default(), "--river-bed"),
         (w.water_detail != Default::default(), "--water-detail"),
         (args.climate_mode != Default::default(), "--climate-mode"),
@@ -1107,6 +1168,11 @@ pub struct LiveArgs {
     #[arg(long = "live-port")]
     pub port: Option<u16>,
 
+    /// Let players on the same network join the live server, which their Multiplayer screen
+    /// then lists under LAN worlds. Only players on this computer get operator rights.
+    #[arg(long = "live-lan", requires = "live")]
+    pub lan: bool,
+
     /// Internal: one tile of a live session.
     #[arg(long = "live-tile", hide = true)]
     pub tile: bool,
@@ -1120,6 +1186,7 @@ impl Default for LiveArgs {
             version: None,
             view_distance: crate::live::DEFAULT_VIEW_DISTANCE,
             port: None,
+            lan: false,
             tile: false,
         }
     }
@@ -1256,6 +1323,10 @@ impl GenerationMode {
 /// pillars, and fixed-size props come to dominate the scene. Objects are skipped instead.
 pub const OBJECT_SKIP_SCALE: f64 = 0.3;
 
+/// Below this many blocks a metre laser data is not used: a hedge would be a
+/// fraction of a block. The window greys Laser Data out below it too.
+pub const LASER_MIN_SCALE: f64 = 0.75;
+
 /// Smallest usable scale. Below this a country-sized bbox degenerates into a few hundred
 /// blocks and terrain detail is lost entirely.
 pub const MIN_SCALE: f64 = 0.05;
@@ -1339,6 +1410,39 @@ impl Args {
     /// Terrain-only still loads it, for the water and nature it keeps.
     pub fn skip_osm(&self) -> bool {
         self.scale < OBJECT_SKIP_SCALE || !self.body.is_earth()
+    }
+
+    /// The laser features this run asks for, or `None` when it asks for none or
+    /// cannot have them: off the Earth, for One World pieces (a region built cell by
+    /// cell would download scans for every cell), or below 0.75 blocks a metre, where
+    /// a hedge is a fraction of a block.
+    pub fn lidar_features(&self) -> Option<crate::survey::Features> {
+        let f = crate::survey::Features {
+            garden: self.garden_detail,
+            trees: self.measured_trees,
+            heights: self.measured_heights,
+            roofs: self.measured_roofs,
+        };
+        let any = f.garden || f.trees || f.heights || f.roofs;
+        (self.lidar && any && self.lidar_off_reason().is_none()).then_some(f)
+    }
+
+    /// Why a run that asks for laser data cannot have it, for the log.
+    pub fn lidar_off_reason(&self) -> Option<String> {
+        if !self.lidar {
+            None
+        } else if !self.body.is_earth() {
+            Some("it is the Earth's only".to_string())
+        } else if self.one_world {
+            Some("One World does not use it".to_string())
+        } else if self.scale < LASER_MIN_SCALE {
+            Some(format!(
+                "it needs a scale of {LASER_MIN_SCALE} or more, and this run's is {:.2}",
+                self.scale
+            ))
+        } else {
+            None
+        }
     }
 
     /// The Mapillary token, if one was given and is not blank.
@@ -1523,6 +1627,9 @@ impl GameMode {
         }
     }
 }
+
+/// `--ground-level` when it is not given: two blocks above vanilla's bedrock.
+pub const DEFAULT_GROUND_LEVEL: i32 = -62;
 
 /// Lowest ground a world with disasters is built on. The default puts the lowest ground two
 /// blocks above bedrock, which leaves sinkholes and cracks nothing to open into.
@@ -2140,14 +2247,19 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         return Err("Rotation angle must be between -90 and 90 degrees.".to_string());
     }
 
+    validate_ground_level(args, "--ground-level")
+}
+
+/// Checks the ground level for the world the run builds, naming it as `name`; the window
+/// skips `validate_args`.
+pub fn validate_ground_level(args: &Args, name: &str) -> Result<(), String> {
     let (floor, ceiling) = ground_level_bounds(args);
     if args.ground_level < floor || args.ground_level > ceiling {
         return Err(format!(
-            "--ground-level must be between {floor} and {ceiling} for this world format (got {}).",
+            "{name} must be between {floor} and {ceiling} for this world format (got {}).",
             args.ground_level
         ));
     }
-
     Ok(())
 }
 
@@ -3513,6 +3625,33 @@ mod tests {
         assert_eq!(retry.units.only_pieces, Some(vec![2, 5]));
         assert!(Args::try_parse_from(["arnis", "--one-world-workers", "0"]).is_err());
         assert!(Args::try_parse_from(["arnis", "--only-pieces", "0"]).is_err());
+    }
+
+    #[test]
+    fn lod_flags_are_refused_in_live_and_redraws_need_one_world() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+        for flag in ["--voxy-lod", "--dh-lod"] {
+            let live = Args::parse_from([
+                "arnis",
+                "--output-dir",
+                tmp_path,
+                "--one-world",
+                "--live",
+                flag,
+            ]);
+            assert!(
+                refuse_live_extras(&live).unwrap_err().contains(flag),
+                "{flag}"
+            );
+        }
+        for flag in ["--voxy-lod-only", "--bake-lighting-only", "--dh-lod-only"] {
+            let alone = Args::parse_from(["arnis", "--output-dir", tmp_path, flag]);
+            assert!(alone.redraws_only());
+            assert!(crate::output_args::validate(&alone).is_err(), "{flag}");
+            let world = Args::parse_from(["arnis", "--output-dir", tmp_path, "--one-world", flag]);
+            assert!(crate::output_args::validate(&world).is_ok(), "{flag}");
+        }
     }
 
     #[test]

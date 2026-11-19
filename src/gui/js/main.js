@@ -18,8 +18,9 @@ import {
   initRunControls, initCellMenu, notePiece, clearPieces, dropStalePieces, resetPieces, showRunControls,
   initJobPlan, schedulePlan, planPieces, planPending, isPiecesJob, selectWithRing,
   setPlanMask, hasPlanMask, refreshStretch,
-  initDataPanel, initProjects, resumeJob, placeForRun,
+  initDataPanel, initProjects, resumeJob, placeForRun, groundLevelFor,
 } from './meld-features.js';
+import { sizeRequest, formatSizeRange, ringsKm2 } from './world-size.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -62,9 +63,83 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
   
   localizeElement(localization, { element: bboxSelectionElement }, localizationKey);
   fillBboxSelectionVars(bboxSelectionElement);
+  showSizeEstimate(bboxSelectionElement);
   bboxSelectionElement.style.color = color;
   // The map-first card says the pieces in its plan block; this line would repeat them.
   bboxSelectionElement.classList.toggle('is-plan', localizationKey === 'area_pieces_info' || localizationKey === 'area_single_info');
+}
+
+// The lines about a selection that is built as it is drawn, which the size estimate follows.
+const SIZE_ESTIMATE_KEYS = new Set(['selection_confirmed', 'custom_selection_confirmed', 'shapes_one_world', 'area_extensive', 'area_too_large', 'area_extreme']);
+
+// The backend's answers by request, the request the line is for now, and the figure it shows while that one's answer is out.
+const sizeAnswers = new Map();
+let sizeWanted = '';
+let sizeShown = null;
+let sizeTimer = 0;
+
+// "Selection confirmed! · about 400 MB", the estimate quieter than the line.
+function showSizeEstimate(element) {
+  element.querySelector('.bbox-size-estimate')?.remove();
+  clearTimeout(sizeTimer);
+  const request = SIZE_ESTIMATE_KEYS.has(currentBboxSelectionKey) ? sizeEstimateRequest() : null;
+  sizeWanted = request ? JSON.stringify(request) : '';
+  if (!request) {
+    sizeShown = null;
+    return;
+  }
+  const key = sizeWanted;
+  if (sizeAnswers.has(key)) sizeShown = sizeAnswers.get(key);
+  // Asked once the line rests, so dragging the scale does not ask at every step.
+  else sizeTimer = setTimeout(() => askSizeEstimate(key, request), 150);
+  // Until then the last figure stands, so the line does not flicker.
+  if (!sizeShown) return;
+  const note = document.createElement('span');
+  note.className = 'bbox-size-estimate';
+  note.textContent = ` · ${oneWorldText('size_estimate', 'about {size}', { size: formatSizeRange(sizeShown) })}`;
+  note.title = oneWorldText('size_estimate_tip', 'Estimated size of the world on disk. With Fill Ground or Caves it depends on the terrain: the larger figure is for mountains.');
+  element.appendChild(note);
+}
+
+// An answer is kept for its own request and redraws the line only while that is still the line's.
+function askSizeEstimate(key, request) {
+  Promise.resolve(invoke('gui_world_size_estimate', { request })).catch(() => null).then((mib) => {
+    if (sizeAnswers.size > 200) sizeAnswers.clear();
+    sizeAnswers.set(key, Array.isArray(mib) ? mib : null);
+    const line = document.getElementById('bbox-selection-info');
+    if (line && sizeWanted === key) showSizeEstimate(line);
+  });
+}
+
+// What the next run's world is made of; not in Live, which grows as it is played, for an existing One World, or for cells, whose plan says it.
+function sizeEstimateRequest() {
+  if (!selectedBBox || selectedBBox === "0.000000 0.000000 0.000000 0.000000") return null;
+  const oneWorld = isOneWorldEnabled();
+  if (isLiveMode() || planPending() || planPieces() || (oneWorld && oneWorldInfo?.exists)) return null;
+  // A greyed switch is not sent as on.
+  const on = (id) => { const el = document.getElementById(id); return !!(el && el.checked && !el.disabled); };
+  const [lat1, lng1, lat2, lng2] = selectedBBox.split(/[\s,]+/).map(Number);
+  // Drawn shapes are clipped to, except by a One World, which builds the rectangle around them.
+  const km2 = selectedShapes && !oneWorld
+    ? ringsKm2(selectedShapes, BODY_RADIUS_M[selectedCelestialBody] || BODY_RADIUS_M.earth)
+    : calculateBBoxSize(lat1, lng1, lat2, lng2) / 1e6;
+  return sizeRequest({
+    km2,
+    scale: parseFloat(document.getElementById('scale-value-slider').value) || 1,
+    body: selectedCelestialBody,
+    format: getEffectiveWorldFormat(),
+    mode: document.getElementById('generation-mode-select').value,
+    groundLevel: groundLevelChoice(oneWorld).level,
+    // A new One World is always built with the extended height.
+    tall: oneWorld || on('disable-height-limit-toggle'),
+    fill: on('fillground-toggle'),
+    caves: on('caves-toggle'),
+    interior: on('interior-toggle'),
+    light: on('bake-lighting-toggle'),
+    voxy: on('voxy-lod-toggle'),
+    dh: on('dh-lod-toggle'),
+    disasters: gameplayToggle('disasters-toggle'),
+  });
 }
 
 // Initialize elements and start the demo progress
@@ -85,6 +160,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initMobSpawningLockout();
   initAdvancedRows();
   refreshHeightLimitRow();
+  refreshLidarRows();
   refreshGameplayRows();
   // After initSettings(), so the slider label and rotation handlers exist
   // before restored values are applied. Labels get localized a few lines below.
@@ -233,6 +309,7 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
+  if (bboxSelectionInfo) showSizeEstimate(bboxSelectionInfo);
   renderOneWorldStatus();
   refreshStartButton();
   // An open Projects list is built in the language it was drawn in.
@@ -244,6 +321,7 @@ async function applyLocalization(localization) {
   fillLiveVersions();
   // liveStatus stays "stopped" after a session, which must not take over a normal run's line.
   if (liveActive()) renderLiveProgress();
+  renderLiveLan();
   // The map hint lives in the map iframe, which cannot see this assignment.
   document.querySelectorAll('iframe').forEach((frame) => {
     try {
@@ -827,6 +905,7 @@ function setCelestialBody(body) {
   refreshWorldTypeRow();
   refreshJavaOnlyRows();
   refreshFacadeRows();
+  refreshLidarRows();
   refreshOneWorldState();
 
   // A default, not a lock. Slider units are clock minutes: 0 midnight, 720 noon.
@@ -1417,6 +1496,7 @@ function initSettings() {
 
   slider.addEventListener("input", refreshScaleDisplay);
   slider.addEventListener("input", refreshBboxSelectionInfo);
+  slider.addEventListener("input", refreshLidarRows);
   // Double-click to reset world scale to default (1.00).
   // Assigning .value fires no event, so dispatch them for the label and store.
   slider.addEventListener("dblclick", () => {
@@ -1548,6 +1628,8 @@ function initSettings() {
     available: () => isOneWorldAvailable() && !liveActive(),
     busy: () => !generationButtonEnabled || bakeRunning,
     canRun: () => !isLiveMode(),
+    // Light & LODs: what the settings ask of a world that already exists.
+    upkeep: () => ({ light: lodOn('bake-lighting-toggle'), voxy: lodOn('voxy-lod-toggle'), dh: lodOn('dh-lod-toggle') }),
     renamed: (from, to) => worldRenamed(from, to),
     trashed: (name) => worldTrashed(name),
     // A new One World is picked by its name alone: the first Start makes it.
@@ -1594,6 +1676,12 @@ function initSettings() {
         terrainEnabled: mode === "geo-terrain" || mode === "terrain-only",
         skipOsmObjects: mode === "terrain-only",
         canopyHeightEnabled: document.getElementById("canopy-height-toggle").checked,
+        lidarEnabled: liveLaser("lidar-toggle"),
+        gardenDetailEnabled: liveLaser("garden-detail-toggle"),
+        measuredTreesEnabled: liveLaser("measured-trees-toggle"),
+        measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+        measuredRoofsEnabled: liveLaser("measured-roofs-toggle"),
+        lidarMaxMb: lidarLimitMb(),
         overtureEnabled: document.getElementById("overture-toggle").checked,
         awsOnlyElevation: document.getElementById("aws-only-elevation-toggle").checked,
         // A plan's flags: the next run's pending retry and skipped cells stay.
@@ -1608,6 +1696,16 @@ function initSettings() {
   // A reloaded map comes back on Earth; restore whatever was picked.
   const bodyMapFrame = getMapFrame();
   if (bodyMapFrame) bodyMapFrame.addEventListener('load', pushBodyToMap);
+
+  // Laser data: the master switch greys its features, the limit is a segmented control.
+  document.getElementById("lidar-toggle")?.addEventListener("change", refreshLidarRows);
+  const lidarLimitGroup = document.getElementById("lidar-limit-group");
+  lidarLimitGroup?.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      lidarLimitGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
 
   // Max tree size segmented control
   const maxTreeSizeGroup = document.getElementById("max-tree-size-group");
@@ -3135,6 +3233,8 @@ async function noteOutline(geojson) {
     outlineFailed = true;
     postToMap({ type: 'planMask', geojson: null });
     const info = document.getElementById('bbox-selection-info');
+    // Not a line of its own key, so no size estimate is put after it.
+    currentBboxSelectionKey = '';
     info.textContent = error;
     info.style.color = "#fa7878";
     return;
@@ -3754,6 +3854,7 @@ const ROW_REASONS = {
   reason_token: ['Enter a Mapillary Token.', 'mapillary-token'],
   reason_outbreak: ['Turn off Zombie Outbreak.', 'zombie-outbreak-toggle'],
   reason_disasters: ['Turn off Disasters.', 'disasters-toggle'],
+  reason_scale_laser: ['Set World Scale to 0.75 or more.', 'scale-value-slider'],
 };
 
 // The key of the first check that fails, as [ok, key] pairs; null when all pass.
@@ -3890,6 +3991,46 @@ function showWorldPainterValidation(localizationKey) {
   progressInfo.style.color = '#fa7878';
 }
 
+// Laser data is Earth-only, never used for One World, and needs a World Scale of 0.75 or more
+// (mirrors LASER_MIN_SCALE in src/args.rs). Its features and limit sit in the same block and show
+// only while the master switch is on, as the Live rows under One World do.
+const LASER_ROWS = ['garden-detail-row', 'measured-trees-row', 'measured-heights-row', 'measured-roofs-row', 'lidar-limit-row'];
+const LASER_MIN_SCALE = 0.75;
+function refreshLidarRows() {
+  const master = document.getElementById('lidar-toggle');
+  if (!master) return;
+  const scale = parseFloat(document.getElementById('scale-value-slider')?.value ?? '1');
+  const reason = why(
+    [selectedCelestialBody === 'earth', 'reason_earth'],
+    [!isOneWorldEnabled(), 'reason_not_one_world'],
+    [!(scale < LASER_MIN_SCALE), 'reason_scale_laser'],
+  );
+  setSettingsRowAvailable('lidar-toggle', !reason, reason);
+  const open = !reason && master.checked;
+  // Squares the card's lower corners while its rows hang under it, as One World does.
+  document.getElementById('lidar-stack')?.classList.toggle('is-open', open);
+  LASER_ROWS.forEach((id) => {
+    const row = document.getElementById(id);
+    if (row) row.style.display = open ? '' : 'none';
+  });
+  ['garden-detail-toggle', 'measured-trees-toggle', 'measured-heights-toggle', 'measured-roofs-toggle'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !open;
+  });
+  document.querySelectorAll('#lidar-limit-group .segment').forEach((b) => { b.disabled = !open; });
+}
+
+// A laser switch counts only while it can be used; a greyed one is never sent as on.
+function liveLaser(id) {
+  const el = document.getElementById(id);
+  return !!(el && el.checked && !el.disabled);
+}
+
+function lidarLimitMb() {
+  const btn = document.querySelector('#lidar-limit-group .segment.active');
+  return parseInt(btn?.dataset.lidarLimit || '1000', 10);
+}
+
 // Advanced settings that only work with another one grey out while it is off, as the gameplay rows do,
 // so no two settings contradict each other and nothing is set that a run would ignore.
 function refreshAdvancedRows() {
@@ -3923,6 +4064,8 @@ function refreshAdvancedRows() {
     [on('disable-height-limit-toggle'), 'reason_height']);
   row('meld-min-y-input', !heightWhy, heightWhy);
   row('meld-max-y-input', !heightWhy, heightWhy);
+  // Not greyed by Live: a new flat world there takes it too.
+  refreshGroundLevelRow();
   row('meld-world-border-toggle', java, 'reason_java');
   const formatChecks = [[java, 'reason_java'], [!oneWorld, 'reason_not_one_world'], [!on('voxy-lod-toggle'), 'reason_voxy'],
     [!on('dh-lod-toggle'), 'reason_dh']];
@@ -3947,6 +4090,30 @@ function refreshAdvancedRows() {
   refreshLayout();
 }
 
+// Ground Level for a run into the One World if `oneWorld`, else into a world of its own.
+function groundLevelChoice(oneWorld = isOneWorldEnabled()) {
+  return groundLevelFor({
+    advanced: meldOn(),
+    typed: document.getElementById('meld-ground-level-input')?.value || '',
+    earth: selectedCelestialBody === 'earth',
+    oneWorld,
+    terrain: document.getElementById('generation-mode-select')?.value !== 'geo-only',
+    world: oneWorldInfo,
+  });
+}
+
+function refreshGroundLevelRow() {
+  const { why } = groundLevelChoice();
+  setSettingsRowAvailable('meld-ground-level-input', !why, why);
+}
+
+// Shows an existing One World's level; greyed before it is written, so the field does not snap it.
+function pinGroundLevel(level) {
+  if (level !== null) setSettingsRowAvailable('meld-ground-level-input', false, 'reason_world_set');
+  pinControl('meld-ground-level-input', level);
+  refreshGroundLevelRow();
+}
+
 function initAdvancedRows() {
   const modal = document.getElementById('settings-modal');
   if (!modal) return;
@@ -3969,7 +4136,8 @@ function writeOneWorldRestore(record) {
 }
 
 function controlValue(el) {
-  return el.type === 'checkbox' ? el.checked : parseFloat(el.value);
+  if (el.type === 'checkbox') return el.checked;
+  return el.type === 'text' ? el.value : parseFloat(el.value);
 }
 
 function writeControl(el, value) {
@@ -4004,14 +4172,24 @@ function pinControl(id, value) {
 // Settings the backend builds into Java worlds only.
 function refreshJavaOnlyRows(format) {
   const java = (format || selectedWorldFormat) === 'java';
-  if (!oneWorldPinned) {
-    setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
-    setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
-  }
+  refreshLodRows(format);
   setSettingsRowAvailable('bake-lighting-toggle', java, 'reason_java');
   const signWhy = why([java, 'reason_java'], [selectedCelestialBody === 'earth', 'reason_earth']);
   setSegmentedRowAvailable('signage-group', !signWhy, signWhy);
   refreshWorldNameRow(format);
+}
+
+// The LOD caches: Java only. A One World rebuilds them over every area after each run; Live tiles
+// leave them out.
+function lodOn(id) {
+  const el = document.getElementById(id);
+  return !!(el && el.checked && !el.disabled);
+}
+
+function refreshLodRows(format) {
+  const reason = why([(format || selectedWorldFormat) === 'java', 'reason_java'], [!isLiveMode(), 'reason_live']);
+  setSettingsRowAvailable('voxy-lod-toggle', !reason, reason);
+  setSettingsRowAvailable('dh-lod-toggle', !reason, reason);
 }
 
 function refreshWorldNameRow(format) {
@@ -4024,22 +4202,18 @@ function restoreNaturalRows() {
   setSettingsRowAvailable('scale-value-slider', selectedCelestialBody === 'earth', 'reason_earth');
   setSettingsRowAvailable('height-multiplier-slider', true);
   setSettingsRowAvailable('aws-only-elevation-toggle', selectedCelestialBody === 'earth', 'reason_earth');
-  setSettingsRowAvailable('voxy-lod-toggle', java, 'reason_java');
-  setSettingsRowAvailable('dh-lod-toggle', java, 'reason_java');
+  refreshLodRows();
   setSettingsRowAvailable('disable-height-limit-toggle', true);
   refreshHeightLimitRow();
 }
 
-// Rotation stays 0, the LOD caches off and the build height extended while
-// the mode is on; scale, build height and elevation source follow the world
-// once it exists.
+// Rotation stays 0 and the build height extended while the mode is on; scale, build height
+// and elevation source follow the world once it exists.
 function applyOneWorldPins(info) {
   oneWorldPinned = true;
   const rotationInput = document.getElementById('rotation-angle-input');
   if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
   setSettingsRowAvailable('rotation-angle-input', false, 'reason_not_one_world');
-  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
-  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
   postToMap({ type: 'setRotationLocked', locked: true });
   syncShapesRect();
 
@@ -4049,9 +4223,8 @@ function applyOneWorldPins(info) {
     exists && typeof info.height_multiplier === 'number' ? info.height_multiplier : null);
   pinControl('disable-height-limit-toggle',
     exists && typeof info.disable_height_limit === 'boolean' ? info.disable_height_limit : true);
+  pinGroundLevel(exists && typeof info.ground_level === 'number' ? String(info.ground_level) : null);
   restoreNaturalRows();
-  setSettingsRowAvailable('voxy-lod-toggle', false, 'reason_not_one_world');
-  setSettingsRowAvailable('dh-lod-toggle', false, 'reason_not_one_world');
   setSettingsRowAvailable('disable-height-limit-toggle', false, 'reason_not_one_world');
   if (exists) {
     setSettingsRowAvailable('scale-value-slider', false, 'reason_world_set');
@@ -4066,6 +4239,7 @@ function releaseOneWorldPins() {
   pinControl('scale-value-slider', null);
   pinControl('height-multiplier-slider', null);
   pinControl('disable-height-limit-toggle', null);
+  pinGroundLevel(null);
   setSettingsRowAvailable('rotation-angle-input', true);
   restoreNaturalRows();
   postToMap({ type: 'setRotationLocked', locked: false });
@@ -4124,6 +4298,7 @@ async function refreshOneWorldState() {
   refreshOneWorldRow();
   redrawProjects();
   refreshLiveRows();
+  refreshLidarRows();
   refreshStartButton();
   if (!isOneWorldEnabled()) {
     const wasOn = oneWorldInfo !== null;
@@ -4134,6 +4309,7 @@ async function refreshOneWorldState() {
     clearOneWorldOverlays();
     if (wasOn) setWorldNameLabel(basenameFromPath(worldPath));
     if (!isWorldNameEditing()) refreshWorldNameEditUI();
+    showSizeEstimate(document.getElementById('bbox-selection-info'));
     return;
   }
   if (!savePath) {
@@ -4170,6 +4346,8 @@ async function refreshOneWorldState() {
   refreshWorldRulesRows();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
   renderOneWorldStatus();
+  // An existing world takes no size estimate, a new one does; the rest of the line stays as it is.
+  showSizeEstimate(document.getElementById('bbox-selection-info'));
 
   if (!info.exists || info.foreign) {
     clearOneWorldOverlays();
@@ -4345,16 +4523,17 @@ function labelLiveViewDistances() {
   }
 }
 
-// The version and view distance only mean something in Live, and stay put while it runs.
+// The version, view distance and LAN only mean something in Live, and stay put while it runs.
 function refreshLiveRows() {
   const live = isLiveMode();
-  for (const id of ['live-version-row', 'live-view-distance-row']) {
+  for (const id of ['live-version-row', 'live-view-distance-row', 'live-lan-row']) {
     const row = document.getElementById(id);
     if (row) row.style.display = live ? '' : 'none';
   }
   document.getElementById('one-world-stack')?.classList.toggle('is-open', live);
   setSettingsRowAvailable('live-version-select', !liveActive(), 'reason_live_running');
   setSettingsRowAvailable('live-view-distance-select', !liveActive(), 'reason_live_running');
+  setSettingsRowAvailable('live-lan-toggle', !liveActive(), 'reason_live_running');
   // The world the session plays is fixed until it ends.
   setSettingsRowAvailable('save-path-input', !liveActive(), 'reason_live_running');
   refreshWorldNameRow();
@@ -4467,6 +4646,69 @@ function renderLiveProgress() {
   resetEta();
 }
 
+// Open to LAN: where friends on the network join, the address copied with a click.
+function renderLiveLan() {
+  const box = document.getElementById('live-lan-info');
+  if (!box) return;
+  const status = liveStatus;
+  const show = !!status && status.phase === 'running' && !!status.lan;
+  box.hidden = !show;
+  // Reports come twice a second: the line is only rebuilt when it reads differently.
+  const key = show ? JSON.stringify([status.lan_address, status.version, window.localization?.live_lan_join_tip]) : '';
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  if (!show) {
+    box.replaceChildren();
+    return;
+  }
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('class', 'icon');
+  icon.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', '#i-users');
+  icon.appendChild(use);
+  const address = status.lan_address;
+  box.classList.toggle('is-warn', !address);
+  const line = document.createElement('span');
+  if (!address) {
+    line.textContent = oneWorldText('live_lan_offline', 'No network, so friends cannot join yet.');
+    box.replaceChildren(icon, line);
+    return;
+  }
+  const [before, after = ''] = oneWorldText('live_lan_join', 'Friends join at {address}').split('{address}');
+  line.title = oneWorldText('live_lan_join_tip', 'Players on your network join at this address with Minecraft {version}, or find it under LAN worlds in Multiplayer.',
+    { version: status.version || '' });
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'live-lan-address';
+  copy.dir = 'ltr';
+  copy.title = oneWorldText('live_lan_copy', 'Copy the address');
+  copy.setAttribute('aria-label', `${copy.title}: ${address}`);
+  const value = document.createElement('span');
+  value.textContent = address;
+  const glyph = icon.cloneNode(true);
+  glyph.firstChild.setAttribute('href', '#i-copy');
+  copy.append(value, glyph);
+  copy.addEventListener('click', () => copyLiveLanAddress(copy, value, address));
+  line.append(before, copy, after);
+  box.replaceChildren(icon, line);
+}
+
+async function copyLiveLanAddress(button, value, address) {
+  try {
+    await navigator.clipboard.writeText(address);
+  } catch (_) {
+    return;
+  }
+  value.textContent = oneWorldText('live_lan_copied', 'Copied');
+  button.classList.add('is-copied');
+  clearTimeout(button.copiedTimer);
+  button.copiedTimer = setTimeout(() => {
+    value.textContent = address;
+    button.classList.remove('is-copied');
+  }, 1500);
+}
+
 // Resolves to true once the user accepted Mojang's EULA.
 function confirmLiveEula() {
   return new Promise((resolve) => {
@@ -4557,16 +4799,19 @@ async function startLive() {
     !(world && world.exists && localStorage.getItem(LIVE_START_KEY) === startKey);
   const versionSelect = document.getElementById('live-version-select');
   const viewSelect = document.getElementById('live-view-distance-select');
+  const lanToggle = document.getElementById('live-lan-toggle');
   const options = {
     savePath: savePath,
     worldName: oneWorldFolderName(),
     version: (versionSelect && versionSelect.value) || null,
     viewDistance: parseInt(viewSelect && viewSelect.value, 10) || 12,
+    lan: !!(lanToggle && lanToggle.checked),
     acceptEula: acceptEula,
     bboxText: useSelection ? selectedBBox : null,
     spawnPoint: useSelection ? spawnPoint : null,
     worldScale: settings.worldScale,
     heightMultiplier: settings.heightMultiplier,
+    groundLevel: world && world.exists ? null : settings.groundLevel,
     generationMode: settings.generationMode,
     winterEnabled: settings.winterEnabled,
     postApocalypticEnabled: settings.postApocalypticEnabled,
@@ -4577,6 +4822,12 @@ async function startLive() {
     maxTreeSize: settings.maxTreeSize,
     fieldPreset: settings.fieldPreset,
     canopyHeightEnabled: settings.canopyHeightEnabled,
+    lidarEnabled: settings.lidarEnabled,
+    gardenDetailEnabled: settings.gardenDetailEnabled,
+    measuredTreesEnabled: settings.measuredTreesEnabled,
+    measuredHeightsEnabled: settings.measuredHeightsEnabled,
+    measuredRoofsEnabled: settings.measuredRoofsEnabled,
+    lidarMaxMb: settings.lidarMaxMb,
     overtureEnabled: settings.overtureEnabled,
     use3dEnabled: settings.use3dEnabled,
     awsOnlyElevation: settings.awsOnlyElevation,
@@ -4621,6 +4872,7 @@ async function stopLive() {
 // Everything that shows the session, after each report.
 function onLiveStatus() {
   renderLiveProgress();
+  renderLiveLan();
   refreshStartButton();
   refreshWorldPainterAvailability();
   if (!isWorldNameEditing()) refreshWorldNameEditUI();
@@ -4793,11 +5045,7 @@ function readGenerationSettings(oneWorld) {
   } else if (oneWorld) {
     disableHeightLimit = true;
   }
-  // The ground level input is gone from the UI; a world the CLI made may sit on another level.
-  let groundLevel = -62;
-  if (oneWorld && oneWorldInfo && oneWorldInfo.exists && typeof oneWorldInfo.ground_level === 'number') {
-    groundLevel = oneWorldInfo.ground_level;
-  }
+  const groundLevel = groundLevelChoice(oneWorld).level;
   // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
   const clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
   const worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
@@ -4815,6 +5063,12 @@ function readGenerationSettings(oneWorld) {
     maxTreeSize: segment("max-tree-size-group", "maxTreeSize", "giant"),
     fieldPreset: segment("field-preset-group", "fieldPreset", "patchwork"),
     canopyHeightEnabled: checked("canopy-height-toggle"),
+    lidarEnabled: liveLaser("lidar-toggle"),
+    gardenDetailEnabled: liveLaser("garden-detail-toggle"),
+    measuredTreesEnabled: liveLaser("measured-trees-toggle"),
+    measuredHeightsEnabled: liveLaser("measured-heights-toggle"),
+    measuredRoofsEnabled: liveLaser("measured-roofs-toggle"),
+    lidarMaxMb: lidarLimitMb(),
     overtureEnabled: checked("overture-toggle"),
     use3dEnabled: checked("use-3d-toggle"),
     disableHeightLimit: disableHeightLimit,
