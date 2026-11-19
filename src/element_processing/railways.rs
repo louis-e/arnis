@@ -11,14 +11,20 @@ use crate::element_processing::bridges::{
 use crate::element_processing::connected_blocks::{
     cross_cells, four_connected_line, place_connected, stair_steps,
 };
-use crate::element_processing::highways::TunnelLight;
+use crate::element_processing::highways::{
+    beyond_portal, faces_near, step_towards, PortalFace, TunnelLight,
+};
 pub use crate::element_processing::rail_track::RailJoins;
 use crate::element_processing::rail_track::{
-    rail_profile, rail_shapes, straight_cells, track_cells, TrackEnd, TrackLevel,
+    rail_profile, rail_shapes, straight_cells, track_cells, TrackEnd, TrackLevel, TunnelBore,
+};
+use crate::element_processing::tunnel_grade::{
+    chains, grade_line, pin_area_edges, planning_order, portal_cuttings, Beside, Bore, CUTTING_GAP,
 };
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use fnv::FnvHashMap;
 use std::collections::{HashMap, HashSet};
 
 const CATENARY_MAST_INTERVAL: usize = 16;
@@ -92,11 +98,7 @@ const RAIL_STEP_COST: f64 = 2.5;
 const RAIL_BED_REACH: i32 = 10;
 /// What a rail pays per cell it sits a block into or onto a road, against a block of cut.
 const ROAD_SHIFT_COST: f64 = 4.0;
-/// What a tunnel pays per block it runs shallower than its depth, against 1 for deeper.
-const TUNNEL_SHALLOW_COST: f64 = 0.25;
-/// The same under a carved water bed, where a shallow roof stands up in the water.
-const TUNNEL_SHALLOW_UNDER_WATER_COST: f64 = 1.0;
-/// Cells a tunnel ramp runs for each block it drops from a portal.
+/// Cells the steepest tunnel ramp runs for each block it drops from a portal.
 const TUNNEL_RAMP_RUN: i32 = 4;
 // The terrain fit leaves `BORE_ROOM` between the deepest bed and the lowest a bed can lie,
 // which is the lowest a floor can lie, `RAIL_TUNNEL_DEPTH + INTERIOR_HEIGHT + 1` under it.
@@ -435,16 +437,7 @@ fn pin_area_edge(
     cells: &[(i32, i32)],
     level: impl Fn(usize) -> i32,
 ) {
-    for [inside, outside] in rail_joins.edge_crossings(cells) {
-        let y = level(if cells[inside] < cells[outside] {
-            inside
-        } else {
-            outside
-        });
-        for i in [inside, outside] {
-            pins[i].get_or_insert(y);
-        }
-    }
+    pin_area_edges(pins, cells, rail_joins.area(), level);
 }
 
 /// The first cell past an end and its height: a bridge's deck there, or level with the end.
@@ -1675,6 +1668,299 @@ pub fn generate_roller_coaster(editor: &mut WorldEditor, element: &ProcessedWay)
     }
 }
 
+/// Plans the floor of every rail tunnel a run of joined ways at a time, so a tunnel split
+/// into several ways or built over several tiles keeps one grade from portal to portal.
+pub fn plan_rail_tunnels(
+    elements: &[ProcessedElement],
+    editor: &WorldEditor,
+    joins: &RailJoins,
+) -> FnvHashMap<u64, TunnelBore> {
+    let ways: Vec<&ProcessedWay> = elements
+        .iter()
+        .filter_map(|e| match e {
+            ProcessedElement::Way(w) if track_level(w) == Some(TrackLevel::Tunnel) => Some(w),
+            _ => None,
+        })
+        .collect();
+    let cells: Vec<WayCells> = ways.iter().map(|w| track_cells(w)).collect();
+    let index: FnvHashMap<u64, usize> = ways.iter().enumerate().map(|(i, w)| (w.id, i)).collect();
+    let ends: Vec<[TrackEnd; 2]> = ways.iter().map(|w| joins.ends(w.id)).collect();
+    let last = |w: usize| cells[w].0.len().saturating_sub(1);
+    // Two tunnel ways carry on into each other where each end picks the other.
+    let partner = |w: usize, e: usize| -> Option<(usize, usize)> {
+        let (other, at, dir) = ends[w][e].into?;
+        let o = *index.get(&other)?;
+        let eo = match dir {
+            1 if at == 0 => 0,
+            -1 if at == last(o) => 1,
+            _ => return None,
+        };
+        let back = if e == 0 { (0, 1) } else { (last(w), -1) };
+        (o != w && ends[o][eo].into == Some((ways[w].id, back.0, back.1))).then_some((o, eo))
+    };
+    let runs = chains(ways.len(), partner);
+    let size: Vec<(usize, u64)> = runs
+        .iter()
+        .map(|run| {
+            let len = run.iter().map(|&(w, _)| cells[w].0.len()).sum();
+            (len, run.iter().map(|&(w, _)| ways[w].id).min().unwrap_or(0))
+        })
+        .collect();
+    let nodes: Vec<Vec<u64>> = runs
+        .iter()
+        .map(|run| {
+            run.iter()
+                .flat_map(|&(w, _)| ways[w].nodes.iter().map(|n| n.id))
+                .collect()
+        })
+        .collect();
+    let mut solved: FnvHashMap<u64, i32> = FnvHashMap::default();
+    let mut beside = Beside::default();
+    let mut out = FnvHashMap::default();
+    for r in planning_order(&size, &nodes) {
+        let run = RailRun::new(&runs[r], &ways, &cells);
+        run.plan(&ends, editor, joins, &mut solved, &mut beside, &mut out);
+    }
+    out
+}
+
+/// What a long rail tunnel's grade is held to, in blocks per cell.
+const RAIL_TUNNEL_GRADE: f64 = 0.04;
+
+/// A way's track cells and the cell each of its nodes falls on.
+type WayCells = (Vec<(i32, i32)>, Vec<usize>);
+
+/// Tunnel ways joined end to end, as one line of cells.
+struct RailRun<'a> {
+    path: Vec<(i32, i32)>,
+    /// Each way: its index, where it starts in `path`, and whether it runs backwards.
+    pieces: Vec<(usize, usize, bool)>,
+    ways: &'a [&'a ProcessedWay],
+    cells: &'a [WayCells],
+}
+
+impl<'a> RailRun<'a> {
+    fn new(run: &[(usize, bool)], ways: &'a [&'a ProcessedWay], cells: &'a [WayCells]) -> Self {
+        let mut path: Vec<(i32, i32)> = Vec::new();
+        let mut pieces = Vec::new();
+        for &(w, back) in run {
+            let mut own = cells[w].0.clone();
+            if back {
+                own.reverse();
+            }
+            // The joint is one cell of both ways.
+            let skip = usize::from(path.last().is_some_and(|c| own.first() == Some(c)));
+            pieces.push((w, path.len() - skip, back));
+            path.extend_from_slice(&own[skip..]);
+        }
+        Self {
+            path,
+            pieces,
+            ways,
+            cells,
+        }
+    }
+
+    /// Where cell `j` of a piece's way lies in the path.
+    fn at(&self, &(w, start, back): &(usize, usize, bool), j: usize) -> usize {
+        if back {
+            start + self.cells[w].0.len() - 1 - j
+        } else {
+            start + j
+        }
+    }
+
+    fn plan(
+        &self,
+        ends: &[[TrackEnd; 2]],
+        editor: &WorldEditor,
+        joins: &RailJoins,
+        solved: &mut FnvHashMap<u64, i32>,
+        beside: &mut Beside,
+        out: &mut FnvHashMap<u64, TunnelBore>,
+    ) {
+        let path = &self.path;
+        let n = path.len();
+        if n == 0 {
+            return;
+        }
+        let (first, last) = (self.pieces[0], self.pieces[self.pieces.len() - 1]);
+        let outer = [
+            &ends[first.0][usize::from(first.2)],
+            &ends[last.0][usize::from(!last.2)],
+        ];
+        let depth = RAIL_TUNNEL_FLOOR_DEPTH;
+        let lowest = crate::world_editor::min_y() + 1;
+        let ground: Vec<i32> = path
+            .iter()
+            .map(|&(x, z)| editor.get_ground_level(x, z))
+            .collect();
+        let low_ground: Vec<i32> = path
+            .iter()
+            .map(|&(x, z)| {
+                (-WALL_RADIUS..=WALL_RADIUS)
+                    .flat_map(|dx| (-WALL_RADIUS..=WALL_RADIUS).map(move |dz| (dx, dz)))
+                    .map(|(dx, dz)| editor.get_ground_level(x + dx, z + dz))
+                    .min()
+                    .unwrap_or(0)
+            })
+            .collect();
+        // Under water the bore keeps its cover under the deepest bed across the shell, or the
+        // bed is laid on it and the shell stands up in the water.
+        let bed: Vec<Option<i32>> = path
+            .iter()
+            .zip(&ground)
+            .map(|(&(x, z), &g)| {
+                editor
+                    .lowest_carved_bed(x, z, WALL_RADIUS)
+                    .filter(|&b| b < g)
+            })
+            .collect();
+        let ceiling: Vec<f64> = (0..n)
+            .map(|i| f64::from(bed[i].map_or(low_ground[i], |b| b.min(low_ground[i])) - depth))
+            .collect();
+        let stations = editor.stations();
+        let mut pins: Vec<Option<i32>> = vec![None; n];
+        let next_in = |i: usize| {
+            if i == 0 {
+                1.min(n - 1)
+            } else {
+                n.saturating_sub(2)
+            }
+        };
+        // At a portal the floor comes up to the track outside, or to its bed along a platform.
+        let portal = outer.map(|end| end.meets_surface);
+        for (e, end) in outer.iter().enumerate().filter(|(e, _)| portal[*e]) {
+            let i = end_cell(n, e);
+            let bed = end.into.and_then(|(way, ..)| {
+                stations
+                    .as_ref()
+                    .and_then(|s| s.track_bed(way, path[i].0, path[i].1))
+            });
+            pin_end(&mut pins, e, end, bed.unwrap_or(ground[i]).max(lowest));
+        }
+        for piece in &self.pieces {
+            let w = piece.0;
+            let len = self.cells[w].0.len();
+            // Next to a deep hall a joint lies lower, so the ways either side share the climb.
+            for (e, end) in ends[w].iter().enumerate() {
+                let i = self.at(piece, if e == 0 { 0 } else { len - 1 });
+                if end.shared && !end.meets_surface {
+                    if let Some(j) = stations
+                        .as_ref()
+                        .and_then(|s| s.joint_floor(path[i].0, path[i].1))
+                    {
+                        for k in [i.saturating_sub(1), i, (i + 1).min(n - 1)] {
+                            pins[k].get_or_insert(j.max(lowest));
+                        }
+                    }
+                }
+            }
+            // A tunnel already planned through a node of this one holds its level there.
+            for (node, &c) in self.ways[w].nodes.iter().zip(&self.cells[w].1) {
+                if let Some(&level) = solved.get(&node.id) {
+                    let i = self.at(piece, c);
+                    pins[i] = Some(level);
+                    if i == 0 || i == n - 1 {
+                        pins[next_in(i)].get_or_insert(level);
+                    }
+                }
+            }
+        }
+        // Not the bed: each area carves its own water, so only the terrain reads alike from
+        // both sides.
+        pin_area_edge(&mut pins, joins, path, |i| (ground[i] - depth).max(lowest));
+        // Through a station hall the track keeps the hall's floor, and goes under another's.
+        for piece in &self.pieces {
+            let way = self.ways[piece.0].id;
+            for (j, &(x, z)) in self.cells[piece.0].0.iter().enumerate() {
+                if let Some(h) = stations.as_ref().and_then(|s| s.tunnel_pin(way, x, z)) {
+                    pins[self.at(piece, j)] = Some(h.floor);
+                }
+            }
+        }
+
+        let bore = Bore::new(
+            n,
+            depth,
+            RAIL_TUNNEL_GRADE,
+            1.0 / f64::from(TUNNEL_RAMP_RUN),
+            lowest,
+        );
+        // Never above the ground, nor under water above its cover.
+        let top: Vec<f64> = (0..n)
+            .map(|i| match bed[i] {
+                Some(_) => ceiling[i],
+                None => f64::from(ground[i]),
+            })
+            .collect();
+        let fixed: Vec<Option<f64>> = pins.iter().map(|p| p.map(f64::from)).collect();
+        let target = grade_line(&ceiling, &top, &fixed, portal, &bore);
+        // Beside a track already planned in the same bore, it keeps to that track's levels.
+        let shared = beside.pins(path, &target, 2 * WALL_RADIUS, portal);
+        let target = if shared.iter().any(Option::is_some) {
+            let fixed: Vec<Option<f64>> =
+                fixed.iter().zip(&shared).map(|(p, s)| p.or(*s)).collect();
+            grade_line(&ceiling, &top, &fixed, portal, &bore)
+        } else {
+            target
+        };
+        let straight = straight_cells(
+            path,
+            outer[0].beyond.first().copied(),
+            outer[1].beyond.first().copied(),
+        );
+        let floors = rail_profile(
+            &straight,
+            |i| match pins[i] {
+                Some(p) => (p, p),
+                None => {
+                    let aim = target[i].round() as i32;
+                    let hi = ground[i].min(aim + RAIL_BED_REACH).max(lowest);
+                    ((aim - RAIL_BED_REACH).max(lowest).min(hi), hi)
+                }
+            },
+            |i, y| (f64::from(y) - target[i]).abs(),
+            RAIL_STEP_COST,
+        );
+        let bare: Vec<bool> = (0..n)
+            .map(|i| floors[i] + INTERIOR_HEIGHT + 1 >= low_ground[i])
+            .collect();
+        let open = portal_cuttings(&bare, portal, CUTTING_GAP);
+        let levels: Vec<f64> = floors.iter().map(|&f| f64::from(f)).collect();
+        beside.add(path, &levels);
+
+        for piece in &self.pieces {
+            let (w, _, back) = *piece;
+            let len = self.cells[w].0.len();
+            for (node, &c) in self.ways[w].nodes.iter().zip(&self.cells[w].1) {
+                solved.insert(node.id, floors[self.at(piece, c)]);
+            }
+            // The cell past an end, where the run goes on in the next way.
+            let past = |e: usize| {
+                let i = self.at(piece, if e == 0 { 0 } else { len - 1 });
+                let k = if (e == 0) != back {
+                    i.checked_sub(1)
+                } else {
+                    Some(i + 1)
+                };
+                k.filter(|&k| k < n).map(|k| floors[k])
+            };
+            out.insert(
+                self.ways[w].id,
+                TunnelBore {
+                    floors: (0..len).map(|j| floors[self.at(piece, j)]).collect(),
+                    open: (0..len).map(|j| open[self.at(piece, j)]).collect(),
+                    shut: (0..len)
+                        .map(|j| bare[self.at(piece, j)] && !open[self.at(piece, j)])
+                        .collect(),
+                    beyond: [past(0), past(1)],
+                },
+            );
+        }
+    }
+}
+
 /// Phase 1 of underground railway generation: place the structural tunnel shell and rail
 /// track.  Called during element processing (step 4) so that all non-AIR
 /// blocks survive the underground stone fill in step 6.
@@ -1692,122 +1978,61 @@ fn generate_rail_tunnel_shell(
         return;
     }
     let ends = rail_joins.ends(element.id);
-    let depth = RAIL_TUNNEL_FLOOR_DEPTH;
-    let ground: Vec<i32> = cells
-        .iter()
-        .map(|&(x, z)| editor.get_ground_level(x, z))
-        .collect();
-    // Under water the terrain is the water's surface, and the carve digs the bed out
-    // below it. The roof keeps its cover under the deepest bed across the shell, or the
-    // bed is laid on the bore and the shell stands up in the water.
-    let bed: Vec<Option<i32>> = cells
-        .iter()
-        .zip(&ground)
-        .map(|(&(x, z), &g)| {
-            editor
-                .lowest_carved_bed(x, z, WALL_RADIUS)
-                .filter(|&b| b < g)
-        })
-        .collect();
-    let surface: Vec<i32> = ground
-        .iter()
-        .zip(&bed)
-        .map(|(&g, b)| b.unwrap_or(g))
-        .collect();
-    let mut deep: Vec<i32> = surface.iter().map(|s| s - depth).collect();
-    // Never under the world's floor: low ground keeps its tunnel just below the surface.
-    let lowest = crate::world_editor::min_y() + 1;
-    let mut pins = vec![None; n];
-    let mut joint_low: Option<i32> = None;
-    for (e, end) in ends.iter().enumerate() {
-        // At a portal the floor comes up to the track outside; underground it keeps its depth.
-        let at = end_cell(n, e);
-        let level = if end.meets_surface {
-            ground[at]
-        } else {
-            // Next to a deep hall the joint lies lower, so both ways share the climb.
-            let joint = editor
-                .stations()
-                .and_then(|s| s.joint_floor(cells[at].0, cells[at].1))
-                .filter(|&j| j < deep[at]);
-            joint_low = joint.map_or(joint_low, |j| Some(joint_low.map_or(j, |l| l.min(j))));
-            joint.unwrap_or(deep[at])
-        };
-        pin_end(&mut pins, e, end, level.max(lowest));
-    }
-    // From a portal it aims down a ramp, not straight for its depth.
-    for (e, end) in ends.iter().enumerate() {
-        let at = end_cell(n, e);
-        if end.meets_surface {
-            for (k, d) in deep.iter_mut().enumerate() {
-                let along = k.abs_diff(at) as i32;
-                *d = (*d).max(ground[at] - along / TUNNEL_RAMP_RUN);
+    let lone;
+    let bore = match rail_joins.tunnel(element.id) {
+        Some(bore) => bore,
+        None => {
+            lone = plan_rail_tunnels(
+                &[ProcessedElement::Way(element.clone())],
+                editor,
+                rail_joins,
+            );
+            match lone.get(&element.id) {
+                Some(bore) => bore,
+                None => return,
             }
         }
+    };
+    if bore.floors.len() != n {
+        return;
     }
-    // Not `deep`: its portal ramps hang on where this area clipped the way. Nor the bed:
-    // each area carves its own water, so only the terrain reads alike from both sides.
-    pin_area_edge(&mut pins, rail_joins, &cells, |i| {
-        (ground[i] - depth).max(lowest)
-    });
-    // Through a station hall the track keeps the hall's floor, and goes under another's.
+    let floors = &bore.floors;
     let stations = editor.stations();
-    let hall_pins: Vec<Option<crate::element_processing::stations::TunnelPin>> = cells
+    let in_hall: Vec<bool> = cells
         .iter()
         .map(|&(x, z)| {
             stations
                 .as_ref()
                 .and_then(|s| s.tunnel_pin(element.id, x, z))
+                .is_some_and(|h| h.in_hall)
         })
         .collect();
-    for (pin, hall) in pins.iter_mut().zip(&hall_pins) {
-        if let Some(h) = hall {
-            *pin = Some(h.floor);
-        }
-    }
-    // Room to ramp down to a hall's floor or a lowered joint, however deep it lies.
-    let pin_low = hall_pins
-        .iter()
-        .flatten()
-        .map(|h| h.floor)
-        .chain(joint_low)
-        .min();
-    let straight = straight_cells(
-        &cells,
-        ends[0].beyond.first().copied(),
-        ends[1].beyond.first().copied(),
-    );
-    let floors = rail_profile(
-        &straight,
-        |i| {
-            pins[i].map_or(
-                (
-                    (deep[i] - RAIL_BED_REACH)
-                        .min(pin_low.unwrap_or(i32::MAX))
-                        .max(lowest),
-                    ground[i].max(lowest),
-                ),
-                |p| (p, p),
-            )
-        },
-        |i, y| {
-            let shallower = (y - deep[i]) as f64;
-            if shallower <= 0.0 {
-                -shallower
-            } else if bed[i].is_some() {
-                TUNNEL_SHALLOW_UNDER_WATER_COST * shallower
-            } else {
-                TUNNEL_SHALLOW_COST * shallower
-            }
-        },
-        RAIL_STEP_COST,
-    );
     let shapes = rail_shapes(
         &cells,
-        &floors,
-        ends[0].beyond.first().map(|&c| (c, floors[0])),
-        ends[1].beyond.first().map(|&c| (c, floors[n - 1])),
+        floors,
+        ends[0]
+            .beyond
+            .first()
+            .map(|&c| (c, bore.beyond[0].unwrap_or(floors[0]))),
+        ends[1]
+            .beyond
+            .first()
+            .map(|&c| (c, bore.beyond[1].unwrap_or(floors[n - 1]))),
     );
+    // The shell stops at a portal's face, or it fills the open track's first cell outside. The
+    // face is square to the track a few cells in, so a diagonal one does not notch its walls.
+    let k = (2 * WALL_RADIUS as usize).min(n - 1);
+    let faces = [0, 1].map(|e| {
+        let (at, inner) = if e == 0 {
+            (cells[0], cells[k])
+        } else {
+            (cells[n - 1], cells[n - 1 - k])
+        };
+        (ends[e].meets_surface && at != inner).then(|| PortalFace {
+            at,
+            out: step_towards(at, inner),
+        })
+    });
 
     for (i, &(bx, bz)) in cells.iter().enumerate() {
         let floor_y = floors[i];
@@ -1816,7 +2041,7 @@ fn generate_rail_tunnel_shell(
         // how many tiles recorded the tunnel or in which order they merged.
         // A hall hollows, lights and walls the track itself: carving its bore too would eat
         // the shell of the next cell where that ramps out of the hall.
-        if hall_pins[i].is_some_and(|h| h.in_hall) {
+        if in_hall[i] {
             continue;
         }
         rail_tunnel_points.push((bx, bz, floor_y, i.is_multiple_of(LIGHT_INTERVAL)));
@@ -1830,14 +2055,21 @@ fn generate_rail_tunnel_shell(
         // Interior positions deliberately get non-AIR blocks too so that
         // the ground fill (skip_existing: true) leaves them alone.
         // Wall/ceiling blocks get random cracked/mossy variants for variety.
+        let near = faces_near(faces, i, n - 1, WALL_RADIUS);
         for dx in -WALL_RADIUS..=WALL_RADIUS {
             for dz in -WALL_RADIUS..=WALL_RADIUS {
+                if beyond_portal(&near, bx + dx, bz + dz) {
+                    continue;
+                }
                 let top = editor.get_ground_level(bx + dx, bz + dz);
+                // In a portal's cutting the ground is its roof, or the sky, as it is wherever a
+                // road or platform here lies lower than planned. Where the ground dips over the
+                // bore further in, it stays shut.
+                let cutting = bore.open[i] || (!bore.shut[i] && ceil_y >= top);
                 for y in floor_y..=ceil_y {
                     let is_wall_or_ceiling =
                         dx.abs() == WALL_RADIUS || dz.abs() == WALL_RADIUS || y == ceil_y;
-                    // Up to the ground it is a cutting: the ground is its roof, or the sky.
-                    if is_wall_or_ceiling && y > floor_y && y >= top {
+                    if cutting && is_wall_or_ceiling && y > floor_y && y >= top {
                         continue;
                     }
 
@@ -2627,6 +2859,285 @@ mod tests {
         assert_eq!(deepest, -RAIL_TUNNEL_DEPTH - INTERIOR_HEIGHT);
     }
 
+    /// Track along z = 50 from node `a` at `x0` to node `b` at `x1`.
+    fn rail_between(
+        id: u64,
+        (x0, a): (i32, u64),
+        (x1, b): (i32, u64),
+        tags: &[(&str, &str)],
+    ) -> ProcessedWay {
+        let mut way = straight_rail(tags);
+        way.id = id;
+        (way.nodes[0].x, way.nodes[0].id) = (x0, a);
+        (way.nodes[1].x, way.nodes[1].id) = (x1, b);
+        way
+    }
+
+    /// Plans, lays and bores `ways` as a run does.
+    fn lay_planned(editor: &mut WorldEditor, ways: &[ProcessedWay], area: Option<&XZBBox>) {
+        let elements: Vec<ProcessedElement> =
+            ways.iter().cloned().map(ProcessedElement::Way).collect();
+        let mut joins = RailJoins::build(&elements, track_level);
+        if let Some(area) = area {
+            joins.meet_at_edge_of(area.clone());
+        }
+        joins.set_tunnels(plan_rail_tunnels(&elements, editor, &joins));
+        let mask = CoordinateBitmap::new(rail_mask_bbox());
+        let mut points = Vec::new();
+        for way in ways {
+            points.extend(run_joined(editor, way, &mask, &joins));
+        }
+        carve_rail_tunnel_interior(editor, &points);
+    }
+
+    /// The rail's height at each x along z = 50.
+    fn rail_ys(editor: &WorldEditor, xs: std::ops::RangeInclusive<i32>) -> Vec<i32> {
+        rail_ys_at(editor, xs, 50)
+    }
+
+    fn rail_ys_at(editor: &WorldEditor, xs: std::ops::RangeInclusive<i32>, z: i32) -> Vec<i32> {
+        xs.map(|x| {
+            (-64..120)
+                .find(|&y| {
+                    editor
+                        .get_block_absolute(x, y, z)
+                        .is_some_and(is_rail_block)
+                })
+                .unwrap_or_else(|| panic!("no rail at ({x}, {z})"))
+        })
+        .collect()
+    }
+
+    #[test]
+    fn two_tracks_in_one_bore_keep_one_level() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        // A slope across the line puts the second track's portals four blocks higher.
+        for x in -10..210 {
+            for z in 40..=66 {
+                let hill = if (21..180).contains(&x) { 40 } else { 0 };
+                editor.register_road_surface_y(x, z, hill + (z - 50).max(0));
+            }
+        }
+        let mut ways = Vec::new();
+        for (base, z) in [(0, 50), (10, 54)] {
+            let along = |id: u64, (x0, a): (i32, u64), (x1, b): (i32, u64), tags| {
+                let mut way = rail_between(id + base, (x0, a + base), (x1, b + base), tags);
+                way.nodes.iter_mut().for_each(|n| n.z = z);
+                way
+            };
+            ways.push(along(1, (0, 1), (20, 2), OPEN));
+            ways.push(along(2, (20, 2), (180, 3), TUNNEL));
+            ways.push(along(3, (180, 3), (199, 4), OPEN));
+        }
+        lay_planned(&mut editor, &ways, None);
+        let (a, b) = (
+            rail_ys_at(&editor, 20..=180, 50),
+            rail_ys_at(&editor, 20..=180, 54),
+        );
+        assert_eq!((a[0], b[0]), (1, 5));
+        assert_eq!(a[40..=120], b[40..=120]);
+    }
+
+    fn hill_editor(xzbbox: &XZBBox, hill: impl Fn(i32) -> i32) -> WorldEditor<'_> {
+        let mut editor = test_editor(xzbbox);
+        for x in -10..210 {
+            for z in 40..=60 {
+                editor.register_road_surface_y(x, z, hill(x));
+            }
+        }
+        editor
+    }
+
+    const TUNNEL: &[(&str, &str)] = &[("railway", "rail"), ("tunnel", "yes")];
+    const OPEN: &[(&str, &str)] = &[("railway", "rail")];
+
+    #[test]
+    fn a_tunnel_split_into_ways_keeps_one_grade_under_a_hill() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = hill_editor(&xzbbox, |x| (40 - (x - 100).abs() * 3 / 5).max(0));
+        let ways = [
+            rail_between(1, (0, 1), (20, 2), OPEN),
+            rail_between(2, (20, 2), (100, 3), TUNNEL),
+            rail_between(3, (180, 4), (100, 3), TUNNEL),
+            rail_between(4, (180, 4), (199, 5), OPEN),
+        ];
+        lay_planned(&mut editor, &ways, None);
+        let ys = rail_ys(&editor, 0..=199);
+        assert!(ys.iter().all(|&y| y == 1), "{ys:?}");
+        assert!(
+            editor.check_for_block_absolute(100, INTERIOR_HEIGHT + 1, 50, Some(SHELL), None),
+            "no roof under the top of the hill"
+        );
+    }
+
+    #[test]
+    fn a_tunnel_rises_at_one_grade_between_portals_at_different_heights() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let ground = |x: i32| {
+            if x <= 20 {
+                0
+            } else if x >= 180 {
+                16
+            } else {
+                60 - (x - 100).abs() / 3
+            }
+        };
+        let mut editor = hill_editor(&xzbbox, ground);
+        let ways = [
+            rail_between(1, (0, 1), (20, 2), OPEN),
+            rail_between(2, (20, 2), (180, 3), TUNNEL),
+            rail_between(3, (180, 3), (199, 4), OPEN),
+        ];
+        lay_planned(&mut editor, &ways, None);
+        let ys = rail_ys(&editor, 20..=180);
+        assert!(ys.windows(2).all(|w| w[1] >= w[0]), "dips: {ys:?}");
+        // Steps of one block no closer than seven cells, as a 1 in 10 grade spreads them.
+        let steps: Vec<usize> = (1..ys.len()).filter(|&i| ys[i] != ys[i - 1]).collect();
+        assert_eq!(steps.len(), 16);
+        assert!(steps.windows(2).all(|w| w[1] - w[0] >= 7), "{steps:?}");
+    }
+
+    #[test]
+    fn a_tunnel_cut_off_by_the_area_keeps_level_with_its_portal() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = hill_editor(&xzbbox, |x| ((x - 40) * 2 / 5).max(0));
+        let ways = [
+            rail_between(1, (0, 1), (20, 2), OPEN),
+            rail_between(2, (20, 2), (199, 3), TUNNEL),
+        ];
+        lay_planned(&mut editor, &ways, None);
+        let ys = rail_ys(&editor, 0..=199);
+        assert!(ys.iter().all(|&y| y == 1), "{ys:?}");
+    }
+
+    #[test]
+    fn a_tunnel_keeps_its_roof_where_a_gully_dips_over_it() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        // Too deep for the grade to take the bore under it, not so deep it runs into the ground.
+        let hill = |x: i32| match x {
+            ..=20 | 180.. => 0,
+            96..=104 => -13,
+            _ => 30,
+        };
+        let mut editor = hill_editor(&xzbbox, hill);
+        let ways = [
+            rail_between(1, (0, 1), (20, 2), OPEN),
+            rail_between(2, (20, 2), (180, 3), TUNNEL),
+            rail_between(3, (180, 3), (199, 4), OPEN),
+        ];
+        lay_planned(&mut editor, &ways, None);
+        let ys = rail_ys(&editor, 20..=180);
+        let deepest = (0..ys.len()).min_by_key(|&i| ys[i]).unwrap();
+        assert!(ys[..deepest].windows(2).all(|w| w[1] <= w[0]), "{ys:?}");
+        assert!(ys[deepest..].windows(2).all(|w| w[1] >= w[0]), "{ys:?}");
+        for x in 96..=104 {
+            let floor = ys[(x - 20) as usize] - 1;
+            let roof = floor + INTERIOR_HEIGHT + 1;
+            assert!(roof >= -13, "the gully covers the roof at x={x}");
+            assert!(
+                editor.check_for_block_absolute(x, roof, 50, Some(SHELL), None),
+                "roof open at x={x}"
+            );
+            assert!(
+                editor.check_for_block_absolute(x, floor + 2, 50 + WALL_RADIUS, Some(SHELL), None),
+                "wall open at x={x}"
+            );
+            assert!(
+                !editor.block_exists_absolute(x, floor + 2, 50),
+                "bore filled at x={x}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_tunnel_under_flat_ground_is_roofed_in_the_middle() {
+        for n in [56, 64, 80] {
+            let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+            let mut editor = hill_editor(&xzbbox, |_| 0);
+            let end = 20 + n - 1;
+            let ways = [
+                rail_between(1, (0, 1), (20, 2), OPEN),
+                rail_between(2, (20, 2), (end, 3), TUNNEL),
+                rail_between(3, (end, 3), (199, 4), OPEN),
+            ];
+            lay_planned(&mut editor, &ways, None);
+            let mid = 20 + (n - 1) / 2;
+            let floor = rail_ys_at(&editor, mid..=mid, 50)[0] - 1;
+            let roof = floor + INTERIOR_HEIGHT + 1;
+            assert!(roof < 0, "n={n}: roof at {roof} is not under the ground");
+            assert!(
+                editor.check_for_block_absolute(mid, roof, 50, Some(SHELL), None),
+                "n={n}: no roof at x={mid}"
+            );
+            assert_eq!(
+                rail_ys_at(&editor, 20..=20, 50)[0],
+                1,
+                "n={n}: the portal stays level"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tunnel_turning_back_past_its_portal_keeps_its_shell() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+        for x in -10..210 {
+            for z in 30..=100 {
+                let cut = x <= 20 && (45..=55).contains(&z);
+                editor.register_road_surface_y(x, z, if cut { 0 } else { 40 });
+            }
+        }
+        let node = |id: u64, x: i32, z: i32| ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        };
+        let open = rail_between(1, (0, 1), (20, 2), OPEN);
+        let mut bend = rail_between(2, (20, 2), (100, 3), TUNNEL);
+        bend.nodes.push(node(4, 100, 80));
+        bend.nodes.push(node(5, 5, 80));
+        lay_planned(&mut editor, &[open, bend], None);
+        // Back past the portal's plane, x < 20, the return leg is still walled in.
+        for x in 8..=18 {
+            let floor = rail_ys_at(&editor, x..=x, 80)[0] - 1;
+            for z in [80 - WALL_RADIUS, 80 + WALL_RADIUS] {
+                assert!(
+                    editor.check_for_block_absolute(x, floor + 2, z, Some(SHELL), None),
+                    "no wall at ({x}, {z})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn one_world_areas_either_side_of_an_edge_bore_one_tunnel() {
+        let hill = |x: i32| (40 - (x - 100).abs() * 3 / 5).max(0);
+        let mut laid = Vec::new();
+        for (x0, x1) in [(0, 99), (100, 199)] {
+            let area = XZBBox::rect_from_min_max(x0, 0, x1, 199).unwrap();
+            let mut editor = hill_editor(&area, hill);
+            // Each clipped 64 blocks past its own area, so neither sees the far portal.
+            let (from, to) = ((x0 - 64).max(20), (x1 + 64).min(180));
+            let mut ways = vec![rail_between(2, (from, 2), (to, 3), TUNNEL)];
+            if from == 20 {
+                ways.push(rail_between(1, (0, 1), (20, 2), OPEN));
+            }
+            if to == 180 {
+                ways.push(rail_between(3, (180, 3), (199, 4), OPEN));
+            }
+            lay_planned(&mut editor, &ways, Some(&area));
+            let ys = rail_ys(&editor, x0..=x1);
+            laid.extend(
+                (x0..=x1)
+                    .zip(ys)
+                    .map(|(x, y)| ((x, 50), y, editor.get_block_absolute(x, y, 50).unwrap())),
+            );
+        }
+        assert_eq!(crate::element_processing::rail_track::loose_ends(&laid), 2);
+    }
+
     /// An editor over a river 100 blocks wide, across x 50..150, flat at `level`.
     fn river_editor(
         xzbbox: &XZBBox,
@@ -2771,6 +3282,11 @@ mod tests {
 
         assert_river_bed_over_bore(&editor, level);
         assert_bore_whole_and_dry(&editor, &points);
+        let lowest = crate::element_processing::tunnel_grade::lowest_floor();
+        assert!(
+            points.iter().all(|p| p.2 >= lowest),
+            "under the floor guard"
+        );
     }
 
     /// Over the world's floor there is no room under the deepest bed: the bore goes as deep

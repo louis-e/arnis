@@ -29,8 +29,9 @@ const MAPPED_DEPTH: i32 = 2;
 const MAPPED_SHELF: i32 = 2;
 
 /// Room a tunnel needs under the deepest bed, on top of the floor the carve leaves it. That
-/// bed lies on `min_y() + 1`; a bore keeping its cover under it needs it at `min_y() + 9`.
-pub const BORE_ROOM: i32 = 8;
+/// bed lies on `min_y() + 1`; a bore keeping its cover under it, its floor `FLOOR_GUARD` over
+/// the world's floor, needs it at `min_y() + 8 + FLOOR_GUARD`.
+pub const BORE_ROOM: i32 = 7 + crate::element_processing::tunnel_grade::FLOOR_GUARD;
 
 /// Cap on water sub-rect cells (bounds memory, keeps u32 indices valid); ~1000 km².
 const MAX_WATER_FIELD_CELLS: usize = 1_000_000_000;
