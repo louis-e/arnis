@@ -40,4 +40,14 @@ const room = px(shown, 'padding-right');
 const pull = px(`${shown} + .tooltip-icon`, 'margin-left');
 assert.strictEqual(room + pull, gap, 'with a badge the tooltip still sits one gap after the name');
 assert.strictEqual(pull + icon + gap + badge, 0, 'the badge ends where the room does');
+
+// Headings fill their row, so display scaling can't break a short name.
+const rule = (sel) => {
+  const at = css.indexOf(`\n${sel} {`);
+  assert.ok(at >= 0, `${sel} has a rule`);
+  return css.slice(at, css.indexOf('}', at));
+};
+assert.match(rule('.setting-text'), /flex-grow: 1;/, 'a heading in a tile takes the room the row leaves it');
+assert.match(rule('.setting-choice > .setting-label > .setting-heading'), /width: 100%;/, 'a choice row heading takes the whole row');
+assert.match(rule('.setting-choice .setting-heading > [data-localize]'), /white-space: nowrap;/, 'a choice row name never breaks');
 console.log('setting-heading: ok');
