@@ -29,8 +29,10 @@ const SOCLE: i32 = 5;
 const ARCHITRAVE: i32 = 24;
 const CORNICE: i32 = 26;
 const DECK_Y: i32 = 29;
+/// The cell column the building is symmetric about east to west; x mirrors to 2 * AXIS - x.
+const AXIS: i32 = 60;
 /// Dome: centre, base layer, radius and height.
-const DOME_X: f64 = 60.0;
+const DOME_X: f64 = AXIS as f64 + 0.5;
 const DOME_Z: f64 = 69.0;
 const DOME_BASE: i32 = 30;
 const DOME_R: f64 = 19.0;
@@ -40,8 +42,10 @@ const MIRROR_SUM: i32 = 137;
 /// Rows the plan is moved south so its north front starts at the grid's edge.
 const SHIFT_Z: i32 = 1;
 
-/// Model point the landmark is pinned to: the middle of the dome.
-pub const ANCHOR: (f64, f64) = (DOME_X, DOME_Z + SHIFT_Z as f64);
+/// Model point pinned to the mapped middle of the dome. The map has the dome half a metre west
+/// of the outline's axis, so the point sits half a block west of the model's axis and the walls
+/// stay on the outline.
+pub const ANCHOR: (f64, f64) = (DOME_X - 0.5, DOME_Z + SHIFT_Z as f64);
 
 /// One straight run of outer wall: its outward side, outline row and the cells along it.
 #[derive(Clone, Copy)]
@@ -129,7 +133,7 @@ fn mirrored(part: Part) -> Part {
 const PLAN: [(i32, i32, i32, i32); 9] = [
     // The main block and its north front.
     (17, 103, 4, 68),
-    (52, 69, 3, 3),
+    (51, 69, 3, 3),
     // Corner pavilions.
     (19, 31, 0, 2),
     (17, 33, 3, 3),
@@ -211,9 +215,9 @@ fn north_half(m: &mut Model) {
             out: Dir::N,
             row: 4,
             from: 34,
-            to: 51,
+            to: 50,
         },
-        &[34, 39, 45, 51],
+        &[34, 39, 45, 50],
         Storeys::Three,
     );
     wing(
@@ -380,12 +384,13 @@ fn north_portal(m: &mut Model) {
     let r = Run {
         out: Dir::N,
         row: 3,
-        from: 52,
+        from: 51,
         to: 69,
     };
-    wing(m, r, &[52, 53, 56, 57, 64, 65, 68, 69], Storeys::Three);
+    let pilasters = [51, 52, 55, 56, 64, 65, 68, 69];
+    wing(m, r, &pilasters, Storeys::Three);
     // The tall arched opening in the middle bay.
-    for along in 59..=62 {
+    for along in 58..=62 {
         for y in 1..=15 {
             m.put(&r, along, 1, y, WINDOW);
         }
@@ -393,14 +398,14 @@ fn north_portal(m: &mut Model) {
         m.clear(&r, along, 0, 2);
         m.clear(&r, along, 0, 3);
     }
-    for along in [59, 62] {
+    for along in [58, 62] {
         m.put(&r, along, 1, 15, ASHLAR);
     }
     // Engaged columns stand a block proud of the pilasters.
-    for along in [52, 53, 56, 57, 64, 65, 68, 69] {
+    for along in pilasters {
         engaged(m, &r, along);
     }
-    pediment(m, &r, 51, 70, CORNICE + 1, -1, 2);
+    pediment(m, &r, 50, 70, CORNICE + 1, -1, 2);
 }
 
 /// A triangular pediment along `r` from `lo` to `hi`, rising half a block a cell, from depth
@@ -433,9 +438,9 @@ fn pediment(m: &mut Model, r: &Run, lo: i32, hi: i32, y0: i32, d: i32, back: i32
 }
 
 /// A corner pavilion with its tower, stepped twice at the corner; the east ones mirror the
-/// west about x = 60.
+/// west about the axis.
 fn pavilion(m: &mut Model, east: bool) {
-    let x = |x: i32| if east { 120 - x } else { x };
+    let x = |x: i32| if east { 2 * AXIS - x } else { x };
     let span = |a: i32, b: i32| (x(a).min(x(b)), x(a).max(x(b)));
     let (out, back) = if east {
         (Dir::E, Dir::W)
@@ -748,7 +753,8 @@ fn skylights(m: &mut Model) {
     for (x0, x1, z0, z1) in lights {
         for x in x0..=x1 {
             for z in z0..=z1 {
-                let rib = (x - x0) % 4 == 0 || (z - z0) % 4 == 0;
+                // Ribs every four from both ends, so each light is symmetric in itself.
+                let rib = (x - x0).min(x1 - x) % 4 == 0 || (z - z0).min(z1 - z) % 4 == 0;
                 m.g.set(x, DECK_Y + 1, z, b(if rib { DECK } else { SKYLIGHT }));
                 if x0 < x && x < x1 && z0 < z && z < z1 {
                     m.g.clear(x, DECK_Y, z);
@@ -1130,6 +1136,25 @@ mod tests {
             .all(|v| (v.0 - x).abs() < 8 && (v.2 - z).abs() < 8));
         assert!(model.voxels.iter().all(|v| v.1 >= 0));
         assert!(model.palette.iter().all(|p| p.block.id() < 256));
+    }
+
+    #[test]
+    fn north_front_and_dome_mirror_about_the_axis() {
+        let model = build();
+        let blocks: std::collections::HashMap<(i16, i16, i16), Block> = model
+            .voxels
+            .iter()
+            .map(|v| ((v.0, v.1, v.2), model.palette[v.3 as usize].block))
+            .collect();
+        // Everything up to the courtyard, and the dome's glass above the ramps, which wind one way.
+        for (&(x, y, z), &block) in &blocks {
+            let front = z <= 21 + SHIFT_Z as i16;
+            let dome = y > 46 && (block == DOME_GLASS || block == DOME_FRAME);
+            if front || dome {
+                let mirrored = blocks.get(&(2 * AXIS as i16 - x, y, z));
+                assert_eq!(mirrored, Some(&block), "{x},{y},{z}");
+            }
+        }
     }
 
     #[test]
