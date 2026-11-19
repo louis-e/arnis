@@ -83,7 +83,7 @@ impl Spot {
     }
 
     /// Metres from the nearest pier centre.
-    fn from_pier(&self) -> f64 {
+    fn off_pier(&self) -> f64 {
         self.bay / 2.0 - self.off().abs()
     }
 
@@ -328,7 +328,7 @@ fn column(m: &mut Model, x: i32, z: i32, s: &Spot) {
         m.set(x, -1, z, b(TUFF));
     }
     // The buttresses are brick through the outer ring; the second ring behind keeps its own height.
-    if (s.stern() && d < RING2) || (s.valadier() && d >= RING1 && d < RING2) {
+    if (s.stern() && d < RING2) || (s.valadier() && (RING1..RING2).contains(&d)) {
         let top = if d < AMB1 {
             envelope(s.b)
         } else {
@@ -444,7 +444,7 @@ fn outer_wall(m: &mut Model, x: i32, z: i32, s: &Spot) {
         m.set(x, y, z, part);
     }
     // Flat pilasters in the attic, flush with the wall.
-    if top == TOP && face && s.from_pier() < 0.5 {
+    if top == TOP && face && s.off_pier() < 0.5 {
         for y in 37..=46 {
             m.set(x, y, z, b(SMOOTH_SANDSTONE));
         }
@@ -553,7 +553,7 @@ fn wedge(
     vault: bool,
 ) {
     let top = tier(s, span, heights).round() as i32;
-    if s.from_pier() < 0.21 * s.bay {
+    if s.off_pier() < 0.21 * s.bay {
         m.fill(x, z, 1, top, b(MUD_BRICKS));
     } else if vault && s.d < span.0 + 1.6 && top > 6 {
         m.fill(x, z, top - 3, top - 1, b(MUD_BRICKS));
@@ -659,7 +659,7 @@ fn arena(m: &mut Model, x: i32, z: i32, s: &Spot) {
         i < 4.0 && w < 2.6 && (w < 0.9 || w >= 1.7 || s.u.rem_euclid(3.0) < 0.9)
     };
     if solid {
-        let broken = !deck && hash((s.u / 6.0).floor() as i32, (v / 4.8) as u32) % 5 == 0;
+        let broken = !deck && hash((s.u / 6.0).floor() as i32, (v / 4.8) as u32).is_multiple_of(5);
         let top = if broken { -3 } else { -1 };
         m.fill(x, z, -6, top, b(if edge { TUFF } else { BRICK }));
     }
@@ -678,6 +678,8 @@ fn half_columns(m: &mut Model) {
             (SANDSTONE_WALL, SMOOTH_SANDSTONE)
         };
         let (x, z) = m.cell(p, -0.5);
+        // The ground order stands on no pedestal.
+        #[allow(clippy::reversed_empty_ranges)]
         let orders = [
             (1..=7, 8, 1..=0),
             (13..=19, 20, 11..=12),
