@@ -19,7 +19,7 @@ use crate::element_processing::rail_track::{
     rail_profile, rail_shapes, straight_cells, track_cells, TrackEnd, TrackLevel, TunnelBore,
 };
 use crate::element_processing::tunnel_grade::{
-    chains, grade_line, lowest_floor, pin_area_edges, planning_order, portal_cuttings, Beside, Bore,
+    chains, grade_line, pin_area_edges, planning_order, portal_cuttings, Beside, Bore, CUTTING_GAP,
 };
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
@@ -1726,8 +1726,6 @@ pub fn plan_rail_tunnels(
 
 /// What a long rail tunnel's grade is held to, in blocks per cell.
 const RAIL_TUNNEL_GRADE: f64 = 0.04;
-/// Covered cells a portal's cutting carries on past, about the bore's width.
-const CUTTING_GAP: usize = 2 * WALL_RADIUS as usize + 1;
 
 /// A way's track cells and the cell each of its nodes falls on.
 type WayCells = (Vec<(i32, i32)>, Vec<usize>);
@@ -1792,7 +1790,7 @@ impl<'a> RailRun<'a> {
             &ends[last.0][usize::from(!last.2)],
         ];
         let depth = RAIL_TUNNEL_FLOOR_DEPTH;
-        let lowest = lowest_floor();
+        let lowest = crate::world_editor::min_y() + 1;
         let ground: Vec<i32> = path
             .iter()
             .map(|&(x, z)| editor.get_ground_level(x, z))
@@ -3284,6 +3282,11 @@ mod tests {
 
         assert_river_bed_over_bore(&editor, level);
         assert_bore_whole_and_dry(&editor, &points);
+        let lowest = crate::element_processing::tunnel_grade::lowest_floor();
+        assert!(
+            points.iter().all(|p| p.2 >= lowest),
+            "under the floor guard"
+        );
     }
 
     /// Over the world's floor there is no room under the deepest bed: the bore goes as deep
@@ -3294,13 +3297,17 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
-        let level = lowest_floor() + 9;
+        let level = crate::world_editor::min_y() + 10;
         let (mut editor, ground, field) = river_editor(&xzbbox, level as f32);
         let points = subway_under_river(&mut editor, &ground, &field, &xzbbox);
 
         assert_bore_whole_and_dry(&editor, &points);
         let mid = points.iter().find(|p| p.0 == 100).unwrap();
-        assert_eq!(mid.2, lowest_floor(), "as deep as it goes");
+        assert_eq!(
+            mid.2,
+            crate::world_editor::min_y() + 1,
+            "as deep as it goes"
+        );
         // The river is carved down to the roof, with the bed on top of it.
         let roof = mid.2 + INTERIOR_HEIGHT + 1;
         assert!(editor.check_for_block_absolute(100, level, 50, Some(&[WATER]), None));

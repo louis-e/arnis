@@ -22,8 +22,8 @@ use crate::element_processing::surfaces::{
 };
 use crate::element_processing::traffic_lights::is_signal;
 use crate::element_processing::tunnel_grade::{
-    chains, grade_line, lowest_floor, pin_area_edges, planning_order, portal_cuttings, walkable,
-    Beside, Bore,
+    chains, grade_line, pin_area_edges, planning_order, portal_cuttings, walkable, Beside, Bore,
+    CUTTING_GAP,
 };
 use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
@@ -835,7 +835,7 @@ fn tunnel_layer_extra(tags: &HashMap<String, String>) -> i32 {
 
 /// Lowest Y a tunnel road may sit at, leaving room for its foundation course.
 fn tunnel_min_road_y() -> i32 {
-    (crate::world_editor::terrain_floor_y() + 2).max(lowest_floor() + 1)
+    crate::world_editor::terrain_floor_y() + 2
 }
 
 /// Lowest terrain over the whole shell footprint; a true minimum, since `covered` licenses the roof course.
@@ -1013,7 +1013,8 @@ pub fn collect_tunnel_portals(
             if tunnel_bore_fits(editor, w, scale) {
                 tunnels.push(w);
             }
-        } else {
+        } else if surface_highway_type(w).is_some() {
+            // Only a way drawn at the surface comes down to a portal.
             surface.push(w);
         }
     }
@@ -1467,8 +1468,7 @@ fn plan_road_tunnels(
         let bare: Vec<bool> = (0..n)
             .map(|i| cover[i] - road_y[i] < TUNNEL_ROOF_COVER)
             .collect();
-        let widest = run.iter().map(|&(w, _)| wall_off[w]).max().unwrap_or(1);
-        let open = portal_cuttings(&bare, portal, 2 * widest as usize + 1);
+        let open = portal_cuttings(&bare, portal, CUTTING_GAP);
         let levels: Vec<f64> = road_y.iter().map(|&y| f64::from(y)).collect();
         beside.add(&path, &levels);
 
@@ -7180,6 +7180,29 @@ mod tests {
         );
     }
 
+    /// Indoor mapping is never drawn, so it cannot bring anyone down to the portal.
+    #[test]
+    fn an_approach_mapped_indoors_does_not_lower_the_portal() {
+        let xzbbox = XZBBox::rect_from_xz_lengths(200.0, 120.0).unwrap();
+        let editor = tunnel_editor(&xzbbox, crate::ground::Ground::new_flat(0));
+        let mut indoor = surface_road(2, 5, 40);
+        indoor.tags.insert("level".to_string(), "-1".to_string());
+        let elems = vec![
+            ProcessedElement::Way(indoor),
+            ProcessedElement::Way(tunnel_span(
+                1,
+                40,
+                70,
+                &[("highway", "residential"), ("tunnel", "yes")],
+            )),
+        ];
+        let endpoints = collect_tunnel_internal_endpoints(&elems, &xzbbox);
+        assert_eq!(
+            test_portals(&editor, &elems, &endpoints).drop_at((40, 50)),
+            0
+        );
+    }
+
     /// The descent is bounded by the run on offer, and a connector serves both portals.
     #[test]
     fn approach_drop_is_bounded_by_the_road_it_runs_on() {
@@ -7458,8 +7481,13 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         // The carve floor for the deepest tier, and the room for a bore on top.
-        road_tunnel_under_river(
+        let cells = road_tunnel_under_river(
             crate::world_editor::min_y() + 6 + 2 + crate::water_depth::BORE_ROOM,
+        );
+        let lowest = crate::element_processing::tunnel_grade::lowest_floor();
+        assert!(
+            cells.iter().all(|c| c.road_y > lowest),
+            "under the floor guard"
         );
     }
 

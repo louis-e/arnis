@@ -4,13 +4,17 @@
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use fnv::{FnvHashMap, FnvHashSet};
 
-/// Blocks of rock a bore's lowest block keeps over the world's floor.
+/// Blocks a station hall's floor keeps over the world's floor. The terrain fit makes that
+/// room for halls and for bores under water; elsewhere a bore goes no deeper than its cover.
 pub(crate) const FLOOR_GUARD: i32 = 3;
 
-/// The lowest a tunnel's floor, or a station hall's, may lie.
+/// The lowest a station hall's floor may lie.
 pub(crate) fn lowest_floor() -> i32 {
     crate::world_editor::min_y() + FLOOR_GUARD
 }
+
+/// Covered cells a portal's cutting carries on past, a bump in the ground and no more.
+pub(crate) const CUTTING_GAP: usize = 5;
 
 /// How a bore keeps to its grade and its cover.
 pub(crate) struct Bore {
@@ -737,6 +741,17 @@ mod tests {
                 assert!(steps(&line).iter().all(|s| s.abs() <= most + 1e-9), "n={n}");
             }
         }
+    }
+
+    #[test]
+    fn a_covered_stretch_ends_a_portals_cutting() {
+        let mut bare = vec![false; 30];
+        for i in (0..3).chain(14..20) {
+            bare[i] = true;
+        }
+        let open = portal_cuttings(&bare, [true, false], CUTTING_GAP);
+        assert!(open[..3].iter().all(|&o| o));
+        assert!(!open[3..].iter().any(|&o| o), "{open:?}");
     }
 
     #[test]
