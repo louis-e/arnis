@@ -1,6 +1,5 @@
 // Run: node tests/gui/setting-heading.mjs
-// A setting's name keeps exactly the room its icons take, with no markup space before them, and a heading is as wide as its row
-// allows rather than as its text, so it stays on one line when it fits, at any display scale.
+// A setting's name keeps exactly the room its icons take, with no markup space before them, so it stays on one line when it fits.
 import assert from 'node:assert';
 import fs from 'node:fs';
 
@@ -42,7 +41,7 @@ const pull = px(`${shown} + .tooltip-icon`, 'margin-left');
 assert.strictEqual(room + pull, gap, 'with a badge the tooltip still sits one gap after the name');
 assert.strictEqual(pull + icon + gap + badge, 0, 'the badge ends where the room does');
 
-// Sized to its own text a heading has no room to spare, and Windows display scaling broke "Game Mode" before its last word.
+// Headings fill their row, so display scaling can't break a short name.
 const rule = (sel) => {
   const at = css.indexOf(`\n${sel} {`);
   assert.ok(at >= 0, `${sel} has a rule`);
