@@ -2392,7 +2392,11 @@ pub fn generate_world_with_options(
 
             release_tile_fills(&tile_fill_ids[tile_idx], &fill_readers, &flood_fill_cache);
             let mut tile_station_voids: Vec<stations::StationVoid> = Vec::new();
-            stations.render(&mut tile_editor, &mut tile_station_voids);
+            stations.render(
+                &mut tile_editor,
+                &mut tile_station_voids,
+                args.post_apocalyptic,
+            );
 
             // Per-tile ground + ore + ESA-water over strict bounds (parallel);
             // neighbour reads use the editor halo from intersection assignment.
@@ -2843,7 +2847,7 @@ pub fn generate_world_with_options(
 
         process_pb.inc(element_counter % pb_batch_size);
         process_pb.finish();
-        stations.render(&mut editor, &mut station_voids);
+        stations.render(&mut editor, &mut station_voids, args.post_apocalyptic);
         bench.mark("elements_sequential");
     }
 

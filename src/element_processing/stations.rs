@@ -3258,7 +3258,12 @@ impl StationIndex {
     }
 
     /// Draws the stations within the editor; open space goes to `voids` for `carve_voids`.
-    pub fn render(&self, editor: &mut WorldEditor, voids: &mut Vec<StationVoid>) {
+    pub fn render(
+        &self,
+        editor: &mut WorldEditor,
+        voids: &mut Vec<StationVoid>,
+        post_apocalyptic: bool,
+    ) {
         let (x0, z0, x1, z1) = editor.bounds();
         let overlaps = |b: &(i32, i32, i32, i32)| b.0 <= x1 && b.2 >= x0 && b.1 <= z1 && b.3 >= z0;
         for station in self.surface.iter().filter(|s| overlaps(&s.bbox)) {
@@ -3268,7 +3273,7 @@ impl StationIndex {
             render_shed(editor, shed);
         }
         for hall in self.halls.iter().filter(|h| overlaps(&h.bbox)) {
-            render_hall(editor, hall, voids);
+            render_hall(editor, hall, voids, post_apocalyptic);
         }
         let entrances: Vec<&Entrance> = self
             .entrances
@@ -3572,7 +3577,12 @@ fn render_shed(editor: &mut WorldEditor, shed: &Shed) {
     }
 }
 
-fn render_hall(editor: &mut WorldEditor, hall: &Hall, voids: &mut Vec<StationVoid>) {
+fn render_hall(
+    editor: &mut WorldEditor,
+    hall: &Hall,
+    voids: &mut Vec<StationVoid>,
+    post_apocalyptic: bool,
+) {
     let start = voids.len();
     let f = hall.floor;
     let roof = f + HALL_HEIGHT;
@@ -3582,33 +3592,46 @@ fn render_hall(editor: &mut WorldEditor, hall: &Hall, voids: &mut Vec<StationVoi
         if !editor.in_bounds(x, z) {
             continue;
         }
+        // Weathering follows world coordinates so it agrees across tiles. Both replacement
+        // blocks keep the hall sealed and are outside the cave carver's host rock set.
+        let weather_patch =
+            post_apocalyptic.then(|| mix(x.div_euclid(3) as u64, z.div_euclid(3) as u64));
+        let finish = |block, y| match weather_patch.map(|patch| mix(patch, y as u64) % 8) {
+            Some(0) => CRACKED_STONE_BRICKS,
+            Some(1) => MOSSY_STONE_BRICKS,
+            _ => block,
+        };
         match c.part {
             HallPart::Wall => {
                 put(editor, POLISHED_DEEPSLATE, x, f, z);
-                put(editor, s.skirting, x, f + 1, z);
+                put(editor, finish(s.skirting, f + 1), x, f + 1, z);
                 for y in f + 2..roof {
                     put(
                         editor,
-                        if y == f + 3 { hall.accent } else { s.wall },
+                        if y == f + 3 {
+                            hall.accent
+                        } else {
+                            finish(s.wall, y)
+                        },
                         x,
                         y,
                         z,
                     );
                 }
-                put(editor, s.ceiling, x, roof, z);
+                put(editor, finish(s.ceiling, roof), x, roof, z);
             }
             HallPart::Portal => {
                 put(editor, POLISHED_DEEPSLATE, x, f, z);
                 void(editor, voids, x, z, f + 1, f + 4);
-                put(editor, s.wall, x, f + 5, z);
-                put(editor, s.ceiling, x, roof, z);
+                put(editor, finish(s.wall, f + 5), x, f + 5, z);
+                put(editor, finish(s.ceiling, roof), x, roof, z);
             }
             HallPart::Trackbed => {
                 put(editor, POLISHED_DEEPSLATE, x, f, z);
                 void(editor, voids, x, z, f + 1, roof - 1);
                 put(
                     editor,
-                    if c.light { SEA_LANTERN } else { s.ceiling },
+                    finish(if c.light { SEA_LANTERN } else { s.ceiling }, roof),
                     x,
                     roof,
                     z,
@@ -3619,13 +3642,13 @@ fn render_hall(editor: &mut WorldEditor, hall: &Hall, voids: &mut Vec<StationVoi
                 let top = match deck {
                     Deck::Edge => POLISHED_ANDESITE,
                     Deck::Line => WHITE_CONCRETE,
-                    _ => s.floor,
+                    _ => finish(s.floor, f + 1),
                 };
                 put(editor, top, x, f + 1, z);
                 void(editor, voids, x, z, f + 2, roof - 1);
                 put(
                     editor,
-                    if c.light { SEA_LANTERN } else { s.ceiling },
+                    finish(if c.light { SEA_LANTERN } else { s.ceiling }, roof),
                     x,
                     roof,
                     z,
@@ -4438,7 +4461,7 @@ mod tests {
 
         let mut editor = test_editor(&xzbbox);
         let mut voids = Vec::new();
-        index.render(&mut editor, &mut voids);
+        index.render(&mut editor, &mut voids, false);
         assert!(open(&editor, 100, 10, 56));
         assert!(matches!(
             editor.get_block_absolute(100, 20, 56),
@@ -4642,7 +4665,7 @@ mod tests {
 
         let mut editor = test_editor(&xzbbox);
         let mut voids = Vec::new();
-        index.render(&mut editor, &mut voids);
+        index.render(&mut editor, &mut voids, false);
         carve_voids(&mut editor, &voids);
         for &(x, z, lo, hi) in &voids {
             assert!((lo..=hi).all(|y| editor.get_block_absolute(x, y, z) != Some(VOID)));
@@ -4718,6 +4741,29 @@ mod tests {
             }
         }
         assert_eq!(parts, (true, true, true));
+
+        let mut ruined = test_editor(&xzbbox);
+        let mut ruined_voids = Vec::new();
+        index.render(&mut ruined, &mut ruined_voids, true);
+        assert_eq!(ruined_voids, voids);
+        carve_voids(&mut ruined, &ruined_voids);
+
+        let mut weathered = 0;
+        for c in &hall.cells {
+            for y in floor..=floor + HALL_HEIGHT {
+                let normal = editor.get_block_absolute(c.x, y, c.z);
+                let aged = ruined.get_block_absolute(c.x, y, c.z);
+                if normal != aged {
+                    assert!(normal.is_some_and(|block| block != AIR));
+                    assert!(matches!(
+                        aged,
+                        Some(CRACKED_STONE_BRICKS | MOSSY_STONE_BRICKS)
+                    ));
+                    weathered += 1;
+                }
+            }
+        }
+        assert!(weathered > 0, "the apocalyptic hall should show weathering");
     }
 
     #[test]
