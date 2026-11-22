@@ -2100,10 +2100,11 @@ fn of_a_castle(element: &ProcessedWay) -> bool {
         || tag("tower:type") == Some("defensive")
         || tag(fortifications::CASTLE_GROUNDS_TAG) == Some("fort")
         || (is_towerish(element)
-            && is_fortification(
-                building_tag(tags, "building").unwrap_or("yes"),
-                building_tag(tags, "historic"),
-            ))
+            && (matches!(building_tag(tags, "building"), Some("castle" | "fort"))
+                || matches!(
+                    building_tag(tags, "historic"),
+                    Some("castle" | "fort" | "fortress")
+                )))
 }
 
 impl BuildingCategory {
@@ -7457,7 +7458,7 @@ fn mapped_parts(tags: &HashMap<String, String>, hint: HeightHint) -> Option<(f64
     if takes_commercial_rhythm(levels > 7.0, building_type, cycle, tags) {
         cycle = 4;
     }
-    let walls = if own && accessory_storey(untaken_type(building_type, tags), tags) {
+    let walls = if own && accessory_storey(building_type, tags) {
         f64::from(ACCESSORY_WALLS_M)
     } else {
         levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS)
@@ -7654,9 +7655,7 @@ fn calculate_building_height(
                 };
                 building_height =
                     (((lev * floor_cycle as f64 + bonus) * scale_factor) as i32).max(3);
-                if min_level == 0
-                    && accessory_storey(untaken_type(building_type, &element.tags), &element.tags)
-                {
+                if min_level == 0 && accessory_storey(building_type, &element.tags) {
                     building_height = multiply_scale(ACCESSORY_WALLS_M, scale_factor).max(3);
                 }
                 has_source = true;
@@ -24006,6 +24005,20 @@ mod style_tests {
             ],
         );
         assert!(of_a_castle(&keep));
+        // A lookout tower marked historic is no castle's, and keeps its timber.
+        let lookout = rect_way(
+            4,
+            0,
+            0,
+            8,
+            8,
+            &[
+                ("man_made", "tower"),
+                ("historic", "tower"),
+                ("building:material", "wood"),
+            ],
+        );
+        assert!(!of_a_castle(&lookout));
         assert!(!of_a_castle(&rect_way(
             3,
             0,
@@ -24033,6 +24046,13 @@ mod style_tests {
         ]);
         assert_eq!(taken, untyped);
         assert!(height(&[("building:part", "cathedral")]) > untyped);
+        // A carport part of mapped storeys keeps a carport's walls.
+        let carport = height(&[
+            ("building:part", "carport"),
+            ("arnis:part_kind_taken", "yes"),
+            ("building:levels", "1"),
+        ]);
+        assert!(carport < height(&[("building:part", "yes"), ("building:levels", "1")]));
     }
 
     // A part stands in the state of its building: a ruin's parts are ruins.

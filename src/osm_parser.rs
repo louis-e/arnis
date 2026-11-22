@@ -1809,15 +1809,6 @@ const OUTLINE_FABRIC_KEYS: [&str; 10] = [
     "construction",
 ];
 
-/// The keys that describe a facade; a part naming any of them keeps its own.
-const FACADE_KEYS: [&str; 6] = [
-    "building:material",
-    "building:facade:material",
-    "facade:material",
-    "building:cladding",
-    "building:colour",
-    "colour",
-];
 const COLOUR_KEYS: [&str; 2] = ["building:colour", "colour"];
 const MATERIAL_KEYS: [&str; 4] = [
     "building:material",
@@ -1840,13 +1831,23 @@ pub(crate) fn building_tag<'a>(tags: &'a HashMap<String, String>, key: &str) -> 
         .map(String::as_str)
 }
 
+/// The facade material a building maps, normalised.
+fn facade_material<'a>(get: impl Fn(&str) -> Option<&'a String>) -> Option<String> {
+    [
+        "building:material",
+        "building:facade:material",
+        "facade:material",
+    ]
+    .into_iter()
+    .find_map(get)
+    .map(|m| norm_tag(m))
+}
+
 fn is_glass_facade(tags: &HashMap<String, String>) -> bool {
-    let material = tags
-        .get("building:material")
-        .or_else(|| tags.get("building:facade:material"))
-        .or_else(|| tags.get("facade:material"))
-        .map(|m| norm_tag(m));
-    matches!(material.as_deref(), Some("glass" | "mirror"))
+    matches!(
+        facade_material(|k| tags.get(k)).as_deref(),
+        Some("glass" | "mirror")
+    )
 }
 
 /// What the parts of one building take from the tags it is mapped with once for all of them.
@@ -1854,10 +1855,13 @@ fn is_glass_facade(tags: &HashMap<String, String>) -> bool {
 struct Inherited {
     /// The building's type, which a part of `building:part=yes` takes.
     kind: Option<String>,
-    /// Its facade, for a part that names none.
-    facade: Vec<(String, String)>,
-    /// A glass building's tint, for a glass part that names no colour.
-    tint: Vec<(String, String)>,
+    /// Its facade material, for a part that names none; never glass, which stays with the
+    /// building, where the group's style hint carries it.
+    material: Vec<(String, String)>,
+    /// Its facade colour: a glass building's tint, else the shade of its material.
+    colour: Vec<(String, String)>,
+    /// Whether the building is glass.
+    glass: bool,
     /// Tags a part takes where it has none of its own.
     rest: Vec<(String, String)>,
 }
@@ -1906,29 +1910,25 @@ impl Inherited {
                 .find(|t| keys.iter().any(|k| t.contains_key(*k)))
         };
         let material = with(&MATERIAL_KEYS);
-        let colour = with(&COLOUR_KEYS).map(|t| pick(t, &COLOUR_KEYS));
-        let (mut facade, mut tint) = (Vec::new(), Vec::new());
-        // A glass building's facade stays with it, where the group's style hint carries it.
-        if material.is_some_and(|t| is_glass_facade(t)) {
-            tint = colour.unwrap_or_default();
-        } else {
-            facade = material
-                .map(|t| pick(t, &MATERIAL_KEYS))
-                .unwrap_or_default();
-            facade.extend(colour.unwrap_or_default());
-        }
+        let glass = material.is_some_and(|t| is_glass_facade(t));
         Self {
             kind,
-            facade,
-            tint,
+            material: material
+                .filter(|_| !glass)
+                .map(|t| pick(t, &MATERIAL_KEYS))
+                .unwrap_or_default(),
+            colour: with(&COLOUR_KEYS)
+                .map(|t| pick(t, &COLOUR_KEYS))
+                .unwrap_or_default(),
+            glass,
             rest,
         }
     }
 
     fn is_empty(&self) -> bool {
         self.kind.is_none()
-            && self.facade.is_empty()
-            && self.tint.is_empty()
+            && self.material.is_empty()
+            && self.colour.is_empty()
             && self.rest.is_empty()
     }
 
@@ -1946,10 +1946,30 @@ impl Inherited {
                 tags.insert(KIND_TAKEN_TAG.to_string(), "yes".to_string());
             }
         }
-        if !FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
-            tags.extend(self.facade.iter().cloned());
-        } else if !COLOUR_KEYS.iter().any(|k| tags.contains_key(*k)) && is_glass_facade(tags) {
-            tags.extend(self.tint.iter().cloned());
+        let names = |keys: &[&str], tags: &HashMap<String, String>| {
+            keys.iter().any(|k| tags.contains_key(*k))
+        };
+        let own_material = names(&MATERIAL_KEYS, tags);
+        if !names(&COLOUR_KEYS, tags) {
+            // A glass part takes a glass building's tint; a part of the building's material,
+            // or of none, its shade.
+            let takes = if self.glass {
+                is_glass_facade(tags)
+            } else {
+                let theirs = |k: &str| {
+                    self.material
+                        .iter()
+                        .find(|(key, _)| key == k)
+                        .map(|(_, v)| v)
+                };
+                !own_material || facade_material(|k| tags.get(k)) == facade_material(theirs)
+            };
+            if takes {
+                tags.extend(self.colour.iter().cloned());
+            }
+        }
+        if !own_material {
+            tags.extend(self.material.iter().cloned());
         }
         for (k, v) in &self.rest {
             tags.entry(k.clone()).or_insert_with(|| v.clone());
@@ -1986,6 +2006,8 @@ impl<'a> PartInheritance<'a> {
             // A building relation's tags come first, then its outline's, then those of the
             // multipolygon building an outline ring bounds.
             let mut outline_of: HashMap<u64, Vec<u64>> = HashMap::new();
+            // Each relation's outline ways, in member order.
+            let mut outlines: Vec<(u64, u64)> = Vec::new();
             let mut ring_owner: HashMap<u64, &HashMap<String, String>> = HashMap::new();
             let mut multipolygons: HashMap<u64, &HashMap<String, String>> = HashMap::new();
             for rel in relations {
@@ -2014,6 +2036,7 @@ impl<'a> PartInheritance<'a> {
                     match m.r#type.as_str() {
                         "way" => {
                             outline_of.entry(m.r#ref).or_default().push(key);
+                            outlines.push((key, m.r#ref));
                         }
                         "relation" => {
                             if let Some(outline) = multipolygons.get(&m.r#ref) {
@@ -2033,11 +2056,9 @@ impl<'a> PartInheritance<'a> {
                     sources.entry(key).or_default().push(tags);
                 }
             }
-            for (way, keys) in &outline_of {
-                if let Some(owner) = ring_owner.get(way) {
-                    for key in keys {
-                        sources.entry(*key).or_default().push(owner);
-                    }
+            for (key, way) in outlines {
+                if let Some(owner) = ring_owner.get(&way) {
+                    sources.entry(key).or_default().push(owner);
                 }
             }
         }
@@ -4092,8 +4113,8 @@ mod outline_suppression_tests {
         }
     }
 
-    // An untagged part takes the stone of its outline; a tagged part and a
-    // glass outline keep their own.
+    // An untagged part takes the stone of its outline; a part keeps its own colour and a glass
+    // outline its facade.
     #[test]
     fn untagged_parts_take_the_masonry_of_their_outline() {
         let (o, on) = square_way(100, 1000, 1.0);
@@ -4124,8 +4145,16 @@ mod outline_suppression_tests {
             part.get("building:colour").map(String::as_str),
             Some("#cfc6b5")
         );
+        // A part with a colour of its own keeps it, on the outline's stone.
         let own = ways[2].tags.as_ref().unwrap();
-        assert!(!own.contains_key("building:material"));
+        assert_eq!(
+            own.get("building:material").map(String::as_str),
+            Some("stone")
+        );
+        assert_eq!(
+            own.get("building:colour").map(String::as_str),
+            Some("black")
+        );
 
         let glass = with_tag(
             tagged(square_way(100, 1000, 1.0).0, "building", "office"),
@@ -4442,6 +4471,25 @@ mod outline_suppression_tests {
         assert_eq!(
             second.get("building:material").map(String::as_str),
             Some("brick")
+        );
+        // A part mapping only its colour takes the brick; one of brick takes the white, one of
+        // stone keeps its own look.
+        let facade = |own: &[(&str, &str)]| {
+            let mut tags = tagmap(&[("building:part", "yes")]);
+            tags.extend(tagmap(own));
+            inheritance.apply_to_way(10, &mut tags);
+            let get = |k: &str| tags.get(k).cloned();
+            (get("building:material"), get("building:colour"))
+        };
+        let some = |m: &str, c: &str| (Some(m.to_string()), Some(c.to_string()));
+        assert_eq!(facade(&[("building:colour", "red")]), some("brick", "red"));
+        assert_eq!(
+            facade(&[("building:material", "brick")]),
+            some("brick", "white")
+        );
+        assert_eq!(
+            facade(&[("building:material", "stone")]),
+            (Some("stone".to_string()), None)
         );
     }
 
