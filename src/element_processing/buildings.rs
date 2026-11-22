@@ -2091,12 +2091,13 @@ fn whole_building_tag<'a>(element: &'a ProcessedWay, key: &str) -> Option<&'a st
     }
 }
 
-/// A castle's own building: mapped as one, or a plain building or tower in its grounds.
+/// A building of castle stone: mapped as a castle or a defensive tower, or a plain building
+/// or tower in the grounds of a stronghold.
 fn of_a_castle(element: &ProcessedWay) -> bool {
+    let tag = |k: &str| element.tags.get(k).map(String::as_str);
     whole_building_tag(element, "historic") == Some("castle")
-        || element
-            .tags
-            .contains_key(fortifications::CASTLE_GROUNDS_TAG)
+        || tag("tower:type") == Some("defensive")
+        || tag(fortifications::CASTLE_GROUNDS_TAG) == Some("fort")
 }
 
 impl BuildingCategory {
@@ -2213,7 +2214,14 @@ impl BuildingCategory {
             return Some(BuildingCategory::Historic);
         }
         let typed = Self::from_building_type(building_type);
-        typed.keeps_its_look_when_tall().then_some(typed)
+        if !typed.keeps_its_look_when_tall() {
+            return None;
+        }
+        // A listed mill or barn is historic, as any lower building is.
+        if whole_building_tag(element, "historic").is_some_and(|v| v != "no") {
+            return Some(BuildingCategory::Historic);
+        }
+        Some(typed)
     }
 
     /// Categories built the same however tall they are mapped: no storeys of offices or flats.
@@ -5574,6 +5582,16 @@ fn determine_wall_block_from_tags(
 ) -> Option<Block> {
     if category == BuildingCategory::GlassySkyscraper {
         // GlassySkyscraper walls must stay glass.
+        return None;
+    }
+    // A castle takes its mapped stone, brick or render, and its castle stone otherwise.
+    if of_a_castle(element)
+        && !element
+            .tags
+            .get("building:material")
+            .or_else(|| element.tags.get("building:facade:material"))
+            .is_some_and(|m| crate::osm_parser::is_masonry_material(m))
+    {
         return None;
     }
     if let Some(material) = element
@@ -14963,7 +14981,11 @@ pub fn generate_buildings(
             start_y_offset + abs_terrain_offset,
             // The parts of one building go up together.
             crate::element_processing::building_construction::Progress::of(
-                crate::osm_parser::group_key(group_seed),
+                if group_seed == element.id {
+                    element.id
+                } else {
+                    crate::osm_parser::group_key(group_seed)
+                },
                 building_height,
                 storey,
             ),
@@ -23891,6 +23913,14 @@ mod style_tests {
             ),
             (&[("building", "industrial"), ("height", "40")], Industrial),
             (
+                &[
+                    ("building", "industrial"),
+                    ("historic", "yes"),
+                    ("height", "40"),
+                ],
+                Historic,
+            ),
+            (
                 &[("building", "warehouse"), ("building:levels", "9")],
                 Warehouse,
             ),
@@ -23902,6 +23932,47 @@ mod style_tests {
         for (tags, want) in cases {
             assert_eq!(categories(tags), [*want; 2], "{tags:?}");
         }
+    }
+
+    // A castle is built of its mapped stone or brick, and of castle stone where it maps only
+    // a colour or a material no castle is built of.
+    #[test]
+    fn castles_take_only_mapped_masonry() {
+        use crate::element_processing::building_test_support::rect_way;
+        let wall = |tags: &[(&str, &str)]| {
+            let way = rect_way(1, 0, 0, 20, 20, tags);
+            determine_wall_block_from_tags(&way, BuildingCategory::Historic, &mut element_rng(1))
+        };
+        assert!(wall(&[
+            ("building", "castle"),
+            ("historic", "castle"),
+            ("building:material", "brick")
+        ])
+        .is_some());
+        assert!(wall(&[
+            ("building", "castle"),
+            ("historic", "castle"),
+            ("building:colour", "white")
+        ])
+        .is_none());
+        assert!(wall(&[
+            ("building", "castle"),
+            ("historic", "castle"),
+            ("building:material", "glass")
+        ])
+        .is_none());
+        assert!(wall(&[
+            ("building", "yes"),
+            ("arnis:castle_grounds", "fort"),
+            ("building:colour", "white")
+        ])
+        .is_none());
+        assert!(wall(&[
+            ("building", "yes"),
+            ("arnis:castle_grounds", "palace"),
+            ("building:colour", "white")
+        ])
+        .is_some());
     }
 
     // A part stands in the state of its building: a ruin's parts are ruins.

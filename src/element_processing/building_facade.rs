@@ -98,7 +98,7 @@ pub struct BuildingContext<'a> {
     pub building_footprints: &'a CoordinateBitmap,
     /// group_seed -> sorted member way ids; only groups with >= 2 members.
     pub group_members: &'a FnvHashMap<u64, Vec<u64>>,
-    /// building:part relations of a housing block, which take its storey height.
+    /// building:part relation id -> the shared style seed of its building.
     pub relation_part_groups: &'a crate::osm_parser::RelationPartGroups,
     /// Untagged buildings and the wall height of the tagged ones they share a wall with.
     pub neighbour_heights: &'a crate::element_processing::buildings::NeighbourHeights,
