@@ -1418,6 +1418,7 @@ pub fn generate_world_with_options(
     camp_sites::prepare(&mut elements);
     allotments::prepare(&mut elements, args.scale);
     mobile_homes::prepare(&mut elements, args.scale);
+    fortifications::mark_castle_grounds(&mut elements);
     // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 

@@ -2091,6 +2091,14 @@ fn whole_building_tag<'a>(element: &'a ProcessedWay, key: &str) -> Option<&'a st
     }
 }
 
+/// A castle's own building: mapped as one, or a plain building or tower in its grounds.
+fn of_a_castle(element: &ProcessedWay) -> bool {
+    whole_building_tag(element, "historic") == Some("castle")
+        || element
+            .tags
+            .contains_key(fortifications::CASTLE_GROUNDS_TAG)
+}
+
 impl BuildingCategory {
     /// Determines the building category from OSM tags and calculated properties
     fn from_element(
@@ -2186,6 +2194,7 @@ impl BuildingCategory {
             if tag("tower:type") == Some("defensive")
                 || is_fortification(building_type, whole_building_tag(element, "historic"))
                 || is_fortification(outline, building_tag(tags, "historic"))
+                || tags.contains_key(fortifications::CASTLE_GROUNDS_TAG)
             {
                 return Some(BuildingCategory::Historic);
             }
@@ -2198,7 +2207,9 @@ impl BuildingCategory {
         {
             return Some(BuildingCategory::Religious);
         }
-        if is_fortification(building_type, whole_building_tag(element, "historic")) {
+        if is_fortification(building_type, whole_building_tag(element, "historic"))
+            || tags.contains_key(fortifications::CASTLE_GROUNDS_TAG)
+        {
             return Some(BuildingCategory::Historic);
         }
         let typed = Self::from_building_type(building_type);
@@ -5017,8 +5028,8 @@ fn closed_retail_bays(
         element.tags.get("shop").map(String::as_str),
         Some("department_store" | "mall")
     ) || matches!(
-        element.tags.get("building").map(String::as_str),
-        Some("retail" | "department_store" | "mall")
+        BuildingCategory::building_type(element),
+        "retail" | "department_store" | "mall"
     );
     let footprint_m2 = footprint_cells as f64 / (scale * scale);
     let storeys = (config.building_height - GROUND_FLOOR_BONUS) / config.floor_cycle.max(1);
@@ -5565,9 +5576,6 @@ fn determine_wall_block_from_tags(
         // GlassySkyscraper walls must stay glass.
         return None;
     }
-    if whole_building_tag(element, "historic") == Some("castle") {
-        return None;
-    }
     if let Some(material) = element
         .tags
         .get("building:material")
@@ -5864,14 +5872,14 @@ fn determine_wall_block(
     rng: &mut impl Rng,
 ) -> Block {
     // Historic castles have their own special treatment
-    if whole_building_tag(element, "historic") == Some("castle") {
+    if of_a_castle(element) {
         return get_castle_wall_block(rng);
     }
     let typology = if category == BuildingCategory::Historic {
         // A listed townhouse or palace is built like its neighbours; only
         // fortifications keep the castle stones.
         let kind = BuildingCategory::building_type(element);
-        (!is_fortification(kind, whole_building_tag(element, "historic")))
+        (!is_fortification(kind, whole_building_tag(element, "historic")) && !of_a_castle(element))
             .then_some(WallTypology::Civic)
     } else {
         wall_typology(category, era, building_height, ctx)
@@ -6259,7 +6267,9 @@ fn compute_detail_tier(
     if building_tag(tags, "heritage").is_some_and(|v| v != "no") {
         score += 20;
     }
-    if building_tag(tags, "historic").is_some_and(|v| v != "no") {
+    if building_tag(tags, "historic").is_some_and(|v| v != "no")
+        || tags.contains_key(fortifications::CASTLE_GROUNDS_TAG)
+    {
         score += 15;
     }
     if tags.contains_key("building:architecture") || tags.contains_key("architecture") {
@@ -14951,8 +14961,9 @@ pub fn generate_buildings(
             element,
             &cached_floor_area,
             start_y_offset + abs_terrain_offset,
+            // The parts of one building go up together.
             crate::element_processing::building_construction::Progress::of(
-                element.id,
+                crate::osm_parser::group_key(group_seed),
                 building_height,
                 storey,
             ),
@@ -23864,6 +23875,19 @@ mod style_tests {
                     ("height", "35"),
                 ],
                 Historic,
+            ),
+            (
+                &[
+                    ("building", "yes"),
+                    ("historic", "yes"),
+                    ("height", "65"),
+                    ("arnis:castle_grounds", "yes"),
+                ],
+                Historic,
+            ),
+            (
+                &[("building", "yes"), ("historic", "yes"), ("height", "65")],
+                MasonrySkyscraper,
             ),
             (&[("building", "industrial"), ("height", "40")], Industrial),
             (

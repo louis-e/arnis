@@ -1,12 +1,80 @@
 //! Town walls and gates: solid masonry with merlons and arched passages.
 
 use crate::block_definitions::*;
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode};
 use crate::world_editor::WorldEditor;
 use fnv::{FnvHashMap, FnvHashSet};
 use std::collections::{HashMap, VecDeque};
 
 /// `historic` and `wall` values of town and castle defences.
 const DEFENCES: &[&str] = &["citywalls", "city_wall", "castle_wall"];
+
+/// Set on a plain building or tower that stands in the grounds of a castle or fort.
+pub(crate) const CASTLE_GROUNDS_TAG: &str = "arnis:castle_grounds";
+
+/// `historic` values of the grounds a castle's buildings stand in.
+const CASTLE_GROUNDS: &[&str] = &["castle", "fort", "fortress"];
+
+/// Marks the buildings mapped with no type of their own, and the towers, that stand in the
+/// grounds of a castle or fort: they are its palace, keep and gatehouse.
+pub fn mark_castle_grounds(elements: &mut [ProcessedElement]) {
+    use crate::element_processing::area_layout::{interior_point, point_in_rings};
+    let is_grounds = |tags: &HashMap<String, String>| {
+        tag(tags, "historic").is_some_and(|h| CASTLE_GROUNDS.contains(&h))
+            && !tags.contains_key("building")
+            && !tags.contains_key("building:part")
+    };
+    type Grounds = ((i32, i32, i32, i32), Vec<Vec<ProcessedNode>>);
+    let mut grounds: Vec<Grounds> = Vec::new();
+    for e in elements.iter() {
+        let rings: Vec<Vec<ProcessedNode>> = match e {
+            ProcessedElement::Way(w) if is_grounds(&w.tags) && closed(&w.nodes) => {
+                vec![w.nodes.clone()]
+            }
+            ProcessedElement::Relation(r) if is_grounds(&r.tags) => r
+                .members
+                .iter()
+                .filter(|m| m.role != ProcessedMemberRole::Part)
+                .map(|m| m.way.nodes.clone())
+                .collect(),
+            _ => continue,
+        };
+        let mut nodes = rings.iter().flatten();
+        let Some(first) = nodes.next() else { continue };
+        let bounds = nodes.fold((first.x, first.z, first.x, first.z), |b, n| {
+            (b.0.min(n.x), b.1.min(n.z), b.2.max(n.x), b.3.max(n.z))
+        });
+        grounds.push((bounds, rings));
+    }
+    if grounds.is_empty() {
+        return;
+    }
+    let inside = |p: (f64, f64)| {
+        grounds.iter().any(|(b, rings)| {
+            p.0 >= b.0 as f64
+                && p.1 >= b.1 as f64
+                && p.0 <= b.2 as f64
+                && p.1 <= b.3 as f64
+                && point_in_rings(&rings.iter().map(Vec::as_slice).collect::<Vec<_>>(), p)
+        })
+    };
+    for e in elements.iter_mut() {
+        let ProcessedElement::Way(w) = e else {
+            continue;
+        };
+        let kind = tag(&w.tags, "building").or_else(|| tag(&w.tags, "building:part"));
+        let plain = kind == Some("yes");
+        let tower = tag(&w.tags, "man_made") == Some("tower") || kind == Some("tower");
+        if (plain || tower) && closed(&w.nodes) && interior_point(&w.nodes).is_some_and(inside) {
+            w.tags
+                .insert(CASTLE_GROUNDS_TAG.to_string(), "yes".to_string());
+        }
+    }
+}
+
+fn closed(nodes: &[ProcessedNode]) -> bool {
+    nodes.len() >= 4 && nodes.first().map(|n| (n.x, n.z)) == nodes.last().map(|n| (n.x, n.z))
+}
 
 /// Clear height of a passage at its sides, in metres; it rises by an arch towards the middle.
 const PASSAGE_M: f64 = 4.0;
@@ -217,6 +285,38 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    // The palace, keep and towers in a castle's grounds are the castle's; a typed house or
+    // a building beyond the grounds is not.
+    #[test]
+    fn plain_buildings_in_castle_grounds_are_marked() {
+        use crate::element_processing::building_test_support::rect_way;
+        let mut elements: Vec<ProcessedElement> = [
+            rect_way(1, 0, 0, 100, 100, &[("historic", "castle")]),
+            rect_way(
+                2,
+                10,
+                10,
+                30,
+                30,
+                &[("building", "yes"), ("historic", "yes")],
+            ),
+            rect_way(3, 40, 40, 46, 46, &[("building:part", "yes")]),
+            rect_way(4, 50, 10, 56, 16, &[("building", "tower")]),
+            rect_way(5, 60, 60, 70, 70, &[("building", "house")]),
+            rect_way(6, 150, 10, 170, 30, &[("building", "yes")]),
+        ]
+        .into_iter()
+        .map(ProcessedElement::Way)
+        .collect();
+        mark_castle_grounds(&mut elements);
+        let marked: Vec<u64> = elements
+            .iter()
+            .filter(|e| e.tags().contains_key(CASTLE_GROUNDS_TAG))
+            .map(ProcessedElement::id)
+            .collect();
+        assert_eq!(marked, [2, 3, 4]);
     }
 
     #[test]
