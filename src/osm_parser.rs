@@ -1833,14 +1833,7 @@ pub(crate) fn building_tag<'a>(tags: &'a HashMap<String, String>, key: &str) -> 
 
 /// The facade material a building maps, normalised.
 fn facade_material<'a>(get: impl Fn(&str) -> Option<&'a String>) -> Option<String> {
-    [
-        "building:material",
-        "building:facade:material",
-        "facade:material",
-    ]
-    .into_iter()
-    .find_map(get)
-    .map(|m| norm_tag(m))
+    MATERIAL_KEYS.into_iter().find_map(get).map(|m| norm_tag(m))
 }
 
 fn is_glass_facade(tags: &HashMap<String, String>) -> bool {

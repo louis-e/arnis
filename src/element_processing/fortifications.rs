@@ -32,16 +32,8 @@ const MAX_GROUNDS_M2: f64 = 100_000.0;
 /// A plain building smaller than this is a kiosk or a shed in the grounds.
 const MIN_BUILDING_M2: f64 = 50.0;
 
-/// `tower:type` values of towers that are no part of a castle: masts, floodlights and the like.
-const NOT_CASTLE_TOWERS: &[&str] = &[
-    "communication",
-    "lighting",
-    "cooling",
-    "siren",
-    "radar",
-    "monitoring",
-    "climbing",
-];
+/// `tower:type` values of a castle's towers.
+const CASTLE_TOWERS: &[&str] = &["defensive", "watchtower", "observation"];
 
 /// `historic` values a building in a fortress town is the fortress's by.
 const FORTIFIED: &[&str] = &[
@@ -59,8 +51,9 @@ const CASTLE_TOURISM: &[&str] = &["museum", "attraction", "gallery", "viewpoint"
 
 /// Marks the buildings of a castle mapped as plain buildings in its grounds: its palace, keep,
 /// gatehouse and towers. In grounds no larger than a castle's, one listed or marked historic is
-/// its own, and so is an unmarked one that is no kiosk, shop or cafe. In grounds the size of a
-/// town only a gate, tower or wall marked as one is.
+/// its own, and so is an unmarked one that is no kiosk, shop or cafe. In a larger castle park
+/// only one marked historic is, and in a fortress town only a gate, tower or wall marked as one.
+/// None mapped as timber, steel or glass is.
 pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
     use crate::element_processing::area_layout::{interior_point, point_in_rings};
     let is_grounds = |tags: &HashMap<String, String>| {
@@ -72,8 +65,10 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
         bounds: (i32, i32, i32, i32),
         rings: Vec<Vec<ProcessedNode>>,
         palace: bool,
-        /// Square blocks inside.
-        area: f64,
+        /// A fort or fortress, which may hold a town, rather than a castle.
+        fortress: bool,
+        /// Square blocks inside, None where the area cuts a ring and its size is not known.
+        area: Option<f64>,
     }
     let m2 = |blocks: f64| blocks / (scale * scale);
     let mut grounds: Vec<Grounds> = Vec::new();
@@ -106,13 +101,21 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
         let bounds = nodes.fold((first.x, first.z, first.x, first.z), |b, n| {
             (b.0.min(n.x), b.1.min(n.z), b.2.max(n.x), b.3.max(n.z))
         });
-        // A ring the area cuts stays open, and is measured as far as it reaches.
-        let area = outer.iter().map(|r| ring_area(r)).sum::<f64>()
-            - inner.iter().map(|r| ring_area(r)).sum::<f64>();
+        let area = outer
+            .iter()
+            .chain(&inner)
+            .all(|r| nearly_closed(r))
+            .then(|| {
+                outer.iter().map(|r| ring_area(r)).sum::<f64>()
+                    - inner.iter().map(|r| ring_area(r)).sum::<f64>()
+            })
+            .filter(|a| *a > 0.0);
+        let tags = e.tags();
         grounds.push(Grounds {
             bounds,
             rings: outer.into_iter().chain(inner).collect(),
-            palace: tag(e.tags(), "castle_type").is_some_and(|t| PALACES.contains(&t)),
+            palace: tag(tags, "castle_type").is_some_and(|t| PALACES.contains(&t)),
+            fortress: tag(tags, "historic") != Some("castle"),
             area,
         });
     }
@@ -131,7 +134,11 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
                     && p.1 <= b.3 as f64
                     && point_in_rings(&g.rings.iter().map(Vec::as_slice).collect::<Vec<_>>(), p)
             })
-            .min_by(|a, b| a.area.total_cmp(&b.area))
+            .min_by(|a, b| {
+                a.area
+                    .unwrap_or(f64::MAX)
+                    .total_cmp(&b.area.unwrap_or(f64::MAX))
+            })
     };
     for e in elements.iter_mut() {
         let ProcessedElement::Way(w) = e else {
@@ -139,10 +146,15 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
         };
         let tags = &w.tags;
         let kind = tag(tags, "building").or_else(|| tag(tags, "building:part"));
-        // A keep, a wall tower or a lookout; not a mast or a floodlight.
+        // A keep, a wall tower or a lookout; not a mast, a belfry or a minaret.
         let tower = (tag(tags, "man_made") == Some("tower") || kind == Some("tower"))
-            && !tag(tags, "tower:type").is_some_and(|t| NOT_CASTLE_TOWERS.contains(&t));
-        if !(tower || kind == Some("yes")) || !closed(&w.nodes) {
+            && tag(tags, "tower:type").is_none_or(|t| CASTLE_TOWERS.contains(&t));
+        // One mapped as timber, steel or glass is built so.
+        let other_material = tags
+            .get("building:material")
+            .or_else(|| tags.get("building:facade:material"))
+            .is_some_and(|m| !crate::osm_parser::is_masonry_material(m));
+        if !(tower || kind == Some("yes")) || other_material || !closed(&w.nodes) {
             continue;
         }
         let Some(g) = interior_point(&w.nodes).and_then(around) else {
@@ -158,10 +170,14 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
             || building_tag(tags, "tourism").is_some_and(|t| !CASTLE_TOURISM.contains(&t));
         let fortified = building_tag(tags, "historic").is_some_and(|h| FORTIFIED.contains(&h))
             || tag(tags, "tower:type") == Some("defensive");
-        let own = if m2(g.area) <= MAX_GROUNDS_M2 {
+        // Grounds of a castle's size lend themselves to all its plain buildings, a castle's
+        // park to those marked historic, a fortress town to its gates, towers and walls.
+        let own = if g.area.is_some_and(|a| m2(a) <= MAX_GROUNDS_M2) {
             marked || (!other_use && (tower || m2(ring_area(&w.nodes)) >= MIN_BUILDING_M2))
-        } else {
+        } else if g.fortress {
             fortified
+        } else {
+            marked
         };
         if own {
             let value = if g.palace { "palace" } else { "fort" };
@@ -175,7 +191,15 @@ fn closed(nodes: &[ProcessedNode]) -> bool {
     nodes.len() >= 4 && nodes.first().map(|n| (n.x, n.z)) == nodes.last().map(|n| (n.x, n.z))
 }
 
-/// Shoelace area of a ring, an open one closed by the chord between its ends.
+/// Closed, or with ends a block apart, as joined pieces of a ring may be.
+fn nearly_closed(nodes: &[ProcessedNode]) -> bool {
+    match (nodes.first(), nodes.last()) {
+        (Some(a), Some(b)) => nodes.len() >= 4 && (a.x - b.x).abs() <= 1 && (a.z - b.z).abs() <= 1,
+        _ => false,
+    }
+}
+
+/// Shoelace area of a ring, an almost closed one closed by the step between its ends.
 fn ring_area(nodes: &[ProcessedNode]) -> f64 {
     let twice: f64 = nodes
         .iter()
@@ -461,6 +485,22 @@ mod tests {
                         ("arnis:outline:tourism", "museum"),
                     ],
                 ),
+                rect_way(
+                    13,
+                    88,
+                    60,
+                    92,
+                    64,
+                    &[("man_made", "tower"), ("building:material", "wood")],
+                ),
+                rect_way(
+                    14,
+                    88,
+                    70,
+                    92,
+                    74,
+                    &[("man_made", "tower"), ("tower:type", "bell_tower")],
+                ),
             ]
             .into_iter()
             .map(ProcessedElement::Way)
@@ -482,7 +522,9 @@ mod tests {
             marks(&[("historic", "castle"), ("castle_type", "stately")], 100),
             fort(&[2, 3, 4, 11, 12], "palace")
         );
-        // In a fortress town only a tower or gate marked as one is the fortress's.
+        // In a castle's park only what is marked historic is the castle's, in a fortress town
+        // only a tower or gate marked as one.
+        assert_eq!(marks(&[("historic", "castle")], 400), fort(&[2], "fort"));
         assert_eq!(marks(&[("historic", "fortress")], 400), fort(&[], "fort"));
     }
 
@@ -535,6 +577,20 @@ mod tests {
             .map(ProcessedElement::id)
             .collect();
         assert_eq!(marked, [3]);
+
+        // Grounds the area cuts open are of no known size, so a plain building in them is
+        // not taken for the castle's.
+        let cut = ProcessedRelation {
+            id: 5,
+            tags: tags(&[("type", "multipolygon"), ("historic", "castle")]),
+            members: vec![piece(51, &[(0, 0), (60, 0), (60, 60), (0, 60)])],
+        };
+        let mut elements = vec![
+            ProcessedElement::Relation(cut),
+            ProcessedElement::Way(rect_way(6, 10, 10, 30, 30, &[("building", "yes")])),
+        ];
+        mark_castle_grounds(&mut elements, 1.0);
+        assert!(!elements[1].tags().contains_key(CASTLE_GROUNDS_TAG));
     }
 
     #[test]
