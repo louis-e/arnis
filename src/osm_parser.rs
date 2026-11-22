@@ -1819,6 +1819,16 @@ const FACADE_KEYS: [&str; 6] = [
     "colour",
 ];
 const COLOUR_KEYS: [&str; 2] = ["building:colour", "colour"];
+const MATERIAL_KEYS: [&str; 4] = [
+    "building:material",
+    "building:facade:material",
+    "facade:material",
+    "building:cladding",
+];
+
+/// Set on a part of `building:part=yes` that took its building's type: its height is still
+/// guessed as an untyped part's, so a porch does not rise to the nave.
+pub(crate) const KIND_TAKEN_TAG: &str = "arnis:part_kind_taken";
 
 /// Building types a part does not take, as they would draw it as a whole stand of seats.
 const KINDS_NOT_HANDED_DOWN: [&str; 4] = ["stadium", "grandstand", "bleachers", "tribune"];
@@ -1889,17 +1899,23 @@ impl Inherited {
                 .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
                 .collect()
         };
+        // The material and the colour each from the first tag set that maps one.
+        let with = |keys: &[&str]| {
+            sources
+                .iter()
+                .find(|t| keys.iter().any(|k| t.contains_key(*k)))
+        };
+        let material = with(&MATERIAL_KEYS);
+        let colour = with(&COLOUR_KEYS).map(|t| pick(t, &COLOUR_KEYS));
         let (mut facade, mut tint) = (Vec::new(), Vec::new());
-        if let Some(tags) = sources
-            .iter()
-            .find(|t| FACADE_KEYS.iter().any(|k| t.contains_key(*k)))
-        {
-            // A glass building's facade stays with it, where the group's style hint carries it.
-            if is_glass_facade(tags) {
-                tint = pick(tags, &COLOUR_KEYS);
-            } else {
-                facade = pick(tags, &FACADE_KEYS);
-            }
+        // A glass building's facade stays with it, where the group's style hint carries it.
+        if material.is_some_and(|t| is_glass_facade(t)) {
+            tint = colour.unwrap_or_default();
+        } else {
+            facade = material
+                .map(|t| pick(t, &MATERIAL_KEYS))
+                .unwrap_or_default();
+            facade.extend(colour.unwrap_or_default());
         }
         Self {
             kind,
@@ -1927,6 +1943,7 @@ impl Inherited {
                 .filter(|v| v.trim().eq_ignore_ascii_case("yes"))
             {
                 v.clone_from(kind);
+                tags.insert(KIND_TAKEN_TAG.to_string(), "yes".to_string());
             }
         }
         if !FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
@@ -1968,7 +1985,7 @@ impl<'a> PartInheritance<'a> {
             };
             // A building relation's tags come first, then its outline's, then those of the
             // multipolygon building an outline ring bounds.
-            let mut outline_of: HashMap<u64, u64> = HashMap::new();
+            let mut outline_of: HashMap<u64, Vec<u64>> = HashMap::new();
             let mut ring_owner: HashMap<u64, &HashMap<String, String>> = HashMap::new();
             let mut multipolygons: HashMap<u64, &HashMap<String, String>> = HashMap::new();
             for rel in relations {
@@ -1996,7 +2013,7 @@ impl<'a> PartInheritance<'a> {
                 for m in rel.members.iter().filter(|m| outline_role(m)) {
                     match m.r#type.as_str() {
                         "way" => {
-                            outline_of.insert(m.r#ref, key);
+                            outline_of.entry(m.r#ref).or_default().push(key);
                         }
                         "relation" => {
                             if let Some(outline) = multipolygons.get(&m.r#ref) {
@@ -2012,13 +2029,15 @@ impl<'a> PartInheritance<'a> {
                 if keys.contains(&w.id) {
                     sources.entry(w.id).or_default().push(tags);
                 }
-                if let Some(&key) = outline_of.get(&w.id) {
+                for &key in outline_of.get(&w.id).into_iter().flatten() {
                     sources.entry(key).or_default().push(tags);
                 }
             }
-            for (way, key) in &outline_of {
+            for (way, keys) in &outline_of {
                 if let Some(owner) = ring_owner.get(way) {
-                    sources.entry(*key).or_default().push(owner);
+                    for key in keys {
+                        sources.entry(*key).or_default().push(owner);
+                    }
                 }
             }
         }
@@ -2473,8 +2492,9 @@ fn spatial_part_suppression<E: Borrow<OsmElement>>(
         .filter(|m| m.r#type == "relation" && m.role.trim().eq_ignore_ascii_case("part"))
         .map(|m| m.r#ref)
         .collect();
-    // Each such part relation, its outer member ways and whether it stands on the ground.
-    let part_relations: Vec<(u64, Vec<u64>, bool)> = elements(relations)
+    // Each such part relation, its outer member ways, whether it stands on the ground and
+    // its own style.
+    let part_relations: Vec<(u64, Vec<u64>, bool, StyleHint)> = elements(relations)
         .filter_map(|r| {
             let tags = r.tags.as_ref()?;
             let wanted = tags.get("type").is_some_and(|t| t == "multipolygon")
@@ -2492,12 +2512,19 @@ fn spatial_part_suppression<E: Borrow<OsmElement>>(
                 })
                 .map(|m| m.r#ref)
                 .collect();
-            wanted.then(|| (r.id, outers, part_covers_ground(tags)))
+            wanted.then(|| {
+                (
+                    r.id,
+                    outers,
+                    part_covers_ground(tags),
+                    building_style_hint(tags),
+                )
+            })
         })
         .collect();
     let member_ways: HashSet<u64> = part_relations
         .iter()
-        .flat_map(|(_, ws, _)| ws.iter().copied())
+        .flat_map(|(_, ws, _, _)| ws.iter().copied())
         .collect();
     let mut member_nodes: HashMap<u64, &Vec<u64>> = HashMap::new();
 
@@ -2629,21 +2656,21 @@ fn spatial_part_suppression<E: Borrow<OsmElement>>(
 
     // credit each part to every outline containing its centroid
     let part_rings: Vec<Vec<(f64, f64)>> = part_ids.iter().map(|&pid| ring(pid)).collect();
-    type PartRings = (u64, Vec<Vec<(f64, f64)>>, bool);
+    type PartRings = (u64, Vec<Vec<(f64, f64)>>, bool, StyleHint);
     let relation_rings: Vec<PartRings> = part_relations
         .into_iter()
-        .filter_map(|(id, outers, ground)| {
+        .filter_map(|(id, outers, ground, hint)| {
             let segments = outers
                 .iter()
                 .filter_map(|w| member_nodes.get(w).map(|ns| (*ns).clone()))
                 .collect();
             let rings = stitch_rings(segments, &node_ll);
             let area: f64 = rings.iter().map(|r| ring_area(r)).sum();
-            (area > 0.0).then_some((id, rings, ground))
+            (area > 0.0).then_some((id, rings, ground, hint))
         })
         .collect();
     let mut covered: HashMap<usize, Vec<&[(f64, f64)]>> = HashMap::new();
-    for (id, rings, ground) in &relation_rings {
+    for (id, rings, ground, hint) in &relation_rings {
         let points = rings.iter().flatten();
         let n = points.clone().count() as f64;
         let (sla, slo) = points.fold((0.0, 0.0), |(a, o), &(la, lo)| (a + la, o + lo));
@@ -2659,7 +2686,7 @@ fn spatial_part_suppression<E: Borrow<OsmElement>>(
         if let Some(gi) = best {
             relation_parts
                 .entry(*id)
-                .or_insert_with(|| seed_of(gi, StyleHint::None));
+                .or_insert_with(|| seed_of(gi, *hint));
         }
     }
     for (&pid, r) in part_ids.iter().zip(&part_rings) {
@@ -4364,6 +4391,58 @@ mod outline_suppression_tests {
             .iter()
             .map(|&id| member("way", id, "outer"))
             .collect()
+    }
+
+    // A part takes the material and the colour each from where the building maps it, and the
+    // outline of two building relations gives to the parts of both.
+    #[test]
+    fn parts_take_material_and_colour_from_wherever_they_are_mapped() {
+        let relations = [
+            relation_el(
+                1,
+                &[("type", "building"), ("building:colour", "white")],
+                vec![member("way", 20, "outline"), member("way", 10, "part")],
+            ),
+            relation_el(
+                2,
+                &[("type", "building")],
+                vec![member("way", 20, "outline"), member("way", 11, "part")],
+            ),
+        ];
+        let outline = with_tag(
+            tagged(square_way(20, 200, 0.001).0, "building", "church"),
+            "building:material",
+            "brick",
+        );
+        let groups: PartGroups = [(10, RELATION_SEED_BIT | 1), (11, RELATION_SEED_BIT | 2)]
+            .into_iter()
+            .collect();
+        let relation_parts = RelationPartGroups::new();
+        let inheritance = PartInheritance::new(&[outline], &relations, &groups, &relation_parts);
+        let tags_of = |id: u64| {
+            let mut tags = tagmap(&[("building:part", "yes")]);
+            inheritance.apply_to_way(id, &mut tags);
+            tags
+        };
+        let first = tags_of(10);
+        assert_eq!(
+            first.get("building:material").map(String::as_str),
+            Some("brick")
+        );
+        assert_eq!(
+            first.get("building:colour").map(String::as_str),
+            Some("white")
+        );
+        assert_eq!(first.get(KIND_TAKEN_TAG).map(String::as_str), Some("yes"));
+        let second = tags_of(11);
+        assert_eq!(
+            second.get("building:part").map(String::as_str),
+            Some("church")
+        );
+        assert_eq!(
+            second.get("building:material").map(String::as_str),
+            Some("brick")
+        );
     }
 
     // A multipolygon part inside a plain outline way is that building's part: it joins its

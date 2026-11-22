@@ -2091,13 +2091,19 @@ fn whole_building_tag<'a>(element: &'a ProcessedWay, key: &str) -> Option<&'a st
     }
 }
 
-/// A building of castle stone: mapped as a castle or a defensive tower, or a plain building
-/// or tower in the grounds of a stronghold.
+/// A building of castle stone: mapped as a castle or a defensive tower, a tower of a castle,
+/// or a plain building or tower in the grounds of a stronghold.
 fn of_a_castle(element: &ProcessedWay) -> bool {
-    let tag = |k: &str| element.tags.get(k).map(String::as_str);
+    let tags = &element.tags;
+    let tag = |k: &str| tags.get(k).map(String::as_str);
     whole_building_tag(element, "historic") == Some("castle")
         || tag("tower:type") == Some("defensive")
         || tag(fortifications::CASTLE_GROUNDS_TAG) == Some("fort")
+        || (is_towerish(element)
+            && is_fortification(
+                building_tag(tags, "building").unwrap_or("yes"),
+                building_tag(tags, "historic"),
+            ))
 }
 
 impl BuildingCategory {
@@ -6699,6 +6705,16 @@ fn pick_weighted_value(rng: &mut impl Rng, options: &[(i32, u32)]) -> i32 {
     options[options.len() - 1].0
 }
 
+/// A part's type as mapped, `yes` where it took its building's: the type its size is
+/// guessed from.
+fn untaken_type<'a>(building_type: &'a str, tags: &HashMap<String, String>) -> &'a str {
+    if tags.contains_key(crate::osm_parser::KIND_TAKEN_TAG) {
+        "yes"
+    } else {
+        building_type
+    }
+}
+
 /// Storey inference for buildings without any OSM height data, following
 /// real-world typology per type and footprint. Seeded on the group seed so
 /// parts of one building agree (#1197, #935, #1220).
@@ -6710,6 +6726,7 @@ fn infer_building_height(
     group_seed: u64,
 ) -> InferredHeight {
     let mut rng = element_rng(group_seed ^ 0x48E1_6F00_1EA5_0001);
+    let building_type = untaken_type(building_type, tags);
 
     // Thresholds are m2. Parts are pinned to the middle band so siblings of
     // one group draw from the same table regardless of their own footprint.
@@ -7440,7 +7457,7 @@ fn mapped_parts(tags: &HashMap<String, String>, hint: HeightHint) -> Option<(f64
     if takes_commercial_rhythm(levels > 7.0, building_type, cycle, tags) {
         cycle = 4;
     }
-    let walls = if own && accessory_storey(building_type, tags) {
+    let walls = if own && accessory_storey(untaken_type(building_type, tags), tags) {
         f64::from(ACCESSORY_WALLS_M)
     } else {
         levels * f64::from(cycle) + f64::from(GROUND_FLOOR_BONUS)
@@ -7637,7 +7654,9 @@ fn calculate_building_height(
                 };
                 building_height =
                     (((lev * floor_cycle as f64 + bonus) * scale_factor) as i32).max(3);
-                if min_level == 0 && accessory_storey(building_type, &element.tags) {
+                if min_level == 0
+                    && accessory_storey(untaken_type(building_type, &element.tags), &element.tags)
+                {
                     building_height = multiply_scale(ACCESSORY_WALLS_M, scale_factor).max(3);
                 }
                 has_source = true;
@@ -15670,12 +15689,7 @@ pub fn generate_buildings(
         },
         // Planned below, once the podium massing has settled the wall height.
         zoning: None,
-        lancets: Lancets::for_wall(
-            category,
-            window_archetype,
-            effective_building_height,
-            is_towerish(element),
-        ),
+        lancets: None,
         balcony_band,
         balcony_kit,
         french_windows,
@@ -15886,6 +15900,12 @@ pub fn generate_buildings(
     };
     let config = BuildingConfig {
         zoning: TowerZoning::plan(&config).map(|z| z.keeping_mapped_wall(&config, &element.tags)),
+        lancets: Lancets::for_wall(
+            config.category,
+            config.window_archetype,
+            config.building_height,
+            is_towerish(element),
+        ),
         ..config
     };
     // The preset facades are recorded before the wall is built, not after it:
@@ -23973,6 +23993,46 @@ mod style_tests {
             ("building:colour", "white")
         ])
         .is_some());
+        // A castle's keep, mapped as its tower part, is of castle stone.
+        let keep = rect_way(
+            2,
+            0,
+            0,
+            8,
+            8,
+            &[
+                ("building:part", "tower"),
+                ("arnis:outline:building", "castle"),
+            ],
+        );
+        assert!(of_a_castle(&keep));
+        assert!(!of_a_castle(&rect_way(
+            3,
+            0,
+            0,
+            8,
+            8,
+            &[("building:part", "tower")]
+        )));
+    }
+
+    // A part that took its building's type is sized as the untyped part it was mapped as, so
+    // a porch of no height does not rise to a cathedral's nave.
+    #[test]
+    fn a_part_that_took_its_type_is_sized_as_mapped() {
+        use crate::element_processing::building_test_support::rect_way;
+        let height = |tags: &[(&str, &str)]| {
+            let way = rect_way(5, 0, 0, 12, 12, tags);
+            let kind = BuildingCategory::building_type(&way);
+            calculate_building_height(&way, kind, 0, 1.0, None, 4, 144, 77).0
+        };
+        let untyped = height(&[("building:part", "yes")]);
+        let taken = height(&[
+            ("building:part", "cathedral"),
+            ("arnis:part_kind_taken", "yes"),
+        ]);
+        assert_eq!(taken, untyped);
+        assert!(height(&[("building:part", "cathedral")]) > untyped);
     }
 
     // A part stands in the state of its building: a ruin's parts are ruins.
