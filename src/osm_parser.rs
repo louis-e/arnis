@@ -1836,11 +1836,17 @@ fn facade_material<'a>(get: impl Fn(&str) -> Option<&'a String>) -> Option<Strin
     MATERIAL_KEYS.into_iter().find_map(get).map(|m| norm_tag(m))
 }
 
+/// Whether a facade is mapped as glass; a glass cladding is not, as the generator reads it.
 fn is_glass_facade(tags: &HashMap<String, String>) -> bool {
-    matches!(
-        facade_material(|k| tags.get(k)).as_deref(),
-        Some("glass" | "mirror")
-    )
+    let material = [
+        "building:material",
+        "building:facade:material",
+        "facade:material",
+    ]
+    .into_iter()
+    .find_map(|k| tags.get(k))
+    .map(|m| norm_tag(m));
+    matches!(material.as_deref(), Some("glass" | "mirror"))
 }
 
 /// What the parts of one building take from the tags it is mapped with once for all of them.
@@ -4483,6 +4489,34 @@ mod outline_suppression_tests {
         assert_eq!(
             facade(&[("building:material", "stone")]),
             (Some("stone".to_string()), None)
+        );
+    }
+
+    // A building clad in glass, which the generator does not read as a glass facade, hands its
+    // cladding and colour to its parts.
+    #[test]
+    fn a_glass_cladding_reaches_the_parts() {
+        let outline = with_tag(
+            with_tag(
+                tagged(square_way(20, 200, 0.001).0, "building", "office"),
+                "building:cladding",
+                "glass",
+            ),
+            "building:colour",
+            "#88aacc",
+        );
+        let groups: PartGroups = [(10, 20)].into_iter().collect();
+        let relation_parts = RelationPartGroups::new();
+        let inheritance = PartInheritance::new(&[outline], &[], &groups, &relation_parts);
+        let mut tags = tagmap(&[("building:part", "yes")]);
+        inheritance.apply_to_way(10, &mut tags);
+        assert_eq!(
+            tags.get("building:cladding").map(String::as_str),
+            Some("glass")
+        );
+        assert_eq!(
+            tags.get("building:colour").map(String::as_str),
+            Some("#88aacc")
         );
     }
 
