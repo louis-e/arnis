@@ -1056,7 +1056,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     let args = args;
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups, housing_parts) =
+    let (mut parsed_elements, mut xzbbox, outline_suppression, part_groups, relation_parts) =
         osm_parser::parse_osm_data(
             raw_data,
             effective_bbox,
@@ -1287,7 +1287,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
         generation_options,
         outline_suppression,
         part_groups,
-        housing_parts,
+        relation_parts,
     ) {
         Ok(saved_path) => {
             one_world::after_run(&args);

@@ -643,8 +643,8 @@ pub type OutlineSuppression = HashSet<(&'static str, u64)>;
 // building:part way id -> shared style seed (containing outline id, or salted relation id)
 pub type PartGroups = HashMap<u64, u64>;
 
-// building:part relation ids whose building is housing
-pub type HousingRelationParts = HashSet<u64>;
+// building:part relation id -> shared style seed of its building
+pub type RelationPartGroups = HashMap<u64, u64>;
 
 // keeps relation-derived seeds out of the way-id namespace
 const RELATION_SEED_BIT: u64 = 1 << 63;
@@ -1104,7 +1104,7 @@ pub fn parse_osm_data(
     XZBBox,
     OutlineSuppression,
     PartGroups,
-    HousingRelationParts,
+    RelationPartGroups,
 ) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
@@ -1132,16 +1132,18 @@ pub fn parse_osm_data(
     }
 
     let mut part_groups = PartGroups::new();
-    let mut housing_parts = HousingRelationParts::new();
+    let mut relation_parts = RelationPartGroups::new();
     let outline_suppression = suppress_outlines(
         &data.relations,
         &data.ways,
         &data.nodes,
         &mut part_groups,
-        &mut housing_parts,
+        &mut relation_parts,
     );
-    inherit_facade_tags(&mut data.ways, &data.relations, &part_groups);
-    lower_outlines_under_parts(
+    // Both are added once the source tags are filtered, which drops every arnis: key.
+    let inheritance =
+        PartInheritance::new(&data.ways, &data.relations, &part_groups, &relation_parts);
+    let parts_tops = lower_outlines_under_parts(
         &mut data.ways,
         &data.nodes,
         &data.relations,
@@ -1232,7 +1234,11 @@ pub fn parse_osm_data(
         }
 
         // Clip the way to bbox to reduce node count dramatically
-        let tags = filter_tags(element.tags.unwrap_or_default());
+        let mut tags = filter_tags(element.tags.unwrap_or_default());
+        inheritance.apply_to_way(element.id, &mut tags);
+        if let Some(top) = parts_tops.get(&element.id) {
+            tags.insert(PARTS_TOP_TAG.to_string(), top.clone());
+        }
 
         let closed = nodes.len() >= 4 && nodes.first().map(|n| n.id) == nodes.last().map(|n| n.id);
         if closed && crate::element_processing::parking_lots::is_surface_lot(&tags) {
@@ -1337,7 +1343,9 @@ pub fn parse_osm_data(
         let Some(raw_tags) = &element.tags else {
             continue;
         };
-        let tags = &filter_tags(raw_tags.clone());
+        let mut tags = filter_tags(raw_tags.clone());
+        inheritance.apply_to_relation(element.id, &mut tags);
+        let tags = &tags;
 
         // Process multipolygons and building relations
         let relation_type = tags.get("type").map(|x: &String| x.as_str());
@@ -1517,7 +1525,7 @@ pub fn parse_osm_data(
         xzbbox,
         outline_suppression,
         part_groups,
-        housing_parts,
+        relation_parts,
     )
 }
 
@@ -1537,7 +1545,7 @@ pub(crate) fn outlines_replaced_by_parts(data: &OsmData) -> OutlineSuppression {
         &ways,
         &nodes,
         &mut PartGroups::new(),
-        &mut HousingRelationParts::new(),
+        &mut RelationPartGroups::new(),
     )
 }
 
@@ -1547,10 +1555,10 @@ fn suppress_outlines<E: Borrow<OsmElement>>(
     ways: &[E],
     nodes: &[E],
     part_groups: &mut PartGroups,
-    housing_parts: &mut HousingRelationParts,
+    relation_parts: &mut RelationPartGroups,
 ) -> OutlineSuppression {
     let mut suppressed =
-        compute_outline_suppression(relations, ways, nodes, part_groups, housing_parts);
+        compute_outline_suppression(relations, ways, nodes, part_groups, relation_parts);
     // Ways owned by a type=building relation are handled above; the spatial pass must
     // not re-judge them against unrelated parts that merely fall inside their footprint.
     let relation_ways: HashSet<u64> = elements(relations)
@@ -1584,7 +1592,7 @@ fn suppress_outlines<E: Borrow<OsmElement>>(
         ways,
         nodes,
         part_groups,
-        housing_parts,
+        relation_parts,
     ));
     // A ride drawn whole replaces any 3D parts mapped inside it, and is never replaced by them.
     suppress_ride_parts(ways, nodes, &mut suppressed);
@@ -1762,136 +1770,247 @@ pub(crate) fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
     min_h.unwrap_or(0.0) <= 0.0 && min_lvl.unwrap_or(0.0) <= 0.0
 }
 
-/// Facade tags a part that names no material or colour of its own takes from
-/// its building: the mapper described the brick, stone or render of the whole
-/// building once, on its outline or relation, and the parts are that
-/// building. Glass, metal and the like stay with the outline, where the
-/// group's style hint already carries them; a glass building's colour, its
-/// tint, still reaches the parts mapped as glass that name none.
-fn inherit_facade_tags(
-    ways: &mut [OsmElement],
-    relations: &[OsmElement],
-    part_groups: &PartGroups,
-) {
-    const FACADE_KEYS: [&str; 5] = [
-        "building:material",
-        "building:facade:material",
-        "facade:material",
-        "building:colour",
-        "colour",
-    ];
-    let masonry = |tags: &HashMap<String, String>| {
-        tags.get("building:material")
-            .or_else(|| tags.get("building:facade:material"))
-            .is_some_and(|m| {
-                matches!(
-                    norm_tag(m).as_str(),
-                    "brick"
-                        | "bricks"
-                        | "stone"
-                        | "naturalstone"
-                        | "limestone"
-                        | "sandstone"
-                        | "marble"
-                        | "granite"
-                        | "plaster"
-                        | "stucco"
-                        | "render"
-                        | "concrete"
-                )
+/// Prefix of the tags a part is handed from its building that other features read as well:
+/// a landmark, a sign or a discovery must not find the building again on every part.
+pub(crate) const OUTLINE_PREFIX: &str = "arnis:outline:";
+
+/// Building tags a part is handed under `OUTLINE_PREFIX`.
+const OUTLINE_IDENTITY_KEYS: [&str; 8] = [
+    "building",
+    "amenity",
+    "historic",
+    "heritage",
+    "wikidata",
+    "tourism",
+    "ruins",
+    "abandoned",
+];
+
+/// Building tags a part takes as they are where it has none of its own.
+const OUTLINE_FABRIC_KEYS: [&str; 9] = [
+    "roof:colour",
+    "roof:material",
+    "building:architecture",
+    "architecture",
+    "ruins:building",
+    "abandoned:building",
+    "disused:building",
+    "construction:building",
+    "construction",
+];
+
+/// The keys that describe a facade; a part naming any of them keeps its own.
+const FACADE_KEYS: [&str; 6] = [
+    "building:material",
+    "building:facade:material",
+    "facade:material",
+    "building:cladding",
+    "building:colour",
+    "colour",
+];
+const COLOUR_KEYS: [&str; 2] = ["building:colour", "colour"];
+
+/// The building's own tag `key`, else the one its outline handed down to this part.
+pub(crate) fn building_tag<'a>(tags: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    tags.get(key)
+        .or_else(|| tags.get(&format!("{OUTLINE_PREFIX}{key}")))
+        .map(String::as_str)
+}
+
+fn is_glass_facade(tags: &HashMap<String, String>) -> bool {
+    let material = tags
+        .get("building:material")
+        .or_else(|| tags.get("building:facade:material"))
+        .or_else(|| tags.get("facade:material"))
+        .map(|m| norm_tag(m));
+    matches!(material.as_deref(), Some("glass" | "mirror"))
+}
+
+/// What the parts of one building take from the tags it is mapped with once for all of them.
+#[derive(Default)]
+struct Inherited {
+    /// The building's type, which a part of `building:part=yes` takes.
+    kind: Option<String>,
+    /// Its facade, for a part that names none.
+    facade: Vec<(String, String)>,
+    /// A glass building's tint, for a glass part that names no colour.
+    tint: Vec<(String, String)>,
+    /// Tags a part takes where it has none of its own.
+    rest: Vec<(String, String)>,
+}
+
+impl Inherited {
+    /// From the building's tag sets, the first of them deciding.
+    fn of(sources: &[&HashMap<String, String>]) -> Self {
+        let first = |key: &str| {
+            sources
+                .iter()
+                .find_map(|t| t.get(key).filter(|v| !v.trim().is_empty()))
+        };
+        let kind = sources
+            .iter()
+            .filter_map(|t| t.get("building"))
+            .find(|v| {
+                let v = v.trim();
+                !v.is_empty() && !v.eq_ignore_ascii_case("yes") && !v.eq_ignore_ascii_case("no")
             })
-    };
-    let facade_of = |tags: &HashMap<String, String>| -> Vec<(String, String)> {
-        FACADE_KEYS
+            .cloned();
+        let mut rest = Vec::new();
+        for key in OUTLINE_IDENTITY_KEYS {
+            let value = if key == "building" {
+                kind.as_ref()
+            } else {
+                first(key)
+            };
+            if let Some(v) = value {
+                rest.push((format!("{OUTLINE_PREFIX}{key}"), v.clone()));
+            }
+        }
+        for key in OUTLINE_FABRIC_KEYS {
+            if let Some(v) = first(key) {
+                rest.push((key.to_string(), v.clone()));
+            }
+        }
+        let pick = |tags: &HashMap<String, String>, keys: &[&str]| -> Vec<(String, String)> {
+            keys.iter()
+                .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
+                .collect()
+        };
+        let (mut facade, mut tint) = (Vec::new(), Vec::new());
+        if let Some(tags) = sources
             .iter()
-            .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
-            .collect()
-    };
-    const COLOUR_KEYS: [&str; 2] = ["building:colour", "colour"];
-    let material_of = |tags: &HashMap<String, String>| {
-        tags.get("building:material")
-            .or_else(|| tags.get("building:facade:material"))
-            .or_else(|| tags.get("facade:material"))
-            .map(|m| norm_tag(m))
-    };
-    let glass = |m: Option<&str>| matches!(m, Some("glass" | "mirror"));
-    let tint_of = |tags: &HashMap<String, String>| -> Option<Vec<(String, String)>> {
-        let tint: Vec<(String, String)> = COLOUR_KEYS
-            .iter()
-            .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
+            .find(|t| FACADE_KEYS.iter().any(|k| t.contains_key(*k)))
+        {
+            // A glass building's facade stays with it, where the group's style hint carries it.
+            if is_glass_facade(tags) {
+                tint = pick(tags, &COLOUR_KEYS);
+            } else {
+                facade = pick(tags, &FACADE_KEYS);
+            }
+        }
+        Self {
+            kind,
+            facade,
+            tint,
+            rest,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.kind.is_none()
+            && self.facade.is_empty()
+            && self.tint.is_empty()
+            && self.rest.is_empty()
+    }
+
+    fn apply(&self, tags: &mut HashMap<String, String>) {
+        if let Some(kind) = &self.kind {
+            if let Some(v) = tags
+                .get_mut("building:part")
+                .filter(|v| v.trim().eq_ignore_ascii_case("yes"))
+            {
+                v.clone_from(kind);
+            }
+        }
+        if !FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
+            tags.extend(self.facade.iter().cloned());
+        } else if !COLOUR_KEYS.iter().any(|k| tags.contains_key(*k)) && is_glass_facade(tags) {
+            tags.extend(self.tint.iter().cloned());
+        }
+        for (k, v) in &self.rest {
+            tags.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+}
+
+/// The tags each building passes to its parts, which the mapper set once on its outline or
+/// relation: the parts are that building and are built as it would be, bar their shape.
+pub(crate) struct PartInheritance<'a> {
+    part_groups: &'a PartGroups,
+    relation_parts: &'a RelationPartGroups,
+    groups: HashMap<u64, Inherited>,
+}
+
+impl<'a> PartInheritance<'a> {
+    fn new(
+        ways: &[OsmElement],
+        relations: &[OsmElement],
+        part_groups: &'a PartGroups,
+        relation_parts: &'a RelationPartGroups,
+    ) -> Self {
+        let keys: HashSet<u64> = part_groups
+            .values()
+            .chain(relation_parts.values())
+            .map(|&s| group_key(s))
             .collect();
-        (glass(material_of(tags).as_deref()) && !tint.is_empty()).then_some(tint)
-    };
-    if part_groups.is_empty() {
-        return;
-    }
-    let groups: HashSet<u64> = part_groups
-        .values()
-        .map(|&s| seed_without_hint(s))
-        .collect();
-    // Facade of each group's building, keyed like the groups: an outline way
-    // by its id, a building relation by its salted id.
-    let mut facade: HashMap<u64, Vec<(String, String)>> = HashMap::new();
-    let mut tint: HashMap<u64, Vec<(String, String)>> = HashMap::new();
-    let mut relation_outlines: HashMap<u64, u64> = HashMap::new();
-    for rel in relations {
-        let Some(tags) = &rel.tags else { continue };
-        let key = RELATION_SEED_BIT | rel.id;
-        if !groups.contains(&key) {
-            continue;
-        }
-        if masonry(tags) {
-            facade.insert(key, facade_of(tags));
-            continue;
-        }
-        if let Some(t) = tint_of(tags) {
-            tint.insert(key, t);
-        }
-        for m in &rel.members {
-            let role = m.role.trim();
-            if m.r#type == "way"
-                && (role.eq_ignore_ascii_case("outline") || role.eq_ignore_ascii_case("outer"))
-            {
-                relation_outlines.insert(m.r#ref, key);
+        let mut sources: HashMap<u64, Vec<&HashMap<String, String>>> = HashMap::new();
+        if !keys.is_empty() {
+            let outline_role = |m: &&OsmMember| {
+                let role = m.role.trim();
+                m.r#type == "way"
+                    && (role.eq_ignore_ascii_case("outline") || role.eq_ignore_ascii_case("outer"))
+            };
+            // An outline way's relation, and the multipolygon building an outline ring bounds:
+            // a building relation's tags come first, then its outline's, then that building's.
+            let mut outline_of: HashMap<u64, u64> = HashMap::new();
+            let mut ring_owner: HashMap<u64, &HashMap<String, String>> = HashMap::new();
+            for rel in relations {
+                let Some(tags) = &rel.tags else { continue };
+                if tags.get("type").map(String::as_str) == Some("multipolygon")
+                    && tags.contains_key("building")
+                {
+                    for m in rel.members.iter().filter(outline_role) {
+                        ring_owner.entry(m.r#ref).or_insert(tags);
+                    }
+                }
+                let key = RELATION_SEED_BIT | rel.id;
+                if !keys.contains(&key) {
+                    continue;
+                }
+                sources.entry(key).or_default().push(tags);
+                for m in rel.members.iter().filter(outline_role) {
+                    outline_of.insert(m.r#ref, key);
+                }
+            }
+            for w in ways {
+                let Some(tags) = &w.tags else { continue };
+                if keys.contains(&w.id) {
+                    sources.entry(w.id).or_default().push(tags);
+                }
+                if let Some(&key) = outline_of.get(&w.id) {
+                    sources.entry(key).or_default().push(tags);
+                }
+            }
+            for (way, key) in &outline_of {
+                if let Some(owner) = ring_owner.get(way) {
+                    sources.entry(*key).or_default().push(owner);
+                }
             }
         }
-    }
-    for w in ways.iter() {
-        let Some(tags) = w.tags.as_ref() else {
-            continue;
-        };
-        let key = if groups.contains(&w.id) {
-            w.id
-        } else if let Some(&key) = relation_outlines.get(&w.id) {
-            key
-        } else {
-            continue;
-        };
-        if masonry(tags) {
-            facade.entry(key).or_insert_with(|| facade_of(tags));
-        } else if let Some(t) = tint_of(tags) {
-            tint.entry(key).or_insert(t);
+        let groups = sources
+            .into_iter()
+            .map(|(key, tags)| (key, Inherited::of(&tags)))
+            .filter(|(_, inherited)| !inherited.is_empty())
+            .collect();
+        Self {
+            part_groups,
+            relation_parts,
+            groups,
         }
     }
-    if facade.is_empty() && tint.is_empty() {
-        return;
-    }
-    for w in ways.iter_mut() {
-        let Some(group) = part_groups.get(&w.id).map(|&seed| seed_without_hint(seed)) else {
-            continue;
-        };
-        let tags = w.tags.get_or_insert_with(HashMap::new);
-        if let Some(inherited) = facade.get(&group) {
-            if !FACADE_KEYS.iter().any(|k| tags.contains_key(*k)) {
-                tags.extend(inherited.iter().cloned());
-            }
-        } else if let Some(inherited) = tint.get(&group) {
-            if !COLOUR_KEYS.iter().any(|k| tags.contains_key(*k))
-                && glass(material_of(tags).as_deref())
-            {
-                tags.extend(inherited.iter().cloned());
-            }
+
+    fn apply(&self, seed: Option<&u64>, tags: &mut HashMap<String, String>) {
+        if let Some(inherited) = seed.and_then(|&s| self.groups.get(&group_key(s))) {
+            inherited.apply(tags);
         }
+    }
+
+    pub(crate) fn apply_to_way(&self, id: u64, tags: &mut HashMap<String, String>) {
+        self.apply(self.part_groups.get(&id), tags);
+    }
+
+    pub(crate) fn apply_to_relation(&self, id: u64, tags: &mut HashMap<String, String>) {
+        self.apply(self.relation_parts.get(&id), tags);
     }
 }
 
@@ -1900,7 +2019,7 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
     ways: &[E],
     nodes: &[E],
     part_group: &mut PartGroups,
-    housing_parts: &mut HousingRelationParts,
+    relation_parts: &mut RelationPartGroups,
 ) -> OutlineSuppression {
     let is_outline = |r: &str| r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer");
 
@@ -2051,9 +2170,7 @@ fn compute_outline_suppression<E: Borrow<OsmElement>>(
             match m.r#type.as_str() {
                 "relation" => {
                     has_relation_part = true;
-                    if housing {
-                        housing_parts.insert(m.r#ref);
-                    }
+                    relation_parts.insert(m.r#ref, group_seed);
                 }
                 "way" => {
                     if way_ground.get(&m.r#ref).copied().unwrap_or(true) {
@@ -2469,7 +2586,7 @@ fn compute_spatial_relation_part_suppression(
         ways,
         nodes,
         &mut PartGroups::new(),
-        &mut HousingRelationParts::new(),
+        &mut RelationPartGroups::new(),
     )
 }
 
@@ -2478,7 +2595,7 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
     ways: &[E],
     nodes: &[E],
     part_group: &mut PartGroups,
-    housing_parts: &mut HousingRelationParts,
+    relation_parts: &mut RelationPartGroups,
 ) -> OutlineSuppression {
     let is_part = |tags: &HashMap<String, String>| {
         tags.get("building:part")
@@ -2746,11 +2863,9 @@ fn spatial_relation_part_suppression<E: Borrow<OsmElement>>(
         if let (Some(pid), Some(gi)) = (p.way, best) {
             part_group.entry(pid).or_insert(outlines[gi].seed);
         }
-        // A part relation still takes the housing storey height, as the part ways do.
+        // A part relation joins its building's group too, as the part ways do.
         if let (Some(rid), Some(gi)) = (p.relation, best) {
-            if residential_group_from_seed(outlines[gi].seed) {
-                housing_parts.insert(rid);
-            }
+            relation_parts.entry(rid).or_insert(outlines[gi].seed);
         }
     }
 
@@ -2803,14 +2918,16 @@ const PART_FIT: f64 = 1.25;
 /// On an outline kept beside its parts, the top an Overture height for it must stay under.
 pub(crate) const PARTS_TOP_TAG: &str = "arnis:parts_top";
 
-/// Lowers each outline kept beside its parts where it would stand over them and hide them.
+/// Lowers each outline kept beside its parts where it would stand over them and hide them, and
+/// gives the `PARTS_TOP_TAG` value of each outline of no height of its own.
 fn lower_outlines_under_parts(
     ways: &mut [OsmElement],
     nodes: &[OsmElement],
     relations: &[OsmElement],
     suppressed: &OutlineSuppression,
     part_groups: &PartGroups,
-) {
+) -> HashMap<u64, String> {
+    let mut tops = HashMap::new();
     use crate::element_processing::buildings::is_underground_building;
     let mut outline_ids: Vec<usize> = Vec::new();
     let mut part_ids: Vec<usize> = Vec::new();
@@ -2833,7 +2950,7 @@ fn lower_outlines_under_parts(
         }
     }
     if outline_ids.is_empty() || part_ids.is_empty() {
-        return;
+        return tops;
     }
     let wanted: HashSet<u64> = outline_ids
         .iter()
@@ -2944,6 +3061,7 @@ fn lower_outlines_under_parts(
 
     for (oi, parts) in parts_of {
         let (outline, area) = &outlines[&oi];
+        let id = ways[oi].id;
         let Some(tags) = ways[oi].tags.as_mut() else {
             continue;
         };
@@ -2986,9 +3104,10 @@ fn lower_outlines_under_parts(
             .filter_map(|p| p.top)
             .max_by(f64::total_cmp);
         if let (None, Some(t)) = (own_top, parts_top) {
-            tags.insert(PARTS_TOP_TAG.to_string(), format!("{t:.1}"));
+            tops.insert(id, format!("{t:.1}"));
         }
     }
+    tops
 }
 
 /// Returns true if tags indicate a water element handled by water_areas.rs.
@@ -3447,7 +3566,7 @@ mod outline_suppression_tests {
             &[outline, part],
             &nodes,
             &mut PartGroups::new(),
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
 
         assert!(!suppressed.contains(&("way", 100)));
@@ -3469,7 +3588,7 @@ mod outline_suppression_tests {
             &[outline, part],
             &nodes,
             &mut PartGroups::new(),
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
 
         assert!(suppressed.contains(&("way", 100)));
@@ -3495,7 +3614,7 @@ mod outline_suppression_tests {
             &[outline, part],
             &nodes,
             &mut groups,
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
 
         assert!(!suppressed.contains(&("way", 100)));
@@ -3521,7 +3640,7 @@ mod outline_suppression_tests {
             &[outline, part],
             &nodes,
             &mut PartGroups::new(),
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
         assert!(suppressed.contains(&("way", 100)));
     }
@@ -3551,7 +3670,7 @@ mod outline_suppression_tests {
             &[outline, part],
             &nodes,
             &mut PartGroups::new(),
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
 
         assert!(!suppressed.contains(&("way", 100)));
@@ -3571,14 +3690,14 @@ mod outline_suppression_tests {
             &[outline],
             &outline_nodes,
             &mut PartGroups::new(),
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
 
         assert!(suppressed.contains(&("way", 100)));
     }
 
-    // The part relations of a block of flats take its storey height; those of an office
-    // block do not.
+    // The part relations of a building join its group; those of a block of flats take its
+    // storey height, those of an office block do not.
     #[test]
     fn relation_parts_of_flats_are_marked_housing() {
         let (outline, outline_nodes) = square_way(100, 1000, 1.0);
@@ -3588,7 +3707,7 @@ mod outline_suppression_tests {
                 member("relation", 300, "part"),
             ]
         };
-        let mut housing = HousingRelationParts::new();
+        let mut housing = RelationPartGroups::new();
         compute_outline_suppression(
             &[with_tag(
                 building_relation(members()),
@@ -3600,17 +3719,18 @@ mod outline_suppression_tests {
             &mut PartGroups::new(),
             &mut housing,
         );
-        assert_eq!(housing, HashSet::from([300]));
+        assert!(residential_group_from_seed(housing[&300]));
 
-        let mut housing = HousingRelationParts::new();
+        let mut groups = RelationPartGroups::new();
         compute_outline_suppression(
             &[with_tag(building_relation(members()), "building", "office")],
             &[outline],
             &outline_nodes,
             &mut PartGroups::new(),
-            &mut housing,
+            &mut groups,
         );
-        assert!(housing.is_empty());
+        assert!(!residential_group_from_seed(groups[&300]));
+        assert_eq!(group_key(groups[&300]), group_key(housing[&300]));
     }
 
     // No parts at all: nothing is ever suppressed.
@@ -3624,7 +3744,7 @@ mod outline_suppression_tests {
             &[outline],
             &outline_nodes,
             &mut PartGroups::new(),
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
 
         assert!(suppressed.is_empty());
@@ -3795,6 +3915,17 @@ mod outline_suppression_tests {
 
     // An untagged part takes the stone of its outline; a tagged part and a
     // glass outline keep their own.
+    // Hands the parts what they take from their outline, on the raw tags.
+    fn inherit(ways: &mut [OsmElement], groups: &PartGroups) {
+        let relation_parts = RelationPartGroups::new();
+        let inheritance = PartInheritance::new(ways, &[], groups, &relation_parts);
+        for w in ways.iter_mut() {
+            if let Some(tags) = w.tags.as_mut() {
+                inheritance.apply_to_way(w.id, tags);
+            }
+        }
+    }
+
     #[test]
     fn untagged_parts_take_the_masonry_of_their_outline() {
         let (o, on) = square_way(100, 1000, 1.0);
@@ -3815,7 +3946,7 @@ mod outline_suppression_tests {
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
         let mut groups = PartGroups::new();
         compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
-        inherit_facade_tags(&mut ways, &[], &groups);
+        inherit(&mut ways, &groups);
         let part = ways[1].tags.as_ref().unwrap();
         assert_eq!(
             part.get("building:material").map(String::as_str),
@@ -3838,12 +3969,37 @@ mod outline_suppression_tests {
             glass,
             tagged(square_way(200, 2000, 0.5).0, "building:part", "yes"),
         ];
-        inherit_facade_tags(&mut ways, &[], &groups);
+        inherit(&mut ways, &groups);
         assert!(!ways[1]
             .tags
             .as_ref()
             .unwrap()
             .contains_key("building:colour"));
+    }
+
+    #[test]
+    fn untagged_parts_take_a_colour_or_timber_facade_too() {
+        let (o, on) = square_way(100, 1000, 1.0);
+        let (p, pn) = square_way(200, 2000, 0.5);
+        let nodes: Vec<OsmElement> = on.into_iter().chain(pn).collect();
+        for facade in [
+            &[("building:colour", "pink")][..],
+            &[("building:material", "wood")][..],
+        ] {
+            let mut outline = tagged(o.clone(), "building", "house");
+            for (k, v) in facade {
+                outline = with_tag(outline, k, v);
+            }
+            let mut ways = vec![outline, tagged(p.clone(), "building:part", "yes")];
+            let mut groups = PartGroups::new();
+            compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
+            inherit(&mut ways, &groups);
+            let part = ways[1].tags.as_ref().unwrap();
+            for (k, v) in facade {
+                assert_eq!(part.get(*k).map(String::as_str), Some(*v));
+            }
+            assert_eq!(part.get("building:part").map(String::as_str), Some("house"));
+        }
     }
 
     #[test]
@@ -3872,7 +4028,7 @@ mod outline_suppression_tests {
         let nodes: Vec<OsmElement> = on.into_iter().chain(pn).chain(qn).collect();
         let mut groups = PartGroups::new();
         compute_spatial_part_suppression(&ways, &nodes, &HashSet::new(), &mut groups);
-        inherit_facade_tags(&mut ways, &[], &groups);
+        inherit(&mut ways, &groups);
         let colour = |i: usize| {
             ways[i]
                 .tags
@@ -4011,7 +4167,7 @@ mod outline_suppression_tests {
             &[outline, part],
             &nodes,
             &mut groups,
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
         assert_eq!(groups.get(&200), Some(&(RELATION_SEED_BIT | 1)));
     }
@@ -4117,7 +4273,7 @@ mod outline_suppression_tests {
             &ways,
             &nodes,
             &mut groups,
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
         assert!(s.contains(&("relation", 1)));
         let seed = groups[&200];
@@ -4144,7 +4300,7 @@ mod outline_suppression_tests {
             ),
             relation_el(2, &[("building:part", "yes")], outer_members(&[200])),
         ];
-        let mut housing = HousingRelationParts::new();
+        let mut housing = RelationPartGroups::new();
         spatial_relation_part_suppression(
             &relations,
             &ways,
@@ -4152,7 +4308,8 @@ mod outline_suppression_tests {
             &mut PartGroups::new(),
             &mut housing,
         );
-        assert_eq!(housing, HashSet::from([2]));
+        assert!(residential_group_from_seed(housing[&2]));
+        assert_eq!(group_key(housing[&2]), RELATION_SEED_BIT | 1);
 
         relations.push(relation_el(
             3,
@@ -4162,7 +4319,7 @@ mod outline_suppression_tests {
                 member("relation", 2, "part"),
             ],
         ));
-        let mut housing = HousingRelationParts::new();
+        let mut housing = RelationPartGroups::new();
         spatial_relation_part_suppression(
             &relations,
             &ways,
@@ -4246,7 +4403,7 @@ mod outline_suppression_tests {
             &[ring, part],
             &nodes,
             &mut groups,
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
         assert_eq!(style_hint_from_seed(groups[&200]), StyleHint::Masonry);
     }
@@ -4275,7 +4432,7 @@ mod outline_suppression_tests {
                 ways,
                 &nodes.iter().collect::<Vec<_>>(),
                 &mut PartGroups::new(),
-                &mut HousingRelationParts::new(),
+                &mut RelationPartGroups::new(),
             )
         };
 
@@ -4335,7 +4492,7 @@ mod outline_suppression_tests {
             &ways,
             &nodes,
             &mut groups,
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
         assert!(s.is_empty());
         assert!(groups.is_empty());
@@ -4360,7 +4517,7 @@ mod outline_suppression_tests {
             &ways,
             &nodes,
             &mut groups,
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
         assert!(s.is_empty());
     }
@@ -4515,10 +4672,18 @@ mod outline_suppression_tests {
             &ways,
             &nodes,
             &mut groups,
-            &mut HousingRelationParts::new(),
+            &mut RelationPartGroups::new(),
         );
-        lower_outlines_under_parts(&mut ways, &nodes, &[], &suppressed, &groups);
-        ways.into_iter().map(|w| w.tags.unwrap()).collect()
+        let tops = lower_outlines_under_parts(&mut ways, &nodes, &[], &suppressed, &groups);
+        ways.into_iter()
+            .map(|w| {
+                let mut tags = w.tags.unwrap();
+                if let Some(top) = tops.get(&w.id) {
+                    tags.insert(PARTS_TOP_TAG.to_string(), top.clone());
+                }
+                tags
+            })
+            .collect()
     }
 
     // The outline's tags after the outlines are lowered under the given parts.
@@ -4896,6 +5061,91 @@ mod osm_xml_tests {
         let (data, bounds) = parse(xml);
         let spec = crate::projection::ProjectionSpec::local(1.0);
         parse_osm_data(data, bounds.unwrap(), false, &spec).0
+    }
+
+    // Parts mapped beside a building's outline, a building relation and an outline kept
+    // beside a small part, for what parsing hands the parts and the outline.
+    const PARTS_AND_OUTLINES: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="test">
+  <bounds minlat="54.6280" minlon="9.9290" maxlat="54.6340" maxlon="9.9330"/>
+  <node id="1" lat="54.629" lon="9.93"/>
+  <node id="2" lat="54.629" lon="9.932"/>
+  <node id="3" lat="54.63" lon="9.932"/>
+  <node id="4" lat="54.63" lon="9.93"/>
+  <node id="5" lat="54.629" lon="9.93"/>
+  <node id="6" lat="54.629" lon="9.9314"/>
+  <node id="7" lat="54.63" lon="9.9314"/>
+  <node id="8" lat="54.63" lon="9.93"/>
+  <node id="9" lat="54.6291" lon="9.9315"/>
+  <node id="10" lat="54.6291" lon="9.9318"/>
+  <node id="11" lat="54.6294" lon="9.9318"/>
+  <node id="12" lat="54.6294" lon="9.9315"/>
+  <node id="21" lat="54.631" lon="9.93"/>
+  <node id="22" lat="54.631" lon="9.932"/>
+  <node id="23" lat="54.632" lon="9.932"/>
+  <node id="24" lat="54.632" lon="9.93"/>
+  <node id="25" lat="54.6311" lon="9.9301"/>
+  <node id="26" lat="54.6311" lon="9.9307"/>
+  <node id="27" lat="54.6315" lon="9.9307"/>
+  <node id="28" lat="54.6315" lon="9.9301"/>
+  <node id="31" lat="54.6325" lon="9.93"/>
+  <node id="32" lat="54.6325" lon="9.932"/>
+  <node id="33" lat="54.6335" lon="9.932"/>
+  <node id="34" lat="54.6335" lon="9.93"/>
+  <node id="35" lat="54.6326" lon="9.9301"/>
+  <node id="36" lat="54.6326" lon="9.9319"/>
+  <node id="37" lat="54.6334" lon="9.9319"/>
+  <node id="38" lat="54.6334" lon="9.9301"/>
+  <way id="100"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/><tag k="building" v="cathedral"/><tag k="amenity" v="place_of_worship"/><tag k="wikidata" v="Q1"/><tag k="roof:colour" v="#d0d0d0"/><tag k="building:architecture" v="gothic"/><tag k="building:material" v="stone"/></way>
+  <way id="200"><nd ref="5"/><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="5"/><tag k="building:part" v="yes"/><tag k="height" v="33"/></way>
+  <way id="201"><nd ref="9"/><nd ref="10"/><nd ref="11"/><nd ref="12"/><nd ref="9"/><tag k="building:part" v="tower"/><tag k="man_made" v="tower"/><tag k="height" v="60"/><tag k="roof:colour" v="#ff0000"/></way>
+  <way id="110"><nd ref="21"/><nd ref="22"/><nd ref="23"/><nd ref="24"/><nd ref="21"/><tag k="building" v="hotel"/></way>
+  <way id="210"><nd ref="25"/><nd ref="26"/><nd ref="27"/><nd ref="28"/><nd ref="25"/><tag k="building:part" v="yes"/><tag k="height" v="117.4"/></way>
+  <way id="120"><nd ref="31"/><nd ref="32"/><nd ref="33"/><nd ref="34"/><nd ref="31"/><tag k="building" v="church"/></way>
+  <way id="121"><nd ref="35"/><nd ref="36"/><nd ref="37"/><nd ref="38"/><nd ref="35"/></way>
+  <relation id="300"><member type="way" ref="120" role="outline"/><member type="relation" ref="301" role="part"/><tag k="type" v="building"/></relation>
+  <relation id="301"><member type="way" ref="121" role="outer"/><tag k="type" v="multipolygon"/><tag k="building:part" v="yes"/><tag k="height" v="20"/></relation>
+</osm>"##;
+
+    fn way_tags(elements: &[ProcessedElement], id: u64) -> &HashMap<String, String> {
+        elements
+            .iter()
+            .find_map(|e| match e {
+                ProcessedElement::Way(w) if w.id == id => Some(&w.tags),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("way {id} is kept"))
+    }
+
+    #[test]
+    fn parts_are_built_as_the_building_they_belong_to() {
+        let elements = parse_local(PARTS_AND_OUTLINES);
+        let get = |id: u64, k: &str| way_tags(&elements, id).get(k).map(String::as_str);
+        // An untyped part is the cathedral, of its stone, roof and style.
+        assert_eq!(get(200, "building:part"), Some("cathedral"));
+        assert_eq!(get(200, "building:material"), Some("stone"));
+        assert_eq!(get(200, "roof:colour"), Some("#d0d0d0"));
+        assert_eq!(get(200, "building:architecture"), Some("gothic"));
+        // What other features read stays off the part, under the outline's namespace.
+        assert_eq!(get(200, "amenity"), None);
+        assert_eq!(get(200, "wikidata"), None);
+        assert_eq!(get(200, "arnis:outline:amenity"), Some("place_of_worship"));
+        assert_eq!(get(200, "arnis:outline:wikidata"), Some("Q1"));
+        // A typed part keeps its type and its own roof, and knows its building.
+        assert_eq!(get(201, "building:part"), Some("tower"));
+        assert_eq!(get(201, "roof:colour"), Some("#ff0000"));
+        assert_eq!(get(201, "arnis:outline:building"), Some("cathedral"));
+        // A part relation of a building relation is the church its outline is.
+        assert_eq!(
+            relation(&elements, 301)
+                .tags
+                .get("building:part")
+                .map(String::as_str),
+            Some("church")
+        );
+        // An outline kept beside its small part knows how tall the part stands.
+        assert_eq!(get(110, PARTS_TOP_TAG), Some("117.4"));
+        assert_eq!(get(210, "building:part"), Some("hotel"));
     }
 
     #[test]

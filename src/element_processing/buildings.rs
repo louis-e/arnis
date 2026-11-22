@@ -19,7 +19,7 @@ use crate::element_processing::subprocessor::interior::{
 };
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{
-    ArchEra, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
+    building_tag, ArchEra, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
 };
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
@@ -44,17 +44,19 @@ pub(crate) enum BuildingCondition {
 impl BuildingCondition {
     /// Returns the strongest applicable state (Ruined > Abandoned > Disused > Construction > Normal).
     fn from_tags(tags: &HashMap<String, String>) -> Self {
-        let building_value = tags.get("building").map(String::as_str);
+        let building_value = tags
+            .get("building")
+            .or_else(|| tags.get("building:part"))
+            .map(String::as_str);
         if matches!(building_value, Some("ruins" | "collapsed"))
-            || tags.get("historic").map(String::as_str) == Some("ruins")
-            || tags.get("ruins").map(String::as_str) == Some("yes")
+            || building_tag(tags, "historic") == Some("ruins")
+            || building_tag(tags, "ruins") == Some("yes")
             || tags.contains_key("ruins:building")
         {
             return Self::Ruined;
         }
 
-        if tags.get("abandoned").map(String::as_str) == Some("yes")
-            || tags.contains_key("abandoned:building")
+        if building_tag(tags, "abandoned") == Some("yes") || tags.contains_key("abandoned:building")
         {
             return Self::Abandoned;
         }
@@ -2066,6 +2068,29 @@ pub enum BuildingCategory {
     Default, // Unknown or generic buildings
 }
 
+/// Building types of places of worship.
+pub(crate) fn is_religious_type(building_type: &str) -> bool {
+    matches!(
+        building_type,
+        "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple"
+    )
+}
+
+/// A building's own tag, or the one of the building a part stands in where the part is mapped
+/// as no other kind of building than it.
+fn whole_building_tag<'a>(element: &'a ProcessedWay, key: &str) -> Option<&'a str> {
+    if let Some(v) = element.tags.get(key) {
+        return Some(v);
+    }
+    let kind = BuildingCategory::building_type(element);
+    let outline = building_tag(&element.tags, "building");
+    if kind == "yes" || outline == Some(kind) {
+        building_tag(&element.tags, key)
+    } else {
+        None
+    }
+}
+
 impl BuildingCategory {
     /// Determines the building category from OSM tags and calculated properties
     fn from_element(
@@ -2076,9 +2101,9 @@ impl BuildingCategory {
         scale_factor: f64,
         region: BuildingRegion,
     ) -> Self {
-        // Check for man_made=tower before anything else
-        if element.tags.get("man_made").map(|s| s.as_str()) == Some("tower") {
-            return BuildingCategory::Tower;
+        let building_type = Self::building_type(element);
+        if let Some(category) = Self::fixed(element, building_type) {
+            return category;
         }
 
         if is_tall_building {
@@ -2135,26 +2160,64 @@ impl BuildingCategory {
             return BuildingCategory::TallBuilding;
         }
 
-        // Religious buildings keep their style even when also tagged historic.
-        let building_type = Self::building_type(element);
-
-        let is_religious_building = matches!(
-            building_type,
-            "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple"
-        );
-        let is_religious_amenity =
-            element.tags.get("amenity").map(|s| s.as_str()) == Some("place_of_worship");
-
-        if is_religious_building || is_religious_amenity {
-            return BuildingCategory::Religious;
-        }
-
-        // Check for historic buildings (only after ruling out religious ones)
-        if element.tags.contains_key("historic") {
+        if whole_building_tag(element, "historic").is_some_and(|v| v != "no") {
             return BuildingCategory::Historic;
         }
 
         Self::from_building_type(building_type)
+    }
+
+    /// The category the tags give whatever the height: a place of worship, a castle, a tower
+    /// or a hall is never built as a block of storeys. A tower stands for the building it is
+    /// part of.
+    fn fixed(element: &ProcessedWay, building_type: &str) -> Option<Self> {
+        let tags = &element.tags;
+        let tag = |k: &str| tags.get(k).map(String::as_str);
+        if is_towerish(element) {
+            let outline = building_tag(tags, "building").unwrap_or(building_type);
+            let worship = is_religious_type(building_type)
+                || is_religious_type(outline)
+                || building_tag(tags, "amenity") == Some("place_of_worship")
+                || matches!(building_type, "bell_tower" | "campanile" | "minaret")
+                || matches!(tag("tower:type"), Some("bell_tower" | "minaret"));
+            if worship {
+                return Some(BuildingCategory::Religious);
+            }
+            if tag("tower:type") == Some("defensive")
+                || is_fortification(building_type, whole_building_tag(element, "historic"))
+                || is_fortification(outline, building_tag(tags, "historic"))
+            {
+                return Some(BuildingCategory::Historic);
+            }
+            if tag("man_made") == Some("tower") {
+                return Some(BuildingCategory::Tower);
+            }
+        }
+        if is_religious_type(building_type)
+            || whole_building_tag(element, "amenity") == Some("place_of_worship")
+        {
+            return Some(BuildingCategory::Religious);
+        }
+        if is_fortification(building_type, whole_building_tag(element, "historic")) {
+            return Some(BuildingCategory::Historic);
+        }
+        let typed = Self::from_building_type(building_type);
+        typed.keeps_its_look_when_tall().then_some(typed)
+    }
+
+    /// Categories built the same however tall they are mapped: no storeys of offices or flats.
+    fn keeps_its_look_when_tall(self) -> bool {
+        matches!(
+            self,
+            BuildingCategory::Religious
+                | BuildingCategory::Historic
+                | BuildingCategory::Industrial
+                | BuildingCategory::Warehouse
+                | BuildingCategory::Farm
+                | BuildingCategory::Garage
+                | BuildingCategory::Shed
+                | BuildingCategory::Greenhouse
+        )
     }
 
     /// The `building` value, else the `building:part` one.
@@ -2205,10 +2268,7 @@ impl BuildingCategory {
             // Healthcare
             "hospital" => BuildingCategory::Hospital,
 
-            // Religious buildings
-            "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple" => {
-                BuildingCategory::Religious
-            }
+            t if is_religious_type(t) => BuildingCategory::Religious,
 
             // Towers
             "tower" | "clock_tower" | "transformer_tower" => BuildingCategory::Tower,
@@ -3251,6 +3311,8 @@ struct BuildingConfig {
     spandrel_block: Block,
     /// Stone base and capital of a masonry tower, if it has them.
     zoning: Option<TowerZoning>,
+    /// A church's tall windows, which follow no storeys.
+    lancets: Option<Lancets>,
     /// Balcony layout on street facades.
     balcony_band: BalconyBand,
     /// What the balconies are built of.
@@ -5064,6 +5126,66 @@ impl BayLayout {
     }
 }
 
+/// How a church's tall windows stand in its wall, whatever its storeys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lancets {
+    /// Tiers of this many rows with a lancet in each, an aisle's under a clerestory's.
+    Tiers(i32),
+    /// A church tower: the belfry's openings at the top and slits below.
+    Belfry,
+}
+
+impl Lancets {
+    fn for_wall(
+        category: BuildingCategory,
+        archetype: WindowArchetype,
+        wall_rows: i32,
+        tower: bool,
+    ) -> Option<Self> {
+        if category != BuildingCategory::Religious
+            || archetype != WindowArchetype::Spaced
+            || wall_rows < 7
+        {
+            return None;
+        }
+        if tower && wall_rows >= 14 {
+            return Some(Self::Belfry);
+        }
+        let tiers = (f64::from(wall_rows) / 10.0).round().max(1.0) as i32;
+        Some(Self::Tiers(wall_rows / tiers))
+    }
+
+    /// Whether wall row `row`, counted from 1 at the bottom of `wall_rows`, is glass.
+    fn glazed(self, row: i32, wall_rows: i32) -> bool {
+        match self {
+            Self::Tiers(tier) => {
+                let count = (wall_rows / tier).max(1);
+                // The rows left over go to the top tier.
+                let t = ((row - 1) / tier).min(count - 1);
+                let top = if t == count - 1 {
+                    wall_rows
+                } else {
+                    (t + 1) * tier
+                };
+                row >= t * tier + 3 && row <= top - 2
+            }
+            Self::Belfry => {
+                (wall_rows - 7..=wall_rows - 2).contains(&row)
+                    || (row < wall_rows - 9 && (5..=6).contains(&row.rem_euclid(10)))
+            }
+        }
+    }
+}
+
+/// A tower, or a building mapped as one.
+fn is_towerish(element: &ProcessedWay) -> bool {
+    element.tags.get("man_made").map(String::as_str) == Some("tower")
+        || matches!(
+            BuildingCategory::building_type(element),
+            "tower" | "clock_tower" | "bell_tower" | "campanile" | "minaret"
+        )
+}
+
 /// Whether `floor_row` of an upper storey is glass under the given archetype.
 /// Row 0 is the band between storeys; rows 1..cycle-1 are open rows.
 fn archetype_allows_window(archetype: WindowArchetype, floor_row: i32, floor_cycle: i32) -> bool {
@@ -5443,7 +5565,7 @@ fn determine_wall_block_from_tags(
         // GlassySkyscraper walls must stay glass.
         return None;
     }
-    if element.tags.get("historic").map(String::as_str) == Some("castle") {
+    if whole_building_tag(element, "historic") == Some("castle") {
         return None;
     }
     if let Some(material) = element
@@ -5742,13 +5864,15 @@ fn determine_wall_block(
     rng: &mut impl Rng,
 ) -> Block {
     // Historic castles have their own special treatment
-    if element.tags.get("historic").map(String::as_str) == Some("castle") {
+    if whole_building_tag(element, "historic") == Some("castle") {
         return get_castle_wall_block(rng);
     }
     let typology = if category == BuildingCategory::Historic {
         // A listed townhouse or palace is built like its neighbours; only
         // fortifications keep the castle stones.
-        (!is_fortification(element)).then_some(WallTypology::Civic)
+        let kind = BuildingCategory::building_type(element);
+        (!is_fortification(kind, whole_building_tag(element, "historic")))
+            .then_some(WallTypology::Civic)
     } else {
         wall_typology(category, era, building_height, ctx)
     };
@@ -5758,12 +5882,11 @@ fn determine_wall_block(
     get_wall_block_for_category(category, era, climate, rng)
 }
 
-/// Walls, towers and ruins that keep castle masonry under `historic=*`.
-fn is_fortification(element: &ProcessedWay) -> bool {
-    let tag = |k: &str| element.tags.get(k).map(String::as_str).unwrap_or("");
-    matches!(tag("building"), "castle" | "ruins" | "fort" | "bunker")
+/// Walls, towers and ruins that keep castle masonry, by building type and `historic=*`.
+fn is_fortification(building_type: &str, historic: Option<&str>) -> bool {
+    matches!(building_type, "castle" | "ruins" | "fort" | "bunker")
         || matches!(
-            tag("historic"),
+            historic.unwrap_or(""),
             "castle"
                 | "fort"
                 | "fortress"
@@ -6123,22 +6246,20 @@ fn compute_detail_tier(
         BuildingCategory::Garage | BuildingCategory::Shed | BuildingCategory::Greenhouse => -20,
         _ => 0,
     };
+    // A part is as notable as the building it belongs to.
     let tags = &element.tags;
-    if tags.contains_key("wikidata") {
+    if building_tag(tags, "wikidata").is_some() {
         score += 15;
     }
-    if tags.get("tourism").is_some_and(|t| {
-        matches!(
-            t.as_str(),
-            "attraction" | "museum" | "gallery" | "viewpoint"
-        )
-    }) {
+    if building_tag(tags, "tourism")
+        .is_some_and(|t| matches!(t, "attraction" | "museum" | "gallery" | "viewpoint"))
+    {
         score += 15;
     }
-    if tags.get("heritage").is_some_and(|v| v != "no") {
+    if building_tag(tags, "heritage").is_some_and(|v| v != "no") {
         score += 20;
     }
-    if tags.get("historic").is_some_and(|v| v != "no") {
+    if building_tag(tags, "historic").is_some_and(|v| v != "no") {
         score += 15;
     }
     if tags.contains_key("building:architecture") || tags.contains_key("architecture") {
@@ -11045,6 +11166,15 @@ fn unzoned_wall_block(h: i32, config: &BuildingConfig, col: ColumnFacade) -> Blo
         // Punched windows, laid out per wall run so every run is symmetric
         // and turns its corners on solid piers.
         let slot = config.slot_of(col);
+        if let Some(lancets) = config.lancets {
+            let glazed = slot.is_window()
+                && lancets.glazed(h - config.start_y_offset, config.building_height);
+            return if glazed {
+                config.window_block
+            } else {
+                config.wall_block
+            };
+        }
         let role = config.floor_role(h);
 
         if role == FloorRole::Ground {
@@ -14721,34 +14851,37 @@ pub fn generate_buildings(
         cached_footprint_size,
         group_seed,
     );
-    let (floor_cycle, building_height, is_tall_building, min_level_offset) =
-        if takes_commercial_rhythm(is_tall_building, building_type, floor_cycle, &element.tags) {
-            let (h, tall) = calculate_building_height(
-                element,
-                building_type,
-                min_level,
-                scale_factor,
-                relation_levels,
-                4,
-                cached_footprint_size,
-                group_seed,
-            );
-            let lift = if element.tags.contains_key("min_height") {
-                min_level_offset
-            } else if min_level > 0 {
-                multiply_scale(min_level * 4 + GROUND_FLOOR_BONUS, scale_factor)
-            } else {
-                min_level_offset
-            };
-            (4, h, tall, lift)
+    let low_rise = BuildingCategory::fixed(element, building_type)
+        .is_some_and(BuildingCategory::keeps_its_look_when_tall);
+    let (floor_cycle, building_height, is_tall_building, min_level_offset) = if !low_rise
+        && takes_commercial_rhythm(is_tall_building, building_type, floor_cycle, &element.tags)
+    {
+        let (h, tall) = calculate_building_height(
+            element,
+            building_type,
+            min_level,
+            scale_factor,
+            relation_levels,
+            4,
+            cached_footprint_size,
+            group_seed,
+        );
+        let lift = if element.tags.contains_key("min_height") {
+            min_level_offset
+        } else if min_level > 0 {
+            multiply_scale(min_level * 4 + GROUND_FLOOR_BONUS, scale_factor)
         } else {
-            (
-                floor_cycle,
-                building_height,
-                is_tall_building,
-                min_level_offset,
-            )
+            min_level_offset
         };
+        (4, h, tall, lift)
+    } else {
+        (
+            floor_cycle,
+            building_height,
+            is_tall_building,
+            min_level_offset,
+        )
+    };
 
     // An untagged building of storeys rises towards taller tagged neighbours.
     let blended_height = match ctx.neighbour_heights.get(&element.id) {
@@ -14845,6 +14978,8 @@ pub fn generate_buildings(
         scale_factor,
         region,
     );
+    // A church, a castle or a hall gets no high-rise treatment, however tall.
+    let is_tall_building = is_tall_building && !category.keeps_its_look_when_tall();
     let preset = BuildingStylePreset::for_category(category);
     let home = Home {
         part_of_housing: housing_group,
@@ -15502,6 +15637,12 @@ pub fn generate_buildings(
         },
         // Planned below, once the podium massing has settled the wall height.
         zoning: None,
+        lancets: Lancets::for_wall(
+            category,
+            window_archetype,
+            effective_building_height,
+            is_towerish(element),
+        ),
         balcony_band,
         balcony_kit,
         french_windows,
@@ -21228,8 +21369,8 @@ pub fn generate_building_from_relation(
         )
     };
 
-    // A part of a housing block takes its storey height, as its part ways do.
-    let housing = ctx.housing_relation_parts.contains(&relation.id);
+    // A part relation shares its building's seed, as its part ways do.
+    let group_seed = ctx.relation_part_groups.get(&relation.id).copied();
 
     // Build a synthetic ProcessedWay for each assembled ring and render it.
     // The relation tags are applied so that building type, levels, and roof
@@ -21247,7 +21388,7 @@ pub fn generate_building_from_relation(
             relation_levels,
             hole_polygons.as_deref(),
             ctx,
-            crate::osm_parser::seed_with_residential_mark(merged_way.id, housing),
+            group_seed.unwrap_or(merged_way.id),
         );
     }
 }
@@ -22886,6 +23027,28 @@ mod style_tests {
     }
 
     #[test]
+    fn church_windows_stand_in_tiers_and_a_belfry() {
+        use WindowArchetype::Spaced;
+        let rows = |lancets: Lancets, wall: i32| -> Vec<i32> {
+            (1..=wall).filter(|&r| lancets.glazed(r, wall)).collect()
+        };
+        let nave = Lancets::for_wall(BuildingCategory::Religious, Spaced, 18, false).unwrap();
+        assert_eq!(rows(nave, 18), [3, 4, 5, 6, 7, 12, 13, 14, 15, 16]);
+        let chapel = Lancets::for_wall(BuildingCategory::Religious, Spaced, 12, false).unwrap();
+        assert_eq!(rows(chapel, 12), (3..=10).collect::<Vec<_>>());
+        let tower = Lancets::for_wall(BuildingCategory::Religious, Spaced, 30, true).unwrap();
+        assert_eq!(rows(tower, 30), [5, 6, 15, 16, 23, 24, 25, 26, 27, 28]);
+        assert_eq!(
+            Lancets::for_wall(BuildingCategory::House, Spaced, 18, false),
+            None
+        );
+        assert_eq!(
+            Lancets::for_wall(BuildingCategory::Religious, Spaced, 5, false),
+            None
+        );
+    }
+
+    #[test]
     fn churches_keep_their_lancets() {
         let picked = pick_window_archetype(
             BuildingCategory::Religious,
@@ -23617,6 +23780,139 @@ mod style_tests {
         );
     }
 
+    // A church, a castle or a hall keeps its type at any height, and the towers of a church or
+    // a castle are built as that building.
+    #[test]
+    fn tall_churches_castles_and_halls_keep_their_type() {
+        use crate::element_processing::building_test_support::rect_way;
+        let categories = |tags: &[(&str, &str)]| {
+            let way = rect_way(20, 0, 0, 40, 20, tags);
+            let btype = BuildingCategory::building_type(&way);
+            let (h, tall) = calculate_building_height(&way, btype, 0, 1.0, None, 4, 800, way.id);
+            [BuildingRegion::Europe, BuildingRegion::NorthAmerica]
+                .map(|region| BuildingCategory::from_element(&way, tall, h, way.id, 1.0, region))
+        };
+        use BuildingCategory::*;
+        let cases: &[(&[(&str, &str)], BuildingCategory)] = &[
+            (&[("building", "church"), ("height", "45")], Religious),
+            (
+                &[("building:part", "cathedral"), ("height", "33")],
+                Religious,
+            ),
+            (
+                &[
+                    ("building", "yes"),
+                    ("amenity", "place_of_worship"),
+                    ("height", "40"),
+                ],
+                Religious,
+            ),
+            (
+                &[
+                    ("building:part", "yes"),
+                    ("height", "33"),
+                    ("arnis:outline:amenity", "place_of_worship"),
+                ],
+                Religious,
+            ),
+            (
+                &[
+                    ("building:part", "retail"),
+                    ("height", "12"),
+                    ("arnis:outline:amenity", "place_of_worship"),
+                ],
+                Commercial,
+            ),
+            (
+                &[
+                    ("building:part", "cathedral"),
+                    ("man_made", "tower"),
+                    ("height", "69"),
+                    ("arnis:outline:building", "cathedral"),
+                ],
+                Religious,
+            ),
+            (
+                &[
+                    ("building:part", "tower"),
+                    ("height", "60"),
+                    ("arnis:outline:building", "church"),
+                ],
+                Religious,
+            ),
+            (
+                &[
+                    ("building", "yes"),
+                    ("man_made", "tower"),
+                    ("tower:type", "bell_tower"),
+                    ("height", "40"),
+                ],
+                Religious,
+            ),
+            (
+                &[
+                    ("building:part", "tower"),
+                    ("height", "35"),
+                    ("arnis:outline:building", "castle"),
+                ],
+                Historic,
+            ),
+            (
+                &[
+                    ("building", "yes"),
+                    ("historic", "castle"),
+                    ("height", "35"),
+                ],
+                Historic,
+            ),
+            (&[("building", "industrial"), ("height", "40")], Industrial),
+            (
+                &[("building", "warehouse"), ("building:levels", "9")],
+                Warehouse,
+            ),
+            (
+                &[("building", "yes"), ("man_made", "tower"), ("height", "40")],
+                Tower,
+            ),
+        ];
+        for (tags, want) in cases {
+            assert_eq!(categories(tags), [*want; 2], "{tags:?}");
+        }
+    }
+
+    // A part stands in the state of its building: a ruin's parts are ruins.
+    #[test]
+    fn parts_take_the_state_of_their_building() {
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            BuildingCondition::from_tags(&tags(&[("building:part", "ruins")])),
+            BuildingCondition::Ruined
+        );
+        assert_eq!(
+            BuildingCondition::from_tags(&tags(&[
+                ("building:part", "yes"),
+                ("arnis:outline:historic", "ruins")
+            ])),
+            BuildingCondition::Ruined
+        );
+        assert_eq!(
+            BuildingCondition::from_tags(&tags(&[
+                ("building:part", "yes"),
+                ("arnis:outline:abandoned", "yes")
+            ])),
+            BuildingCondition::Abandoned
+        );
+        assert_eq!(
+            BuildingCondition::from_tags(&tags(&[("building:part", "yes")])),
+            BuildingCondition::Normal
+        );
+    }
+
     #[test]
     fn panel_era_walls_stay_in_the_allow_list() {
         // Panel-era residential walls stay inside the era allow-list
@@ -23982,6 +24278,7 @@ mod style_tests {
             eave_outline: None,
             spandrel_block: SMOOTH_STONE,
             zoning: None,
+            lancets: None,
             balcony_band: BalconyBand::Scattered,
             balcony_kit: BalconyKit::Panels(OAK_TRAPDOOR),
             french_windows: false,
@@ -26947,7 +27244,7 @@ mod facade_integration_tests {
             road_mask: road,
             building_footprints: footprints,
             group_members: &groups,
-            housing_relation_parts: &Default::default(),
+            relation_part_groups: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
             inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses:
@@ -27070,7 +27367,7 @@ mod facade_integration_tests {
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
-            housing_relation_parts: &Default::default(),
+            relation_part_groups: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
             inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses:
@@ -27268,7 +27565,7 @@ mod facade_integration_tests {
     #[test]
     fn housing_part_relations_take_housing_storeys() {
         use crate::element_processing::building_test_support::tag_map;
-        use crate::osm_parser::{HousingRelationParts, ProcessedMember};
+        use crate::osm_parser::{ProcessedMember, RelationPartGroups};
         let xz = XZBBox::rect_from_xz_lengths(80.0, 80.0).unwrap();
         let road = CoordinateBitmap::new(&xz);
         let footprints = CoordinateBitmap::new(&xz);
@@ -27285,7 +27582,7 @@ mod facade_integration_tests {
                 way: Arc::new(rect_way(7, 20, 20, 40, 36, &[])),
             }],
         };
-        let top = |housing: &HousingRelationParts| {
+        let top = |housing: &RelationPartGroups| {
             let mut editor = test_editor(&xz);
             let cache = FloodFillCache::new();
             let passages = CoordinateBitmap::new_empty();
@@ -27296,7 +27593,7 @@ mod facade_integration_tests {
                 road_mask: &road,
                 building_footprints: &footprints,
                 group_members: &FnvHashMap::default(),
-                housing_relation_parts: housing,
+                relation_part_groups: housing,
                 neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
                 inset_plan: crate::element_processing::buildings::no_inset_plan(),
                 interior_uses:
@@ -27306,8 +27603,13 @@ mod facade_integration_tests {
             editor.highest_block_between(30, 20, -64, 300)
         };
         // Five storeys of 4 or 3 blocks over the base, under a coping.
-        assert_eq!(top(&HousingRelationParts::new()), Some(23));
-        assert_eq!(top(&HousingRelationParts::from([9])), Some(18));
+        assert_eq!(top(&RelationPartGroups::new()), Some(23));
+        // In a group, five storeys a block lower each for housing, the rolls alike.
+        let group = |housing| {
+            let seed = crate::osm_parser::seed_with_residential_mark(1 << 63 | 4, housing);
+            top(&RelationPartGroups::from([(9, seed)])).unwrap()
+        };
+        assert_eq!(group(false) - group(true), 5);
     }
 
     // A tower's crown ends at its mapped height: a screen carries the wall
@@ -28018,7 +28320,7 @@ mod facade_integration_tests {
                 road_mask: &road,
                 building_footprints: &footprints,
                 group_members: &groups,
-                housing_relation_parts: &Default::default(),
+                relation_part_groups: &Default::default(),
                 neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
                 inset_plan: crate::element_processing::buildings::no_inset_plan(),
                 interior_uses:
@@ -29164,7 +29466,7 @@ mod facade_dump {
                     road_mask: &road,
                     building_footprints: &footprints,
                     group_members: &groups,
-                    housing_relation_parts: &Default::default(),
+                    relation_part_groups: &Default::default(),
                     neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
                     inset_plan: crate::element_processing::buildings::no_inset_plan(),
                     interior_uses:
@@ -29342,7 +29644,7 @@ mod doorstep_tests {
             road_mask: &road,
             building_footprints: &footprints,
             group_members: &groups,
-            housing_relation_parts: &Default::default(),
+            relation_part_groups: &Default::default(),
             neighbour_heights: crate::element_processing::buildings::no_neighbour_heights(),
             inset_plan: crate::element_processing::buildings::no_inset_plan(),
             interior_uses:
