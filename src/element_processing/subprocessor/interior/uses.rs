@@ -203,7 +203,7 @@ fn faith(tags: &HashMap<String, String>) -> Faith {
         Some("jewish") => Faith::Jewish,
         Some("christian") => Faith::Christian,
         Some(_) => Faith::Other,
-        None => match tag(tags, "building") {
+        None => match tag(tags, "building").or_else(|| tag(tags, "building:part")) {
             Some("mosque") => Faith::Muslim,
             Some("synagogue") => Faith::Jewish,
             Some("temple" | "shrine") => Faith::Other,

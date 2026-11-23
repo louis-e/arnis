@@ -10,8 +10,8 @@ use crate::ground_generation;
 use crate::map_preview;
 use crate::map_renderer::PreviewAccumulator;
 use crate::osm_parser::{
-    HousingRelationParts, OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole,
-    ProcessedNode, ProcessedRelation, ProcessedWay,
+    OutlineSuppression, PartGroups, ProcessedElement, ProcessedMemberRole, ProcessedNode,
+    ProcessedRelation, ProcessedWay, RelationPartGroups,
 };
 use crate::progress::{
     emit_gui_progress_update, emit_gui_progress_update_ex, emit_map_preview_ready,
@@ -287,7 +287,7 @@ fn process_element(
     tunnel_portals: &highways::TunnelPortalMap,
     tunnel_cells: &mut Vec<highways::HighwayTunnelCell>,
     part_groups: &PartGroups,
-    housing_relation_parts: &HousingRelationParts,
+    relation_part_groups: &RelationPartGroups,
     group_members: &FnvHashMap<u64, Vec<u64>>,
     neighbours: &buildings::Neighbours,
     still_surfaces: &water_areas::StillWaterSurfaces,
@@ -367,7 +367,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
-                    housing_relation_parts,
+                    relation_part_groups,
                     neighbour_heights: &neighbours.heights,
                     inset_plan: &neighbours.steps,
                     interior_uses,
@@ -730,7 +730,7 @@ fn process_element(
                     road_mask,
                     building_footprints,
                     group_members,
-                    housing_relation_parts,
+                    relation_part_groups,
                     neighbour_heights: &neighbours.heights,
                     inset_plan: &neighbours.steps,
                     interior_uses,
@@ -999,7 +999,7 @@ pub fn generate_world_with_options(
     options: GenerationOptions,
     outline_suppression: OutlineSuppression,
     mut part_groups: PartGroups,
-    housing_parts: HousingRelationParts,
+    relation_parts: RelationPartGroups,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
@@ -1418,6 +1418,7 @@ pub fn generate_world_with_options(
     camp_sites::prepare(&mut elements);
     allotments::prepare(&mut elements, args.scale);
     mobile_homes::prepare(&mut elements, args.scale);
+    fortifications::mark_castle_grounds(&mut elements, args.scale);
     // Nested areas render correctly only if the smallest one writes first.
     sort_ground_fill_areas(&mut elements);
 
@@ -2382,7 +2383,7 @@ pub fn generate_world_with_options(
                     &tunnel_portals,
                     &mut tile_tunnel_cells,
                     &part_groups,
-                    &housing_parts,
+                    &relation_parts,
                     &group_members,
                     &neighbours,
                     &still_surfaces,
@@ -2828,7 +2829,7 @@ pub fn generate_world_with_options(
                 &tunnel_portals,
                 &mut tunnel_cells,
                 &part_groups,
-                &housing_parts,
+                &relation_parts,
                 &group_members,
                 &neighbours,
                 &still_surfaces,
