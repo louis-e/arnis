@@ -7476,6 +7476,16 @@ fn ring_area_blocks(nodes: &[ProcessedNode]) -> f64 {
 const MAX_PLAUSIBLE_HEIGHT_M: f64 = 1000.0;
 
 /// Parses a `height` tag in meters, dropping values no building can have.
+/// The walls left standing of a ruin. A ruin is mapped as it stands, so only a guessed height
+/// loses its fallen top.
+fn ruin_height(building_height: i32, tags: &HashMap<String, String>) -> i32 {
+    if parse_building_height_tag(tags).is_some() {
+        building_height
+    } else {
+        ((f64::from(building_height) * 0.6) as i32).max(3)
+    }
+}
+
 fn parse_building_height_tag(tags: &HashMap<String, String>) -> Option<f64> {
     let height = tags
         .get("height")?
@@ -15335,7 +15345,7 @@ pub fn generate_buildings(
             has_single_door = false;
         }
         BuildingCondition::Ruined => {
-            effective_building_height = ((building_height as f64 * 0.6) as i32).max(3);
+            effective_building_height = ruin_height(building_height, &element.tags);
             has_windows = false;
             has_garage_door = false;
             has_single_door = false;
@@ -23952,6 +23962,22 @@ mod style_tests {
 
     // A church, a castle or a hall keeps its type at any height, and the towers of a church or
     // a castle are built as that building.
+    // A ruin keeps the height it is mapped at; only a guessed one is cut down.
+    #[test]
+    fn a_ruin_stands_as_mapped() {
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            ruin_height(35, &tags(&[("height", "35"), ("ruins", "yes")])),
+            35
+        );
+        assert_eq!(ruin_height(20, &tags(&[("ruins", "yes")])), 12);
+    }
+
     // A lookout marked historic stays a tower; a keep so marked is the castle's.
     #[test]
     fn historic_lookouts_stay_towers() {
