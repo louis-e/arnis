@@ -2896,7 +2896,8 @@ impl BuildingStyle {
                 ];
                 MODERN_ACCENT_OPTIONS[rng.random_range(0..MODERN_ACCENT_OPTIONS.len())]
             } else {
-                accent_for_wall(wall_block, rng)
+                white_stone_trim(element, wall_block)
+                    .unwrap_or_else(|| accent_for_wall(wall_block, rng))
             }
         });
 
@@ -5556,6 +5557,32 @@ fn coordinated_window_block(wall_block: Block, accent_block: Block, picked: Bloc
     }
 }
 
+/// Trim of a castle or a building of mapped stone whose wall is a white stone: the same
+/// stone, a shade off, rather than the grey trim of a rendered wall.
+fn white_stone_trim(element: &ProcessedWay, wall: Block) -> Option<Block> {
+    if !matches!(
+        wall,
+        QUARTZ_BLOCK | CALCITE | POLISHED_DIORITE | QUARTZ_BRICKS
+    ) {
+        return None;
+    }
+    let stone = element
+        .tags
+        .get("building:material")
+        .or_else(|| element.tags.get("building:facade:material"))
+        .is_some_and(|m| {
+            matches!(
+                m.trim().to_ascii_lowercase().as_str(),
+                "stone" | "limestone" | "sandstone" | "marble" | "granite" | "natural_stone"
+            )
+        });
+    (stone || of_a_castle(element)).then_some(if wall == QUARTZ_BLOCK {
+        CALCITE
+    } else {
+        QUARTZ_BLOCK
+    })
+}
+
 /// Trim stone that suits the wall: grey stone or
 /// quartz on white render, white quartz surrounds on pink and ochre render,
 /// buff and light stone on brick, a sibling sandstone on sandstone. Other
@@ -5591,7 +5618,8 @@ fn determine_wall_block_from_tags(
         // GlassySkyscraper walls must stay glass.
         return None;
     }
-    // A castle takes its mapped stone, brick or render, and its castle stone otherwise.
+    // A castle takes its mapped stone, brick or render, else stone of its mapped colour, else
+    // its castle stone.
     if of_a_castle(element)
         && !element
             .tags
@@ -5599,7 +5627,12 @@ fn determine_wall_block_from_tags(
             .or_else(|| element.tags.get("building:facade:material"))
             .is_some_and(|m| crate::osm_parser::is_masonry_material(m))
     {
-        return None;
+        return element
+            .tags
+            .get("building:colour")
+            .or_else(|| element.tags.get("colour"))
+            .and_then(|c| color_text_to_rgb_tuple(c))
+            .and_then(|rgb| facade_tone_for_colour(rgb, STONEWORK | BRICKWORK, rng));
     }
     if let Some(material) = element
         .tags
@@ -5900,19 +5933,40 @@ fn determine_wall_block(
     if of_a_castle(element) {
         return get_castle_wall_block(rng);
     }
-    let typology = if category == BuildingCategory::Historic {
-        // A listed townhouse or palace is built like its neighbours; only
-        // fortifications keep the castle stones.
-        let kind = BuildingCategory::building_type(element);
-        (!is_fortification(kind, whole_building_tag(element, "historic")) && !of_a_castle(element))
+    let typology = match category {
+        BuildingCategory::Historic => {
+            // A listed townhouse or palace is built like its neighbours; only
+            // fortifications keep the castle stones.
+            let kind = BuildingCategory::building_type(element);
+            (!is_fortification(kind, whole_building_tag(element, "historic"))
+                && !of_a_castle(element))
             .then_some(WallTypology::Civic)
-    } else {
-        wall_typology(category, era, building_height, ctx)
+        }
+        // A church is of the local stone, brick or render, as the town's halls are.
+        BuildingCategory::Religious => Some(WallTypology::Civic),
+        _ => wall_typology(category, era, building_height, ctx),
     };
     if let Some(pool) = typology.and_then(|t| regional_wall_pool(ctx.materials, t)) {
-        return pick_district_wall(pool, category, climate, ctx.district, rng);
+        let wall = pick_district_wall(pool, category, climate, ctx.district, rng);
+        // A church is not of planks where the town's halls may be.
+        if !(category == BuildingCategory::Religious && is_planks(wall)) {
+            return wall;
+        }
     }
     get_wall_block_for_category(category, era, climate, rng)
+}
+
+fn is_planks(block: Block) -> bool {
+    matches!(
+        block,
+        OAK_PLANKS
+            | SPRUCE_PLANKS
+            | BIRCH_PLANKS
+            | DARK_OAK_PLANKS
+            | CHERRY_PLANKS
+            | MANGROVE_PLANKS
+            | CRIMSON_PLANKS
+    )
 }
 
 /// Walls, towers and ruins that keep castle masonry, by building type and `historic=*`.
@@ -15566,7 +15620,8 @@ pub fn generate_buildings(
         effective_building_height / floor_cycle,
     );
     let surrounds = surrounds && dressed;
-    let trim_block = trim_block_for_wall(wall_block, group_seed);
+    let trim_block = white_stone_trim(element, wall_block)
+        .unwrap_or_else(|| trim_block_for_wall(wall_block, group_seed));
     let top_band = (!dressed
         && style.roof_type == RoofType::Flat
         && min_level_offset == 0
@@ -23956,6 +24011,24 @@ mod style_tests {
     // A castle is built of its mapped stone or brick, and of castle stone where it maps only
     // a colour or a material no castle is built of.
     #[test]
+    fn white_stone_takes_its_own_trim() {
+        use crate::element_processing::building_test_support::rect_way;
+        let limestone = rect_way(
+            1,
+            0,
+            0,
+            20,
+            20,
+            &[("building", "yes"), ("building:material", "limestone")],
+        );
+        let rendered = rect_way(2, 0, 0, 20, 20, &[("building", "yes")]);
+        assert_eq!(white_stone_trim(&limestone, QUARTZ_BLOCK), Some(CALCITE));
+        assert_eq!(white_stone_trim(&limestone, CALCITE), Some(QUARTZ_BLOCK));
+        assert_eq!(white_stone_trim(&rendered, QUARTZ_BLOCK), None);
+        assert_eq!(white_stone_trim(&limestone, BRICK), None);
+    }
+
+    #[test]
     fn castles_take_only_mapped_masonry() {
         use crate::element_processing::building_test_support::rect_way;
         let wall = |tags: &[(&str, &str)]| {
@@ -23968,10 +24041,30 @@ mod style_tests {
             ("building:material", "brick")
         ])
         .is_some());
+        // A mapped colour picks the castle's stone: white limestone, pink sandstone.
+        let white = wall(&[
+            ("building", "castle"),
+            ("historic", "castle"),
+            ("building:colour", "white"),
+        ]);
+        assert!(matches!(
+            white,
+            Some(CALCITE | QUARTZ_BLOCK | QUARTZ_BRICKS | POLISHED_DIORITE)
+        ));
+        let pink = wall(&[
+            ("building", "yes"),
+            ("arnis:castle_grounds", "fort"),
+            ("building:colour", "#F5BCA9"),
+        ]);
+        assert!(matches!(
+            pink,
+            Some(WHITE_TERRACOTTA | TERRACOTTA | POLISHED_GRANITE | LIGHT_GRAY_TERRACOTTA)
+        ));
+        // A colour no stone comes near leaves the castle stone.
         assert!(wall(&[
             ("building", "castle"),
             ("historic", "castle"),
-            ("building:colour", "white")
+            ("building:colour", "#1e28c8")
         ])
         .is_none());
         assert!(wall(&[
@@ -23980,12 +24073,7 @@ mod style_tests {
             ("building:material", "glass")
         ])
         .is_none());
-        assert!(wall(&[
-            ("building", "yes"),
-            ("arnis:castle_grounds", "fort"),
-            ("building:colour", "white")
-        ])
-        .is_none());
+        assert!(wall(&[("building", "yes"), ("arnis:castle_grounds", "fort")]).is_none());
         assert!(wall(&[
             ("building", "yes"),
             ("arnis:castle_grounds", "palace"),
@@ -26196,6 +26284,39 @@ mod style_tests {
             let b = get_fallback_building_block(&mut element_rng(seed));
             assert!(!ODD.contains(&b), "{} as a fallback wall", b.name());
         }
+    }
+
+    #[test]
+    fn churches_are_of_the_local_stone() {
+        use crate::element_processing::building_test_support::rect_way;
+        let church = rect_way(9, 0, 0, 30, 60, &[("building", "cathedral")]);
+        let pick = |materials, seed| {
+            let ctx = RoofContext {
+                materials,
+                district: 99,
+                ..RoofContext::default()
+            };
+            determine_wall_block(
+                &church,
+                BuildingCategory::Religious,
+                ArchEra::HistoricOrnate,
+                Climate::Temperate,
+                40,
+                &ctx,
+                &mut element_rng(seed),
+            )
+        };
+        let in_pool = |pool: WallPool, b: Block| pool.iter().any(|&(p, _)| p == b);
+        for seed in 0..60u64 {
+            let paris = pick(MaterialRegion::France, seed);
+            assert!(in_pool(FRANCE_TRADITIONAL_WALLS, paris), "{}", paris.name());
+            assert!(!is_planks(pick(MaterialRegion::Central, seed)));
+            let lubeck = pick(MaterialRegion::BrickNorth, seed);
+            assert!(in_pool(BRICK_NORTH_TRADITIONAL_WALLS, lubeck));
+        }
+        // Where the region has no palette, the church palette stays.
+        let other = pick(MaterialRegion::Other, 1);
+        assert!(RELIGIOUS_WALL_OPTIONS.contains(&other));
     }
 
     #[test]
