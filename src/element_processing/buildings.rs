@@ -2096,12 +2096,13 @@ fn whole_building_tag<'a>(element: &'a ProcessedWay, key: &str) -> Option<&'a st
 fn of_a_castle(element: &ProcessedWay) -> bool {
     let tags = &element.tags;
     let tag = |k: &str| tags.get(k).map(String::as_str);
+    let defensive = tag("tower:type").is_some_and(fortifications::is_defensive_tower_type);
     // A palace is no fortress, bar a tower it marks defensive.
-    if is_palace(element) && tag("tower:type") != Some("defensive") {
+    if is_palace(element) && !defensive {
         return false;
     }
     whole_building_tag(element, "historic") == Some("castle")
-        || tag("tower:type") == Some("defensive")
+        || defensive
         || tag(fortifications::CASTLE_GROUNDS_TAG) == Some("fort")
         || (is_towerish(element)
             && (matches!(building_tag(tags, "building"), Some("castle" | "fort"))
@@ -2203,9 +2204,10 @@ impl BuildingCategory {
             if worship {
                 return Some(BuildingCategory::Religious);
             }
-            // A mast marked historic is still a mast.
-            let castle_kind = tag("tower:type").is_none_or(fortifications::is_castle_tower_type);
-            if tag("tower:type") == Some("defensive")
+            // A mast or a lookout marked historic is still a mast or a lookout.
+            let defensive = tag("tower:type").is_some_and(fortifications::is_defensive_tower_type);
+            let castle_kind = tag("tower:type").is_none() || defensive;
+            if defensive
                 || (castle_kind
                     && (is_fortification(building_type, whole_building_tag(element, "historic"))
                         || is_fortification(outline, building_tag(tags, "historic"))))
@@ -5633,19 +5635,17 @@ fn determine_wall_block_from_tags(
         return None;
     }
     // A castle takes its mapped stone, brick or render, else the colour it maps with no
-    // material, in stone where a stone comes near it, else its castle stone.
-    // The keys the material below reads.
-    const FACADE_MATERIAL_KEYS: [&str; 3] = [
+    // material, in stone where a stone comes near it, else its castle stone. The material is
+    // the one the code below builds with: the first of its keys.
+    let material = [
         "building:material",
         "building:facade:material",
         "facade:material",
-    ];
-    let mut mapped_materials = FACADE_MATERIAL_KEYS
-        .iter()
-        .filter_map(|k| element.tags.get(*k))
-        .peekable();
-    let mapped_material = mapped_materials.peek().is_some();
-    let masonry = mapped_materials.any(|m| crate::osm_parser::is_masonry_material(m));
+    ]
+    .iter()
+    .find_map(|k| element.tags.get(*k));
+    let mapped_material = material.is_some() || element.tags.contains_key("building:cladding");
+    let masonry = material.is_some_and(|m| crate::osm_parser::is_masonry_material(m));
     if of_a_castle(element) && !masonry {
         // A colour no stone comes near is the castle's render, as mapped.
         return element
@@ -23952,6 +23952,30 @@ mod style_tests {
 
     // A church, a castle or a hall keeps its type at any height, and the towers of a church or
     // a castle are built as that building.
+    // A lookout marked historic stays a tower; a keep so marked is the castle's.
+    #[test]
+    fn historic_lookouts_stay_towers() {
+        use crate::element_processing::building_test_support::rect_way;
+        let category = |tower_type: &str| {
+            let way = rect_way(
+                1,
+                0,
+                0,
+                6,
+                6,
+                &[
+                    ("building", "tower"),
+                    ("man_made", "tower"),
+                    ("historic", "tower"),
+                    ("tower:type", tower_type),
+                ],
+            );
+            BuildingCategory::from_element(&way, false, 30, 1, 1.0, BuildingRegion::Europe)
+        };
+        assert_eq!(category("observation"), BuildingCategory::Tower);
+        assert_eq!(category("Defensive;keep"), BuildingCategory::Historic);
+    }
+
     #[test]
     fn tall_churches_castles_and_halls_keep_their_type() {
         use crate::element_processing::building_test_support::rect_way;
@@ -24123,6 +24147,14 @@ mod style_tests {
             pink,
             Some(WHITE_TERRACOTTA | TERRACOTTA | POLISHED_GRANITE)
         ));
+        // A castle mapped first in timber is not built of the stone it maps second.
+        assert!(wall(&[
+            ("building", "castle"),
+            ("historic", "castle"),
+            ("building:material", "wood"),
+            ("building:facade:material", "stone")
+        ])
+        .is_none());
         // A castle mapped in timber keeps its castle stone whatever its colour.
         assert!(wall(&[
             ("building", "castle"),

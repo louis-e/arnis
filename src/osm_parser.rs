@@ -1358,7 +1358,11 @@ pub fn parse_osm_data(
             for m in element.members.iter().filter(|m| m.r#type == "way") {
                 let role = m.role.trim().to_ascii_lowercase();
                 let inner_ring = role == "inner";
-                if !(inner_ring || matches!(role.as_str(), "outer" | "outline" | "")) {
+                // A ring of no role is settled by its shape later; its size is not known here.
+                if role.is_empty() {
+                    return (Vec::new(), Vec::new());
+                }
+                if !(inner_ring || matches!(role.as_str(), "outer" | "outline")) {
                     continue;
                 }
                 // A ring the data lacks leaves the size unknown.

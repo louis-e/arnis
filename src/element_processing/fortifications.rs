@@ -198,7 +198,7 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
             .any(|k| building_tag(tags, k).is_some())
             || building_tag(tags, "tourism").is_some_and(|t| !CASTLE_TOURISM.contains(&t));
         let fortified = building_tag(tags, "historic").is_some_and(|h| FORTIFIED.contains(&h))
-            || tag(tags, "tower:type") == Some("defensive");
+            || tag(tags, "tower:type").is_some_and(is_defensive_tower_type);
         // Grounds of a castle's size lend themselves to all its plain buildings, a castle's
         // park to those marked historic, a fortress town to its gates, towers and walls.
         let own = if g.area.is_some_and(|a| m2(a) <= MAX_GROUNDS_M2) {
@@ -253,6 +253,16 @@ pub(crate) fn is_castle_tower_type(value: &str) -> bool {
     value
         .split(';')
         .any(|v| CASTLE_TOWERS.contains(&v.trim().to_ascii_lowercase().as_str()))
+}
+
+/// Whether a `tower:type`, or one of a list of them, is a keep or a wall tower: no lookout.
+pub(crate) fn is_defensive_tower_type(value: &str) -> bool {
+    value.split(';').any(|v| {
+        matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "defensive" | "watchtower" | "keep" | "bastion" | "fortification"
+        )
+    })
 }
 
 /// Castle or fortress grounds: an area of `historic=castle|fort|fortress` that is no building.
@@ -720,6 +730,8 @@ mod tests {
         );
         assert!(is_castle_tower_type("Defensive;keep"));
         assert!(!is_castle_tower_type("communication"));
+        assert!(is_defensive_tower_type("Defensive;keep"));
+        assert!(!is_defensive_tower_type("observation"));
     }
 
     // A castle's grounds mapped in pieces are measured whole, and a castle within a fortress
