@@ -2096,7 +2096,11 @@ fn whole_building_tag<'a>(element: &'a ProcessedWay, key: &str) -> Option<&'a st
 fn of_a_castle(element: &ProcessedWay) -> bool {
     let tags = &element.tags;
     let tag = |k: &str| tags.get(k).map(String::as_str);
-    (whole_building_tag(element, "historic") == Some("castle") && !is_palace(element))
+    // A palace is no fortress, bar a tower it marks defensive.
+    if is_palace(element) && tag("tower:type") != Some("defensive") {
+        return false;
+    }
+    whole_building_tag(element, "historic") == Some("castle")
         || tag("tower:type") == Some("defensive")
         || tag(fortifications::CASTLE_GROUNDS_TAG) == Some("fort")
         || (is_towerish(element)
@@ -2199,13 +2203,8 @@ impl BuildingCategory {
             if worship {
                 return Some(BuildingCategory::Religious);
             }
-            // A mast or a lookout marked historic is still a mast or a lookout.
-            let castle_kind = tag("tower:type").is_none_or(|t| {
-                matches!(
-                    t,
-                    "defensive" | "watchtower" | "keep" | "bastion" | "fortification"
-                )
-            });
+            // A mast marked historic is still a mast.
+            let castle_kind = tag("tower:type").is_none_or(fortifications::is_castle_tower_type);
             if tag("tower:type") == Some("defensive")
                 || (castle_kind
                     && (is_fortification(building_type, whole_building_tag(element, "historic"))
@@ -5635,24 +5634,25 @@ fn determine_wall_block_from_tags(
     }
     // A castle takes its mapped stone, brick or render, else the colour it maps with no
     // material, in stone where a stone comes near it, else its castle stone.
-    const FACADE_MATERIAL_KEYS: [&str; 4] = [
+    // The keys the material below reads.
+    const FACADE_MATERIAL_KEYS: [&str; 3] = [
         "building:material",
         "building:facade:material",
         "facade:material",
-        "building:cladding",
     ];
-    let mapped_material = FACADE_MATERIAL_KEYS
+    let mut mapped_materials = FACADE_MATERIAL_KEYS
         .iter()
-        .find_map(|k| element.tags.get(*k));
-    if of_a_castle(element)
-        && !mapped_material.is_some_and(|m| crate::osm_parser::is_masonry_material(m))
-    {
+        .filter_map(|k| element.tags.get(*k))
+        .peekable();
+    let mapped_material = mapped_materials.peek().is_some();
+    let masonry = mapped_materials.any(|m| crate::osm_parser::is_masonry_material(m));
+    if of_a_castle(element) && !masonry {
         // A colour no stone comes near is the castle's render, as mapped.
         return element
             .tags
             .get("building:colour")
             .or_else(|| element.tags.get("colour"))
-            .filter(|_| mapped_material.is_none())
+            .filter(|_| !mapped_material)
             .and_then(|c| color_text_to_rgb_tuple(c))
             .map(|rgb| {
                 facade_tone_for_colour(rgb, STONEWORK, rng)
@@ -6029,8 +6029,7 @@ fn is_timber(block: Block) -> bool {
 
 /// A castle mapped as a palace, manor or stately home, which is no fortress.
 fn is_palace(element: &ProcessedWay) -> bool {
-    building_tag(&element.tags, "castle_type")
-        .is_some_and(|t| fortifications::PALACES.contains(&t.trim().to_ascii_lowercase().as_str()))
+    building_tag(&element.tags, "castle_type").is_some_and(fortifications::is_palace_type)
 }
 
 /// Walls, towers and ruins that keep castle masonry, by building type and `historic=*`.
@@ -25849,7 +25848,7 @@ mod style_tests {
         }
     }
 
-    // A church part mapped without a roof shape keeps the flat top of an untyped part; the
+    // A church part mapped without a roof shape is roofed as an untyped part, here flat; the
     // church mapped whole gets its pitched nave.
     #[test]
     fn a_part_that_took_its_type_is_roofed_as_mapped() {

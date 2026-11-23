@@ -1356,11 +1356,16 @@ pub fn parse_osm_data(
         mark_grounds_area(&mut tags, || {
             let (mut outer, mut inner) = (Vec::new(), Vec::new());
             for m in element.members.iter().filter(|m| m.r#type == "way") {
-                // A member the data lacks leaves the size unknown.
+                let role = m.role.trim().to_ascii_lowercase();
+                let inner_ring = role == "inner";
+                if !(inner_ring || matches!(role.as_str(), "outer" | "outline" | "")) {
+                    continue;
+                }
+                // A ring the data lacks leaves the size unknown.
                 let Some(way) = ways_map.get(&m.r#ref) else {
                     return (Vec::new(), Vec::new());
                 };
-                if m.role.trim().eq_ignore_ascii_case("inner") {
+                if inner_ring {
                     inner.push(way.nodes.clone());
                 } else {
                     outer.push(way.nodes.clone());
@@ -1838,7 +1843,6 @@ const MATERIAL_KEYS: [&str; 4] = [
 /// guessed as an untyped part's, so a porch does not rise to the nave.
 pub(crate) const KIND_TAKEN_TAG: &str = "arnis:part_kind_taken";
 
-/// Building types a part does not take, as they would draw it as a whole stand of seats.
 /// Building types a part does not take: a stand's parts are built by the stand, and a part
 /// of a canopy is not itself a roof without walls.
 const KINDS_NOT_HANDED_DOWN: [&str; 5] = ["stadium", "grandstand", "bleachers", "tribune", "roof"];
@@ -1959,7 +1963,7 @@ impl Inherited {
         if let Some(kind) = self
             .kind
             .as_ref()
-            .filter(|k| !KINDS_NOT_HANDED_DOWN.contains(&k.trim()))
+            .filter(|k| !KINDS_NOT_HANDED_DOWN.contains(&k.trim().to_ascii_lowercase().as_str()))
         {
             if let Some(v) = tags
                 .get_mut("building:part")
@@ -2020,7 +2024,7 @@ fn mark_grounds_area(
     if let Some(area) = fortifications::grounds_area(outer, inner) {
         tags.insert(
             fortifications::GROUNDS_AREA_TAG.to_string(),
-            format!("{area:.0}"),
+            area.to_string(),
         );
     }
 }

@@ -44,7 +44,7 @@ const MAX_GROUNDS_M2: f64 = 100_000.0;
 const MIN_BUILDING_M2: f64 = 50.0;
 
 /// `tower:type` values of a castle's towers.
-const CASTLE_TOWERS: &[&str] = &[
+pub(crate) const CASTLE_TOWERS: &[&str] = &[
     "defensive",
     "watchtower",
     "observation",
@@ -137,11 +137,12 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
         // Measured before clipping where the parser could, so every piece of a world agrees.
         let area = tag(tags, GROUNDS_AREA_TAG)
             .and_then(|a| a.parse::<f64>().ok())
+            .filter(|a| a.is_finite() && *a > 0.0)
             .or_else(|| rings_area(&outer, &inner));
         grounds.push(Grounds {
             bounds,
             rings: outer.into_iter().chain(inner).collect(),
-            palace: tag(tags, "castle_type").is_some_and(|t| PALACES.contains(&t)),
+            palace: tag(tags, "castle_type").is_some_and(is_palace_type),
             fortress: tag(tags, "historic") != Some("castle"),
             area,
             extent: f64::from(bounds.2 - bounds.0) * f64::from(bounds.3 - bounds.1),
@@ -177,11 +178,7 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
                 .map(|v| v.trim().to_ascii_lowercase())
                 .collect::<Vec<_>>()
         };
-        let castle_tower = tag(tags, "tower:type").is_none_or(|t| {
-            values(t)
-                .iter()
-                .any(|v| CASTLE_TOWERS.contains(&v.as_str()))
-        });
+        let castle_tower = tag(tags, "tower:type").is_none_or(is_castle_tower_type);
         let tower = tag(tags, "man_made") == Some("tower") || kind == Some("tower");
         // One mapped as timber, steel or glass is built so.
         let other_material = MATERIAL_KEYS
@@ -211,7 +208,8 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
         } else {
             marked || fortified
         };
-        own.then_some(if g.palace { "palace" } else { "fort" })
+        let palace = g.palace || building_tag(tags, "castle_type").is_some_and(is_palace_type);
+        own.then_some(if palace { "palace" } else { "fort" })
     };
     for e in elements.iter_mut() {
         let (tags, mark) = match e {
@@ -243,6 +241,18 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
             tags.insert(CASTLE_GROUNDS_TAG.to_string(), value.to_string());
         }
     }
+}
+
+/// Whether a `castle_type` is a palace, manor or stately home rather than a fortress.
+pub(crate) fn is_palace_type(value: &str) -> bool {
+    PALACES.contains(&value.trim().to_ascii_lowercase().as_str())
+}
+
+/// Whether a `tower:type`, or one of a list of them, is a keep, wall tower or lookout.
+pub(crate) fn is_castle_tower_type(value: &str) -> bool {
+    value
+        .split(';')
+        .any(|v| CASTLE_TOWERS.contains(&v.trim().to_ascii_lowercase().as_str()))
 }
 
 /// Castle or fortress grounds: an area of `historic=castle|fort|fortress` that is no building.
@@ -639,8 +649,6 @@ mod tests {
         assert_eq!(marks(&[("historic", "fortress")], 400), fort(&[], "fort"));
     }
 
-    // A castle's grounds mapped in pieces are measured whole, and a castle within a fortress
-    // town is judged by its own grounds.
     // Grounds measured before clipping keep their size in every piece of a world, and a palace
     // mapped as a multipolygon round its courtyard is the castle's too.
     #[test]
@@ -686,8 +694,36 @@ mod tests {
                 .map(String::as_str),
             Some("fort")
         );
+
+        // A palace in a castle's grounds is a palace, and a size of nothing is no size.
+        let mut zero = rect_way(3, 0, 0, 60, 60, &[("historic", "castle")]);
+        zero.tags
+            .insert(GROUNDS_AREA_TAG.to_string(), "0".to_string());
+        let mut elements = vec![
+            ProcessedElement::Way(zero),
+            ProcessedElement::Way(rect_way(
+                4,
+                10,
+                10,
+                30,
+                30,
+                &[("building", "yes"), ("castle_type", "Palace")],
+            )),
+        ];
+        mark_castle_grounds(&mut elements, 1.0);
+        assert_eq!(
+            elements[1]
+                .tags()
+                .get(CASTLE_GROUNDS_TAG)
+                .map(String::as_str),
+            Some("palace")
+        );
+        assert!(is_castle_tower_type("Defensive;keep"));
+        assert!(!is_castle_tower_type("communication"));
     }
 
+    // A castle's grounds mapped in pieces are measured whole, and a castle within a fortress
+    // town is judged by its own grounds.
     #[test]
     fn castle_grounds_are_measured_whole_and_the_smallest_wins() {
         use crate::element_processing::building_test_support::rect_way;
