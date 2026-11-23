@@ -1725,7 +1725,8 @@ pub fn generate_world_with_options(
     );
 
     // Resolved before the 3D archetypes so they never claim a landmark's element.
-    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args);
+    let relief = editor.elevation_blocks_per_meter();
+    let landmarks = crate::landmarks::prescan(&elements, &xzbbox, llbbox, args, relief);
     // 3D model pipeline pre-scan: elements rendered as 3D models instead of
     // voxels are recorded here and skipped by the element loop below.
     let models_3d_pipeline = args.use_3d.then(|| {

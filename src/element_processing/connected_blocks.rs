@@ -42,7 +42,7 @@ fn is_gate(block: Block) -> bool {
 }
 
 /// Whether `own` joins `neighbour`: its own family, or a fence gate (bars and panes never do).
-fn joins(own: Block, neighbour: Block) -> bool {
+pub(crate) fn joins(own: Block, neighbour: Block) -> bool {
     family(neighbour) == family(own) || (!is_bars_or_pane(own) && is_gate(neighbour))
 }
 
@@ -114,18 +114,21 @@ fn refresh_neighbours(
 }
 
 fn refresh(editor: &mut WorldEditor, block: Block, x: i32, y: i32, z: i32) {
-    let own = family(block);
-    let [north, south, east, west] = SIDES.map(|(dx, dz)| {
+    let sides = SIDES.map(|(dx, dz)| {
         editor
             .get_block_absolute(x + dx, y, z + dz)
             .is_some_and(|b| joins(block, b))
     });
-    let joined = if is_bars_or_pane(block) || own == Some(Family::Fence) {
+    editor.set_block_with_properties_absolute(joined(block, sides), x, y, z, Some(&[block]), None);
+}
+
+/// A wall, fence, bar or pane joined on the given north, south, east and west sides.
+pub(crate) fn joined(block: Block, [north, south, east, west]: [bool; 4]) -> BlockWithProperties {
+    if is_bars_or_pane(block) || family(block) == Some(Family::Fence) {
         connected_fence(block, north, south, east, west)
     } else {
         connected_wall(block, north, south, east, west)
-    };
-    editor.set_block_with_properties_absolute(joined, x, y, z, Some(&[block]), None);
+    }
 }
 
 fn flag(v: bool) -> Value {

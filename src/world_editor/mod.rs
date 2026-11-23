@@ -2018,6 +2018,12 @@ impl<'a> WorldEditor<'a> {
         crate::climate::Climate::classify(self.anchor_bbox())
     }
 
+    /// Blocks per real metre of terrain height, `None` without elevation or with a bent top.
+    pub fn elevation_blocks_per_meter(&self) -> Option<f64> {
+        let affine = self.ground.as_ref()?.elevation_affine()?;
+        affine.soft_top.is_none().then_some(affine.blocks_per_meter)
+    }
+
     /// Get the effective ground level at a world coordinate.
     ///
     /// Checks the road-surface override map first so that a later

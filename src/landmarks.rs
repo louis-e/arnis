@@ -2,14 +2,15 @@
 //! Matched by Wikidata QID so a model only replaces that one object, and placed
 //! from the anchor lat/lon because ways get clipped to the selected area.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use colored::Colorize;
+use fastnbt::Value;
 
 use crate::args::Args;
 use crate::block_definitions::{
-    Block, BlockWithProperties, AIR, GLASS, GREEN_STAINED_HARDENED_CLAY, GREEN_WOOL, STONE,
-    WHITE_CONCRETE,
+    Block, BlockWithProperties, AIR, LIGHT_GRAY_CONCRETE, POLISHED_BASALT, STONE,
 };
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
@@ -27,6 +28,10 @@ enum Source {
     /// the terrain one by one, and each taller part rests on the highest ground it meets, its
     /// footings carried down to the ground under them.
     OnTerrain(fn() -> PalettizedSchematic),
+    /// A gzipped Sponge `.schem` placed as `OnTerrain` is.
+    SchemOnTerrain(&'static [u8]),
+    /// A `.schem` of terrain itself, placed as `Schem` only where the ground keeps its real height.
+    Terrain(&'static [u8]),
 }
 
 /// One bundled landmark model.
@@ -68,75 +73,155 @@ const LANDMARKS: &[Landmark] = &[
     Landmark {
         name: "Olympiastadion München",
         qid: "Q131610",
-        osm_ids: &[("way", 419_656_920)],
+        // The stadium and the eight concrete backstay anchors the model builds.
+        osm_ids: &[
+            ("way", 419_656_920),
+            ("way", 117_479_842),
+            ("way", 117_479_843),
+            ("way", 117_479_845),
+            ("way", 117_479_850),
+            ("way", 117_479_852),
+            ("way", 117_479_855),
+            ("way", 117_479_856),
+            ("way", 117_479_858),
+        ],
         model: Source::Schem(include_bytes!(
             "../assets/structures/landmarks/olympiastadion_munich.schem"
         )),
-        // Centre of the leisure=stadium footprint; model bowl 230x261 vs 241x260 m.
-        lat: 48.173_101_2,
-        lon: 11.546_483_3,
-        anchor_x: 224.5,
-        anchor_z: 238.0,
-        // Pitch slab, with 12 layers of below-grade structure under it.
-        ground_y: 12,
-        ground_offset: -20,
-        // The tribune ring encloses track and pitch, so filling it gives the bowl.
-        interior_marker: &[GREEN_WOOL, GREEN_STAINED_HARDENED_CLAY],
-        ground_overlap: 10,
+        // Origin of the model's laser survey frame, 4 m WSW of the field centre; true north.
+        lat: 48.173_102_3,
+        lon: 11.546_496_1,
+        anchor_x: 189.5,
+        anchor_z: 201.5,
+        // The pitch, 8.3 m under the median ground round the bowl.
+        ground_y: 3,
+        ground_offset: -9,
+        // The ring's fill, moat, booth and tunnels; filling the enclosed ring gives the bowl.
+        interior_marker: &[LIGHT_GRAY_CONCRETE],
+        // Keeps the outer walkway's rim, so its edge meets the terrain.
+        ground_overlap: 1,
         // Stops short of the retail units 155 m east and the roofs 210 m north.
         suppress_half_x: 135.0,
         suppress_half_z: 145.0,
-        reach_m: 240,
-        height: 76,
+        reach_m: 217,
+        height: 84,
     },
     Landmark {
         name: "Olympiahalle",
         qid: "Q48849",
-        osm_ids: &[("way", 303_099_272)],
+        // The hall, its roof and connectors, and the mapped cable anchors it builds.
+        osm_ids: &[
+            ("way", 303_099_272),
+            ("way", 15_805_226),
+            ("way", 302_726_370),
+            ("way", 117_477_621),
+            ("way", 117_470_701),
+            ("way", 117_468_801),
+            ("way", 117_468_806),
+            ("way", 117_470_696),
+            ("way", 117_470_697),
+            ("way", 117_470_698),
+            ("way", 117_470_700),
+            ("way", 117_470_703),
+            ("way", 117_470_705),
+            ("way", 117_470_707),
+            ("way", 117_470_708),
+            ("way", 117_470_709),
+            ("way", 117_470_711),
+            ("way", 117_470_712),
+            ("way", 117_470_713),
+            ("way", 117_470_714),
+            ("way", 117_477_617),
+            ("way", 117_479_853),
+            ("way", 117_523_417),
+            ("way", 117_523_419),
+            ("way", 117_524_350),
+            ("way", 118_239_000),
+            ("way", 118_241_446),
+            ("way", 118_241_447),
+            ("way", 118_241_448),
+            ("way", 118_241_449),
+            ("way", 118_241_450),
+            ("way", 118_241_451),
+            ("way", 360_117_190),
+            ("way", 360_117_191),
+            ("way", 360_117_192),
+            ("way", 360_117_193),
+            ("way", 360_117_194),
+            ("way", 360_341_546),
+            ("way", 360_341_549),
+            ("way", 360_341_552),
+            ("way", 360_341_554),
+            ("way", 360_341_560),
+            ("way", 360_341_561),
+            ("way", 360_341_564),
+        ],
         model: Source::Schem(include_bytes!(
             "../assets/structures/landmarks/olympiahalle_munich.schem"
         )),
-        // Fitted by overlapping the model body with the OSM polygon: 16847/16860 m2.
-        lat: 48.174_905_8,
-        lon: 11.550_030_8,
-        anchor_x: 115.0,
-        anchor_z: 130.0,
-        // Terrain-following base; its columns want to rest on Y -52.
-        ground_y: 0,
-        ground_offset: -9,
-        // The white cladding wraps the hall; roof cables outside stay buried.
-        interior_marker: &[WHITE_CONCRETE],
+        // Centroid of the mapped outline; roof, masts and anchors at their laser heights.
+        lat: 48.174_924_8,
+        lon: 11.550_061_4,
+        anchor_x: 222.2,
+        anchor_z: 176.3,
+        // The layer of the laser's median ground over the sampled grid.
+        ground_y: 13,
+        ground_offset: 0,
+        // A sill under every glass-wall column rings exactly the mapped outline.
+        interior_marker: &[POLISHED_BASALT],
         ground_overlap: 0,
-        // Takes in the admin wing but not the Kleine Olympiahalle 168 m east.
-        suppress_half_x: 95.0,
-        suppress_half_z: 75.0,
-        reach_m: 160,
-        height: 70,
+        // Short of the admin office and the retail unit, which are not modelled.
+        suppress_half_x: 60.0,
+        suppress_half_z: 50.0,
+        reach_m: 238,
+        height: 61,
     },
     Landmark {
         name: "Olympia-Schwimmhalle",
         qid: "Q3882013",
-        osm_ids: &[("way", 227_012_665)],
+        // The hall, its roof and connector to the Olympiahalle, the lake mast, cables and anchors.
+        osm_ids: &[
+            ("way", 227_012_665),
+            ("way", 15_805_217),
+            ("way", 117_468_809),
+            ("way", 117_470_710),
+            ("way", 117_479_859),
+            ("way", 118_153_987),
+            ("way", 118_153_988),
+            ("way", 118_153_989),
+            ("way", 118_153_990),
+            ("way", 118_153_991),
+            ("way", 118_153_992),
+            ("way", 118_153_993),
+            ("way", 118_161_792),
+            ("way", 118_161_796),
+            ("way", 269_819_552),
+            ("way", 117_468_804),
+            ("way", 117_468_800),
+            ("way", 117_468_805),
+            ("way", 117_468_808),
+            ("way", 117_468_810),
+            ("way", 360_117_188),
+            ("way", 360_117_189),
+            ("way", 360_341_557),
+        ],
         model: Source::Schem(include_bytes!(
             "../assets/structures/landmarks/olympia_schwimmhalle_munich.schem"
         )),
-        // The glazed facade encloses 83x124 blocks against the real 82x123 m.
-        lat: 48.173_572_3,
-        lon: 11.551_479_7,
-        anchor_x: 99.0,
-        anchor_z: 126.5,
-        // Terrain-following base. The sampled ground reads high because the hall
-        // is on a rise while its cables anchor on the lower lawn.
-        ground_y: 0,
-        ground_offset: -6,
-        // Outside the facade ring it is roof cable standing in the park.
-        interior_marker: &[GLASS],
-        // No overlap, or a fringe of terrain would be left inside the hall.
+        // Centroid of the mapped outline; roof, mast and anchors at their laser heights.
+        lat: 48.173_552_8,
+        lon: 11.551_536_7,
+        anchor_x: 97.9,
+        anchor_z: 114.9,
+        ground_y: 12,
+        ground_offset: 0,
+        // A sill under every glass-wall column rings exactly the mapped outline.
+        interior_marker: &[POLISHED_BASALT],
         ground_overlap: 0,
-        suppress_half_x: 50.0,
-        suppress_half_z: 70.0,
-        reach_m: 160,
-        height: 79,
+        suppress_half_x: 40.0,
+        suppress_half_z: 55.0,
+        reach_m: 135,
+        height: 69,
     },
     Landmark {
         name: "Olympiaturm",
@@ -145,27 +230,27 @@ const LANDMARKS: &[Landmark] = &[
         model: Source::Schem(include_bytes!(
             "../assets/structures/landmarks/olympiaturm_munich.schem"
         )),
-        // Centre of the tower's OSM footprint.
-        lat: 48.174_409_5,
-        lon: 11.553_740_1,
-        anchor_x: 11.5,
-        anchor_z: 13.5,
+        // Shaft axis fitted to the laser points.
+        lat: 48.174_417_1,
+        lon: 11.553_755_7,
+        anchor_x: 15.5,
+        anchor_z: 15.5,
         ground_y: 0,
         ground_offset: 0,
-        // All structure, no hole.
         interior_marker: &[],
         ground_overlap: 0,
+        // Not the visitor entrance building 27 m east.
         suppress_half_x: 22.0,
         suppress_half_z: 22.0,
-        reach_m: 30,
-        height: 288,
+        reach_m: 22,
+        height: 291,
     },
     Landmark {
         name: "Elizabeth Tower",
         qid: "Q41225",
         osm_ids: &[("way", 123_557_148)],
         model: Source::Built(crate::structures::elizabeth_tower::build),
-        // Centre of the mapped outline. That turns 6 degrees off north; the model stands square.
+        // Centre of the mapped outline; standing square to its 6.4 degree turn moves corners ~1 m.
         lat: 51.500_701_2,
         lon: -0.124_573_0,
         anchor_x: 8.5,
@@ -322,6 +407,286 @@ const LANDMARKS: &[Landmark] = &[
         reach_m: 100,
         height: 49,
     },
+    Landmark {
+        name: "Cristo Redentor",
+        qid: "Q79961",
+        // The statue and terrace parts; the stairs down and station escalators stay with OSM.
+        osm_ids: &[
+            ("node", 4_919_986_733),
+            ("relation", 16_147_269),
+            ("way", 105_667_349),
+            ("way", 1_447_517_217),
+            ("way", 1_447_517_218),
+            ("way", 1_447_517_219),
+            ("way", 1_447_517_220),
+            ("way", 1_021_319_646),
+            ("way", 1_021_319_647),
+            ("way", 1_021_319_651),
+            ("way", 1_021_319_652),
+            ("way", 1_021_319_653),
+            ("way", 274_557_377),
+            ("way", 274_562_791),
+        ],
+        model: Source::SchemOnTerrain(include_bytes!(
+            "../assets/structures/landmarks/christ_the_redeemer.schem"
+        )),
+        // The mapped monument node; statue and pedestal face 80.9 degrees, as the mapped octagon.
+        lat: -22.951_917_3,
+        lon: -43.210_458_5,
+        anchor_x: 21.5,
+        anchor_z: 24.5,
+        // Layer 0 is the footing, so every column stands on layer 1 as one part.
+        ground_y: 1,
+        // Puts the platform floor (layer 38) on the summit, which peaks.rs lifts to its mapped height.
+        ground_offset: -38,
+        interior_marker: &[],
+        ground_overlap: 0,
+        suppress_half_x: 20.0,
+        suppress_half_z: 18.0,
+        reach_m: 32,
+        height: 76,
+    },
+    Landmark {
+        name: "Taj Mahal",
+        qid: "Q9141",
+        // The complex way and relation; its 54 mapped parts fall inside the suppress box.
+        osm_ids: &[("way", 375_257_537), ("relation", 11_089_173)],
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/taj_mahal.schem"
+        )),
+        // Mid-complex on its axis, 163 m south of the dome, so the box stays off the river.
+        lat: 27.173_538_0,
+        lon: 78.042_100_0,
+        anchor_x: 154.5,
+        anchor_z: 223.5,
+        // Garden turf; the terrace is a metre above it, the river wall 7 layers below.
+        ground_y: 7,
+        ground_offset: -1,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // River wall to great gate, wall to wall; not the forecourt south of the gate.
+        suppress_half_x: 155.0,
+        suppress_half_z: 224.0,
+        reach_m: 275,
+        height: 76,
+    },
+    Landmark {
+        name: "Parthenon",
+        qid: "Q10288",
+        // Temple, Acropolis relation and corner parts; the box spares the site sheds 8 m south.
+        osm_ids: &[
+            ("way", 910_010_406),
+            ("relation", 4_423_249),
+            ("way", 386_428_494),
+            ("way", 386_428_497),
+            ("way", 386_428_499),
+            ("way", 386_428_502),
+            ("way", 386_428_503),
+            ("way", 386_428_506),
+            ("way", 386_428_509),
+            ("way", 386_428_510),
+            ("way", 386_428_512),
+            ("way", 386_428_519),
+            ("way", 386_428_521),
+            ("way", 386_428_524),
+            ("way", 386_428_527),
+            ("way", 386_428_530),
+            ("way", 386_428_540),
+            ("way", 386_428_542),
+            ("way", 386_428_543),
+            ("way", 386_428_547),
+            ("way", 386_428_549),
+            ("way", 386_428_552),
+            ("way", 386_428_562),
+            ("way", 386_428_564),
+            ("way", 386_428_579),
+            ("way", 386_428_580),
+            ("way", 386_428_590),
+            ("way", 386_428_591),
+            ("way", 386_428_598),
+            ("way", 386_428_600),
+            ("way", 386_428_602),
+            ("way", 386_428_632),
+            ("way", 386_428_644),
+            ("way", 386_428_651),
+            ("way", 386_428_654),
+            ("way", 386_428_655),
+            ("way", 386_428_686),
+            ("way", 386_428_693),
+            ("way", 386_428_708),
+            ("way", 386_428_711),
+            ("way", 386_428_713),
+            ("way", 386_428_720),
+            ("way", 386_428_737),
+            ("way", 386_428_741),
+            ("way", 386_428_742),
+        ],
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/parthenon.schem"
+        )),
+        // Middle of the colonnade; the 46 mapped columns centre within a centimetre of it.
+        lat: 37.971_503_4,
+        lon: 23.726_617_7,
+        anchor_x: 41.0,
+        anchor_z: 27.0,
+        // Buried footing and euthynteria below; the stylobate stays level, so not on terrain.
+        ground_y: 3,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        suppress_half_x: 37.5,
+        suppress_half_z: 20.5,
+        reach_m: 50,
+        height: 18,
+    },
+    Landmark {
+        name: "Arc de Triomphe",
+        qid: "Q64436",
+        osm_ids: &[("way", 226_413_508)],
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/arc_de_triomphe.schem"
+        )),
+        // Middle of the body from IGN LiDAR HD; the model is built at its 25.6 degree turn.
+        lat: 48.873_778_8,
+        lon: 2.295_038_7,
+        anchor_x: 23.784,
+        anchor_z: 29.451,
+        // The paving under the vault is dug in.
+        ground_y: 2,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        suppress_half_x: 26.0,
+        suppress_half_z: 28.0,
+        reach_m: 40,
+        height: 50,
+    },
+    Landmark {
+        name: "Mount Rushmore",
+        qid: "Q83497",
+        // Carving, summit, talus (else grass) and the four head nodes (else statues on the faces).
+        osm_ids: &[
+            ("way", 550_692_883),
+            ("node", 357_100_300),
+            ("way", 823_076_723),
+            ("node", 11_872_642_649),
+            ("node", 11_872_642_650),
+            ("node", 11_872_642_651),
+            ("node", 11_872_642_652),
+        ],
+        model: Source::Terrain(include_bytes!(
+            "../assets/structures/landmarks/mount_rushmore.schem"
+        )),
+        // Middle of the footprint's bounding box, on a block corner; shaped from USGS 3DEP lidar.
+        lat: 43.878_649_3,
+        lon: -103.458_775_4,
+        anchor_x: 68.0,
+        anchor_z: 93.0,
+        // The median ground over the box, 1650 m.
+        ground_y: 41,
+        ground_offset: 0,
+        // Every column is dug out from its lowest block, so carved hollows replace the terrain.
+        interior_marker: &[],
+        ground_overlap: 0,
+        suppress_half_x: 64.0,
+        suppress_half_z: 89.0,
+        reach_m: 116,
+        height: 85,
+    },
+    Landmark {
+        name: "Eiffel Tower",
+        qid: "Q243",
+        // The tower way, which also carries the 3DMR model, and its mapped pillars, floors and parts.
+        osm_ids: &[
+            ("way", 5_013_364),
+            ("way", 69_034_127),
+            ("way", 69_034_135),
+            ("way", 69_034_179),
+            ("way", 69_034_180),
+            ("relation", 4_114_839),
+            ("relation", 4_114_842),
+            ("way", 308_021_389),
+            ("way", 308_145_239),
+            ("way", 308_145_258),
+            ("way", 308_145_259),
+            ("way", 308_687_744),
+            ("way", 308_687_745),
+            ("way", 308_687_748),
+            ("way", 308_687_752),
+            ("way", 308_687_753),
+            ("way", 308_689_164),
+            ("way", 308_689_165),
+            ("way", 308_689_166),
+            ("way", 308_689_167),
+            ("way", 1_462_597_762),
+            ("way", 1_462_597_763),
+            ("way", 1_462_597_764),
+            ("way", 1_462_597_765),
+        ],
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/eiffel_tower.schem"
+        )),
+        // Tower axis from IGN LiDAR HD; the model is built at the real 44.3 degree turn.
+        lat: 48.858_260_0,
+        lon: 2.294_499_8,
+        anchor_x: 92.0,
+        anchor_z: 92.0,
+        // Two layers of buried pier stones.
+        ground_y: 2,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // The pillars and the kiosks under them, not the buildings round the esplanade.
+        suppress_half_x: 66.0,
+        suppress_half_z: 66.0,
+        reach_m: 90,
+        height: 330,
+    },
+    Landmark {
+        name: "Gateway Arch",
+        qid: "Q2027162",
+        // The node carries the QID; the building relation is tagged with the park's QID instead.
+        osm_ids: &[("node", 4_004_558_403), ("relation", 12_813_920)],
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/gateway_arch.schem"
+        )),
+        // Between the legs at plaza level, from the design solid fitted to USGS 3DEP lidar.
+        lat: 38.624_608_0,
+        lon: -90.184_975_7,
+        anchor_x: 37.5,
+        anchor_z: 95.5,
+        // Three layers of leg below the plaza.
+        ground_y: 3,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        suppress_half_x: 37.0,
+        suppress_half_z: 95.0,
+        reach_m: 98,
+        height: 192,
+    },
+    Landmark {
+        name: "Space Needle",
+        qid: "Q5317",
+        osm_ids: &[("way", 12_903_132), ("relation", 19_745_997)],
+        model: Source::Schem(include_bytes!(
+            "../assets/structures/landmarks/space_needle.schem"
+        )),
+        // Tower axis from USGS 3DEP lidar; the mapped way sits a metre west of it.
+        lat: 47.620_503_9,
+        lon: -122.349_283_9,
+        anchor_x: 25.5,
+        anchor_z: 25.5,
+        ground_y: 2,
+        ground_offset: 0,
+        interior_marker: &[],
+        ground_overlap: 0,
+        // The pavilion and halo, not the entry canopy 30 m south.
+        suppress_half_x: 22.0,
+        suppress_half_z: 22.0,
+        reach_m: 23,
+        height: 186,
+    },
 ];
 
 /// A landmark resolved to a spot in this world.
@@ -393,6 +758,11 @@ pub fn tall_models_in(
         .collect()
 }
 
+/// Whether a bundled landmark model stands for this Wikidata QID.
+pub fn has_landmark(qid: &str) -> bool {
+    LANDMARKS.iter().any(|l| l.qid == qid)
+}
+
 /// Whether this run places landmarks: `--props` (else `--no-3d`) allows them, and it builds
 /// objects and buildings.
 pub fn placed(args: &Args) -> bool {
@@ -400,11 +770,13 @@ pub fn placed(args: &Args) -> bool {
 }
 
 /// Resolve the landmarks inside this world and collect what they replace.
+/// `relief` is the terrain's blocks per metre, `None` without elevation.
 pub fn prescan(
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
     llbbox: LLBBox,
     args: &Args,
+    relief: Option<f64>,
 ) -> LandmarkPrescan {
     let mut placements: Vec<LandmarkPlacement> = Vec::new();
     let mut suppressed: HashSet<(&'static str, u64)> = HashSet::new();
@@ -428,6 +800,14 @@ pub fn prescan(
             || world_z + reach < xzbbox.min_z()
             || world_z - reach > xzbbox.max_z()
         {
+            continue;
+        }
+        let true_relief = relief.is_some_and(|bpm| (bpm / args.scale - 1.0).abs() <= 0.02);
+        if matches!(landmark.model, Source::Terrain(_)) && !true_relief {
+            println!(
+                "  Left out {}: it needs the terrain at its real height",
+                landmark.name
+            );
             continue;
         }
 
@@ -582,10 +962,13 @@ struct Model {
 
 impl Model {
     fn load(landmark: &Landmark) -> Result<Self, String> {
-        let parsed = match landmark.model {
-            Source::Schem(bytes) => load_palettized(bytes)?,
+        let mut parsed = match landmark.model {
+            Source::Schem(bytes) | Source::SchemOnTerrain(bytes) | Source::Terrain(bytes) => {
+                load_palettized(bytes)?
+            }
             Source::Built(build) | Source::OnTerrain(build) => build(),
         };
+        join_connectables(&mut parsed);
         let mut voxels = parsed.voxels;
         if voxels.is_empty() {
             return Err("no mapped blocks".to_string());
@@ -633,7 +1016,11 @@ impl Model {
             )
         };
 
-        let parts = matches!(landmark.model, Source::OnTerrain(_)).then(|| {
+        let parts = matches!(
+            landmark.model,
+            Source::OnTerrain(_) | Source::SchemOnTerrain(_)
+        )
+        .then(|| {
             let standing: Vec<bool> = columns
                 .iter()
                 .map(|&(offset, len)| {
@@ -881,10 +1268,20 @@ fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacemen
 
             // Inside the interior this is a hole, so cut down to the model.
             // Outside, cut only what stands where the model breaks through.
+            // A span overhead keeps what stands on the ground under it.
+            let span = column_low > bury_below;
             let clear_from = if model.excavated(model_x, model_z) {
-                column_bottom.min(terrain + 1)
+                if span {
+                    column_bottom
+                } else {
+                    column_bottom.min(terrain + 1)
+                }
             } else if column_top > terrain {
-                terrain + 1
+                if span {
+                    column_bottom.max(terrain + 1)
+                } else {
+                    terrain + 1
+                }
             } else {
                 clear_top
             };
@@ -929,6 +1326,136 @@ fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacemen
             placed
         );
     }
+}
+
+/// The ground offset in blocks, scaled like the model's layers.
+fn scaled_offset(landmark: &Landmark, args: &Args) -> i32 {
+    (f64::from(landmark.ground_offset) * args.scale).round() as i32
+}
+
+/// Joins walls, fences, bars and panes inside the model as a block update would in game.
+fn join_connectables(model: &mut PalettizedSchematic) {
+    use crate::element_processing::connected_blocks::{is_connectable, joined, joins};
+    const SIDES: [(i16, i16); 4] = [(0, -1), (0, 1), (1, 0), (-1, 0)];
+    let cells: HashMap<(i16, i16, i16), u8> = model
+        .voxels
+        .iter()
+        .map(|v| ((v.0, v.1, v.2), v.3))
+        .collect();
+    let mut slots: HashMap<(u8, [bool; 4]), u8> = HashMap::new();
+    let mut palette = model.palette.clone();
+    for v in &mut model.voxels {
+        let authored = &model.palette[v.3 as usize];
+        let block = authored.block;
+        if !is_connectable(block) {
+            continue;
+        }
+        let sides = SIDES.map(|(dx, dz)| {
+            cells.get(&(v.0 + dx, v.1, v.2 + dz)).is_some_and(|&s| {
+                let n = model.palette[s as usize].block;
+                joins(block, n) || sturdy(n)
+            })
+        });
+        let slot = *slots.entry((v.3, sides)).or_insert_with(|| {
+            if palette.len() >= 256 {
+                return v.3;
+            }
+            let mut fresh = joined(block, sides);
+            keep_authored(&mut fresh, authored);
+            palette.push(fresh);
+            (palette.len() - 1) as u8
+        });
+        v.3 = slot;
+    }
+    model.palette = palette;
+}
+
+/// Carries over what joining can't tell: tall wall sides, a raised post, water.
+fn keep_authored(fresh: &mut BlockWithProperties, authored: &BlockWithProperties) {
+    let is = |props: &HashMap<String, Value>, key: &str, want: &str| matches!(props.get(key), Some(Value::String(v)) if v == want);
+    let (Some(Value::Compound(old)), Some(new)) =
+        (authored.properties.as_deref(), fresh.properties.as_mut())
+    else {
+        return;
+    };
+    let Value::Compound(new) = Arc::make_mut(new) else {
+        return;
+    };
+    for side in ["north", "south", "east", "west"] {
+        if is(old, side, "tall") && is(new, side, "low") {
+            new.insert(side.to_string(), Value::String("tall".to_string()));
+        }
+    }
+    for key in ["up", "waterlogged"] {
+        if is(old, key, "true") && new.contains_key(key) {
+            new.insert(key.to_string(), Value::String("true".to_string()));
+        }
+    }
+}
+
+/// A block with full sides that walls, fences and panes join, read from its name.
+fn sturdy(block: Block) -> bool {
+    const THIN: &[&str] = &[
+        "air",
+        "light",
+        "water",
+        "lava",
+        "fire",
+        "soul_fire",
+        "ladder",
+        "rail",
+        "snow",
+        "scaffolding",
+        "anvil",
+        "hopper",
+        "grindstone",
+        "lectern",
+        "chain",
+        "iron_chain",
+        "cobweb",
+        "vine",
+        "cauldron",
+        "chest",
+        "bell",
+        "short_grass",
+        "tall_grass",
+        "fern",
+        "large_fern",
+        "dead_bush",
+        "lantern",
+        "soul_lantern",
+        "torch",
+        "end_rod",
+        "lightning_rod",
+        "flower_pot",
+        "cactus",
+        "bamboo",
+        "sugar_cane",
+        "lily_pad",
+        "kelp",
+        "seagrass",
+        "poppy",
+        "dandelion",
+        "allium",
+        "cornflower",
+        "sunflower",
+        "lilac",
+        "peony",
+        "lily_of_the_valley",
+        "barrier",
+        "carved_pumpkin",
+        "jack_o_lantern",
+        "melon",
+        "pumpkin",
+    ];
+    const THIN_KINDS: &[&str] = &[
+        "slab", "stairs", "wall", "fence", "gate", "pane", "bars", "trapdoor", "door", "carpet",
+        "button", "plate", "torch", "banner", "sign", "leaves", "head", "skull", "bed", "candle",
+        "pickle", "sapling", "tulip", "orchid", "bluet", "daisy", "bush", "flower", "box",
+    ];
+    let name = block.name();
+    let kind = name.rsplit('_').next().unwrap_or(name);
+    !(THIN.contains(&name) || THIN_KINDS.contains(&kind) || name.starts_with("potted_"))
 }
 
 /// Places a model on terrain: draped columns on their own ground, each part on the highest
@@ -981,7 +1508,7 @@ fn stand_on_terrain(
                     (bearing, _) => bearing,
                 },
             };
-            let base = ground + 1 + landmark.ground_offset;
+            let base = ground + 1 + scaled_offset(landmark, args);
             let (low, layers) = column_layers(&columns, landmark.ground_y, args.scale, palette);
             let bottom = base + low;
             let top = bottom + layers.len() as i32;
@@ -1136,7 +1663,7 @@ fn base_ground_y(editor: &WorldEditor, args: &Args, placement: &LandmarkPlacemen
         }
     }
     levels.sort_unstable();
-    let base = levels[levels.len() / 2] + 1 + landmark.ground_offset;
+    let base = levels[levels.len() / 2] + 1 + scaled_offset(landmark, args);
     // One course above the lowest writable layer so the ground layer exists.
     base.max(crate::world_editor::min_y() + 2)
 }
@@ -1216,7 +1743,9 @@ mod tests {
     fn every_landmark_height_is_its_models() {
         for l in LANDMARKS {
             let model = match l.model {
-                Source::Schem(bytes) => load_palettized(bytes).unwrap(),
+                Source::Schem(bytes) | Source::SchemOnTerrain(bytes) | Source::Terrain(bytes) => {
+                    load_palettized(bytes).unwrap()
+                }
                 Source::Built(build) | Source::OnTerrain(build) => build(),
             };
             let top = model.voxels.iter().map(|v| i32::from(v.1)).max().unwrap() + 1;
@@ -1346,6 +1875,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn joins_read_whole_block_names_and_keep_tall_sides() {
+        use crate::block_definitions::{LANTERN, LIGHT, SEA_LANTERN, STONE_BRICK_WALL, WATER};
+        assert!(sturdy(LIGHT_GRAY_CONCRETE) && sturdy(SEA_LANTERN) && sturdy(STONE));
+        assert!(!sturdy(LIGHT) && !sturdy(LANTERN) && !sturdy(WATER) && !sturdy(AIR));
+
+        let tall = BlockWithProperties::new(
+            STONE_BRICK_WALL,
+            Some(Value::Compound(HashMap::from([
+                ("east".to_string(), Value::String("tall".to_string())),
+                ("up".to_string(), Value::String("true".to_string())),
+            ]))),
+        );
+        let mut model = PalettizedSchematic {
+            palette: vec![tall, BlockWithProperties::simple(STONE)],
+            voxels: vec![(0, 0, 0, 0), (1, 0, 0, 1)],
+            width: 2,
+            length: 1,
+        };
+        join_connectables(&mut model);
+        let props = model.palette[model.voxels[0].3 as usize].properties.clone();
+        let Some(Value::Compound(props)) = props.as_deref().cloned() else {
+            panic!("no properties");
+        };
+        let get = |k: &str| props.get(k).cloned();
+        assert_eq!(get("east"), Some(Value::String("tall".to_string())));
+        assert_eq!(get("west"), Some(Value::String("none".to_string())));
+        assert_eq!(get("up"), Some(Value::String("true".to_string())));
+    }
+
     // The swim hall's glazed façade is a closed ring, so hole-filling it must
     // yield the building interior while the roof cables outside stay buried.
     #[test]
@@ -1366,7 +1925,7 @@ mod tests {
         let facade: Vec<(i32, i32)> = model
             .voxels
             .iter()
-            .filter(|v| model.palette[v.3 as usize].block == GLASS)
+            .filter(|v| model.palette[v.3 as usize].block == POLISHED_BASALT)
             .map(|v| (i32::from(v.0), i32::from(v.2)))
             .collect();
         let (fx0, fx1) = (

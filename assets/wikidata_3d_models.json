@@ -54,14 +54,6 @@
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆"
     },
-    "Q10288": {
-      "label": "Parthenon",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Parthenon.stl",
-      "license": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft",
-      "height_m": 13.72
-    },
     "Q104774507": {
       "label": "Q104774507",
       "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%E9%81%93%E6%A8%99%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%97%AD%E5%8C%BA%E4%B8%87%E9%A8%8E%E3%81%8C%E5%8E%9F%EF%BC%89.stl",
@@ -117,13 +109,6 @@
       "license": "CC0",
       "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
       "artist": "Leochares(?). Digitization: Statens Museum for Kunst."
-    },
-    "Q131013": {
-      "label": "Acropolis of Athens",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Acropolis%203D.stl",
-      "license": "CC0",
-      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
-      "artist": "SebaK from blenderswap.com"
     },
     "Q136396319": {
       "label": "Best Friends Forever",
@@ -412,14 +397,6 @@
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "Rinaldum"
     },
-    "Q2027162": {
-      "label": "Gateway Arch",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Gateway%20Arch.stl",
-      "license": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft",
-      "height_m": 192.024378
-    },
     "Q20640455": {
       "label": "Lion of Al-lāt",
       "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Asad%20Al-Lat.stl",
@@ -559,14 +536,6 @@
       "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
       "artist": "-karlos-"
     },
-    "Q5317": {
-      "label": "Space Needle",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Space%20Needle.stl",
-      "license": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft",
-      "height_m": 184.0
-    },
     "Q54384": {
       "label": "Discovery",
       "url": "https://commons.wikimedia.org/wiki/Special:FilePath/SShuttle%20Exterior-Medium%20resolution%20%28Space%20Shuttle%20Discovery%29%2002.stl",
@@ -608,14 +577,6 @@
       "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Gassendicrater3Xv.stl",
       "license": "Public domain",
       "artist": "Northeast Planetary Data Center, NASA RPIF System, Seth S Horowitz & Peter H. Schultz"
-    },
-    "Q64436": {
-      "label": "Arc de Triomphe",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Arc%20de%20Triomphe.stl",
-      "license": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft",
-      "height_m": 49.54
     },
     "Q669194": {
       "label": "Monastery of Leyre",

@@ -46,6 +46,8 @@ static INDEX: Lazy<HashMap<String, IndexEntry>> = Lazy::new(|| {
         serde_json::from_str(RAW_MANUAL).expect("wikidata_3d_models_manual.json malformed");
     let mut merged = auto.models;
     merged.extend(manual.models);
+    // A hand-built landmark stands in for these, so their meshes never return as a fallback.
+    merged.retain(|qid, _| !crate::landmarks::has_landmark(qid));
     merged
 });
 
