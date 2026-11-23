@@ -3,8 +3,10 @@
 //! from the anchor lat/lon because ways get clipped to the selected area.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use colored::Colorize;
+use fastnbt::Value;
 
 use crate::args::Args;
 use crate::block_definitions::{
@@ -28,9 +30,7 @@ enum Source {
     OnTerrain(fn() -> PalettizedSchematic),
     /// A gzipped Sponge `.schem` placed as `OnTerrain` is.
     SchemOnTerrain(&'static [u8]),
-    /// A gzipped Sponge `.schem` that is a piece of the terrain itself, placed as `Schem`. It
-    /// only meets the generated ground where that keeps its real vertical scale, so elsewhere it
-    /// is left out.
+    /// A `.schem` of terrain itself, placed as `Schem` only where the ground keeps its real height.
     Terrain(&'static [u8]),
 }
 
@@ -93,8 +93,7 @@ const LANDMARKS: &[Landmark] = &[
         lon: 11.546_496_1,
         anchor_x: 189.5,
         anchor_z: 201.5,
-        // The pitch surface, which lies 8.3 m under the median ground round the bowl. The
-        // loader drops the schematic's empty bottom layer, so this is its layer 4.
+        // The pitch, 8.3 m under the median ground round the bowl.
         ground_y: 3,
         ground_offset: -9,
         // The ring's fill, moat, booth and tunnels; filling the enclosed ring gives the bowl.
@@ -214,7 +213,6 @@ const LANDMARKS: &[Landmark] = &[
         lon: 11.551_536_7,
         anchor_x: 97.9,
         anchor_z: 114.9,
-        // Layer 13 of the schematic, whose empty bottom layer the loader drops.
         ground_y: 12,
         ground_offset: 0,
         // A sill under every glass-wall column rings exactly the mapped outline.
@@ -252,8 +250,7 @@ const LANDMARKS: &[Landmark] = &[
         qid: "Q41225",
         osm_ids: &[("way", 123_557_148)],
         model: Source::Built(crate::structures::elizabeth_tower::build),
-        // Centre of the mapped outline, which turns 6.4 degrees off north. The model stands square:
-        // that moves its corners about a metre, where a shear would jog every face and dial.
+        // Centre of the mapped outline; standing square to its 6.4 degree turn moves corners ~1 m.
         lat: 51.500_701_2,
         lon: -0.124_573_0,
         anchor_x: 8.5,
@@ -413,8 +410,7 @@ const LANDMARKS: &[Landmark] = &[
     Landmark {
         name: "Cristo Redentor",
         qid: "Q79961",
-        // The statue and the terrace parts the model builds; the stairs down and the station
-        // escalators stay with OSM.
+        // The statue and terrace parts; the stairs down and station escalators stay with OSM.
         osm_ids: &[
             ("node", 4_919_986_733),
             ("relation", 16_147_269),
@@ -477,8 +473,7 @@ const LANDMARKS: &[Landmark] = &[
     Landmark {
         name: "Parthenon",
         qid: "Q10288",
-        // The temple, the Acropolis relation whose mesh it stands in for, and the corner parts
-        // outside the box, which is kept tight to spare the site sheds 8 m south.
+        // Temple, Acropolis relation and corner parts; the box spares the site sheds 8 m south.
         osm_ids: &[
             ("way", 910_010_406),
             ("relation", 4_423_249),
@@ -569,8 +564,7 @@ const LANDMARKS: &[Landmark] = &[
     Landmark {
         name: "Mount Rushmore",
         qid: "Q83497",
-        // The carving outline and summit, the talus (else drawn as grass) and the four head
-        // nodes (else statues stood on the faces).
+        // Carving, summit, talus (else grass) and the four head nodes (else statues on the faces).
         osm_ids: &[
             ("way", 550_692_883),
             ("node", 357_100_300),
@@ -588,8 +582,7 @@ const LANDMARKS: &[Landmark] = &[
         lon: -103.458_775_4,
         anchor_x: 68.0,
         anchor_z: 93.0,
-        // The layer of the median ground over the box, 1650 m. The loader drops the schematic's
-        // 22 empty bottom layers, so this is its layer 63 and layer 0 is 1610 m.
+        // The median ground over the box, 1650 m.
         ground_y: 41,
         ground_offset: 0,
         // Every column is dug out from its lowest block, so carved hollows replace the terrain.
@@ -777,11 +770,13 @@ pub fn placed(args: &Args) -> bool {
 }
 
 /// Resolve the landmarks inside this world and collect what they replace.
+/// `relief` is the terrain's blocks per metre, `None` without elevation.
 pub fn prescan(
     elements: &[ProcessedElement],
     xzbbox: &XZBBox,
     llbbox: LLBBox,
     args: &Args,
+    relief: Option<f64>,
 ) -> LandmarkPrescan {
     let mut placements: Vec<LandmarkPlacement> = Vec::new();
     let mut suppressed: HashSet<(&'static str, u64)> = HashSet::new();
@@ -805,6 +800,14 @@ pub fn prescan(
             || world_z + reach < xzbbox.min_z()
             || world_z - reach > xzbbox.max_z()
         {
+            continue;
+        }
+        let true_relief = relief.is_some_and(|bpm| (bpm / args.scale - 1.0).abs() <= 0.02);
+        if matches!(landmark.model, Source::Terrain(_)) && !true_relief {
+            println!(
+                "  Left out {}: it needs the terrain at its real height",
+                landmark.name
+            );
             continue;
         }
 
@@ -1178,15 +1181,6 @@ impl LandmarkPrescan {
 
 fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacement) {
     let landmark = placement.landmark;
-    if matches!(landmark.model, Source::Terrain(_))
-        && (editor.ground_blocks_per_meter() / args.scale - 1.0).abs() > 0.02
-    {
-        println!(
-            "  Left out {}: the terrain here is scaled vertically, so it would not meet it",
-            landmark.name
-        );
-        return;
-    }
     let model = match Model::load(landmark) {
         Ok(m) => m,
         Err(e) => {
@@ -1334,8 +1328,12 @@ fn place_one(editor: &mut WorldEditor, args: &Args, placement: &LandmarkPlacemen
     }
 }
 
-/// Joins walls, fences, bars and panes to their neighbours inside the model as a block update
-/// would in game; schematics often store them as bare posts, which chunks keep until updated.
+/// The ground offset in blocks, scaled like the model's layers.
+fn scaled_offset(landmark: &Landmark, args: &Args) -> i32 {
+    (f64::from(landmark.ground_offset) * args.scale).round() as i32
+}
+
+/// Joins walls, fences, bars and panes inside the model as a block update would in game.
 fn join_connectables(model: &mut PalettizedSchematic) {
     use crate::element_processing::connected_blocks::{is_connectable, joined, joins};
     const SIDES: [(i16, i16); 4] = [(0, -1), (0, 1), (1, 0), (-1, 0)];
@@ -1347,7 +1345,8 @@ fn join_connectables(model: &mut PalettizedSchematic) {
     let mut slots: HashMap<(u8, [bool; 4]), u8> = HashMap::new();
     let mut palette = model.palette.clone();
     for v in &mut model.voxels {
-        let block = model.palette[v.3 as usize].block;
+        let authored = &model.palette[v.3 as usize];
+        let block = authored.block;
         if !is_connectable(block) {
             continue;
         }
@@ -1361,7 +1360,9 @@ fn join_connectables(model: &mut PalettizedSchematic) {
             if palette.len() >= 256 {
                 return v.3;
             }
-            palette.push(joined(block, sides));
+            let mut fresh = joined(block, sides);
+            keep_authored(&mut fresh, authored);
+            palette.push(fresh);
             (palette.len() - 1) as u8
         });
         v.3 = slot;
@@ -1369,50 +1370,92 @@ fn join_connectables(model: &mut PalettizedSchematic) {
     model.palette = palette;
 }
 
-/// A full block that walls, fences and panes join, read from its name.
+/// Carries over what joining can't tell: tall wall sides, a raised post, water.
+fn keep_authored(fresh: &mut BlockWithProperties, authored: &BlockWithProperties) {
+    let is = |props: &HashMap<String, Value>, key: &str, want: &str| matches!(props.get(key), Some(Value::String(v)) if v == want);
+    let (Some(Value::Compound(old)), Some(new)) =
+        (authored.properties.as_deref(), fresh.properties.as_mut())
+    else {
+        return;
+    };
+    let Value::Compound(new) = Arc::make_mut(new) else {
+        return;
+    };
+    for side in ["north", "south", "east", "west"] {
+        if is(old, side, "tall") && is(new, side, "low") {
+            new.insert(side.to_string(), Value::String("tall".to_string()));
+        }
+    }
+    for key in ["up", "waterlogged"] {
+        if is(old, key, "true") && new.contains_key(key) {
+            new.insert(key.to_string(), Value::String("true".to_string()));
+        }
+    }
+}
+
+/// A block with full sides that walls, fences and panes join, read from its name.
 fn sturdy(block: Block) -> bool {
-    const PARTIAL: &[&str] = &[
+    const THIN: &[&str] = &[
         "air",
-        "slab",
-        "stairs",
-        "wall",
-        "fence",
-        "pane",
-        "bars",
-        "chain",
-        "trapdoor",
-        "door",
-        "carpet",
-        "button",
-        "plate",
-        "torch",
-        "lantern",
-        "rod",
-        "banner",
-        "sign",
         "light",
+        "water",
+        "lava",
         "fire",
-        "rail",
+        "soul_fire",
         "ladder",
-        "pot",
-        "leaves",
-        "grass",
-        "fern",
-        "flower",
+        "rail",
         "snow",
         "scaffolding",
         "anvil",
         "hopper",
         "grindstone",
         "lectern",
-        "pickle",
-        "head",
-        "skull",
-        "bed",
-        "candle",
+        "chain",
+        "iron_chain",
+        "cobweb",
+        "vine",
+        "cauldron",
+        "chest",
+        "bell",
+        "short_grass",
+        "tall_grass",
+        "fern",
+        "large_fern",
+        "dead_bush",
+        "lantern",
+        "soul_lantern",
+        "torch",
+        "end_rod",
+        "lightning_rod",
+        "flower_pot",
+        "cactus",
+        "bamboo",
+        "sugar_cane",
+        "lily_pad",
+        "kelp",
+        "seagrass",
+        "poppy",
+        "dandelion",
+        "allium",
+        "cornflower",
+        "sunflower",
+        "lilac",
+        "peony",
+        "lily_of_the_valley",
+        "barrier",
+        "carved_pumpkin",
+        "jack_o_lantern",
+        "melon",
+        "pumpkin",
+    ];
+    const THIN_KINDS: &[&str] = &[
+        "slab", "stairs", "wall", "fence", "gate", "pane", "bars", "trapdoor", "door", "carpet",
+        "button", "plate", "torch", "banner", "sign", "leaves", "head", "skull", "bed", "candle",
+        "pickle", "sapling", "tulip", "orchid", "bluet", "daisy", "bush", "flower", "box",
     ];
     let name = block.name();
-    !PARTIAL.iter().any(|p| name.contains(p))
+    let kind = name.rsplit('_').next().unwrap_or(name);
+    !(THIN.contains(&name) || THIN_KINDS.contains(&kind) || name.starts_with("potted_"))
 }
 
 /// Places a model on terrain: draped columns on their own ground, each part on the highest
@@ -1465,7 +1508,7 @@ fn stand_on_terrain(
                     (bearing, _) => bearing,
                 },
             };
-            let base = ground + 1 + landmark.ground_offset;
+            let base = ground + 1 + scaled_offset(landmark, args);
             let (low, layers) = column_layers(&columns, landmark.ground_y, args.scale, palette);
             let bottom = base + low;
             let top = bottom + layers.len() as i32;
@@ -1620,7 +1663,7 @@ fn base_ground_y(editor: &WorldEditor, args: &Args, placement: &LandmarkPlacemen
         }
     }
     levels.sort_unstable();
-    let base = levels[levels.len() / 2] + 1 + landmark.ground_offset;
+    let base = levels[levels.len() / 2] + 1 + scaled_offset(landmark, args);
     // One course above the lowest writable layer so the ground layer exists.
     base.max(crate::world_editor::min_y() + 2)
 }
@@ -1830,6 +1873,36 @@ mod tests {
                 .any(|&(x, z)| !model.excavated(i32::from(x), i32::from(z))),
             "ground_overlap must reach in under the tribunes"
         );
+    }
+
+    #[test]
+    fn joins_read_whole_block_names_and_keep_tall_sides() {
+        use crate::block_definitions::{LANTERN, LIGHT, SEA_LANTERN, STONE_BRICK_WALL, WATER};
+        assert!(sturdy(LIGHT_GRAY_CONCRETE) && sturdy(SEA_LANTERN) && sturdy(STONE));
+        assert!(!sturdy(LIGHT) && !sturdy(LANTERN) && !sturdy(WATER) && !sturdy(AIR));
+
+        let tall = BlockWithProperties::new(
+            STONE_BRICK_WALL,
+            Some(Value::Compound(HashMap::from([
+                ("east".to_string(), Value::String("tall".to_string())),
+                ("up".to_string(), Value::String("true".to_string())),
+            ]))),
+        );
+        let mut model = PalettizedSchematic {
+            palette: vec![tall, BlockWithProperties::simple(STONE)],
+            voxels: vec![(0, 0, 0, 0), (1, 0, 0, 1)],
+            width: 2,
+            length: 1,
+        };
+        join_connectables(&mut model);
+        let props = model.palette[model.voxels[0].3 as usize].properties.clone();
+        let Some(Value::Compound(props)) = props.as_deref().cloned() else {
+            panic!("no properties");
+        };
+        let get = |k: &str| props.get(k).cloned();
+        assert_eq!(get("east"), Some(Value::String("tall".to_string())));
+        assert_eq!(get("west"), Some(Value::String("none".to_string())));
+        assert_eq!(get("up"), Some(Value::String("true".to_string())));
     }
 
     // The swim hall's glazed façade is a closed ring, so hole-filling it must
