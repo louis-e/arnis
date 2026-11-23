@@ -21,11 +21,14 @@ const DEFENCES: &[&str] = &["citywalls", "city_wall", "castle_wall"];
 /// castle stone, `palace` in the grounds of a palace or manor.
 pub(crate) const CASTLE_GROUNDS_TAG: &str = "arnis:castle_grounds";
 
+/// The square blocks of castle grounds, measured on the whole of them before clipping.
+pub(crate) const GROUNDS_AREA_TAG: &str = "arnis:grounds_area";
+
 /// `historic` values of the grounds a castle's buildings stand in.
 const CASTLE_GROUNDS: &[&str] = &["castle", "fort", "fortress"];
 
 /// `castle_type` values of a residence rather than a stronghold.
-const PALACES: &[&str] = &[
+pub(crate) const PALACES: &[&str] = &[
     "palace",
     "stately",
     "manor",
@@ -86,11 +89,7 @@ const CASTLE_TOURISM: &[&str] = &["museum", "attraction", "gallery", "viewpoint"
 /// None mapped as timber, steel or glass is, nor a tower of another kind such as a belfry.
 pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
     use crate::element_processing::area_layout::{interior_point, point_in_rings};
-    let is_grounds = |tags: &HashMap<String, String>| {
-        tag(tags, "historic").is_some_and(|h| CASTLE_GROUNDS.contains(&h))
-            && !tags.contains_key("building")
-            && !tags.contains_key("building:part")
-    };
+    let is_grounds = is_castle_grounds;
     struct Grounds {
         bounds: (i32, i32, i32, i32),
         rings: Vec<Vec<ProcessedNode>>,
@@ -134,17 +133,11 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
         let bounds = nodes.fold((first.x, first.z, first.x, first.z), |b, n| {
             (b.0.min(n.x), b.1.min(n.z), b.2.max(n.x), b.3.max(n.z))
         });
-        // A ring the area cuts carries the clipper's nodes, or stays open.
-        let whole = outer.iter().chain(&inner).all(|r| {
-            nearly_closed(r) && !r.iter().any(|n| crate::clipping::is_invented_node_id(n.id))
-        });
-        let area = whole
-            .then(|| {
-                outer.iter().map(|r| ring_area(r)).sum::<f64>()
-                    - inner.iter().map(|r| ring_area(r)).sum::<f64>()
-            })
-            .filter(|a| *a > 0.0);
         let tags = e.tags();
+        // Measured before clipping where the parser could, so every piece of a world agrees.
+        let area = tag(tags, GROUNDS_AREA_TAG)
+            .and_then(|a| a.parse::<f64>().ok())
+            .or_else(|| rings_area(&outer, &inner));
         grounds.push(Grounds {
             bounds,
             rings: outer.into_iter().chain(inner).collect(),
@@ -175,11 +168,8 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
                 ka.0.total_cmp(&kb.0).then(ka.1.total_cmp(&kb.1))
             })
     };
-    for e in elements.iter_mut() {
-        let ProcessedElement::Way(w) = e else {
-            continue;
-        };
-        let tags = &w.tags;
+    // The mark a building or part with this outline takes, if it is the castle's.
+    let decide = |tags: &HashMap<String, String>, ring: &[ProcessedNode]| -> Option<&'static str> {
         let kind = tag(tags, "building").or_else(|| tag(tags, "building:part"));
         // A keep, a wall tower or a lookout; not a mast, a belfry or a minaret.
         let values = |v: &str| {
@@ -198,12 +188,10 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
             .iter()
             .filter_map(|k| tag(tags, k))
             .any(|m| values(m).iter().any(|v| NOT_MASONRY.contains(&v.as_str())));
-        if !(tower || kind == Some("yes")) || !castle_tower || other_material || !closed(&w.nodes) {
-            continue;
+        if !(tower || kind == Some("yes")) || !castle_tower || other_material || !closed(ring) {
+            return None;
         }
-        let Some(g) = interior_point(&w.nodes).and_then(around) else {
-            continue;
-        };
+        let g = interior_point(ring).and_then(around)?;
         // A part answers for its building. A castle's palace is often its museum.
         let marked = ["historic", "heritage"]
             .iter()
@@ -217,18 +205,76 @@ pub fn mark_castle_grounds(elements: &mut [ProcessedElement], scale: f64) {
         // Grounds of a castle's size lend themselves to all its plain buildings, a castle's
         // park to those marked historic, a fortress town to its gates, towers and walls.
         let own = if g.area.is_some_and(|a| m2(a) <= MAX_GROUNDS_M2) {
-            marked || (!other_use && (tower || m2(ring_area(&w.nodes)) >= MIN_BUILDING_M2))
+            marked || (!other_use && (tower || m2(ring_area(ring)) >= MIN_BUILDING_M2))
         } else if g.fortress {
             fortified
         } else {
             marked || fortified
         };
-        if own {
-            let value = if g.palace { "palace" } else { "fort" };
-            w.tags
-                .insert(CASTLE_GROUNDS_TAG.to_string(), value.to_string());
+        own.then_some(if g.palace { "palace" } else { "fort" })
+    };
+    for e in elements.iter_mut() {
+        let (tags, mark) = match e {
+            ProcessedElement::Way(w) => {
+                let mark = decide(&w.tags, &w.nodes);
+                (&mut w.tags, mark)
+            }
+            // A building mapped as a multipolygon, as a palace round a courtyard is, by its
+            // largest outer ring.
+            ProcessedElement::Relation(r)
+                if r.tags.contains_key("building") || r.tags.contains_key("building:part") =>
+            {
+                let mut outer: Vec<Vec<ProcessedNode>> = r
+                    .members
+                    .iter()
+                    .filter(|m| m.role == ProcessedMemberRole::Outer)
+                    .map(|m| m.way.nodes.clone())
+                    .collect();
+                crate::element_processing::merge_way_segments(&mut outer);
+                let mark = outer
+                    .iter()
+                    .max_by(|a, b| ring_area(a).total_cmp(&ring_area(b)))
+                    .and_then(|ring| decide(&r.tags, ring));
+                (&mut r.tags, mark)
+            }
+            _ => continue,
+        };
+        if let Some(value) = mark {
+            tags.insert(CASTLE_GROUNDS_TAG.to_string(), value.to_string());
         }
     }
+}
+
+/// Castle or fortress grounds: an area of `historic=castle|fort|fortress` that is no building.
+pub(crate) fn is_castle_grounds(tags: &HashMap<String, String>) -> bool {
+    tag(tags, "historic").is_some_and(|h| CASTLE_GROUNDS.contains(&h))
+        && !tags.contains_key("building")
+        && !tags.contains_key("building:part")
+}
+
+/// Square blocks inside outer rings less inner ones, or None where a ring is cut open or the
+/// rings make no sense. Pieces of a ring are joined first.
+pub(crate) fn grounds_area(
+    mut outer: Vec<Vec<ProcessedNode>>,
+    mut inner: Vec<Vec<ProcessedNode>>,
+) -> Option<f64> {
+    crate::element_processing::merge_way_segments(&mut outer);
+    crate::element_processing::merge_way_segments(&mut inner);
+    rings_area(&outer, &inner)
+}
+
+fn rings_area(outer: &[Vec<ProcessedNode>], inner: &[Vec<ProcessedNode>]) -> Option<f64> {
+    // A ring the area cuts carries the clipper's nodes, or stays open.
+    let whole = !outer.is_empty()
+        && outer.iter().chain(inner).all(|r| {
+            nearly_closed(r) && !r.iter().any(|n| crate::clipping::is_invented_node_id(n.id))
+        });
+    whole
+        .then(|| {
+            outer.iter().map(|r| ring_area(r)).sum::<f64>()
+                - inner.iter().map(|r| ring_area(r)).sum::<f64>()
+        })
+        .filter(|a| *a > 0.0)
 }
 
 fn closed(nodes: &[ProcessedNode]) -> bool {
@@ -595,6 +641,53 @@ mod tests {
 
     // A castle's grounds mapped in pieces are measured whole, and a castle within a fortress
     // town is judged by its own grounds.
+    // Grounds measured before clipping keep their size in every piece of a world, and a palace
+    // mapped as a multipolygon round its courtyard is the castle's too.
+    #[test]
+    fn grounds_keep_their_measured_size_and_mark_relation_buildings() {
+        use crate::element_processing::building_test_support::rect_way;
+        use crate::osm_parser::{ProcessedMember, ProcessedRelation, ProcessedWay};
+        use std::sync::Arc;
+        let mut cut = rect_way(1, 0, 0, 60, 60, &[("historic", "castle")]);
+        cut.nodes[1].id = (1 << 62) + 1;
+        cut.tags
+            .insert(GROUNDS_AREA_TAG.to_string(), "3600".to_string());
+        let nodes = [(10, 10), (40, 10), (40, 40), (10, 40), (10, 10)]
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, z))| ProcessedNode {
+                id: 210 + i as u64 % 4,
+                tags: HashMap::new(),
+                x,
+                z,
+            })
+            .collect();
+        let palace = ProcessedRelation {
+            id: 2,
+            tags: tags(&[("type", "multipolygon"), ("building", "yes")]),
+            members: vec![ProcessedMember {
+                role: ProcessedMemberRole::Outer,
+                way: Arc::new(ProcessedWay {
+                    id: 21,
+                    tags: HashMap::new(),
+                    nodes,
+                }),
+            }],
+        };
+        let mut elements = vec![
+            ProcessedElement::Way(cut),
+            ProcessedElement::Relation(palace),
+        ];
+        mark_castle_grounds(&mut elements, 1.0);
+        assert_eq!(
+            elements[1]
+                .tags()
+                .get(CASTLE_GROUNDS_TAG)
+                .map(String::as_str),
+            Some("fort")
+        );
+    }
+
     #[test]
     fn castle_grounds_are_measured_whole_and_the_smallest_wins() {
         use crate::element_processing::building_test_support::rect_way;

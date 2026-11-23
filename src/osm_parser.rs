@@ -1243,6 +1243,7 @@ pub fn parse_osm_data(
         // Clip the way to bbox to reduce node count dramatically
         let mut tags = filter_tags(element.tags.unwrap_or_default());
         inheritance.apply_to_way(element.id, &mut tags);
+        mark_grounds_area(&mut tags, || (vec![nodes.clone()], Vec::new()));
         if let Some(top) = parts_tops.get(&element.id) {
             tags.insert(PARTS_TOP_TAG.to_string(), top.clone());
         }
@@ -1352,6 +1353,21 @@ pub fn parse_osm_data(
         };
         let mut tags = filter_tags(raw_tags.clone());
         inheritance.apply_to_relation(element.id, &mut tags);
+        mark_grounds_area(&mut tags, || {
+            let (mut outer, mut inner) = (Vec::new(), Vec::new());
+            for m in element.members.iter().filter(|m| m.r#type == "way") {
+                // A member the data lacks leaves the size unknown.
+                let Some(way) = ways_map.get(&m.r#ref) else {
+                    return (Vec::new(), Vec::new());
+                };
+                if m.role.trim().eq_ignore_ascii_case("inner") {
+                    inner.push(way.nodes.clone());
+                } else {
+                    outer.push(way.nodes.clone());
+                }
+            }
+            (outer, inner)
+        });
         let tags = &tags;
 
         // Process multipolygons and building relations
@@ -1784,10 +1800,11 @@ pub(crate) fn part_covers_ground(tags: &HashMap<String, String>) -> bool {
 pub(crate) const OUTLINE_PREFIX: &str = "arnis:outline:";
 
 /// Building tags a part is handed under `OUTLINE_PREFIX`.
-const OUTLINE_IDENTITY_KEYS: [&str; 8] = [
+const OUTLINE_IDENTITY_KEYS: [&str; 9] = [
     "building",
     "amenity",
     "historic",
+    "castle_type",
     "heritage",
     "wikidata",
     "tourism",
@@ -1822,7 +1839,9 @@ const MATERIAL_KEYS: [&str; 4] = [
 pub(crate) const KIND_TAKEN_TAG: &str = "arnis:part_kind_taken";
 
 /// Building types a part does not take, as they would draw it as a whole stand of seats.
-const KINDS_NOT_HANDED_DOWN: [&str; 4] = ["stadium", "grandstand", "bleachers", "tribune"];
+/// Building types a part does not take: a stand's parts are built by the stand, and a part
+/// of a canopy is not itself a roof without walls.
+const KINDS_NOT_HANDED_DOWN: [&str; 5] = ["stadium", "grandstand", "bleachers", "tribune", "roof"];
 
 /// The building's own tag `key`, else the one its outline handed down to this part.
 pub(crate) fn building_tag<'a>(tags: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
@@ -1899,14 +1918,19 @@ impl Inherited {
         }
         let pick = |tags: &HashMap<String, String>, keys: &[&str]| -> Vec<(String, String)> {
             keys.iter()
-                .filter_map(|&k| tags.get(k).map(|v| (k.to_string(), v.clone())))
+                .filter_map(|&k| {
+                    tags.get(k)
+                        .filter(|v| !v.trim().is_empty())
+                        .map(|v| (k.to_string(), v.clone()))
+                })
                 .collect()
         };
         // The material and the colour each from the first tag set that maps one.
         let with = |keys: &[&str]| {
-            sources
-                .iter()
-                .find(|t| keys.iter().any(|k| t.contains_key(*k)))
+            sources.iter().find(|t| {
+                keys.iter()
+                    .any(|k| t.get(*k).is_some_and(|v| !v.trim().is_empty()))
+            })
         };
         let material = with(&MATERIAL_KEYS);
         let glass = material.is_some_and(|t| is_glass_facade(t));
@@ -1970,9 +1994,34 @@ impl Inherited {
         if !own_material {
             tags.extend(self.material.iter().cloned());
         }
+        // A roof's colour and material are one: a part that maps either keeps its roof.
+        let own_roof = ROOF_KEYS.iter().any(|k| tags.contains_key(*k));
         for (k, v) in &self.rest {
+            if own_roof && ROOF_KEYS.contains(&k.as_str()) {
+                continue;
+            }
             tags.entry(k.clone()).or_insert_with(|| v.clone());
         }
+    }
+}
+
+const ROOF_KEYS: [&str; 2] = ["roof:colour", "roof:material"];
+
+/// Tags castle grounds with their size, measured on their rings before clipping cuts them.
+fn mark_grounds_area(
+    tags: &mut HashMap<String, String>,
+    rings: impl FnOnce() -> (Vec<Vec<ProcessedNode>>, Vec<Vec<ProcessedNode>>),
+) {
+    use crate::element_processing::fortifications;
+    if !fortifications::is_castle_grounds(tags) {
+        return;
+    }
+    let (outer, inner) = rings();
+    if let Some(area) = fortifications::grounds_area(outer, inner) {
+        tags.insert(
+            fortifications::GROUNDS_AREA_TAG.to_string(),
+            format!("{area:.0}"),
+        );
     }
 }
 
@@ -2691,9 +2740,17 @@ fn spatial_part_suppression<E: Borrow<OsmElement>>(
         .collect();
     let mut covered: HashMap<usize, Vec<&[(f64, f64)]>> = HashMap::new();
     for (id, rings, ground, hint) in &relation_rings {
-        let points = rings.iter().flatten();
-        let n = points.clone().count() as f64;
-        let (sla, slo) = points.fold((0.0, 0.0), |(a, o), &(la, lo)| (a + la, o + lo));
+        // The largest ring places the part: the mean of rings apart can fall between them.
+        let Some(main_ring) = rings
+            .iter()
+            .max_by(|a, b| ring_area(a).total_cmp(&ring_area(b)))
+        else {
+            continue;
+        };
+        let n = main_ring.len() as f64;
+        let (sla, slo) = main_ring
+            .iter()
+            .fold((0.0, 0.0), |(a, o), &(la, lo)| (a + la, o + lo));
         let (best, all) = containing(sla / n, slo / n);
         if *ground {
             for gi in all {
@@ -4490,6 +4547,49 @@ mod outline_suppression_tests {
             facade(&[("building:material", "stone")]),
             (Some("stone".to_string()), None)
         );
+    }
+
+    // A part of a canopy is no canopy itself.
+    #[test]
+    fn parts_of_a_roof_keep_their_walls() {
+        let outline = tagged(square_way(20, 200, 0.001).0, "building", "roof");
+        let groups: PartGroups = [(10, 20)].into_iter().collect();
+        let relation_parts = RelationPartGroups::new();
+        let inheritance = PartInheritance::new(&[outline], &[], &groups, &relation_parts);
+        let mut kiosk = tagmap(&[("building:part", "yes")]);
+        inheritance.apply_to_way(10, &mut kiosk);
+        assert_eq!(kiosk.get("building:part").map(String::as_str), Some("yes"));
+    }
+
+    // A part that maps its roof's colour keeps it, and takes no roof material from its building.
+    #[test]
+    fn a_part_keeps_the_roof_it_maps() {
+        let outline = with_tag(
+            with_tag(
+                tagged(square_way(20, 200, 0.001).0, "building", "church"),
+                "roof:material",
+                "copper",
+            ),
+            "roof:colour",
+            "green",
+        );
+        let groups: PartGroups = [(10, 20)].into_iter().collect();
+        let relation_parts = RelationPartGroups::new();
+        let inheritance = PartInheritance::new(&[outline], &[], &groups, &relation_parts);
+        let mut dome = tagmap(&[("building:part", "yes"), ("roof:colour", "lightyellow")]);
+        inheritance.apply_to_way(10, &mut dome);
+        assert_eq!(
+            dome.get("roof:colour").map(String::as_str),
+            Some("lightyellow")
+        );
+        assert!(!dome.contains_key("roof:material"));
+        let mut plain = tagmap(&[("building:part", "yes")]);
+        inheritance.apply_to_way(10, &mut plain);
+        assert_eq!(
+            plain.get("roof:material").map(String::as_str),
+            Some("copper")
+        );
+        assert_eq!(plain.get("roof:colour").map(String::as_str), Some("green"));
     }
 
     // A building clad in glass, which the generator does not read as a glass facade, hands its

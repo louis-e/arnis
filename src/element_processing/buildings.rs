@@ -2096,7 +2096,7 @@ fn whole_building_tag<'a>(element: &'a ProcessedWay, key: &str) -> Option<&'a st
 fn of_a_castle(element: &ProcessedWay) -> bool {
     let tags = &element.tags;
     let tag = |k: &str| tags.get(k).map(String::as_str);
-    whole_building_tag(element, "historic") == Some("castle")
+    (whole_building_tag(element, "historic") == Some("castle") && !is_palace(element))
         || tag("tower:type") == Some("defensive")
         || tag(fortifications::CASTLE_GROUNDS_TAG) == Some("fort")
         || (is_towerish(element)
@@ -2199,9 +2199,17 @@ impl BuildingCategory {
             if worship {
                 return Some(BuildingCategory::Religious);
             }
+            // A mast or a lookout marked historic is still a mast or a lookout.
+            let castle_kind = tag("tower:type").is_none_or(|t| {
+                matches!(
+                    t,
+                    "defensive" | "watchtower" | "keep" | "bastion" | "fortification"
+                )
+            });
             if tag("tower:type") == Some("defensive")
-                || is_fortification(building_type, whole_building_tag(element, "historic"))
-                || is_fortification(outline, building_tag(tags, "historic"))
+                || (castle_kind
+                    && (is_fortification(building_type, whole_building_tag(element, "historic"))
+                        || is_fortification(outline, building_tag(tags, "historic"))))
                 || tags.contains_key(fortifications::CASTLE_GROUNDS_TAG)
             {
                 return Some(BuildingCategory::Historic);
@@ -2963,11 +2971,14 @@ impl BuildingStyle {
             .get(crate::survey::roofs::SHAPE_HINT)
             .filter(|_| !roof_ctx.enclosed && !element.tags.contains_key("building:part"))
             .map(|s| parse_roof_type(s));
+        // A part that took its building's type is roofed as it is mapped: an untyped part.
+        let kind_taken = element.tags.contains_key(crate::osm_parser::KIND_TAKEN_TAG);
+        let roof_kind = untaken_type(building_type, &element.tags);
         let (roof_type, generate_roof) = if let Some(roof_shape) = element.tags.get("roof:shape") {
             (parse_roof_type(roof_shape), true)
         } else if let Some(rt) = measured_roof {
             (rt, true)
-        } else if let Some(rt) = preset.roof_type {
+        } else if let Some(rt) = preset.roof_type.filter(|_| !kind_taken) {
             let should_generate = preset.generate_roof.unwrap_or(rt != RoofType::Flat);
             (rt, should_generate)
         } else if element.tags.contains_key("building:part")
@@ -2979,7 +2990,7 @@ impl BuildingStyle {
             (RoofType::Flat, false)
         } else if let Some(choice) = european_default_roof(
             element,
-            building_type,
+            roof_kind,
             era,
             building_height,
             footprint_size,
@@ -2989,7 +3000,7 @@ impl BuildingStyle {
             choice
         } else if let Some(choice) = regional_default_roof(
             element,
-            building_type,
+            roof_kind,
             era,
             climate,
             building_height,
@@ -2998,7 +3009,7 @@ impl BuildingStyle {
             roof_ctx,
         ) {
             choice
-        } else if qualifies_for_auto_gabled_roof(building_type) {
+        } else if qualifies_for_auto_gabled_roof(roof_kind) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
             // Own stream: the draw count here depends on footprint and would
             // otherwise desync sibling parts.
@@ -3010,10 +3021,10 @@ impl BuildingStyle {
             let american_flat = roof_ctx.region == BuildingRegion::NorthAmerica
                 && (roof_ctx.attached
                     || f64::from(building_height) >= 13.0 * roof_ctx.scale
-                    || (!is_house_type(building_type) && footprint_size as f64 > 300.0 * scale_sq));
+                    || (!is_house_type(roof_kind) && footprint_size as f64 > 300.0 * scale_sq));
             if american_flat {
                 (RoofType::Flat, false)
-            } else if building_type == "apartments" && big_block {
+            } else if roof_kind == "apartments" && big_block {
                 // Urban apartment blocks: flat, hipped, or (pre-war) mansard.
                 let (flat_w, hip_w) =
                     if matches!(era, ArchEra::HistoricOrnate | ArchEra::TraditionalPreWar) {
@@ -3048,13 +3059,12 @@ impl BuildingStyle {
             } else {
                 (RoofType::Flat, false)
             }
-        } else if matches!(building_type, "church" | "cathedral" | "chapel")
+        } else if matches!(roof_kind, "church" | "cathedral" | "chapel")
             && (footprint_size as f64) <= 6000.0 * roof_ctx.scale * roof_ctx.scale
         {
             // A church nave is pitched; generate_building_roof makes it steep.
             (RoofType::Gabled, true)
-        } else if matches!(building_type, "industrial" | "warehouse" | "hangar")
-            && footprint_size > 800
+        } else if matches!(roof_kind, "industrial" | "warehouse" | "hangar") && footprint_size > 800
         {
             // Big industrial halls: shallow mono-pitch or flat.
             let mut roof_rng = element_rng(style_seed ^ 0x0F1E_2D3C_4B5A_6907);
@@ -3071,7 +3081,7 @@ impl BuildingStyle {
         // stays as it was.
         let defaulted = !element.tags.contains_key("roof:shape")
             && measured_roof.is_none()
-            && preset.roof_type.is_none()
+            && (preset.roof_type.is_none() || kind_taken)
             && !roof_ctx.enclosed;
         let (roof_type, generate_roof) = match roof_levels_roof(element, era, roof_ctx) {
             Some(choice) if defaulted && roof_type == RoofType::Flat => choice,
@@ -5571,9 +5581,14 @@ fn white_stone_trim(element: &ProcessedWay, wall: Block) -> Option<Block> {
         .or_else(|| element.tags.get("building:facade:material"))
         .or_else(|| element.tags.get("facade:material"))
         .is_some_and(|m| {
+            let m: String = m
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect();
             matches!(
-                m.trim().to_ascii_lowercase().as_str(),
-                "stone" | "limestone" | "sandstone" | "marble" | "granite" | "natural_stone"
+                m.as_str(),
+                "stone" | "limestone" | "sandstone" | "marble" | "granite" | "naturalstone"
             )
         });
     (stone || of_a_castle(element)).then_some(if wall == QUARTZ_BLOCK {
@@ -5618,25 +5633,31 @@ fn determine_wall_block_from_tags(
         // GlassySkyscraper walls must stay glass.
         return None;
     }
-    // A castle takes its mapped stone, brick or render, else stone of the colour it maps with
-    // no material, else its castle stone.
+    // A castle takes its mapped stone, brick or render, else the colour it maps with no
+    // material, in stone where a stone comes near it, else its castle stone.
+    const FACADE_MATERIAL_KEYS: [&str; 4] = [
+        "building:material",
+        "building:facade:material",
+        "facade:material",
+        "building:cladding",
+    ];
+    let mapped_material = FACADE_MATERIAL_KEYS
+        .iter()
+        .find_map(|k| element.tags.get(*k));
     if of_a_castle(element)
-        && !element
-            .tags
-            .get("building:material")
-            .or_else(|| element.tags.get("building:facade:material"))
-            .is_some_and(|m| crate::osm_parser::is_masonry_material(m))
+        && !mapped_material.is_some_and(|m| crate::osm_parser::is_masonry_material(m))
     {
-        let mapped_material = ["building:material", "building:facade:material"]
-            .iter()
-            .any(|k| element.tags.contains_key(*k));
+        // A colour no stone comes near is the castle's render, as mapped.
         return element
             .tags
             .get("building:colour")
             .or_else(|| element.tags.get("colour"))
-            .filter(|_| !mapped_material)
+            .filter(|_| mapped_material.is_none())
             .and_then(|c| color_text_to_rgb_tuple(c))
-            .and_then(|rgb| facade_tone_for_colour(rgb, STONEWORK, rng));
+            .map(|rgb| {
+                facade_tone_for_colour(rgb, STONEWORK, rng)
+                    .unwrap_or_else(|| wall_block_for_colour_tag(rgb, rng))
+            });
     }
     if let Some(material) = element
         .tags
@@ -5942,7 +5963,8 @@ fn determine_wall_block(
             // A listed townhouse or palace is built like its neighbours; only
             // fortifications keep the castle stones.
             let kind = BuildingCategory::building_type(element);
-            (!is_fortification(kind, whole_building_tag(element, "historic"))
+            ((!is_fortification(kind, whole_building_tag(element, "historic"))
+                || is_palace(element))
                 && !of_a_castle(element))
             .then_some(WallTypology::Civic)
         }
@@ -6003,6 +6025,12 @@ fn is_timber(block: Block) -> bool {
             | ACACIA_LOG
             | MANGROVE_LOG
     )
+}
+
+/// A castle mapped as a palace, manor or stately home, which is no fortress.
+fn is_palace(element: &ProcessedWay) -> bool {
+    building_tag(&element.tags, "castle_type")
+        .is_some_and(|t| fortifications::PALACES.contains(&t.trim().to_ascii_lowercase().as_str()))
 }
 
 /// Walls, towers and ruins that keep castle masonry, by building type and `historic=*`.
@@ -24104,13 +24132,29 @@ mod style_tests {
             ("building:colour", "brown")
         ])
         .is_none());
-        // A colour no stone comes near leaves the castle stone.
+        // A colour no stone comes near is the castle's render, as mapped.
         assert!(wall(&[
             ("building", "castle"),
             ("historic", "castle"),
             ("building:colour", "#1e28c8")
         ])
-        .is_none());
+        .is_some_and(|b| !matches!(b, STONE_BRICKS | COBBLESTONE | MOSSY_COBBLESTONE)));
+        // A palace mapped as a castle is no fortress: its part keeps the colour it maps.
+        let palace_part = rect_way(
+            3,
+            0,
+            0,
+            20,
+            20,
+            &[
+                ("building:part", "government"),
+                ("arnis:part_kind_taken", "yes"),
+                ("arnis:outline:historic", "castle"),
+                ("arnis:outline:castle_type", "palace"),
+                ("building:colour", "#f0d0a0"),
+            ],
+        );
+        assert!(!of_a_castle(&palace_part));
         assert!(wall(&[
             ("building", "castle"),
             ("historic", "castle"),
@@ -25803,6 +25847,45 @@ mod style_tests {
                 b.name()
             );
         }
+    }
+
+    // A church part mapped without a roof shape keeps the flat top of an untyped part; the
+    // church mapped whole gets its pitched nave.
+    #[test]
+    fn a_part_that_took_its_type_is_roofed_as_mapped() {
+        use crate::element_processing::building_test_support::rect_way;
+        let roof = |tags: &[(&str, &str)], kind: &str| {
+            let way = rect_way(7, 0, 0, 24, 40, tags);
+            let category = BuildingCategory::Religious;
+            let preset = BuildingStylePreset::for_category(category);
+            BuildingStyle::resolve(
+                &preset,
+                &way,
+                kind,
+                category,
+                ArchEra::HistoricOrnate,
+                Climate::Temperate,
+                DetailTier::Standard,
+                12,
+                true,
+                960,
+                7,
+                RoofContext::default(),
+                &mut element_rng(7),
+            )
+            .roof_type
+        };
+        let part = roof(
+            &[
+                ("building:part", "church"),
+                ("arnis:part_kind_taken", "yes"),
+                ("roof:colour", "red"),
+            ],
+            "church",
+        );
+        assert_eq!(part, RoofType::Flat);
+        let church = roof(&[("building", "church")], "church");
+        assert_ne!(church, RoofType::Flat);
     }
 
     // Identically-tagged parts of one group must resolve the same style.
