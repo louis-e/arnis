@@ -4972,7 +4972,7 @@ mod osm_xml_tests {
     }
 
     // Across x = 0: a tilted field 900 m long, a Parthenon 280 m long, two fields mapped as
-    // multipolygons, one ring closed and one in two ways, an Acropolis mapped as one, and a
+    // multipolygons, one ring closed and one in two ways, a castle mapped as one, and a
     // plain building 270 m long.
     const ACROSS_THE_SEAM: &str = r#"<osm version="0.6">
   <node id="1" lat="47.9975" lon="10.9940"/>
@@ -4986,7 +4986,7 @@ mod osm_xml_tests {
   <way id="40"><nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>
     <tag k="landuse" v="farmland"/></way>
   <way id="41"><nd ref="5"/><nd ref="6"/><nd ref="7"/><nd ref="8"/><nd ref="5"/>
-    <tag k="building" v="yes"/><tag k="wikidata" v="Q10288"/></way>
+    <tag k="building" v="yes"/><tag k="wikidata" v="Q35525"/></way>
   <node id="11" lat="48.0030" lon="10.9950"/>
   <node id="12" lat="48.0030" lon="11.0050"/>
   <node id="13" lat="48.0045" lon="11.0052"/>
@@ -5015,7 +5015,7 @@ mod osm_xml_tests {
   <relation id="52">
     <member type="way" ref="45" role="outer"/>
     <tag k="type" v="multipolygon"/><tag k="historic" v="castle"/>
-    <tag k="wikidata" v="Q131013"/>
+    <tag k="wikidata" v="Q2206135"/>
   </relation>
   <node id="35" lat="48.0004" lon="10.9965"/>
   <node id="36" lat="48.0004" lon="11.0002"/>

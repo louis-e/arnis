@@ -73,7 +73,10 @@ fn barrier_style(tags: &std::collections::HashMap<String, String>) -> Option<Sty
             Some("glass") => set(GLASS, 1),
             _ => {}
         },
-        Some("wall" | "city_wall") => set(STONE_BRICK_WALL, 3),
+        Some("wall" | "city_wall") => match tags.get("fence_type").map(|s| s.as_str()) {
+            Some("glass") => set(GLASS, 3),
+            _ => set(STONE_BRICK_WALL, 3),
+        },
         // Holds back the ground behind it, so only its top shows.
         Some("retaining_wall") => set(STONE_BRICK_WALL, 1),
         Some("guard_rail" | "handrail" | "cable_barrier") => set(STONE_BRICK_WALL, 1),
@@ -93,6 +96,7 @@ fn barrier_style(tags: &std::collections::HashMap<String, String>) -> Option<Sty
         Some("concrete") => style.material = LIGHT_GRAY_CONCRETE,
         Some("metal") => style.material = STONE_BRICK_WALL,
         Some("wood") => style.material = OAK_FENCE,
+        Some("glass") => style.material = GLASS,
         _ => {}
     }
     Some(style)
@@ -1120,6 +1124,17 @@ mod tests {
                 })
                 .collect(),
             tags: tag_map(tags),
+        }
+    }
+
+    #[test]
+    fn glass_walls_are_glass() {
+        for tags in [
+            &[("barrier", "wall"), ("fence_type", "glass")][..],
+            &[("barrier", "wall"), ("material", "glass")][..],
+        ] {
+            let style = barrier_style(&tag_map(tags)).unwrap();
+            assert_eq!((style.material, style.height), (GLASS, 3));
         }
     }
 

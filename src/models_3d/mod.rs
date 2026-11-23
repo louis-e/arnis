@@ -314,7 +314,7 @@ mod tests {
         assert!(footprint_tag(std::iter::empty()).is_none());
         assert!(may_replace(&HashMap::from([(
             "wikidata".to_string(),
-            " Q10288".to_string()
+            " Q35525".to_string()
         )])));
         assert!(!may_replace(&HashMap::from([(
             "wikidata".to_string(),

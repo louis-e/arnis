@@ -2018,6 +2018,11 @@ impl<'a> WorldEditor<'a> {
         crate::climate::Climate::classify(self.anchor_bbox())
     }
 
+    /// Blocks per real metre of terrain height, 1.0 without elevation.
+    pub fn ground_blocks_per_meter(&self) -> f64 {
+        self.ground.as_ref().map_or(1.0, |g| g.blocks_per_meter())
+    }
+
     /// Get the effective ground level at a world coordinate.
     ///
     /// Checks the road-surface override map first so that a later

@@ -329,6 +329,29 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "nether_bricks" => NETHER_BRICK,
         "black_terracotta" => BLACK_TERRACOTTA,
         "tinted_glass" => TINTED_GLASS,
+        // Eiffel Tower iron, Olympic roof joints.
+        "brown_mushroom_block" => BROWN_MUSHROOM_BLOCK,
+        "light_gray_stained_glass" => LIGHT_GRAY_STAINED_GLASS,
+        // Taj Mahal finials, red sandstone and garden turf.
+        "gold_block" => GOLD_BLOCK,
+        "granite" => GRANITE,
+        "polished_granite" => POLISHED_GRANITE,
+        "polished_granite_slab" => POLISHED_GRANITE_SLAB,
+        "grass_block" => GRASS_BLOCK,
+        // Olympiastadion seats, pitch stripes, jump pits, signs and booth glazing.
+        "lime_concrete" => LIME_CONCRETE,
+        "lime_wool" => LIME_WOOL,
+        // Invisible light source; its `level` carries through.
+        "light" => LIGHT,
+        "lime_concrete_powder" => LIME_CONCRETE_POWDER,
+        "moss_block" => MOSS_BLOCK,
+        "sand" => SAND,
+        "light_blue_concrete" => LIGHT_BLUE_CONCRETE,
+        "gray_stained_glass" => GRAY_STAINED_GLASS,
+        // Parthenon and Arc de Triomphe marble, the Unknown Soldier's flame.
+        "calcite" => CALCITE,
+        "netherrack" => NETHERRACK,
+        "fire" => FIRE,
         // Aeroplane liveries differ only in the accent material, so no substitutions here.
         "purpur_block" => PURPUR_BLOCK,
         "purpur_slab" => PURPUR_SLAB,

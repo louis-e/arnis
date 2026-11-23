@@ -18,6 +18,12 @@ const OUTPUT_PATH: &str = "assets/wikidata_3d_models.json";
 const DENY_LIST: &[&str] = &[
     "Q9188",  // Empire State Building — wrong height_m (1500), generic block model
     "Q41225", // Big Ben — built in code as a landmark
+    // Bundled landmark models stand in for these.
+    "Q10288",   // Parthenon
+    "Q64436",   // Arc de Triomphe
+    "Q2027162", // Gateway Arch
+    "Q5317",    // Space Needle
+    "Q131013",  // Acropolis of Athens — the mesh includes the rock, which is terrain
 ];
 
 #[derive(Serialize, Debug, Clone)]

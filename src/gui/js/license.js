@@ -153,6 +153,10 @@ Wind turbine by <a href="https://www.planetminecraft.com/member/zaevyy/" target=
 Helicopter by the Arnis project<br>
 Aeroplanes and jet bridge by French_Prod</p>
 </div>
+<div class="credit">
+<h4>Landmark Models</h4>
+<p>The bundled landmark models are built by the Arnis project. Their shapes and heights are measured from open survey data: the Bavarian laser scans and DOP20 aerial photos (Olympiapark M&uuml;nchen), &copy; Bayerische Vermessungsverwaltung &ndash; <a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener noreferrer">www.geodaten.bayern.de</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>; IGN <a href="https://geoservices.ign.fr/lidarhd" target="_blank" rel="noopener noreferrer">LiDAR HD</a> (Eiffel Tower, Arc de Triomphe), &copy; IGN, Licence Ouverte 2.0; USGS 3DEP laser scans (Gateway Arch, Space Needle, Mount Rushmore), public domain; Environment Agency LiDAR (Elizabeth Tower, Stonehenge), &copy; Environment Agency, contains public sector information licensed under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/" target="_blank" rel="noopener noreferrer">Open Government Licence v3.0</a>; Hamburg's laser surface model (Elbphilharmonie), &copy; Freie und Hansestadt Hamburg, LGV, <a href="https://www.govdata.de/dl-de/by-2-0" target="_blank" rel="noopener noreferrer">dl-de/by-2-0</a>; Berlin's surface model and LoD2 buildings (Reichstagsgeb&auml;ude), Geoportal Berlin. Outlines and positions &copy; OpenStreetMap contributors. The Cristo Redentor statue is voxelized from a mesh by louis-e (CC BY 4.0).</p>
+</div>
 <div id="license-runtime-credits" class="credits-runtime"></div>
 </div>
 </section>
