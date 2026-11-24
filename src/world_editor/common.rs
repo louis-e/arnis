@@ -2064,9 +2064,40 @@ impl WorldToModify {
         Self::merge_chunk_lists(self_chunk, other_chunk.other);
     }
 
-    /// Append a tile chunk's entity lists (see `merges_as_list`); other keys are dropped.
+    /// Append tile entity lists and merge sparse road markers; other keys are dropped.
     fn merge_chunk_lists(self_chunk: &mut ChunkToModify, other: FnvHashMap<String, Value>) {
         for (key, value) in other {
+            if key == super::region_overlay::SPARSE_ROAD_SURFACE_HEIGHTS_KEY {
+                let Value::IntArray(other_heights) = value else {
+                    continue;
+                };
+                if other_heights.len() != 256 {
+                    continue;
+                }
+                match self_chunk.other.entry(key) {
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        if let Value::IntArray(heights) = entry.get_mut() {
+                            if heights.len() == 256 {
+                                for (height, other_height) in
+                                    heights.iter_mut().zip(other_heights.iter())
+                                {
+                                    if *other_height != i32::MIN {
+                                        *height = *other_height;
+                                    }
+                                }
+                            } else {
+                                entry.insert(Value::IntArray(other_heights));
+                            }
+                        } else {
+                            entry.insert(Value::IntArray(other_heights));
+                        }
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        entry.insert(Value::IntArray(other_heights));
+                    }
+                }
+                continue;
+            }
             if !Self::merges_as_list(&key) {
                 continue;
             }
@@ -2095,7 +2126,10 @@ impl WorldToModify {
                 for section in other_chunk.sections.values_mut() {
                     section.retain_properties_on_blocks();
                 }
-                other_chunk.other.retain(|key, _| Self::merges_as_list(key));
+                other_chunk.other.retain(|key, _| {
+                    Self::merges_as_list(key)
+                        || key == super::region_overlay::SPARSE_ROAD_SURFACE_HEIGHTS_KEY
+                });
                 *slot = Some(other_chunk);
                 continue;
             };
@@ -2777,6 +2811,69 @@ mod merge_fast_path_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tile_merges_preserve_sparse_road_surface_metadata() {
+        let road_marker = |column, y| {
+            let mut heights = vec![i32::MIN; 256];
+            heights[column] = y;
+            Value::IntArray(fastnbt::IntArray::new(heights))
+        };
+        let marker_key =
+            crate::world_editor::region_overlay::SPARSE_ROAD_SURFACE_HEIGHTS_KEY.to_string();
+        let mut merged = WorldToModify::default();
+
+        let mut first_tile = WorldToModify::default();
+        first_tile
+            .get_or_create_region(0, 0)
+            .get_or_create_chunk(0, 0)
+            .other
+            .insert(marker_key.clone(), road_marker(5, 12));
+        merged.merge(first_tile, 0, 0, 511, 511);
+
+        let mut second_tile = WorldToModify::default();
+        second_tile
+            .get_or_create_region(0, 0)
+            .get_or_create_chunk(0, 0)
+            .other
+            .insert(marker_key.clone(), road_marker(20, 34));
+        merged.merge(second_tile, 0, 0, 511, 511);
+
+        let mut halo_tile = WorldToModify::default();
+        halo_tile
+            .get_or_create_region(1, 0)
+            .get_or_create_chunk(0, 0)
+            .other
+            .insert(marker_key.clone(), road_marker(7, 56));
+        merged.merge(halo_tile, 0, 0, 511, 511);
+
+        let Value::IntArray(owned_heights) = merged
+            .get_region(0, 0)
+            .unwrap()
+            .get_chunk(0, 0)
+            .unwrap()
+            .other
+            .get(&marker_key)
+            .unwrap()
+        else {
+            panic!("owned road heights are missing");
+        };
+        assert_eq!(owned_heights[5], 12);
+        assert_eq!(owned_heights[20], 34);
+
+        let Value::IntArray(halo_heights) = merged
+            .get_region(1, 0)
+            .unwrap()
+            .get_chunk(0, 0)
+            .unwrap()
+            .other
+            .get(&marker_key)
+            .unwrap()
+        else {
+            panic!("halo road heights are missing");
+        };
+        assert_eq!(halo_heights[7], 56);
+    }
 
     #[test]
     fn a_tile_merge_keeps_entities_sharing_a_cell_and_drops_halo_copies() {

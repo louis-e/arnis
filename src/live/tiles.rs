@@ -65,6 +65,7 @@ pub fn tile_flags(a: &Args, manifest: &crate::one_world::Manifest) -> Vec<String
         (a.fillground, "--fillground"),
         (a.caves, "--caves"),
         (a.legacy_trees, "--legacy-trees"),
+        (a.no_trees, "--no-trees"),
         (!a.use_3d, "--no-3d"),
         (a.no_tile_archive, "--no-tile-archive"),
         (manifest.aws_only_elevation, "--aws-only-elevation"),
@@ -485,6 +486,7 @@ mod tests {
             "--signage=full",
             "--mode=terrain-only",
             "--no-3d",
+            "--no-trees",
         ]);
         let manifest: crate::one_world::Manifest = serde_json::from_value(serde_json::json!({
             "version": 3, "created_with": "test", "created_at": 0, "origin_lat": 52.5,
@@ -500,7 +502,14 @@ mod tests {
         ];
         argv.extend(tile_flags(&args, &manifest));
         let back = Args::try_parse_from(argv).unwrap();
-        assert!(back.winter && back.caves && !back.use_3d && back.live.tile && !back.map_item);
+        assert!(
+            back.winter
+                && back.caves
+                && !back.use_3d
+                && back.no_trees
+                && back.live.tile
+                && !back.map_item
+        );
         assert_eq!(back.scale, 1.5);
         assert_eq!(back.signage, crate::args::SignageLevel::Full);
         assert_eq!(back.mode, crate::args::GenerationMode::TerrainOnly);

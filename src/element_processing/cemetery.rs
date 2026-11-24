@@ -240,7 +240,7 @@ pub fn cemetery_area(
         let roll = coord_hash(x ^ 0x6CE7, z) % 1000;
         let on_grid = x.rem_euclid(3) == 0 && z.rem_euclid(3) == 0;
         if on_grid && roll < 30 {
-            if editor.land_cover_backs_trees(x, z) && clear_around(editor, x, z) {
+            if !args.no_trees && editor.land_cover_backs_trees(x, z) && clear_around(editor, x, z) {
                 Tree::create(
                     editor,
                     (x, 1, z),
