@@ -983,8 +983,7 @@ fn spawn_marker(
         .filter(|p| bbox.contains(p) && shapes.is_none_or(|s| s.contains(p)))
 }
 
-/// Once the street turn is measured, the spawn placed on the unturned area turns with the world:
-/// the one generation uses, and the one a new world's level.dat already holds.
+/// Turns the spawn placed on the unturned area with the world, in the options and a new level.dat.
 fn turn_spawn_with_world(
     args: &Args,
     pre_rotation: &XZBBox,
@@ -3590,6 +3589,7 @@ fn gui_start_generation(
             // Ask Args, not the frontend mode: below OBJECT_SKIP_SCALE, or off Earth, no OSM
             // is loaded whatever mode was picked.
             if args.skip_osm() {
+                map_transformation::align::no_map(&args);
                 // Ground data (terrain) only
                 let mut ground = ground::generate_ground_data(
                     &args,
@@ -3838,7 +3838,7 @@ fn gui_start_generation(
 
                     // Same as run_cli: the street turn is measured on the parsed map.
                     let mut args = args;
-                    map_transformation::align::settle(&mut args, &parsed_elements);
+                    map_transformation::align::settle(&mut args, &parsed_elements, &xzbbox);
                     let turned = args.align_to_streets && args.rotation.abs() > f64::EPSILON;
                     // As for a typed angle: the map preview covers the unturned area only.
                     args.map_preview &= !turned;

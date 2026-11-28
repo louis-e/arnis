@@ -1150,7 +1150,7 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     // The street turn is measured on the parsed map, before anything that turns with it.
     let args = {
         let mut args = args;
-        map_transformation::align::settle(&mut args, &parsed_elements);
+        map_transformation::align::settle(&mut args, &parsed_elements, &xzbbox);
         args
     };
 

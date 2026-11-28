@@ -1,12 +1,9 @@
-//! "Align to the streets": the world turn that lays most building walls along the block grid.
-//!
-//! Every wall piece votes for its direction, folded onto a quarter turn and weighted by its
-//! length; the strongest direction wins, so a district with two street grids follows the one
-//! with more wall. One pass over the outlines into a fixed histogram, nothing stored per wall.
+//! "Align to Streets": the world turn that lays most building walls along the block grid.
 
 use rayon::prelude::*;
 
 use crate::args::Args;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode};
 use crate::progress::{emit_gui_progress_update, MESSAGE_ONLY};
 
@@ -15,8 +12,7 @@ const BINS: usize = 180;
 /// A wall this close to an axis stands flat in blocks: one block of drift over about 20.
 const ON_GRID_DEG: f64 = 3.0;
 const ON_GRID_BINS: usize = 6;
-/// Half-width of the window the strongest direction settles in: wide enough to hold a grid
-/// that rounding spread over several degrees, narrow enough to leave a second grid out.
+/// Window the strongest direction settles in: holds a grid spread by rounding, not a second grid.
 const SETTLE_DEG: f64 = 8.0;
 /// Below this a wall of 30 blocks drifts less than one: turning would not show.
 const MIN_TURN_DEG: f64 = 2.0;
@@ -35,7 +31,7 @@ pub enum Source {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Alignment {
-    /// The clockwise turn, in degrees in (-45, 45], that lines the strongest direction up.
+    /// The clockwise turn in degrees, within ±45, that lines the strongest direction up.
     pub turn: f64,
     /// `turn` where it is worth it, else 0.
     pub rotation: f64,
@@ -45,8 +41,7 @@ pub struct Alignment {
     pub source: Source,
 }
 
-/// Wall length per direction bin, with each bin's weighted direction (as 4x the angle, where a
-/// quarter turn is a full circle) to place the winner between bin edges.
+/// Wall length per direction bin, with its direction at 4x the angle to place the winner between bins.
 #[derive(Clone)]
 struct Directions {
     length: [f64; BINS],
@@ -65,13 +60,14 @@ impl Directions {
         }
     }
 
-    fn add_line(&mut self, nodes: &[ProcessedNode]) {
+    fn add_line(&mut self, nodes: &[ProcessedNode], area: &XZBBox) {
         for pair in nodes.windows(2) {
             let (dx, dz) = (
                 i64::from(pair[1].x - pair[0].x),
                 i64::from(pair[1].z - pair[0].z),
             );
-            if dx * dx + dz * dz < MIN_PIECE * MIN_PIECE {
+            let mid = XZPoint::new((pair[0].x + pair[1].x) / 2, (pair[0].z + pair[1].z) / 2);
+            if dx * dx + dz * dz < MIN_PIECE * MIN_PIECE || !area.contains(&mid) {
                 continue;
             }
             let len = ((dx * dx + dz * dz) as f64).sqrt();
@@ -95,9 +91,7 @@ impl Directions {
         self
     }
 
-    /// The direction most wall runs in, in [0, 90): the strongest bin of the smoothed
-    /// histogram, then the window recentred on its own weighted mean until it settles, so
-    /// rounding that spreads a grid over several degrees does not pull it off centre.
+    /// The main direction in [0, 90): the smoothed peak, recentred on its weighted mean until it settles.
     fn strongest(&self) -> f64 {
         let ring = |i: isize| i.rem_euclid(BINS as isize) as usize;
         let k = ON_GRID_BINS as isize;
@@ -129,15 +123,15 @@ impl Directions {
         centre
     }
 
-    /// Share of the length within ON_GRID_DEG of an axis once turned by `rotation`.
-    fn on_grid(&self, rotation: f64) -> f64 {
+    /// Share of the length within `tolerance` degrees of an axis once turned by `rotation`.
+    fn on_grid(&self, rotation: f64, tolerance: f64) -> f64 {
         if self.total <= 0.0 {
             return 0.0;
         }
         let on: f64 = (0..BINS)
             .filter(|&i| {
                 let deg = ((i as f64 + 0.5) * BIN_DEG + rotation).rem_euclid(90.0);
-                deg.min(90.0 - deg) <= ON_GRID_DEG
+                deg.min(90.0 - deg) <= tolerance
             })
             .map(|i| self.length[i])
             .sum();
@@ -166,35 +160,32 @@ fn is_road(tags: &std::collections::HashMap<String, String>) -> bool {
     })
 }
 
-/// The turn that puts most building walls on the block grid, or None where the map holds too
-/// few walls and streets to tell.
-pub fn street_alignment(elements: &[ProcessedElement]) -> Option<Alignment> {
+/// The turn that puts most building walls inside `area` on the block grid; None with too few.
+pub fn street_alignment(elements: &[ProcessedElement], area: &XZBBox) -> Option<Alignment> {
+    // Boxed, so the fold moves pointers rather than the histograms.
+    let fresh = || (Box::new(Directions::new()), Box::new(Directions::new()));
     let (walls, roads) = elements
         .par_iter()
-        .fold(
-            || (Directions::new(), Directions::new()),
-            |(mut walls, mut roads), e| {
-                match e {
-                    ProcessedElement::Way(w) if is_building(&w.tags) => walls.add_line(&w.nodes),
-                    ProcessedElement::Way(w) if is_road(&w.tags) => roads.add_line(&w.nodes),
-                    ProcessedElement::Relation(r) if is_building(&r.tags) => {
-                        for m in &r.members {
-                            if m.role == ProcessedMemberRole::Outer {
-                                walls.add_line(&m.way.nodes);
-                            }
+        .fold(fresh, |(mut walls, mut roads), e| {
+            match e {
+                ProcessedElement::Way(w) if is_building(&w.tags) => walls.add_line(&w.nodes, area),
+                ProcessedElement::Way(w) if is_road(&w.tags) => roads.add_line(&w.nodes, area),
+                ProcessedElement::Relation(r) if is_building(&r.tags) => {
+                    for m in &r.members {
+                        if m.role == ProcessedMemberRole::Outer {
+                            walls.add_line(&m.way.nodes, area);
                         }
                     }
-                    _ => {}
                 }
-                (walls, roads)
-            },
-        )
-        .reduce(
-            || (Directions::new(), Directions::new()),
-            |a, b| (a.0.merge(&b.0), a.1.merge(&b.1)),
-        );
+                _ => {}
+            }
+            (walls, roads)
+        })
+        .reduce(fresh, |a, b| {
+            (Box::new(a.0.merge(&b.0)), Box::new(a.1.merge(&b.1)))
+        });
     let (dirs, source) = if walls.total >= MIN_LENGTH {
-        (walls, Source::Buildings)
+        (*walls, Source::Buildings)
     } else {
         (walls.merge(&roads), Source::BuildingsAndRoads)
     };
@@ -206,7 +197,9 @@ pub fn street_alignment(elements: &[ProcessedElement]) -> Option<Alignment> {
         turn += 90.0;
     }
     let turn = (turn * 10.0).round() / 10.0;
-    let (before, after) = (dirs.on_grid(0.0), dirs.on_grid(turn));
+    // A small turn is judged on a tighter grid, or walls a couple of degrees off count as on it.
+    let tolerance = (turn.abs() / 2.0).clamp(1.0, ON_GRID_DEG);
+    let (before, after) = (dirs.on_grid(0.0, tolerance), dirs.on_grid(turn, tolerance));
     let worth = after - before >= MIN_GAIN && turn.abs() >= MIN_TURN_DEG;
     Some(Alignment {
         turn,
@@ -217,11 +210,13 @@ pub fn street_alignment(elements: &[ProcessedElement]) -> Option<Alignment> {
     })
 }
 
-/// With `--align-to-streets`, sets `args.rotation` from the map and says what was chosen: in
-/// full on the console, in short on the GUI's status line.
-pub fn settle(args: &mut Args, elements: &[ProcessedElement]) {
+/// With `--align-to-streets`, sets `args.rotation` from the map in `area` and reports the choice.
+pub fn settle(args: &mut Args, elements: &[ProcessedElement], area: &XZBBox) {
     if !args.align_to_streets {
         return;
+    }
+    if args.skip_osm() {
+        return no_map(args);
     }
     let pct = |share: f64| (share * 100.0).round();
     // The per-position climate does not follow a turned ground (the CLI refuses the pair).
@@ -231,7 +226,7 @@ pub fn settle(args: &mut Args, elements: &[ProcessedElement]) {
             "Not turned: per-position climate".to_string(),
         )
     } else {
-        match street_alignment(elements) {
+        match street_alignment(elements, area) {
             None => (
                 "Align to streets: too few buildings or streets to measure, not turned".to_string(),
                 "Not turned: too few buildings".to_string(),
@@ -272,6 +267,14 @@ pub fn settle(args: &mut Args, elements: &[ProcessedElement]) {
     emit_gui_progress_update(MESSAGE_ONLY, &short);
 }
 
+/// Where no map is loaded (off Earth, or below the object scale) there is nothing to align to.
+pub fn no_map(args: &Args) {
+    if args.align_to_streets {
+        println!("Align to streets: no buildings or streets are loaded at this scale, not turned");
+        emit_gui_progress_update(MESSAGE_ONLY, "Not turned: no map at this scale");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,6 +289,10 @@ mod tests {
             x: x.round() as i32,
             z: z.round() as i32,
         }
+    }
+
+    fn everywhere() -> XZBBox {
+        XZBBox::rect_from_min_max(-5000, -5000, 5000, 5000).unwrap()
     }
 
     /// A row of `n` buildings `w` x `d` blocks, their walls at `deg` clockwise from east.
@@ -316,7 +323,7 @@ mod tests {
     fn a_grid_at_an_angle_is_turned_onto_the_blocks() {
         for deg in [33.0, 57.0, 12.0, -21.0, 44.0] {
             let elements = block_row(deg, 40, 18.0, 12.0, (500.0, 500.0));
-            let a = street_alignment(&elements).unwrap();
+            let a = street_alignment(&elements, &everywhere()).unwrap();
             let folded = (deg + a.rotation).rem_euclid(90.0);
             assert!(
                 folded.min(90.0 - folded) < 0.4,
@@ -332,7 +339,7 @@ mod tests {
     #[test]
     fn the_turn_matches_the_world_rotation() {
         let elements = block_row(33.0, 40, 18.0, 12.0, (500.0, 500.0));
-        let turn = street_alignment(&elements).unwrap().rotation;
+        let turn = street_alignment(&elements, &everywhere()).unwrap().rotation;
         let bbox = XZBBox::rect_from_xz_lengths(1000.0, 1000.0).unwrap();
         let ProcessedElement::Way(w) = &elements[0] else {
             unreachable!()
@@ -347,20 +354,44 @@ mod tests {
     fn the_longer_of_two_grids_wins() {
         let mut elements = block_row(30.0, 60, 18.0, 12.0, (300.0, 300.0));
         elements.extend(block_row(10.0, 20, 18.0, 12.0, (300.0, 900.0)));
-        let a = street_alignment(&elements).unwrap();
+        let a = street_alignment(&elements, &everywhere()).unwrap();
         assert!((a.rotation + 30.0).abs() < 1.0, "{a:?}");
     }
 
     #[test]
     fn a_town_already_on_the_grid_is_left_alone() {
         let elements = block_row(1.5, 40, 18.0, 12.0, (500.0, 500.0));
-        let a = street_alignment(&elements).unwrap();
+        let a = street_alignment(&elements, &everywhere()).unwrap();
         assert_eq!(a.rotation, 0.0);
+    }
+
+    #[test]
+    fn a_town_a_few_degrees_off_is_turned() {
+        let elements = block_row(2.5, 40, 60.0, 40.0, (500.0, 500.0));
+        let a = street_alignment(&elements, &everywhere()).unwrap();
+        assert!((a.rotation + 2.5).abs() < 0.6, "{a:?}");
+    }
+
+    #[test]
+    fn two_equal_grids_half_a_quarter_apart_are_not_turned() {
+        let mut elements = block_row(0.0, 40, 18.0, 12.0, (300.0, 300.0));
+        elements.extend(block_row(45.0, 40, 18.0, 12.0, (300.0, 1500.0)));
+        let a = street_alignment(&elements, &everywhere()).unwrap();
+        assert_eq!(a.rotation, 0.0, "{a:?}");
+    }
+
+    #[test]
+    fn only_walls_inside_the_area_count() {
+        let mut elements = block_row(30.0, 20, 18.0, 12.0, (300.0, 300.0));
+        elements.extend(block_row(10.0, 60, 18.0, 12.0, (300.0, 2500.0)));
+        let area = XZBBox::rect_from_min_max(0, 0, 1200, 1200).unwrap();
+        let a = street_alignment(&elements, &area).unwrap();
+        assert!((a.rotation + 30.0).abs() < 1.0, "{a:?}");
     }
 
     #[test]
     fn a_few_sheds_say_nothing() {
         let elements = block_row(30.0, 3, 6.0, 5.0, (500.0, 500.0));
-        assert_eq!(street_alignment(&elements), None);
+        assert_eq!(street_alignment(&elements, &everywhere()), None);
     }
 }
