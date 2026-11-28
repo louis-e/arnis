@@ -1147,6 +1147,13 @@ fn run_generation_cli(mut args: Args, asked_mob_spawning: args::MobSpawning) {
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
     bench.mark("transform_map");
 
+    // The street turn is measured on the parsed map, before anything that turns with it.
+    let args = {
+        let mut args = args;
+        map_transformation::align::settle(&mut args, &parsed_elements);
+        args
+    };
+
     // The default spawn is picked in the unrotated area and turned with it, as in the GUI.
     let pre_rotation_bbox = xzbbox.clone();
 

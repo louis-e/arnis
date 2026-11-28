@@ -584,7 +584,7 @@ pub fn prepare(world_dir: &Path, requested: &LLBBox, args: &mut Args) -> Result<
     if !args.body.is_earth() {
         return Err("One World is available for Earth only.".to_string());
     }
-    if args.rotation.abs() > f64::EPSILON {
+    if args.rotation.abs() > f64::EPSILON || args.align_to_streets {
         return Err(
             "One World keeps the world aligned to real-world coordinates, so rotation must be 0."
                 .to_string(),

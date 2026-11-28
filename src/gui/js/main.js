@@ -973,6 +973,12 @@ function registerMessageEvent() {
       if (isOneWorldEnabled()) return;
       var angle = event.data.angle;
       var rotationInput = document.getElementById("rotation-angle-input");
+      // A line drawn on the map is an explicit angle: it takes over from Align to Streets.
+      var alignStreets = document.getElementById("align-streets-toggle");
+      if (alignStreets && alignStreets.checked) {
+        alignStreets.checked = false;
+        alignStreets.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       if (rotationInput) {
         var clamped = Math.min(Math.max(angle, -90), 90);
         rotationInput.value = clamped.toFixed(2);
@@ -1765,6 +1771,16 @@ function initSettings() {
     updateRotation(parseFloat(rotationInput.value));
   });
   window.updateRotation = updateRotation;
+
+  // Align to Streets measures the turn from the buildings during generation; the angle waits at 0.
+  const alignStreets = document.getElementById("align-streets-toggle");
+  function refreshAlignStreets() {
+    if (alignStreets.disabled) return;          // One World holds both rows
+    if (alignStreets.checked && parseFloat(rotationInput.value) !== 0) updateRotation(0);
+    rotationInput.disabled = alignStreets.checked;
+  }
+  alignStreets.addEventListener("change", refreshAlignStreets);
+  window.refreshAlignStreets = refreshAlignStreets;
 
   // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
@@ -4150,6 +4166,7 @@ function applyOneWorldPins(info) {
   const rotationInput = document.getElementById('rotation-angle-input');
   if (rotationInput && parseFloat(rotationInput.value) !== 0 && window.updateRotation) window.updateRotation(0);
   setSettingsRowAvailable('rotation-angle-input', false, 'reason_not_one_world');
+  setSettingsRowAvailable('align-streets-toggle', false, 'reason_not_one_world');
   postToMap({ type: 'setRotationLocked', locked: true });
   syncShapesRect();
 
@@ -4177,6 +4194,8 @@ function releaseOneWorldPins() {
   pinControl('disable-height-limit-toggle', null);
   pinGroundLevel(null);
   setSettingsRowAvailable('rotation-angle-input', true);
+  setSettingsRowAvailable('align-streets-toggle', true);
+  if (window.refreshAlignStreets) window.refreshAlignStreets();
   restoreNaturalRows();
   postToMap({ type: 'setRotationLocked', locked: false });
   postToMap({ type: 'setShapesMode', mode: '' });
@@ -5163,8 +5182,9 @@ async function startGeneration(confirmed = false, prewarm = false) {
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
 
-    // Get rotation angle
-    var rotationAngle = oneWorld ? 0 : (parseFloat(document.getElementById("rotation-angle-input").value) || 0);
+    // Get rotation angle; with Align to Streets the backend measures it from the buildings
+    var alignToStreets = !oneWorld && document.getElementById("align-streets-toggle").checked;
+    var rotationAngle = (oneWorld || alignToStreets) ? 0 : (parseFloat(document.getElementById("rotation-angle-input").value) || 0);
 
     const flags = meldFlags({
       oneWorld: oneWorld,
@@ -5191,6 +5211,7 @@ async function startGeneration(confirmed = false, prewarm = false) {
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
         rotationAngle: rotationAngle,
+        alignToStreets: alignToStreets,
         celestialBodyName: selectedCelestialBody,
         pauseMenu: gameplayToggle('pause-menu-toggle'),
         discoveries: gameplayToggle('discoveries-toggle'),
