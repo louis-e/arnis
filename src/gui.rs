@@ -983,6 +983,27 @@ fn spawn_marker(
         .filter(|p| bbox.contains(p) && shapes.is_none_or(|s| s.contains(p)))
 }
 
+/// Turns the spawn placed on the unturned area with the world, in the options and a new level.dat.
+fn turn_spawn_with_world(
+    args: &Args,
+    pre_rotation: &XZBBox,
+    options: &mut GenerationOptions,
+    new_world: Option<&Path>,
+) {
+    let turn = |(x, z): (i32, i32)| {
+        map_transformation::rotate::rotate_xz_point(x, z, args.rotation, pre_rotation)
+    };
+    options.spawn_point = options.spawn_point.map(turn);
+    let Some(dir) = new_world else {
+        return;
+    };
+    if let Some((x, z)) = crate::map_item::read_spawn_xz(dir).map(turn) {
+        if let Err(e) = set_player_spawn_in_level_dat(&dir.display().to_string(), x, z) {
+            eprintln!("Warning: Failed to turn the spawn point: {e}");
+        }
+    }
+}
+
 /// Sets the player spawn point in level.dat using Minecraft XZ coordinates.
 /// The Y coordinate is set to a temporary value (150) and will be updated
 /// after terrain generation by `update_player_spawn_y_after_generation`.
@@ -2823,6 +2844,7 @@ fn gui_start_generation(
     telemetry_consent: bool,
     world_format: String,
     rotation_angle: f64,
+    align_to_streets: bool,
     gamemode: String,
     world_time: i64,
     world_type: String,
@@ -2852,6 +2874,13 @@ fn gui_start_generation(
     use progress::emit_gui_error;
     use LLBBox;
     let is_new_world = owns_selected_world(is_new_world, one_world, &flags);
+    // The street turn is measured once the map is parsed; until then the world is unturned.
+    let align_to_streets = align_to_streets && !one_world;
+    let rotation_angle = if align_to_streets {
+        0.0
+    } else {
+        rotation_angle
+    };
 
     // Shapes replace the rectangle; the status line holds 35 characters, so details go to the log.
     let shapes = match selection_shapes.filter(|rings| !rings.is_empty()) {
@@ -3217,6 +3246,7 @@ fn gui_start_generation(
                 spawn_lat: None,
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
+                align_to_streets,
                 vanilla_height: !existing_tall && (!disable_height_limit || existing_java),
                 disable_height_limit: existing_tall || (one_world && disable_height_limit),
                 aws_only_elevation,
@@ -3559,6 +3589,7 @@ fn gui_start_generation(
             // Ask Args, not the frontend mode: below OBJECT_SKIP_SCALE, or off Earth, no OSM
             // is loaded whatever mode was picked.
             if args.skip_osm() {
+                map_transformation::align::no_map(&args);
                 // Ground data (terrain) only
                 let mut ground = ground::generate_ground_data(
                     &args,
@@ -3805,10 +3836,27 @@ fn gui_start_generation(
                         &mut ground,
                     );
 
+                    // Same as run_cli: the street turn is measured on the parsed map.
+                    let mut args = args;
+                    map_transformation::align::settle(&mut args, &parsed_elements, &xzbbox);
+                    let turned = args.align_to_streets && args.rotation.abs() > f64::EPSILON;
+                    // As for a typed angle: the map preview covers the unturned area only.
+                    args.map_preview &= !turned;
+                    let args = args;
+                    let mut generation_options = generation_options.clone();
+                    if turned {
+                        turn_spawn_with_world(
+                            &args,
+                            &xzbbox,
+                            &mut generation_options,
+                            new_java_world,
+                        );
+                    }
+
                     // Apply rotation if specified
-                    if rotation_angle.abs() > f64::EPSILON {
+                    if args.rotation.abs() > f64::EPSILON {
                         map_transformation::rotate::rotate_world(
-                            rotation_angle.clamp(-90.0, 90.0),
+                            args.rotation.clamp(-90.0, 90.0),
                             &mut parsed_elements,
                             &mut xzbbox,
                             &mut ground,

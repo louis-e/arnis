@@ -281,6 +281,11 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
 
+    /// Turn the world so most buildings line up with the block grid, measured from the map
+    /// (instead of --rotation; not with --one-world)
+    #[arg(long, default_value_t = false)]
+    pub align_to_streets: bool,
+
     /// Keep the vanilla build height (Y -64 to 319) and compress taller terrain to fit. By
     /// default an area that needs more room gets a bundled pack that extends the build
     /// height (Java 1.21.4+: Y -2032 to 2031, experimental; Bedrock 1.21.120+: up to Y 511).
@@ -1817,6 +1822,19 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     if args.climate_mode == crate::climate_field::ClimateMode::PerPosition && args.rotation != 0.0 {
         return Err("--climate-mode per-position does not support --rotation.".to_string());
     }
+    if args.align_to_streets {
+        // The turn is measured later, so everything that refuses a turn refuses this too.
+        if args.rotation != 0.0 {
+            return Err(
+                "--align-to-streets measures the turn itself; drop --rotation.".to_string(),
+            );
+        }
+        if args.climate_mode == crate::climate_field::ClimateMode::PerPosition {
+            return Err(
+                "--climate-mode per-position does not support --align-to-streets.".to_string(),
+            );
+        }
+    }
     crate::y_bounds::check(args)?;
     if args.prewarm_first && !args.units.coordinates() {
         return Err(
@@ -1910,6 +1928,12 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         if args.rotation.abs() > f64::EPSILON {
             return Err(
                 "--one-world keeps the world aligned to real-world coordinates; --rotation must be 0."
+                    .to_string(),
+            );
+        }
+        if args.align_to_streets {
+            return Err(
+                "--one-world keeps the world aligned to real-world coordinates; drop --align-to-streets."
                     .to_string(),
             );
         }
@@ -2046,8 +2070,10 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             return Err("--cave-zone-map needs --bbox.".to_string());
         }
         // The images are laid out on the unrotated bbox, so a rotated world would not match.
-        if args.rotation != 0.0 {
-            return Err("--cave-zone-map does not support --rotation.".to_string());
+        if args.rotation != 0.0 || args.align_to_streets {
+            return Err(
+                "--cave-zone-map does not support --rotation or --align-to-streets.".to_string(),
+            );
         }
     }
 

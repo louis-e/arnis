@@ -131,6 +131,8 @@ const SETTINGS = [
 
   // Not persisted: picking a bbox force-resets the angle to 0 anyway.
   { id: 'rotation-angle-input', kind: 'number', store: NONE },
+  // A preference, unlike the angle: it holds for every area.
+  { id: 'align-streets-toggle', kind: 'checkbox', store: OWN },
 
   { id: 'enable-luanti-toggle', kind: 'checkbox', store: EXTERNAL },
   // Turning Hytale off gives Advanced back, so a reset does it before resetting Advanced.
